@@ -36,16 +36,28 @@ export default {
   },
   methods: {
     async handleLogin() {
-      const success = await this.$store.dispatch("login", {
-        username: this.username,
-        password: this.password,
-      });
-      if (success) {
-        this.$router.push("/dashboard");
-      } else {
-        this.error = "Invalid username or password.";
-      }
-    },
+  this.error = null; // Reset the error message
+  console.log("Attempting login with username:", this.username);
+
+  try {
+    const success = await this.$store.dispatch("login", {
+      username: this.username,
+      password: this.password,
+    });
+
+    if (success) {
+      console.log("Login successful, redirecting to dashboard...");
+      this.$router.push("/dashboard"); // Redirect to dashboard on success
+    } else {
+      console.log("Login failed: Invalid credentials.");
+      console.log(this.username,this.password)
+      this.error = "Invalid username or password."; // Show error message
+    }
+  } catch (err) {
+    console.error("Unexpected error during login:", err);
+    this.error = "An unexpected error occurred. Please try again.";
+  }
+},
   },
 };
 </script>

@@ -1,27 +1,31 @@
 from fastapi import FastAPI
-
-from database import Base, engine
+from starlette.middleware.cors import CORSMiddleware
 import users
-
+from database import Base, engine
 from logger import logger
 
-# Create database tables
-try:
-    Base.metadata.create_all(bind=engine)
-    logger.info("Database tables created successfully.")
-except Exception as e:
-    logger.error(f"Error creating database tables: {e}")
-
-# FastAPI app setup
+# Initialize FastAPI app
 app = FastAPI()
+ALLOWED_ORIGINS = '*'
+# Allow CORS for localhost during development
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=ALLOWED_ORIGINS,  # Frontend URL
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
-# Include user-related routes
+# Include routers
 app.include_router(users.router)
 
+# Database initialization
+Base.metadata.create_all(bind=engine)
+
 @app.on_event("startup")
-def on_startup():
+async def startup_event():
     logger.info("Application has started.")
 
 @app.on_event("shutdown")
-def on_shutdown():
+async def shutdown_event():
     logger.info("Application has stopped.")

@@ -1,0 +1,16 @@
+2024-11-27 11:42:32,042 - ecrf_backend - INFO - Its here.
+2024-11-27 11:42:32,045 - ecrf_backend - INFO - Application has started.
+2024-11-27 11:42:51,816 - ecrf_backend - INFO - Login attempt for username: admin
+2024-11-27 11:42:51,816 - ecrf_backend - DEBUG - Fetching user by username: admin
+2024-11-27 11:42:51,823 - ecrf_backend - DEBUG - Stored password for admin: $2b$12$lH.1hjeB64bm6Dk8yZi3/.DqFHUSsPYT2rRQGpFmBDI0xkeR6USQO
+2024-11-27 11:42:51,823 - ecrf_backend - DEBUG - Password entered: Admin123!
+2024-11-27 11:42:52,026 - ecrf_backend - INFO - User admin logged in successfully.
+2024-11-27 11:43:22,363 - ecrf_backend - INFO - Attempting to register a new user.
+2024-11-27 11:43:22,367 - ecrf_backend - WARNING - User registration failed. Username or email already exists: admin
+2024-11-27 11:43:31,645 - ecrf_backend - INFO - Attempting to register a new user.
+2024-11-27 11:43:31,871 - ecrf_backend - INFO - User admin1 registered successfully.
+2024-11-27 11:43:44,707 - ecrf_backend - INFO - Login attempt for username: admin1
+2024-11-27 11:43:44,707 - ecrf_backend - DEBUG - Fetching user by username: admin1
+2024-11-27 11:43:44,710 - ecrf_backend - DEBUG - Stored password for admin1: $2b$12$1iXohRtEl.AEU9XlhKHTVudylhOGv8V71keVbB7Hvpy2WcjnyCRre
+2024-11-27 11:43:44,710 - ecrf_backend - DEBUG - Password entered: Admin123!
+2024-11-27 11:43:44,927 - ecrf_backend - INFO - User admin1 logged in successfully.

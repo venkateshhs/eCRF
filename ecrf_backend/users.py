@@ -49,14 +49,26 @@ def register_user(user_data: UserCreate, db: Session = Depends(get_db)):
     logger.info(f"User {user.username} registered successfully.")
     return user
 
+
 @router.post("/login")
 def login_user(request: LoginRequest, db: Session = Depends(get_db)):
     logger.info(f"Login attempt for username: {request.username}")
+
+    # Fetch user from the database
     user = get_user_by_username(db, request.username)
-    if not user or not verify_password(request.password, user.password):
-        logger.warning(f"Failed login for username: {request.username}")
+    if not user:
+        logger.warning(f"Login failed: Username not found: {request.username}")
         raise HTTPException(status_code=400, detail="Invalid username or password.")
 
+    logger.debug(f"Stored password for {request.username}: {user.password}")
+    logger.debug(f"Password entered: {request.password}")
+
+    if not verify_password(request.password, user.password):
+        logger.warning(f"Login failed: Incorrect password for {request.username}")
+        raise HTTPException(status_code=400, detail="Invalid username or password.")
+
+    # Generate token
     token = create_access_token(user.username)
     logger.info(f"User {request.username} logged in successfully.")
     return {"access_token": token, "token_type": "bearer"}
+

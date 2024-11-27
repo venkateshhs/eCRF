@@ -1,7 +1,9 @@
 from sqlalchemy.orm import Session
 from models import User
+from logger import logger
 
 def get_user_by_username(db: Session, username: str):
+    logger.debug(f"Fetching user by username: {username}")
     return db.query(User).filter(User.username == username).first()
 
 def get_user_by_email(db: Session, email: str):

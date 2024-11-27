@@ -1,0 +1,22 @@
+2024-11-27 11:32:21,722 - ecrf_backend - INFO - Its here.
+2024-11-27 11:32:21,724 - ecrf_backend - INFO - Application has started.
+2024-11-27 11:32:38,150 - ecrf_backend - INFO - Login attempt for username: johndoe
+2024-11-27 11:32:38,150 - ecrf_backend - DEBUG - Fetching user by username: johndoe
+2024-11-27 11:32:38,156 - ecrf_backend - DEBUG - Stored password for johndoe: $2b$12$Qu3Y/0gDlH.L/sWnTKgBTe3Pq1ZwSO8VAXsfhelZMTc/SshVtPfCW
+2024-11-27 11:32:38,156 - ecrf_backend - DEBUG - Password entered: Password123!
+2024-11-27 11:32:38,358 - ecrf_backend - INFO - User johndoe logged in successfully.
+2024-11-27 11:33:02,302 - ecrf_backend - INFO - Login attempt for username: johndoe
+2024-11-27 11:33:02,303 - ecrf_backend - DEBUG - Fetching user by username: johndoe
+2024-11-27 11:33:02,305 - ecrf_backend - DEBUG - Stored password for johndoe: $2b$12$Qu3Y/0gDlH.L/sWnTKgBTe3Pq1ZwSO8VAXsfhelZMTc/SshVtPfCW
+2024-11-27 11:33:02,305 - ecrf_backend - DEBUG - Password entered: Password123!
+2024-11-27 11:33:02,523 - ecrf_backend - INFO - User johndoe logged in successfully.
+2024-11-27 11:33:36,992 - ecrf_backend - INFO - Attempting to register a new user.
+2024-11-27 11:33:37,208 - ecrf_backend - INFO - User admin registered successfully.
+2024-11-27 11:33:50,990 - ecrf_backend - INFO - Login attempt for username: admin
+2024-11-27 11:33:50,991 - ecrf_backend - DEBUG - Fetching user by username: admin
+2024-11-27 11:33:50,993 - ecrf_backend - DEBUG - Stored password for admin: $2b$12$lH.1hjeB64bm6Dk8yZi3/.DqFHUSsPYT2rRQGpFmBDI0xkeR6USQO
+2024-11-27 11:33:50,993 - ecrf_backend - DEBUG - Password entered: Admin123!
+2024-11-27 11:33:51,211 - ecrf_backend - INFO - User admin logged in successfully.
+2024-11-27 11:34:53,070 - ecrf_backend - INFO - Attempting to register a new user.
+2024-11-27 11:34:53,074 - ecrf_backend - WARNING - User registration failed. Username or email already exists: admin
+2024-11-27 11:42:30,378 - ecrf_backend - INFO - Application has stopped.
