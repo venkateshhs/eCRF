@@ -12,7 +12,12 @@
         </div>
         <div class="form-group">
           <label for="password">Password</label>
-          <input type="password" id="password" v-model="password" placeholder="Enter your password" />
+          <div class="password-wrapper">
+            <input :type="showPassword ? 'text' : 'password'" id="password" v-model="password" placeholder="Enter your password" />
+            <button type="button" class="toggle-password" @click="togglePasswordVisibility">
+              {{ showPassword ? "Hide" : "Show" }}
+            </button>
+          </div>
         </div>
         <button type="submit" class="btn-login">Login</button>
       </form>
@@ -31,33 +36,37 @@ export default {
     return {
       username: "",
       password: "",
+      showPassword: false, // Added for toggling password visibility
       error: null,
     };
   },
   methods: {
+    togglePasswordVisibility() {
+      this.showPassword = !this.showPassword; // Toggle password visibility
+    },
     async handleLogin() {
-  this.error = null; // Reset the error message
-  console.log("Attempting login with username:", this.username);
+      this.error = null; // Reset the error message
+      console.log("Attempting login with username:", this.username);
 
-  try {
-    const success = await this.$store.dispatch("login", {
-      username: this.username,
-      password: this.password,
-    });
+      try {
+        const success = await this.$store.dispatch("login", {
+          username: this.username,
+          password: this.password,
+        });
 
-    if (success) {
-      console.log("Login successful, redirecting to dashboard...");
-      this.$router.push("/dashboard"); // Redirect to dashboard on success
-    } else {
-      console.log("Login failed: Invalid credentials.");
-      console.log(this.username,this.password)
-      this.error = "Invalid username or password."; // Show error message
-    }
-  } catch (err) {
-    console.error("Unexpected error during login:", err);
-    this.error = "An unexpected error occurred. Please try again.";
-  }
-},
+        if (success) {
+          console.log("Login successful, redirecting to dashboard...");
+          this.$router.push("/dashboard"); // Redirect to dashboard on success
+        } else {
+          console.log("Login failed: Invalid credentials.");
+          console.log(this.username, this.password);
+          this.error = "Invalid username or password."; // Show error message
+        }
+      } catch (err) {
+        console.error("Unexpected error during login:", err);
+        this.error = "An unexpected error occurred. Please try again.";
+      }
+    },
   },
 };
 </script>
@@ -118,6 +127,25 @@ input {
 input:focus {
   border-color: #007bff;
   outline: none;
+}
+
+/* Password Wrapper Styling */
+.password-wrapper {
+  display: flex;
+  align-items: center;
+}
+
+.toggle-password {
+  margin-left: 10px;
+  background: none;
+  border: none;
+  color: #007bff;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.toggle-password:hover {
+  text-decoration: underline;
 }
 
 /* Button Styling */

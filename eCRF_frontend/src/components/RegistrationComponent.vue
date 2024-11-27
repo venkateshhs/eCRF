@@ -123,26 +123,28 @@ export default {
     },
     async handleRegistration() {
       this.error = null;
-      this.message = null;
+  this.message = null;
 
-      // Validate fields
-      if (!this.handleValidation()) {
-        this.error = "Please fix the highlighted errors.";
-        return;
-      }
+  try {
+    const success = await this.$store.dispatch("register", {
+      first_name: this.first_name,
+      last_name: this.last_name,
+      email: this.email,
+      username: this.username,
+      password: this.password,
+    });
 
-      // Proceed with registration logic
-      await this.$store.dispatch("register", {
-        first_name: this.first_name,
-        last_name: this.last_name,
-        email: this.email,
-        username: this.username,
-        password: this.password,
-      });
+    if (success) {
       this.message = "Registration successful! Redirecting to login...";
       setTimeout(() => {
-        this.goToLogin();
+        this.$router.push("/");
       }, 2000);
+    }
+  } catch (err) {
+    // Display user-friendly error messages
+    this.error = err.message || "An error occurred during registration.";
+
+}
     },
     goToLogin() {
       this.$router.push("/");

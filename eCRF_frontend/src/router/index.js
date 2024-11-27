@@ -8,7 +8,8 @@ import ViewFormsComponent from "../components/ViewFormsComponent.vue";
 import AnalyticsComponent from "../components/AnalyticsComponent.vue";
 
 const routes = [
-  { path: "/", name: "Login", component: LoginComponent },
+  { path: "/", redirect: "/login" }, // Redirect root to login
+  { path: "/login", name: "Login", component: LoginComponent },
   { path: "/register", name: "Registration", component: RegistrationComponent },
   {
     path: "/dashboard",

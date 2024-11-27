@@ -6,6 +6,14 @@ from auth import hash_password, verify_password, create_access_token
 from database import get_db
 from logger import logger
 from models import User, UserProfile  # Import the User model
+import re
+from fastapi.security import OAuth2PasswordBearer
+import jwt
+SECRET_KEY = "your-very-secure-secret-key"
+ALGORITHM = "HS256"
+
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="users/login")
+
 
 logger.info("Its here.")
 router = APIRouter(prefix="/users", tags=["users"])
@@ -71,4 +79,46 @@ def login_user(request: LoginRequest, db: Session = Depends(get_db)):
     token = create_access_token(user.username)
     logger.info(f"User {request.username} logged in successfully.")
     return {"access_token": token, "token_type": "bearer"}
+
+@router.post("/change-password")
+def change_password(username: str, new_password: str, db: Session = Depends(get_db)):
+    logger.info(f"Password change request for user: {username}")
+
+    user = get_user_by_username(db, username)
+    if not user:
+        logger.warning(f"Password change failed: User not found: {username}")
+        raise HTTPException(status_code=404, detail="User not found.")
+
+    # Validate new password
+    password_regex = re.compile(r"^(?=.*[0-9])(?=.*[!@#$%^&*])[A-Za-z\d!@#$%^&*]{8,}$")
+    if not password_regex.match(new_password):
+        logger.warning(f"Password validation failed for user: {username}")
+        raise HTTPException(
+            status_code=400,
+            detail="Password must be at least 8 characters, include a number, and a special character.",
+        )
+
+    # Hash and update the new password
+    user.password = hash_password(new_password)
+    db.commit()
+
+    logger.info(f"Password successfully changed for user: {username}")
+    return {"message": "Password changed successfully"}
+
+
+@router.get("/me", response_model=UserResponse)
+def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
+    payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+    username = payload.get("sub")
+    if username is None:
+        raise HTTPException(status_code=401, detail="Invalid token")
+
+    user = get_user_by_username(db, username)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    return user
+
+
+
 

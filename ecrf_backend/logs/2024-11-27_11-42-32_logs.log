@@ -14,3 +14,24 @@
 2024-11-27 11:43:44,710 - ecrf_backend - DEBUG - Stored password for admin1: $2b$12$1iXohRtEl.AEU9XlhKHTVudylhOGv8V71keVbB7Hvpy2WcjnyCRre
 2024-11-27 11:43:44,710 - ecrf_backend - DEBUG - Password entered: Admin123!
 2024-11-27 11:43:44,927 - ecrf_backend - INFO - User admin1 logged in successfully.
+2024-11-27 13:53:59,175 - ecrf_backend - INFO - Login attempt for username: admin
+2024-11-27 13:53:59,176 - ecrf_backend - DEBUG - Fetching user by username: admin
+2024-11-27 13:53:59,183 - ecrf_backend - DEBUG - Stored password for admin: $2b$12$lH.1hjeB64bm6Dk8yZi3/.DqFHUSsPYT2rRQGpFmBDI0xkeR6USQO
+2024-11-27 13:53:59,184 - ecrf_backend - DEBUG - Password entered: Admin123!
+2024-11-27 13:53:59,395 - ecrf_backend - INFO - User admin logged in successfully.
+2024-11-27 13:56:29,151 - ecrf_backend - INFO - Login attempt for username: admin
+2024-11-27 13:56:29,153 - ecrf_backend - DEBUG - Fetching user by username: admin
+2024-11-27 13:56:29,156 - ecrf_backend - DEBUG - Stored password for admin: $2b$12$lH.1hjeB64bm6Dk8yZi3/.DqFHUSsPYT2rRQGpFmBDI0xkeR6USQO
+2024-11-27 13:56:29,157 - ecrf_backend - DEBUG - Password entered: admin123
+2024-11-27 13:56:29,374 - ecrf_backend - WARNING - Login failed: Incorrect password for admin
+2024-11-27 13:56:37,053 - ecrf_backend - INFO - Login attempt for username: admin
+2024-11-27 13:56:37,053 - ecrf_backend - DEBUG - Fetching user by username: admin
+2024-11-27 13:56:37,055 - ecrf_backend - DEBUG - Stored password for admin: $2b$12$lH.1hjeB64bm6Dk8yZi3/.DqFHUSsPYT2rRQGpFmBDI0xkeR6USQO
+2024-11-27 13:56:37,056 - ecrf_backend - DEBUG - Password entered: Admin123
+2024-11-27 13:56:37,274 - ecrf_backend - WARNING - Login failed: Incorrect password for admin
+2024-11-27 13:56:41,022 - ecrf_backend - INFO - Login attempt for username: admin
+2024-11-27 13:56:41,022 - ecrf_backend - DEBUG - Fetching user by username: admin
+2024-11-27 13:56:41,025 - ecrf_backend - DEBUG - Stored password for admin: $2b$12$lH.1hjeB64bm6Dk8yZi3/.DqFHUSsPYT2rRQGpFmBDI0xkeR6USQO
+2024-11-27 13:56:41,025 - ecrf_backend - DEBUG - Password entered: Admin123!
+2024-11-27 13:56:41,245 - ecrf_backend - INFO - User admin logged in successfully.
+2024-11-27 14:04:36,039 - ecrf_backend - INFO - Application has stopped.
