@@ -1,4 +1,5 @@
 from pydantic import BaseModel, EmailStr, constr
+from typing import Dict, Any, Optional
 
 class UserBase(BaseModel):
     username: constr(min_length=3, max_length=50)
@@ -21,3 +22,15 @@ class UserResponse(UserBase):
 class LoginRequest(BaseModel):
     username: str
     password: str
+
+
+class FormShapeCreate(BaseModel):
+    name: str
+    description: Optional[str]
+    shape: Dict[str, Any]  # SHACL Shape
+
+class FormShapeResponse(FormShapeCreate):
+    id: int
+
+    class Config:
+        orm_mode = True

@@ -1,40 +1,87 @@
 <template>
   <div class="create-form-container">
-    <h1>Create a New Form</h1>
-
-    <!-- Form Builder -->
-    <div id="form-builder"></div>
-
-    <!-- Buttons -->
-    <div class="form-actions">
-      <button class="btn-save" @click="getFormData">Get Form Data</button>
-    </div>
-
-    <!-- Display Form JSON -->
-    <div class="form-json" v-if="formJson">
-      <h2>Generated Form JSON</h2>
-      <pre>{{ formJson }}</pre>
-    </div>
+    <h1>Create Form</h1>
+    <form @submit.prevent="handleSubmit">
+      <div v-for="(field, index) in formFields" :key="index" class="form-group">
+        <label :for="field.name">{{ field.label }}</label>
+        <input
+          v-if="field.type === 'text'"
+          type="text"
+          :id="field.name"
+          v-model="field.value"
+          :placeholder="field.placeholder"
+        />
+        <textarea
+          v-if="field.type === 'textarea'"
+          :id="field.name"
+          v-model="field.value"
+          :placeholder="field.placeholder"
+        ></textarea>
+        <input
+          v-if="field.type === 'date'"
+          type="date"
+          :id="field.name"
+          v-model="field.value"
+        />
+        <input
+          v-if="field.type === 'number'"
+          type="number"
+          :id="field.name"
+          v-model="field.value"
+        />
+        <select v-if="field.type === 'select'" :id="field.name" v-model="field.value">
+          <option v-for="option in field.options" :key="option" :value="option">
+            {{ option }}
+          </option>
+        </select>
+      </div>
+      <button type="submit" class="btn-submit">Submit</button>
+    </form>
+    <p v-if="message" class="success-message">{{ message }}</p>
+    <p v-if="errorMessage" class="error-message">{{ errorMessage }}</p>
   </div>
 </template>
 
 <script>
+import axios from "axios";
+
 export default {
   name: "CreateFormComponent",
   data() {
     return {
-      formBuilder: null, // To store the formBuilder instance
-      formJson: null, // To store the generated JSON
+      formFields: [], // Will hold the dynamically loaded form fields
+      message: null,
+      errorMessage: null,
     };
   },
-  mounted() {
-    // Initialize the formBuilder
-    this.formBuilder = window.$("#form-builder").formBuilder();
+  created() {
+    // Load the SHACL template when the component is created
+    this.loadTemplate();
   },
   methods: {
-    getFormData() {
-      // Get the form data (JSON format)
-      this.formJson = this.formBuilder.actions.getData("json");
+    async loadTemplate() {
+      try {
+        const response = await axios.get("http://127.0.0.1:8000/forms/templates/shacl");
+        console.log("SHACL template loaded:", response.data);
+
+        // Convert SHACL shapes to form fields
+        this.formFields = response.data.map((shape) => ({
+          name: shape.name,
+          label: shape.label,
+          type: shape.type,
+          value: shape.default || "",
+          placeholder: shape.placeholder || "",
+          options: shape.options || [],
+        }));
+      } catch (error) {
+        console.error("Error loading SHACL template:", error.response?.data || error.message);
+        this.errorMessage = "Failed to load template. Please try again.";
+      }
+    },
+    handleSubmit() {
+      console.log("Form submitted with values:", this.formFields);
+      // Optionally save the form data to the backend
+      this.message = "Form submitted successfully!";
     },
   },
 };
@@ -56,16 +103,38 @@ h1 {
   color: #333;
 }
 
-#form-builder {
+.form-group {
   margin-bottom: 20px;
 }
 
-.form-actions {
-  text-align: center;
+label {
+  display: block;
+  font-size: 14px;
+  color: #555;
+  margin-bottom: 5px;
 }
 
-.btn-save {
-  padding: 10px 20px;
+input,
+textarea,
+select {
+  width: 100%;
+  padding: 10px;
+  font-size: 14px;
+  border: 1px solid #ccc;
+  border-radius: 5px;
+  box-sizing: border-box;
+}
+
+input:focus,
+textarea:focus,
+select:focus {
+  border-color: #007bff;
+  outline: none;
+}
+
+.btn-submit {
+  width: 100%;
+  padding: 10px;
   font-size: 16px;
   background-color: #007bff;
   color: white;
@@ -75,21 +144,19 @@ h1 {
   transition: background-color 0.3s ease;
 }
 
-.btn-save:hover {
+.btn-submit:hover {
   background-color: #0056b3;
 }
 
-.form-json {
-  margin-top: 20px;
-  padding: 10px;
-  background-color: #f9f9f9;
-  border: 1px solid #ddd;
-  border-radius: 5px;
+.success-message {
+  color: green;
+  font-size: 14px;
+  text-align: center;
 }
 
-pre {
+.error-message {
+  color: red;
   font-size: 14px;
-  white-space: pre-wrap;
-  word-wrap: break-word;
+  text-align: center;
 }
 </style>

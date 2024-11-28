@@ -8,6 +8,8 @@ const store = createStore({
   state: {
     user: null, // User object after login
     token: null, // JWT token after successful login
+    forms: [], // Store all forms
+    currentForm: null, // Store the currently selected form for editing/viewing
   },
   mutations: {
     setUser(state, user) {
@@ -19,31 +21,35 @@ const store = createStore({
     clearAuth(state) {
       state.user = null;
       state.token = null;
+      state.forms = [];
+      state.currentForm = null;
+    },
+    setForms(state, forms) {
+      state.forms = forms;
+    },
+    setCurrentForm(state, form) {
+      state.currentForm = form;
     },
   },
   actions: {
+    // Login action
     async login({ commit }, payload) {
       console.log("Attempting login with payload:", payload);
 
       try {
-        // Step 1: Send login request to backend
         const response = await axios.post(`${API_BASE_URL}/users/login`, payload);
         console.log("Login successful, API response:", response.data);
 
         const { access_token } = response.data;
 
-        // Step 2: Store token in Vuex and localStorage
         commit("setToken", access_token);
         localStorage.setItem("token", access_token);
 
-        // Step 3: Fetch user data after successful login
         const userResponse = await axios.get(`${API_BASE_URL}/users/me`, {
           headers: { Authorization: `Bearer ${access_token}` },
         });
 
         console.log("Fetched user data:", userResponse.data);
-
-        // Step 4: Store user data in Vuex
         commit("setUser", userResponse.data);
 
         return true; // Signal success to the component
@@ -53,15 +59,14 @@ const store = createStore({
       }
     },
 
+    // Register action
     async register(_, payload) {
       console.log("Registering user with payload:", payload);
 
       try {
-        // Send registration request to backend
-        const response = await axios.post(`${API_BASE_URL}/users/register`, payload);
-        console.log("Registration successful, API response:", response.data);
-
-        return true; // Signal success to the component
+        await axios.post(`${API_BASE_URL}/users/register`, payload);
+        console.log("Registration successful");
+        return true;
       } catch (error) {
         if (error.response?.status === 400) {
           console.error("Registration failed: Duplicate username or email.");
@@ -72,6 +77,7 @@ const store = createStore({
       }
     },
 
+    // Change password action
     async changePassword({ state }, payload) {
       console.log("Changing password:", payload);
 
@@ -79,7 +85,7 @@ const store = createStore({
         const response = await axios.post(
           `${API_BASE_URL}/users/change-password`,
           {
-            username: state.user.username, // Use logged-in user details
+            username: state.user.username,
             new_password: payload.newPassword,
           },
           {
@@ -88,13 +94,14 @@ const store = createStore({
         );
 
         console.log("Password changed successfully:", response.data);
-        return true; // Signal success
+        return true;
       } catch (error) {
         console.error("Error changing password:", error.response?.data || error.message);
-        return false; // Signal failure
+        return false;
       }
     },
 
+    // Fetch logged-in user data
     async fetchUserData({ commit }) {
       const token = localStorage.getItem("token");
       if (!token) {
@@ -115,15 +122,75 @@ const store = createStore({
       }
     },
 
+    // Logout action
     logout({ commit }) {
       console.log("Logging out...");
-      commit("clearAuth"); // Clear Vuex state
-      localStorage.removeItem("token"); // Remove token from localStorage
+      commit("clearAuth");
+      localStorage.removeItem("token");
+    },
+
+    // Fetch all forms
+    async fetchForms({ commit, state }) {
+      try {
+        const response = await axios.get(`${API_BASE_URL}/forms`, {
+          headers: { Authorization: `Bearer ${state.token}` },
+        });
+        commit("setForms", response.data);
+      } catch (error) {
+        console.error("Error fetching forms:", error.response?.data || error.message);
+      }
+    },
+
+    // Fetch a specific form by ID
+    async fetchFormById({ commit, state }, id) {
+      try {
+        const response = await axios.get(`${API_BASE_URL}/forms/${id}`, {
+          headers: { Authorization: `Bearer ${state.token}` },
+        });
+        commit("setCurrentForm", response.data);
+      } catch (error) {
+        console.error("Error fetching form:", error.response?.data || error.message);
+      }
+    },
+
+    // Create a new form
+    async createForm({ state }, form) {
+      try {
+        await axios.post(`${API_BASE_URL}/forms`, form, {
+          headers: { Authorization: `Bearer ${state.token}` },
+        });
+      } catch (error) {
+        console.error("Error creating form:", error.response?.data || error.message);
+      }
+    },
+
+    // Update an existing form
+    async updateForm({ state }, { id, form }) {
+      try {
+        await axios.put(`${API_BASE_URL}/forms/${id}`, form, {
+          headers: { Authorization: `Bearer ${state.token}` },
+        });
+      } catch (error) {
+        console.error("Error updating form:", error.response?.data || error.message);
+      }
+    },
+
+    // Delete a form by ID
+    async deleteForm({ state }, id) {
+      try {
+        await axios.delete(`${API_BASE_URL}/forms/${id}`, {
+          headers: { Authorization: `Bearer ${state.token}` },
+        });
+      } catch (error) {
+        console.error("Error deleting form:", error.response?.data || error.message);
+      }
     },
   },
   getters: {
-    isAuthenticated: (state) => !!state.token, // Check if user is authenticated
-    getUser: (state) => state.user, // Get current user data
+    isAuthenticated: (state) => !!state.token,
+    getUser: (state) => state.user,
+    getForms: (state) => state.forms,
+    getCurrentForm: (state) => state.currentForm,
   },
 });
 
