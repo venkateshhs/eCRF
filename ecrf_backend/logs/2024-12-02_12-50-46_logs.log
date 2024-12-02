@@ -1,0 +1,14 @@
+2024-12-02 12:50:46,622 - ecrf_backend - INFO - Its here.
+2024-12-02 12:50:46,627 - ecrf_backend - INFO - Application has started.
+2024-12-02 12:51:04,983 - ecrf_backend - INFO - Login attempt for username: admin
+2024-12-02 12:51:04,983 - ecrf_backend - DEBUG - Fetching user by username: admin
+2024-12-02 12:51:04,993 - ecrf_backend - DEBUG - Stored password for admin: $2b$12$lH.1hjeB64bm6Dk8yZi3/.DqFHUSsPYT2rRQGpFmBDI0xkeR6USQO
+2024-12-02 12:51:04,993 - ecrf_backend - DEBUG - Password entered: Admin123!
+2024-12-02 12:51:05,198 - ecrf_backend - INFO - User admin logged in successfully.
+2024-12-02 12:51:05,204 - ecrf_backend - DEBUG - Fetching user by username: admin
+2024-12-02 13:31:52,814 - ecrf_backend - INFO - Login attempt for username: admin
+2024-12-02 13:31:52,815 - ecrf_backend - DEBUG - Fetching user by username: admin
+2024-12-02 13:31:52,821 - ecrf_backend - DEBUG - Stored password for admin: $2b$12$lH.1hjeB64bm6Dk8yZi3/.DqFHUSsPYT2rRQGpFmBDI0xkeR6USQO
+2024-12-02 13:31:52,821 - ecrf_backend - DEBUG - Password entered: Admin123!
+2024-12-02 13:31:53,038 - ecrf_backend - INFO - User admin logged in successfully.
+2024-12-02 13:31:53,044 - ecrf_backend - DEBUG - Fetching user by username: admin

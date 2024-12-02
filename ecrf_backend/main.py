@@ -2,12 +2,13 @@ from fastapi import FastAPI
 from starlette.middleware.cors import CORSMiddleware
 import users
 from database import Base, engine
+import forms
 from logger import logger
 
 # Initialize FastAPI app
 app = FastAPI()
-ALLOWED_ORIGINS = '*'
-# Allow CORS for localhost during development
+ALLOWED_ORIGINS = ["http://localhost:8080", "http://127.0.0.1:8080"]
+# Allow CORS for localhost during developmentph
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,  # Frontend URL
@@ -18,7 +19,7 @@ app.add_middleware(
 
 # Include routers
 app.include_router(users.router)
-
+app.include_router(forms.router)
 # Database initialization
 Base.metadata.create_all(bind=engine)
 

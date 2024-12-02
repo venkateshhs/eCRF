@@ -1,0 +1,30 @@
+[  {
+    "name": "dob",
+    "label": "Date of Birth",
+    "type": "date"
+  },
+  {
+    "name": "age",
+    "label": "Age",
+    "type": "number",
+    "placeholder": "Enter your age"
+  },
+  {
+    "name": "name",
+    "label": "State your name",
+    "type": "text"
+  },
+  {
+    "name": "first_name",
+    "label": "First Name",
+    "type": "text",
+    "placeholder": "Enter your first name"
+  },
+  {
+    "name": "last_name",
+    "label": "Last Name",
+    "type": "text",
+    "placeholder": "Enter your last name"
+  }
+
+]
