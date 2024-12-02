@@ -6,7 +6,7 @@ import UserInfoComponent from "../components/UserInfoComponent.vue";
 import CreateFormComponent from "../components/CreateFormComponent.vue"; // Unified component for template selection and rendering
 import ViewFormsComponent from "../components/ViewFormsComponent.vue";
 import AnalyticsComponent from "../components/AnalyticsComponent.vue";
-
+import ScratchFormComponent from "../components/ScratchFormComponent.vue";
 const routes = [
   { path: "/", redirect: "/login" }, // Redirect root to login
   { path: "/login", name: "Login", component: LoginComponent },
@@ -25,6 +25,11 @@ const routes = [
       { path: "view-forms", name: "ViewForms", component: ViewFormsComponent },
       { path: "analytics", name: "Analytics", component: AnalyticsComponent },
     ],
+  },
+  {
+    path: "/dashboard/create-form-scratch",
+    name: "CreateFormScratch",
+    component: ScratchFormComponent, // New scratch form creation page
   },
 ];
 

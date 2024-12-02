@@ -1,0 +1,61 @@
+[
+  {
+    "type": "text",
+    "label": "Text Field",
+    "placeholder": "Enter text",
+    "default": ""
+  },
+  {
+    "type": "textarea",
+    "label": "Text Area",
+    "placeholder": "Enter longer text",
+    "rows": 4,
+    "default": ""
+  },
+  {
+    "type": "number",
+    "label": "Number",
+    "placeholder": "Enter a number",
+    "min": 0,
+    "max": 100,
+    "default": 0
+  },
+  {
+    "type": "checkbox",
+    "label": "Checkbox",
+    "default": false
+  },
+  {
+    "type": "radio",
+    "label": "Radio Group",
+    "options": ["Option 1", "Option 2", "Option 3"],
+    "default": "Option 1"
+  },
+  {
+    "type": "select",
+    "label": "Dropdown Select",
+    "options": ["Option A", "Option B", "Option C"],
+    "default": "Option A"
+  },
+  {
+    "type": "date",
+    "label": "Date Field",
+    "placeholder": "Select a date",
+    "default": ""
+  },
+  {
+    "type": "file",
+    "label": "File Upload",
+    "default": null
+  },
+  {
+    "type": "button",
+    "label": "Button",
+    "default": "Click Me"
+  },
+  {
+    "type": "paragraph",
+    "label": "Paragraph",
+    "default": "This is a sample paragraph text."
+  }
+]

@@ -36,3 +36,20 @@ def get_shacl_template(template_name: str = Query(None)):
             return template
         except json.JSONDecodeError:
             raise HTTPException(status_code=500, detail="Error reading template file.")
+
+
+
+@router.get("/available-fields")
+async def get_available_fields():
+    try:
+        # Load the JSON file dynamically from the templates directory
+        available_fields_file = TEMPLATE_DIR / "available-fields.json"
+        if not available_fields_file.exists():
+            raise HTTPException(status_code=404, detail="Available fields file not found.")
+
+        with open(available_fields_file, "r") as file:
+            data = json.load(file)
+
+        return data
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error loading available fields: {str(e)}")

@@ -1,6 +1,13 @@
+
 <template>
   <div class="create-form-container">
-    <h1>Create Form</h1>
+    <div class="header">
+      <h1>Create Form</h1>
+      <button @click="navigateToScratch" class="btn-create-from-scratch">
+        Create Form from Scratch
+      </button>
+    </div>
+
     <p>Select a template:</p>
     <select v-model="selectedTemplate" @change="handleTemplateSelection">
       <option disabled value="">-- Select a Template --</option>
@@ -148,6 +155,9 @@ export default {
     handleSubmit() {
       console.log("Form submitted with values:", this.formFields);
       this.message = "Form submitted successfully!";
+    },
+    navigateToScratch() {
+      this.$router.push("/dashboard/create-form-scratch");
     },
   },
 };
