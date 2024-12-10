@@ -1,107 +1,149 @@
 <template>
   <div class="create-form-container">
-    <h1>Create Form from Scratch</h1>
+    <div class="header-container">
+      <button @click="goBack" class="btn-back">⬅ Back</button>
+      <h1>Create Form from Scratch</h1>
+    </div>
 
     <div class="scratch-form-content">
       <!-- Form Area (Left) -->
       <div class="form-area">
         <h2>Form Preview</h2>
-        <form>
-          <div v-for="(field, index) in formFields" :key="index" class="form-group">
-            <div class="field-header">
-              <label v-if="field.type !== 'button'" :for="field.name">{{ field.label }}</label>
-              <div class="field-actions">
-                <button
-                  @click.prevent="editField(index)"
-                  class="icon-button action-button edit-button"
-                >
-                  <i class="icon-pencil"></i> Edit
-                </button>
-                <button
-                  @click.prevent="addSimilarField(index)"
-                  class="icon-button action-button add-button"
-                >
-                  <i class="icon-plus"></i> Add
-                </button>
-                <button
-                  @click.prevent="removeField(index)"
-                  class="icon-button action-button delete-button"
-                >
-                  <i class="icon-trash"></i> Delete
+        <div
+          v-for="(section, sectionIndex) in formSections"
+          :key="sectionIndex"
+          class="form-section"
+          :class="{ active: activeSection === sectionIndex }"
+          @click="setActiveSection(sectionIndex)"
+        >
+          <!-- Section Header -->
+          <div class="section-header">
+            <h3>{{ section.title }}</h3>
+            <div class="field-actions">
+              <button
+                @click.prevent="editSection(sectionIndex)"
+                class="icon-button edit-button"
+              >
+                <i class="fas fa-edit"></i>
+              </button>
+              <button
+                @click.prevent="addNewSectionBelow(sectionIndex)"
+                class="icon-button add-button"
+              >
+                <i class="fas fa-plus"></i>
+              </button>
+              <button
+                @click.prevent="deleteSection(sectionIndex)"
+                class="icon-button delete-button"
+              >
+                <i class="fas fa-trash"></i>
+              </button>
+              <button
+                @click.prevent="toggleSection(sectionIndex)"
+                class="icon-button collapse-button"
+              >
+                <i :class="section.collapsed ? 'fas fa-angle-down' : 'fas fa-angle-up'"></i>
+              </button>
+            </div>
+          </div>
+
+          <!-- Section Content -->
+          <div
+            v-if="!section.collapsed"
+            class="section-content"
+          >
+            <div
+              v-for="(field, fieldIndex) in section.fields"
+              :key="fieldIndex"
+              class="form-group"
+            >
+              <div class="field-header">
+                <label v-if="field.type !== 'button'" :for="field.name">{{ field.label }}</label>
+                <div class="field-actions">
+                  <button
+                    @click.prevent="editField(sectionIndex, fieldIndex)"
+                    class="icon-button edit-button"
+                  >
+                    <i class="fas fa-edit"></i>
+                  </button>
+                  <button
+                    @click.prevent="addSimilarField(sectionIndex, fieldIndex)"
+                    class="icon-button add-button"
+                  >
+                    <i class="fas fa-plus"></i>
+                  </button>
+                  <button
+                    @click.prevent="removeField(sectionIndex, fieldIndex)"
+                    class="icon-button delete-button"
+                  >
+                    <i class="fas fa-trash"></i>
+                  </button>
+                </div>
+              </div>
+
+              <div class="field-box">
+                <!-- Render Fields Dynamically -->
+                <input
+                  v-if="field.type === 'text'"
+                  type="text"
+                  :id="field.name"
+                  v-model="field.value"
+                  :placeholder="field.placeholder"
+                />
+                <textarea
+                  v-if="field.type === 'textarea'"
+                  :id="field.name"
+                  v-model="field.value"
+                  :placeholder="field.placeholder"
+                  :rows="field.rows"
+                ></textarea>
+                <input
+                  v-if="field.type === 'number'"
+                  type="number"
+                  :id="field.name"
+                  v-model="field.value"
+                  :placeholder="field.placeholder"
+                />
+                <input
+                  v-if="field.type === 'date'"
+                  type="date"
+                  :id="field.name"
+                  v-model="field.value"
+                />
+                <select v-if="field.type === 'select'" :id="field.name" v-model="field.value">
+                  <option v-for="option in field.options" :key="option" :value="option">
+                    {{ option }}
+                  </option>
+                </select>
+                <div v-if="field.type === 'checkbox'" class="checkbox-group">
+                  <label v-for="(option, i) in field.options" :key="i">
+                    <input type="checkbox" v-model="field.value" :value="option" /> {{ option }}
+                  </label>
+                </div>
+                <div v-if="field.type === 'radio'" class="radio-group">
+                  <label v-for="option in field.options" :key="option">
+                    <input
+                      type="radio"
+                      :name="field.name"
+                      v-model="field.value"
+                      :value="option"
+                    />
+                    {{ option }}
+                  </label>
+                </div>
+                <div v-if="field.type === 'paragraph'" class="paragraph-field">
+                  <p>{{ field.content }}</p>
+                </div>
+                <button v-if="field.type === 'button'" type="button" class="form-button">
+                  {{ field.label }}
                 </button>
               </div>
             </div>
-
-            <!-- Render Fields Dynamically -->
-            <input
-              v-if="field.type === 'text'"
-              type="text"
-              :id="field.name"
-              v-model="field.value"
-              :placeholder="field.placeholder"
-            />
-            <textarea
-              v-if="field.type === 'textarea'"
-              :id="field.name"
-              v-model="field.value"
-              :placeholder="field.placeholder"
-              :rows="field.rows"
-            ></textarea>
-            <input
-              v-if="field.type === 'number'"
-              type="number"
-              :id="field.name"
-              v-model="field.value"
-              :placeholder="field.placeholder"
-            />
-            <input
-              v-if="field.type === 'date'"
-              type="date"
-              :id="field.name"
-              v-model="field.value"
-            />
-            <select v-if="field.type === 'select'" :id="field.name" v-model="field.value">
-              <option v-for="option in field.options" :key="option" :value="option">
-                {{ option }}
-              </option>
-            </select>
-            <div v-if="field.type === 'checkbox'">
-              <label>
-                <input type="checkbox" v-model="field.value" /> {{ field.label }}
-              </label>
-            </div>
-            <div v-if="field.type === 'radio'" class="radio-group">
-              <label v-for="(option, i) in field.options" :key="option">
-                <input
-                  type="radio"
-                  :name="field.name"
-                  v-model="field.value"
-                  :value="option"
-                />
-                {{ option }}
-                <button @click.prevent="editRadioOption(index, i)" class="edit-button">
-                  Edit
-                </button>
-                <button @click.prevent="removeRadioOption(index, i)" class="delete-button">
-                  Remove
-                </button>
-              </label>
-              <button @click.prevent="addRadioOption(index)" class="add-button">Add Option</button>
-            </div>
-            <div v-if="field.type === 'paragraph'" class="paragraph-field">
-              <p>{{ field.content }}</p>
-              <button @click.prevent="editParagraph(index)" class="edit-button">
-                Edit Paragraph
-              </button>
-            </div>
-            <button v-if="field.type === 'button'" type="button" class="form-button">
-              {{ field.label }}
-            </button>
           </div>
-        </form>
+        </div>
 
-        <!-- Fixed Position for Clear and Submit Buttons -->
         <div class="form-actions">
+          <button @click.prevent="addNewSection" class="btn-add-section">+ Add Section</button>
           <button @click.prevent="clearForm" class="btn-clear">Clear Form</button>
           <button @click.prevent="submitForm" class="btn-submit">Submit Form</button>
         </div>
@@ -110,20 +152,58 @@
       <!-- Available Fields Area (Right) -->
       <div class="available-fields">
         <h2>Available Fields</h2>
-        <div class="field-buttons">
+        <div class="tabs">
           <button
-            v-for="field in availableFields"
-            :key="field.type"
+            :class="{ active: activeTab === 'general' }"
+            @click="activeTab = 'general'"
+          >
+            General Fields
+          </button>
+          <button
+            :class="{ active: activeTab === 'specialized' }"
+            @click="activeTab = 'specialized'"
+          >
+            Specialized Fields
+          </button>
+        </div>
+
+        <!-- General Fields Tab -->
+        <div v-if="activeTab === 'general'" class="general-fields">
+          <div
+            v-for="(field, index) in generalFields"
+            :key="index"
             class="available-field-button"
-            @click="addField(field)"
+            @click="addFieldToActiveSection(field)"
           >
             <i :class="field.icon"></i> {{ field.label }}
-          </button>
+          </div>
+        </div>
+
+        <!-- Specialized Fields Tab -->
+        <div v-if="activeTab === 'specialized'" class="specialized-fields">
+          <div
+            v-for="(section, sectionIndex) in specializedFieldSections"
+            :key="sectionIndex"
+            class="available-section"
+          >
+            <h3>{{ section.title }}</h3>
+            <div class="field-buttons">
+              <button
+                v-for="(field, fieldIndex) in section.fields"
+                :key="fieldIndex"
+                class="available-field-button"
+                @click="addFieldToActiveSection(field)"
+              >
+                <i :class="field.icon"></i> {{ field.label }}
+              </button>
+            </div>
+          </div>
         </div>
       </div>
     </div>
   </div>
 </template>
+
 
 <script>
 import axios from "axios";
@@ -132,82 +212,140 @@ export default {
   name: "ScratchFormComponent",
   data() {
     return {
-      availableFields: [], // List of available fields
-      formFields: [], // Fields added to the form
+      formSections: [{ title: "Default Section", fields: [], collapsed: false }],
+      generalFields: [],
+      specializedFieldSections: [],
+      activeSection: 0, // Tracks the active section index
+      activeTab: "general", // Tracks the current tab ("general" or "specialized")
     };
   },
   async created() {
     await this.loadAvailableFields();
   },
   methods: {
+    // Load fields data from backend
     async loadAvailableFields() {
       try {
-        const response = await axios.get("http://127.0.0.1:8000/forms/available-fields");
-        this.availableFields = response.data;
+        const generalResponse = await axios.get("http://127.0.0.1:8000/forms/available-fields");
+        const specializedResponse = await axios.get("http://127.0.0.1:8000/forms/specialized-fields");
+        this.generalFields = generalResponse.data || [];
+        this.specializedFieldSections = specializedResponse.data || [];
       } catch (error) {
-        console.error("Error loading available fields:", error.response?.data || error.message);
+        console.error("Error loading fields:", error.response?.data || error.message);
       }
     },
-    addField(field) {
-      const newField = { ...field, name: `${field.type}_${Date.now()}` };
-      this.formFields.push(newField);
+
+    // Expand the clicked section and collapse others
+    toggleSection(sectionIndex) {
+      this.formSections.forEach((section, index) => {
+        if (index === sectionIndex) {
+          section.collapsed = false; // Expand the clicked section
+          this.activeSection = sectionIndex; // Set active section
+        } else {
+          section.collapsed = true; // Collapse all other sections
+        }
+      });
     },
-    removeField(index) {
-      this.formFields.splice(index, 1);
-    },
-    editField(index) {
-      const newLabel = prompt("Enter new label for the field:", this.formFields[index].label);
-      if (newLabel !== null) {
-        this.formFields[index].label = newLabel;
+
+    // Add a field to the active section
+    addFieldToActiveSection(field) {
+      if (this.formSections[this.activeSection]) {
+        this.formSections[this.activeSection].fields.push({
+          ...field,
+          name: `${field.type}_${Date.now()}`,
+        });
+      } else {
+        alert("Please select a valid section to add the field.");
       }
     },
-    addSimilarField(index) {
-      const originalField = this.formFields[index];
-      const newField = { ...originalField, name: `${originalField.name}_${Date.now()}` };
-      this.formFields.splice(index + 1, 0, newField);
+
+    // Add a new section
+    addNewSection() {
+      this.formSections.push({
+        title: `New Section ${this.formSections.length + 1}`,
+        fields: [],
+        collapsed: true,
+      });
+      this.activeSection = this.formSections.length - 1; // Set the new section as active
+      this.toggleSection(this.activeSection); // Automatically expand the new section
     },
-    editRadioOption(fieldIndex, optionIndex) {
-      const newOption = prompt(
-        "Enter new value for the option:",
-        this.formFields[fieldIndex].options[optionIndex]
-      );
-      if (newOption !== null) {
-        this.formFields[fieldIndex].options.splice(optionIndex, 1, newOption);
+    setActiveSection(sectionIndex) {
+  this.activeSection = sectionIndex;
+},
+    // Add a new section below a given index
+    addNewSectionBelow(index) {
+      this.formSections.splice(index + 1, 0, {
+        title: `New Section ${index + 2}`,
+        fields: [],
+        collapsed: true,
+      });
+      this.activeSection = index + 1; // Set the new section as active
+      this.toggleSection(this.activeSection); // Automatically expand the new section
+    },
+
+    // Delete a section
+    deleteSection(index) {
+      if (confirm("Are you sure you want to delete this section?")) {
+        this.formSections.splice(index, 1);
+
+        // Adjust active section
+        if (this.activeSection >= index) {
+          this.activeSection = Math.max(0, this.activeSection - 1);
+        }
+        if (this.formSections.length > 0) {
+          this.toggleSection(this.activeSection);
+        }
       }
     },
-    removeRadioOption(fieldIndex, optionIndex) {
-      this.formFields[fieldIndex].options.splice(optionIndex, 1);
-    },
-    addRadioOption(fieldIndex) {
-      const newOption = prompt("Enter a new option:");
-      if (newOption) {
-        this.formFields[fieldIndex].options.push(newOption);
+
+    // Edit the title of a section
+    editSection(index) {
+      const newTitle = prompt("Enter a new title for this section:", this.formSections[index].title);
+      if (newTitle) {
+        this.formSections[index].title = newTitle;
       }
     },
-    editParagraph(index) {
-      const newContent = prompt(
-        "Enter new content for the paragraph:",
-        this.formFields[index].content
-      );
-      if (newContent !== null) {
-        this.formFields[index].content = newContent;
-      }
-    },
+
+    // Clear the form
     clearForm() {
       if (confirm("Are you sure you want to clear the form?")) {
-        this.formFields = [];
+        this.formSections = [{ title: "Default Section", fields: [], collapsed: false }];
+        this.activeSection = 0;
       }
     },
+
+    // Submit the form data
     submitForm() {
-      console.log("Form submitted with data:", this.formFields);
+      console.log("Form submitted with data:", this.formSections);
       alert("Form submitted successfully!");
+    },
+
+    // Edit a specific field within a section
+    editField(sectionIndex, fieldIndex) {
+      const field = this.formSections[sectionIndex].fields[fieldIndex];
+      const newLabel = prompt("Enter new label for the field:", field.label);
+      if (newLabel) {
+        field.label = newLabel;
+      }
+    },
+
+    // Add a field similar to an existing one
+    addSimilarField(sectionIndex, fieldIndex) {
+      const field = this.formSections[sectionIndex].fields[fieldIndex];
+      const newField = { ...field, name: `${field.type}_${Date.now()}` };
+      this.formSections[sectionIndex].fields.splice(fieldIndex + 1, 0, newField);
+    },
+
+    // Remove a specific field from a section
+    removeField(sectionIndex, fieldIndex) {
+      this.formSections[sectionIndex].fields.splice(fieldIndex, 1);
     },
   },
 };
 </script>
 
 <style scoped>
-/* Reused CreateFormComponent Styles */
+/* Main container for the page */
 .create-form-container {
   max-width: 1200px;
   margin: auto;
@@ -223,143 +361,132 @@ h1 {
   color: #333;
 }
 
+/* Layout handling for the main content */
 .scratch-form-content {
   display: flex;
   justify-content: space-between;
+  gap: 20px;
   margin-top: 20px;
+  flex-wrap: wrap; /* Enables wrapping for smaller screens */
 }
-
-.form-area {
-  flex: 3;
-  padding: 20px;
-  margin-right: 20px;
-  background-color: #f9f9f9;
-  border-radius: 10px;
-  position: relative;
-}
-.btn-clear {
-  background-color: #ffc107;
-  color: white;
-  border: 50px;
-  padding: 10px 20px;
-  border-radius: 5px;
+.section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 0;
   cursor: pointer;
   font-size: 16px;
 }
-.btn-clear:hover {
-  background-color: #e0a800;
-}
-
-.btn-submit:hover {
-  background-color: #0056b3;
-}
-
-.available-fields {
-  flex: 1;
-  padding: 20px;
-  background-color: #fff;
-  border: 1px solid #ddd;
-  border-radius: 10px;
-}
-
-.field-buttons {
+.general-fields {
   display: flex;
   flex-direction: column;
   gap: 10px;
 }
+.collapse-button {
+  background: none;
+  border: none;
+  font-size: 20px;
+  cursor: pointer;
+}
 
-.available-field-button {
+.field-buttons {
   display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px;
-  background-color: #f4f4f4;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+/* Form Preview (Left Side) */
+.form-area {
+  flex: 3;
+  padding: 20px;
+  background-color: #f9f9f9;
+  border-radius: 10px;
+  position: relative;
+  overflow: hidden; /* Prevents content overflow */
+  word-wrap: break-word; /* Wraps long content */
+}
+/* Highlight active section with a brighter background and bold border */
+.form-section {
+  transition: all 0.3s ease;
+  filter: brightness(1); /* Default reduced brightness */
+}
+
+.form-section.active {
+  filter: brightness(1); /* Full brightness for active section */
+  border: 1px solid #007bff; /* Highlight border */
+  background-color: #e7f3ff; /* Subtle background color */
+}
+
+/* Collapse animation for sections */
+.section-content {
+  max-height: 0;
+  overflow: hidden;
+  transition: max-height 0.3s ease-in-out;
+}
+
+.form-section:not(.active) .section-content {
+  max-height: 0;
+}
+
+.form-section.active .section-content {
+  max-height: 1000px; /* Large enough to fit expanded content */
+}
+
+/* Collapse animation for sections */
+.section-content {
+  transition: max-height 0.3s ease-in-out;
+}
+.form-area form {
+  display: flex;
+  flex-direction: column; /* Ensures fields are stacked vertically */
+  gap: 15px; /* Adds consistent spacing between fields */
+}
+
+/* Field Layout */
+.field-layout {
+  border: 1px solid #ddd;
+  margin-bottom: 15px;
+  padding: 15px;
+  border-radius: 5px;
+  background-color: #fff;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1); /* Optional shadow for separation */
+}
+
+/* Handles overflow issues for dynamically added fields */
+.field-box {
+  width: 100%; /* Ensures the field takes full width of its container */
+  max-width: 100%; /* Prevents exceeding container width */
+  padding: 10px;
+  background-color: #fdfdfd;
+  border-radius: 5px;
+}
+
+/* Input field styles */
+input,
+textarea,
+select {
+  width: 100%; /* Ensures the field fills the container */
+  padding: 10px;
+  margin-top: 5px;
+  font-size: 14px;
   border: 1px solid #ccc;
   border-radius: 5px;
-  cursor: pointer;
-  transition: background-color 0.2s ease;
+  box-sizing: border-box;
 }
 
-.available-field-button:hover {
-  background-color: #e0e0e0;
-}
-.field-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
+input:focus,
+textarea:focus,
+select:focus {
+  border-color: #007bff;
+  outline: none;
 }
 
-label {
-  display: block;
-  font-size: 14px;
-  color: #555;
-}
-
+/* Actions for editing fields (add/edit/delete buttons) */
 .field-actions {
   display: flex;
   gap: 10px;
 }
 
-input {
-  width: 100%;
-  padding: 10px;
-  font-size: 14px;
-  border: 1px solid #ccc;
-  border-radius: 5px;
-  box-sizing: border-box;
-  margin-top: 10px;
-}
-
-input:focus {
-  border-color: #007bff;
-  outline: none;
-}
-
-/* Generic Button Styles */
-button {
-  padding: 5px 12px;
-  font-size: 14px;
-  border: 1px solid #ccc;
-  background-color: #f4f4f4;
-  color: #333;
-  border-radius: 3px;
-  cursor: pointer;
-  transition: background-color 0.2s ease;
-}
-
-button:hover {
-  background-color: #e0e0e0;
-}
-
-/* Primary Button (e.g., Submit) */
-.btn-submit {
-   background-color: #007bff;
-  color: white;
-  border: 5px;
-  padding: 10px 20px;
-  border-radius: 5px;
-  cursor: pointer;
-  font-size: 16px;
-}
-
-.btn-submit:hover {
-  background-color: #0056b3;
-}
-
-/* Success Message */
-.success-message {
-  color: green;
-  font-size: 14px;
-  text-align: center;
-}
-
-/* Error Message */
-.error-message {
-  color: red;
-  font-size: 14px;
-  text-align: center;
-}
-/* Generic Button Styles for Icons */
 .icon-button {
   background: none;
   border: none;
@@ -378,38 +505,116 @@ button:hover {
 
 .icon-pencil::before {
   content: "✏️"; /* Pencil for edit */
-  font-size: 16px;
 }
 
 .icon-plus::before {
   content: "➕"; /* Plus for add */
-  font-size: 16px;
 }
 
 .icon-trash::before {
   content: "🗑️"; /* Trash for delete */
+}
+
+/* Right-side available fields section */
+.available-fields {
+  flex: 1;
+  padding: 20px;
+  background-color: #fff;
+  border: 1px solid #ddd;
+  border-radius: 10px;
+  max-width: 300px; /* Prevents the available fields from growing too wide */
+  overflow: auto; /* Ensures scrollable content if needed */
+}
+
+.tabs {
+  display: flex;
+  justify-content: space-around;
+  margin-bottom: 15px;
+}
+
+.tabs button {
+  padding: 10px;
+  border: 1px solid #ddd;
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+.tabs button.active {
+  background-color: #007bff;
+  color: white;
+  border: none;
+}
+
+.tabs button:not(.active):hover {
+  background-color: #f4f4f4;
+}
+
+.available-field-button {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 15px;
+  font-size: 14px;
+  background-color: #f9f9f9;
+  border: 1px solid #ccc;
+  border-radius: 5px;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+}
+
+.available-field-button i {
+  font-size: 18px;
+  color: #007bff;
+}
+
+.available-field-button:hover {
+  background-color: #e0e0e0;
+}
+
+/* Form action buttons (Submit and Clear) */
+.form-actions {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 20px;
+  gap: 20px;
+}
+
+.btn-clear {
+  background-color: #ffc107;
+  color: white;
+  padding: 10px 20px;
+  border-radius: 5px;
   font-size: 16px;
 }
 
-/* Optional: Adjust for consistency with the rest of the project */
-.field-actions {
-  display: flex;
-  gap: 10px;
+.btn-clear:hover {
+  background-color: #e0a800;
 }
-textarea {
-  width: 100%;
-  padding: 10px;
-  font-size: 14px;
-  border: 1px solid #ccc;
+
+.btn-submit {
+  background-color: #007bff;
+  color: white;
+  padding: 10px 20px;
   border-radius: 5px;
-  box-sizing: border-box;
-  margin-top: 10px;
+  font-size: 16px;
 }
 
-textarea:focus {
-  border-color: #007bff;
-  outline: none;
+.btn-submit:hover {
+  background-color: #0056b3;
 }
 
+/* Mobile responsive adjustments */
+@media (max-width: 768px) {
+  .scratch-form-content {
+    flex-direction: column; /* Stacks the form and available fields */
+  }
 
+  .form-area {
+    max-width: 100%;
+  }
+
+  .available-fields {
+    max-width: 100%;
+  }
+}
 </style>

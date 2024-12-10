@@ -53,3 +53,19 @@ async def get_available_fields():
         return data
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error loading available fields: {str(e)}")
+
+
+@router.get("/specialized-fields")
+async def get_specialized_fields():
+    try:
+        # Load the JSON file dynamically from the templates directory
+        available_fields_file = TEMPLATE_DIR / "specialized-fields.json"
+        if not available_fields_file.exists():
+            raise HTTPException(status_code=404, detail="Available fields file not found.")
+
+        with open(available_fields_file, "r") as file:
+            data = json.load(file)
+
+        return data
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error loading available fields: {str(e)}")

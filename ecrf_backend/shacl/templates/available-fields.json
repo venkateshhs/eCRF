@@ -3,6 +3,7 @@
     "type": "text",
     "label": "Text Field",
     "placeholder": "Enter text",
+    "icon": "fas fa-font",
     "default": ""
   },
   {
@@ -10,6 +11,7 @@
     "label": "Text Area",
     "placeholder": "Enter longer text",
     "rows": 4,
+    "icon": "fas fa-align-left",
     "default": ""
   },
   {
@@ -18,44 +20,52 @@
     "placeholder": "Enter a number",
     "min": 0,
     "max": 100,
+    "icon": "fas fa-hashtag",
     "default": 0
   },
   {
     "type": "checkbox",
     "label": "Checkbox",
+    "icon": "fas fa-check-square",
     "default": false
   },
   {
     "type": "radio",
     "label": "Radio Group",
     "options": ["Option 1", "Option 2", "Option 3"],
+    "icon": "fas fa-dot-circle",
     "default": "Option 1"
   },
   {
     "type": "select",
     "label": "Dropdown Select",
     "options": ["Option A", "Option B", "Option C"],
+    "icon": "fas fa-caret-down",
     "default": "Option A"
   },
   {
     "type": "date",
     "label": "Date Field",
     "placeholder": "Select a date",
+    "icon": "fas fa-calendar-alt",
     "default": ""
   },
   {
     "type": "file",
     "label": "File Upload",
+    "icon": "fas fa-file-upload",
     "default": null
   },
   {
     "type": "button",
     "label": "Button",
+    "icon": "fas fa-mouse-pointer",
     "default": "Click Me"
   },
   {
     "type": "paragraph",
     "label": "Paragraph",
+    "icon": "fas fa-paragraph",
     "default": "This is a sample paragraph text."
   }
 ]

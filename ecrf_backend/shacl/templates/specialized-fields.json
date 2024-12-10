@@ -1,0 +1,95 @@
+[
+  {
+    "title": "Demographic Information",
+    "fields": [
+      {
+        "type": "text",
+        "label": "First Name",
+        "placeholder": "Enter first name",
+        "icon": "fas fa-user",
+        "default": ""
+      },
+      {
+        "type": "text",
+        "label": "Last Name",
+        "placeholder": "Enter last name",
+        "icon": "fas fa-user",
+        "default": ""
+      },
+      {
+        "type": "date",
+        "label": "Date of Birth",
+        "placeholder": "Select date of birth",
+        "icon": "fas fa-calendar-alt",
+        "default": ""
+      },
+      {
+        "type": "select",
+        "label": "Gender",
+        "options": ["Male", "Female", "Other"],
+        "icon": "fas fa-venus-mars",
+        "default": "Male"
+      }
+    ]
+  },
+  {
+    "title": "Clinical Information",
+    "fields": [
+      {
+        "type": "number",
+        "label": "Height (cm)",
+        "placeholder": "Enter height",
+        "icon": "fas fa-ruler-vertical",
+        "default": 0
+      },
+      {
+        "type": "number",
+        "label": "Weight (kg)",
+        "placeholder": "Enter weight",
+        "icon": "fas fa-weight",
+        "default": 0
+      },
+      {
+        "type": "select",
+        "label": "Blood Type",
+        "options": ["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"],
+        "icon": "fas fa-tint",
+        "default": "A+"
+      },
+      {
+        "type": "textarea",
+        "label": "Medical History",
+        "placeholder": "Enter medical history details",
+        "rows": 4,
+        "icon": "fas fa-notes-medical",
+        "default": ""
+      }
+    ]
+  },
+  {
+    "title": "Contact Information",
+    "fields": [
+      {
+        "type": "text",
+        "label": "Email Address",
+        "placeholder": "Enter email address",
+        "icon": "fas fa-envelope",
+        "default": ""
+      },
+      {
+        "type": "text",
+        "label": "Phone Number",
+        "placeholder": "Enter phone number",
+        "icon": "fas fa-phone",
+        "default": ""
+      },
+      {
+        "type": "text",
+        "label": "Address",
+        "placeholder": "Enter address",
+        "icon": "fas fa-map-marker-alt",
+        "default": ""
+      }
+    ]
+  }
+]
