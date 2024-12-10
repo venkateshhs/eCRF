@@ -14,7 +14,7 @@
           :key="sectionIndex"
           class="form-section"
           :class="{ active: activeSection === sectionIndex }"
-          @click="setActiveSection(sectionIndex)"
+          @click.self="setActiveSection(sectionIndex)"
         >
           <!-- Section Header -->
           <div class="section-header">
@@ -33,6 +33,12 @@
                 <i class="fas fa-plus"></i>
               </button>
               <button
+                @click.prevent="copySection(sectionIndex)"
+                class="icon-button copy-button"
+              >
+                <i class="fas fa-copy"></i>
+              </button>
+              <button
                 @click.prevent="deleteSection(sectionIndex)"
                 class="icon-button delete-button"
               >
@@ -48,10 +54,7 @@
           </div>
 
           <!-- Section Content -->
-          <div
-            v-if="!section.collapsed"
-            class="section-content"
-          >
+          <div v-if="!section.collapsed" class="section-content">
             <div
               v-for="(field, fieldIndex) in section.fields"
               :key="fieldIndex"
@@ -205,6 +208,8 @@
 </template>
 
 
+
+
 <script>
 import axios from "axios";
 
@@ -215,15 +220,14 @@ export default {
       formSections: [{ title: "Default Section", fields: [], collapsed: false }],
       generalFields: [],
       specializedFieldSections: [],
-      activeSection: 0, // Tracks the active section index
-      activeTab: "general", // Tracks the current tab ("general" or "specialized")
+      activeSection: 0,
+      activeTab: "general",
     };
   },
   async created() {
     await this.loadAvailableFields();
   },
   methods: {
-    // Load fields data from backend
     async loadAvailableFields() {
       try {
         const generalResponse = await axios.get("http://127.0.0.1:8000/forms/available-fields");
@@ -234,61 +238,51 @@ export default {
         console.error("Error loading fields:", error.response?.data || error.message);
       }
     },
-
-    // Expand the clicked section and collapse others
+    goBack() {
+      this.$router.back();
+    },
     toggleSection(sectionIndex) {
-      this.formSections.forEach((section, index) => {
-        if (index === sectionIndex) {
-          section.collapsed = false; // Expand the clicked section
-          this.activeSection = sectionIndex; // Set active section
-        } else {
-          section.collapsed = true; // Collapse all other sections
-        }
-      });
-    },
-
-    // Add a field to the active section
-    addFieldToActiveSection(field) {
-      if (this.formSections[this.activeSection]) {
-        this.formSections[this.activeSection].fields.push({
-          ...field,
-          name: `${field.type}_${Date.now()}`,
-        });
-      } else {
-        alert("Please select a valid section to add the field.");
+  this.formSections.forEach((section, index) => {
+    if (index === sectionIndex) {
+      section.collapsed = !section.collapsed;
+      if (!section.collapsed) {
+        this.setActiveSection(sectionIndex); // Set the active section if expanded
       }
+    } else {
+      section.collapsed = true; // Collapse all other sections
+    }
+  });
+},
+    setActiveSection(sectionIndex) {
+      this.activeSection = sectionIndex;
     },
+    addFieldToActiveSection(field) {
+  const section = this.formSections[this.activeSection];
+  if (section.collapsed) {
+    this.toggleSection(this.activeSection); // Expand the active section if collapsed
+  }
+  section.fields.push({ ...field, name: `${field.type}_${Date.now()}` }); // Ensure unique field name
+},
 
-    // Add a new section
     addNewSection() {
       this.formSections.push({
         title: `New Section ${this.formSections.length + 1}`,
         fields: [],
         collapsed: true,
       });
-      this.activeSection = this.formSections.length - 1; // Set the new section as active
-      this.toggleSection(this.activeSection); // Automatically expand the new section
+      this.toggleSection(this.formSections.length - 1);
     },
-    setActiveSection(sectionIndex) {
-  this.activeSection = sectionIndex;
-},
-    // Add a new section below a given index
     addNewSectionBelow(index) {
       this.formSections.splice(index + 1, 0, {
         title: `New Section ${index + 2}`,
         fields: [],
         collapsed: true,
       });
-      this.activeSection = index + 1; // Set the new section as active
-      this.toggleSection(this.activeSection); // Automatically expand the new section
+      this.toggleSection(index + 1);
     },
-
-    // Delete a section
     deleteSection(index) {
       if (confirm("Are you sure you want to delete this section?")) {
         this.formSections.splice(index, 1);
-
-        // Adjust active section
         if (this.activeSection >= index) {
           this.activeSection = Math.max(0, this.activeSection - 1);
         }
@@ -297,30 +291,43 @@ export default {
         }
       }
     },
-
-    // Edit the title of a section
     editSection(index) {
       const newTitle = prompt("Enter a new title for this section:", this.formSections[index].title);
       if (newTitle) {
         this.formSections[index].title = newTitle;
       }
     },
+   copySection(sectionIndex) {
+  const sectionToCopy = this.formSections[sectionIndex];
 
-    // Clear the form
+  // Create a deep copy of the section
+  const newSection = JSON.parse(JSON.stringify(sectionToCopy));
+
+  // Modify the copied section's title and fields
+  newSection.title = `${sectionToCopy.title} (Copy)`;
+  newSection.fields = sectionToCopy.fields.map((field) => ({
+    ...field,
+    name: `${field.name}_copy_${Date.now()}`, // Ensure unique field name
+  }));
+  newSection.collapsed = true; // Collapse the new section initially
+
+  // Insert the copied section into the list
+  this.formSections.splice(sectionIndex + 1, 0, newSection);
+
+  // Automatically expand the copied section
+  this.toggleSection(sectionIndex + 1);
+},
+
     clearForm() {
       if (confirm("Are you sure you want to clear the form?")) {
         this.formSections = [{ title: "Default Section", fields: [], collapsed: false }];
         this.activeSection = 0;
       }
     },
-
-    // Submit the form data
     submitForm() {
       console.log("Form submitted with data:", this.formSections);
       alert("Form submitted successfully!");
     },
-
-    // Edit a specific field within a section
     editField(sectionIndex, fieldIndex) {
       const field = this.formSections[sectionIndex].fields[fieldIndex];
       const newLabel = prompt("Enter new label for the field:", field.label);
@@ -328,15 +335,11 @@ export default {
         field.label = newLabel;
       }
     },
-
-    // Add a field similar to an existing one
     addSimilarField(sectionIndex, fieldIndex) {
       const field = this.formSections[sectionIndex].fields[fieldIndex];
       const newField = { ...field, name: `${field.type}_${Date.now()}` };
       this.formSections[sectionIndex].fields.splice(fieldIndex + 1, 0, newField);
     },
-
-    // Remove a specific field from a section
     removeField(sectionIndex, fieldIndex) {
       this.formSections[sectionIndex].fields.splice(fieldIndex, 1);
     },
