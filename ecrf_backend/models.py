@@ -7,10 +7,12 @@ class User(Base):
     __tablename__ = "users"
 
     id = Column(Integer, primary_key=True, index=True)
+
     username = Column(String(50), unique=True, nullable=False)
     email = Column(String(255), unique=True, nullable=False)
     password = Column(String(255), nullable=False)
     created_at = Column(DateTime, server_default=func.now())
+    forms = relationship("Form", back_populates="user")
 
     profile = relationship("UserProfile", back_populates="user", uselist=False)
 
@@ -32,3 +34,11 @@ class FormShape(Base):
     name = Column(String, unique=True, index=True)  # Form name
     description = Column(Text, nullable=True)  # Optional form description
     shape = Column(JSON, nullable=False)
+
+class Form(Base):
+    __tablename__ = "forms"
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"))
+    form_name = Column(String, nullable=False)
+    form_structure = Column(JSON, nullable=False)
+    user = relationship("User", back_populates="forms")

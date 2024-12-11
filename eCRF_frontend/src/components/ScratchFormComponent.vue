@@ -20,10 +20,7 @@
           <div class="section-header">
             <h3>{{ section.title }}</h3>
             <div class="field-actions">
-              <button
-                @click.prevent="editSection(sectionIndex)"
-                class="icon-button edit-button"
-              >
+              <button @click.prevent="editSection(sectionIndex)" class="icon-button edit-button">
                 <i class="fas fa-edit"></i>
               </button>
               <button
@@ -32,10 +29,7 @@
               >
                 <i class="fas fa-plus"></i>
               </button>
-              <button
-                @click.prevent="copySection(sectionIndex)"
-                class="icon-button copy-button"
-              >
+              <button @click.prevent="copySection(sectionIndex)" class="icon-button copy-button">
                 <i class="fas fa-copy"></i>
               </button>
               <button
@@ -146,9 +140,16 @@
         </div>
 
         <div class="form-actions">
+          <input
+            v-model="formName"
+            type="text"
+            class="form-name-input"
+            placeholder="Enter Form Name"
+          />
           <button @click.prevent="addNewSection" class="btn-add-section">+ Add Section</button>
           <button @click.prevent="clearForm" class="btn-clear">Clear Form</button>
-          <button @click.prevent="submitForm" class="btn-submit">Submit Form</button>
+          <button @click.prevent="saveForm" class="btn-save">Save Form</button>
+          <button @click="navigateToSavedForms" class="btn-view-saved">View Saved Forms</button>
         </div>
       </div>
 
@@ -210,6 +211,7 @@
 
 
 
+
 <script>
 import axios from "axios";
 
@@ -218,28 +220,70 @@ export default {
   data() {
     return {
       formSections: [{ title: "Default Section", fields: [], collapsed: false }],
+      savedForms: [],
       generalFields: [],
       specializedFieldSections: [],
       activeSection: 0,
       activeTab: "general",
+      formName: "Untitled Form",
     };
   },
-  async created() {
-    await this.loadAvailableFields();
+  computed: {
+    token() {
+      return this.$store.state.token; // Retrieve the token directly from Vuex
+    },
   },
+  async mounted() {
+  await this.loadAvailableFields();
+  },
+
+
   methods: {
+  navigateToSavedForms() {
+      this.$router.push("/saved-forms");
+    },
+    async saveForm() {
+      if (!this.token) {
+        alert("Authentication error: No token found. Please log in again.");
+        this.$router.push("/login");
+        return;
+      }
+
+      const formData = {
+        form_name: this.formName || "Untitled Form",
+        form_structure: this.formSections,
+      };
+
+      try {
+        const response = await axios.post("http://127.0.0.1:8000/forms/save-form", formData, {
+          headers: {
+            Authorization: `Bearer ${this.token}`, // Use the Vuex token
+          },
+        });
+        alert(`Form "${response.data.form_name}" saved successfully!`);
+      } catch (error) {
+        if (error.response?.status === 401) {
+          alert("Your session has expired. Please log in again.");
+          this.$router.push("/login");
+        } else {
+          console.error("Error saving form:", error);
+          alert("Failed to save form. Please try again.");
+        }
+      }
+    },
     async loadAvailableFields() {
       try {
-        const generalResponse = await axios.get("http://127.0.0.1:8000/forms/available-fields");
-        const specializedResponse = await axios.get("http://127.0.0.1:8000/forms/specialized-fields");
-        this.generalFields = generalResponse.data || [];
-        this.specializedFieldSections = specializedResponse.data || [];
+      const generalResponse = await axios.get("http://127.0.0.1:8000/forms/available-fields");
+      const specializedResponse = await axios.get("http://127.0.0.1:8000/forms/specialized-fields");
+      this.generalFields = generalResponse.data || [];
+      this.specializedFieldSections = specializedResponse.data || [];
       } catch (error) {
         console.error("Error loading fields:", error.response?.data || error.message);
       }
     },
+
     goBack() {
-      this.$router.back();
+      this.$router.back("/dashboard");
     },
     toggleSection(sectionIndex) {
   this.formSections.forEach((section, index) => {
@@ -604,6 +648,54 @@ select:focus {
 
 .btn-submit:hover {
   background-color: #0056b3;
+}
+
+.saved-forms {
+  margin-top: 20px;
+  padding: 10px;
+  background-color: #f7f7f7;
+  border-radius: 8px;
+}
+
+.saved-forms ul {
+  list-style-type: none;
+  padding: 0;
+}
+
+.saved-forms li {
+  margin-bottom: 10px;
+}
+
+.saved-forms button {
+  background-color: #007bff;
+  color: white;
+  border: none;
+  padding: 5px 10px;
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+.btn-save {
+  background-color: #007bff; /* Blue background for Save Form */
+  color: white; /* White text */
+  padding: 10px 20px;
+  border-radius: 5px;
+  font-size: 16px;
+  border: none; /* Optional, to remove any border */
+}
+
+.btn-save:hover {
+  background-color: #0056b3; /* Darker blue on hover */
+}
+.saved-forms button:hover {
+  background-color: #0056b3;
+}
+
+.form-name-input {
+  width: 50%;
+  padding: 5px;
+  margin-bottom: 10px;
+  font-size: 16px;
 }
 
 /* Mobile responsive adjustments */

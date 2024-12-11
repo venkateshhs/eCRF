@@ -1,19 +1,20 @@
+from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from schemas import UserCreate, LoginRequest, UserResponse
-from crud import get_user_by_username, get_user_by_email, create_user
+from crud import get_user_by_username, create_user
 from auth import hash_password, verify_password, create_access_token
 from database import get_db
 from logger import logger
-from models import User, UserProfile  # Import the User model
+from models import User, UserProfile
+import jwt
 import re
 from fastapi.security import OAuth2PasswordBearer
-import jwt
+from jwt import decode, ExpiredSignatureError, InvalidTokenError
 SECRET_KEY = "your-very-secure-secret-key"
 ALGORITHM = "HS256"
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="users/login")
-
 
 logger.info("Its here.")
 router = APIRouter(prefix="/users", tags=["users"])
@@ -119,6 +120,32 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
 
     return user
 
+
+def get_current_user(token: str, db: Session = Depends(get_db)) -> User:
+    """
+    Decodes the JWT access token and retrieves the authenticated user object.
+    """
+    try:
+        payload = decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        username = payload.get("sub")
+        exp = payload.get("exp")
+
+        if not username or not exp:
+            raise HTTPException(status_code=401, detail="Invalid token")
+
+        if datetime.utcnow().timestamp() > exp:
+            raise HTTPException(status_code=401, detail="Token expired")
+
+        user = get_user_by_username(db, username)
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        return user
+
+    except ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="Token expired")
+    except InvalidTokenError:
+        raise HTTPException(status_code=401, detail="Invalid token")
 
 
 

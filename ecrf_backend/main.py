@@ -4,14 +4,16 @@ import users
 from database import Base, engine
 import forms
 from logger import logger
+from models import Form
 
 # Initialize FastAPI app
 app = FastAPI()
+
+# Allow CORS for frontend during development
 ALLOWED_ORIGINS = ["http://localhost:8080", "http://127.0.0.1:8080"]
-# Allow CORS for localhost during developmentph
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=ALLOWED_ORIGINS,  # Frontend URL
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -30,3 +32,8 @@ async def startup_event():
 @app.on_event("shutdown")
 async def shutdown_event():
     logger.info("Application has stopped.")
+    # Add cleanup logic if needed
+
+@app.get("/health")
+async def health_check():
+    return {"status": "ok"}

@@ -34,3 +34,19 @@ class FormShapeResponse(FormShapeCreate):
 
     class Config:
         orm_mode = True
+
+class FormSaveSchema(BaseModel):
+    form_name: str
+    form_structure: Any
+
+    class Config:
+        orm_mode = True
+
+class FormSchema(BaseModel):
+    id: int
+    user_id: int
+    form_name: str
+    form_structure: Any
+
+    class Config:
+        orm_mode = True

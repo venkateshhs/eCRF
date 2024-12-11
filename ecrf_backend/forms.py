@@ -1,7 +1,16 @@
+from typing import List
+
 from fastapi import APIRouter, HTTPException, Depends, Query
 from pathlib import Path
 import json
 
+from database import get_db
+from logger import logger
+from schemas import FormSchema, FormSaveSchema
+from models import Form, User
+from users import get_current_user, oauth2_scheme
+
+from sqlalchemy.orm import Session
 router = APIRouter(prefix="/forms", tags=["forms"])
 
 TEMPLATE_DIR = Path("shacl/templates")  # Path to your templates directory
@@ -69,3 +78,44 @@ async def get_specialized_fields():
         return data
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error loading available fields: {str(e)}")
+
+
+
+@router.post("/save-form")
+def save_form(
+    form_data: FormSaveSchema,
+    db: Session = Depends(get_db),
+    token: str = Depends(oauth2_scheme),  # Extract token from the Authorization header
+):
+    current_user = get_current_user(token, db)
+    logger.info(f"Saving form: {form_data}")
+    logger.info(f"Current user: {current_user}")
+
+    form = Form(
+        user_id=current_user.id,
+        form_name=form_data.form_name,
+        form_structure=form_data.form_structure,
+    )
+    db.add(form)
+    db.commit()
+    db.refresh(form)
+
+    logger.info(f"Form saved successfully: {form}")
+    return form
+
+
+@router.get("/load-saved-forms", response_model=list[FormSchema])
+def load_saved_forms(
+    db: Session = Depends(get_db), current_user: User = Depends(get_current_user)
+):
+    try:
+        # Query forms associated with the logged-in user
+        forms = db.query(Form).filter(Form.user_id == current_user.id).all()
+
+        # Debugging: Log the retrieved forms
+        logger.info(f"Forms retrieved for user {current_user.id}: {forms}")
+
+        return forms
+    except Exception as e:
+        logger.error(f"Error loading saved forms: {e}")
+        raise HTTPException(status_code=500, detail=f"Error loading saved forms: {str(e)}")
