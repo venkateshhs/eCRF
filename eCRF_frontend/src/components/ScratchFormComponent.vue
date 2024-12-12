@@ -255,12 +255,12 @@ export default {
       };
 
       try {
-        const response = await axios.post("http://127.0.0.1:8000/forms/save-form", formData, {
+        await axios.post("http://127.0.0.1:8000/forms/save-form", formData, {
           headers: {
             Authorization: `Bearer ${this.token}`, // Use the Vuex token
           },
         });
-        alert(`Form "${response.data.form_name}" saved successfully!`);
+        alert(`Form "${this.formName}" saved successfully!`);
       } catch (error) {
         if (error.response?.status === 401) {
           alert("Your session has expired. Please log in again.");

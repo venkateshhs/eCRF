@@ -1,17 +1,27 @@
 <template>
-  <div class="saved-forms-page">
-    <div class="header-container">
-      <button @click="goBack" class="btn-back">⬅ Back</button>
-      <h1>Saved Forms</h1>
-    </div>
+  <div class="saved-forms-container">
+    <h1>Saved Forms</h1>
     <div v-if="savedForms.length > 0">
-      <ul>
-        <li v-for="form in savedForms" :key="form.id">
-          <button @click.prevent="loadForm(form)">{{ form.form_name }}</button>
-        </li>
-      </ul>
+      <table>
+        <thead>
+          <tr>
+            <th>Form Name</th>
+            <th>Date Created</th>
+            <th>Action</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="form in savedForms" :key="form.id">
+            <td>{{ form.form_name }}</td>
+            <td>{{ form.created_at }}</td>
+            <td>
+              <button @click="viewForm(form)">View</button>
+            </td>
+          </tr>
+        </tbody>
+      </table>
     </div>
-    <p v-else>No saved forms found. Create and save a new form to get started!</p>
+    <p v-else>No saved forms found.</p>
   </div>
 </template>
 
@@ -19,41 +29,91 @@
 import axios from "axios";
 
 export default {
-  name: "SavedFormsComponent",
+  name: "SavedFormsViewComponent",
   data() {
     return {
-      savedForms: [],
+      savedForms: [], // Array to store fetched forms
     };
   },
-  async mounted() {
-    await this.loadSavedForms();
+  computed: {
+    token() {
+      return this.$store.state.token; // Retrieve the token directly from Vuex
+    },
+  },
+  async created() {
+    await this.loadSavedForms(); // Load forms when component is created
   },
   methods: {
-    async loadSavedForms() {
-      try {
-        const token = localStorage.getItem("access_token");
-        if (!token) {
-          console.error("No access token found.");
-          return;
-        }
+  async loadSavedForms() {
+  console.log("Token being sent:", this.token); // Debug token
 
-        const response = await axios.get("http://127.0.0.1:8000/forms/load-saved-forms", {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        });
+  try {
+    const response = await axios.get("http://127.0.0.1:8000/forms/saved-forms", {
+      headers: {
+        Authorization: `Bearer ${this.token}`,
+      },
+    });
+    this.savedForms = response.data;
+  } catch (error) {
+    console.error("Error loading saved forms:", error.response?.data || error.message);
+    if (error.response?.status === 401) {
+      alert("Authentication error. Please log in again.");
+      this.$router.push("/login");
+    } else if (error.response?.status === 422) {
+      alert("Validation error. Please check your request.");
+    } else {
+      alert("Failed to load saved forms.");
+    }
+  }
+}
+},
 
-        this.savedForms = response.data;
-      } catch (error) {
-        console.error("Error loading saved forms:", error.response?.data || error.message);
-      }
-    },
-    loadForm(form) {
-      alert(`Loaded form "${form.form_name}"!`);
-    },
-    goBack() {
-      this.$router.push("/dashboard/create-form-scratch"); // Navigate back to ScratchFormComponent
-    },
-  },
 };
 </script>
+
+<style scoped>
+.saved-forms-container {
+  max-width: 800px;
+  margin: auto;
+  padding: 20px;
+  font-family: Arial, sans-serif;
+  background-color: #fff;
+  border-radius: 10px;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
+}
+
+h1 {
+  text-align: center;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 20px;
+}
+
+th,
+td {
+  border: 1px solid #ddd;
+  padding: 10px;
+  text-align: left;
+}
+
+th {
+  background-color: #007bff;
+  color: white;
+}
+
+button {
+  padding: 5px 10px;
+  background-color: #007bff;
+  color: white;
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+button:hover {
+  background-color: #0056b3;
+}
+</style>

@@ -109,3 +109,17 @@ def load_saved_forms(
     if not forms:
         raise HTTPException(status_code=404, detail="No saved forms found")
     return forms
+
+@router.get("/{form_id}")
+def get_form_by_id(
+    form_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user)
+):
+    """
+    Retrieve a specific saved form by its ID.
+    """
+    form = db.query(Form).filter(Form.id == form_id, Form.user_id == user.id).first()
+    if not form:
+        raise HTTPException(status_code=404, detail="Form not found")
+    return form
