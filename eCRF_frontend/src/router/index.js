@@ -7,6 +7,7 @@ import CreateFormComponent from "../components/CreateFormComponent.vue"; // Unif
 import ViewFormsComponent from "../components/ViewFormsComponent.vue";
 import AnalyticsComponent from "../components/AnalyticsComponent.vue";
 import ScratchFormComponent from "../components/ScratchFormComponent.vue";
+import SavedFormsComponent from "@/components/SavedFormsComponent";
 const routes = [
   { path: "/", redirect: "/login" }, // Redirect root to login
   { path: "/login", name: "Login", component: LoginComponent },
@@ -31,6 +32,11 @@ const routes = [
     name: "CreateFormScratch",
     component: ScratchFormComponent, // New scratch form creation page
   },
+  {
+      path: "/saved-forms",
+      name: "saved-forms",
+      component: SavedFormsComponent,
+    },
 ];
 
 const router = createRouter({

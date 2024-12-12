@@ -43,7 +43,8 @@ const store = createStore({
         const { access_token } = response.data;
 
         commit("setToken", access_token);
-        localStorage.setItem("token", access_token);
+        console.log("access token:", response.data.access_token);
+        localStorage.setItem("access_token", response.data.access_token);
 
         const userResponse = await axios.get(`${API_BASE_URL}/users/me`, {
           headers: { Authorization: `Bearer ${access_token}` },
@@ -103,7 +104,7 @@ const store = createStore({
 
     // Fetch logged-in user data
     async fetchUserData({ commit }) {
-      const token = localStorage.getItem("token");
+      const token = localStorage.getItem("access_token");
       if (!token) {
         console.warn("No token found in localStorage. Cannot fetch user data.");
         return false;
@@ -126,7 +127,7 @@ const store = createStore({
     logout({ commit }) {
       console.log("Logging out...");
       commit("clearAuth");
-      localStorage.removeItem("token");
+      localStorage.removeItem("access_token");
     },
 
     // Fetch all forms
