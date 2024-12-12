@@ -1,5 +1,5 @@
 from datetime import datetime
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Header
 from sqlalchemy.orm import Session
 from schemas import UserCreate, LoginRequest, UserResponse
 from crud import get_user_by_username, create_user
@@ -121,22 +121,29 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
     return user
 
 
-def get_current_user(token: str, db: Session = Depends(get_db)) -> User:
+def get_current_user(authorization: str = Header(None), db: Session = Depends(get_db)) -> User:
     """
-    Decodes the JWT access token and retrieves the authenticated user object.
+    Decodes the JWT access token from the Authorization header and retrieves the authenticated user object.
     """
+    if not authorization:
+        raise HTTPException(status_code=401, detail="Authorization header missing")
+
+    if not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Authorization header must start with 'Bearer '")
+
+    token = authorization.split("Bearer ")[1]
     try:
         payload = decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         username = payload.get("sub")
         exp = payload.get("exp")
 
         if not username or not exp:
-            raise HTTPException(status_code=401, detail="Invalid token")
+            raise HTTPException(status_code=401, detail="Invalid token payload")
 
         if datetime.utcnow().timestamp() > exp:
             raise HTTPException(status_code=401, detail="Token expired")
 
-        user = get_user_by_username(db, username)
+        user = db.query(User).filter(User.username == username).first()
         if not user:
             raise HTTPException(status_code=404, detail="User not found")
 

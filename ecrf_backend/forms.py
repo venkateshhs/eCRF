@@ -83,39 +83,29 @@ async def get_specialized_fields():
 
 @router.post("/save-form")
 def save_form(
-    form_data: FormSaveSchema,
-    db: Session = Depends(get_db),
-    token: str = Depends(oauth2_scheme),  # Extract token from the Authorization header
+        form_data: dict,
+        db: Session = Depends(get_db),
+        user: User = Depends(get_current_user)
 ):
-    current_user = get_current_user(token, db)
-    logger.info(f"Saving form: {form_data}")
-    logger.info(f"Current user: {current_user}")
-
-    form = Form(
-        user_id=current_user.id,
-        form_name=form_data.form_name,
-        form_structure=form_data.form_structure,
-    )
-    db.add(form)
+    """
+    Save a form for the authenticated user.
+    """
+    new_form = Form(user_id=user.id, **form_data)
+    db.add(new_form)
     db.commit()
-    db.refresh(form)
-
-    logger.info(f"Form saved successfully: {form}")
-    return form
+    db.refresh(new_form)
+    return {"message": "Form saved successfully", "form_id": new_form.id}
 
 
-@router.get("/load-saved-forms", response_model=list[FormSchema])
+@router.get("/saved-forms")
 def load_saved_forms(
-    db: Session = Depends(get_db), current_user: User = Depends(get_current_user)
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user)
 ):
-    try:
-        # Query forms associated with the logged-in user
-        forms = db.query(Form).filter(Form.user_id == current_user.id).all()
-
-        # Debugging: Log the retrieved forms
-        logger.info(f"Forms retrieved for user {current_user.id}: {forms}")
-
-        return forms
-    except Exception as e:
-        logger.error(f"Error loading saved forms: {e}")
-        raise HTTPException(status_code=500, detail=f"Error loading saved forms: {str(e)}")
+    """
+    Load all saved forms for the authenticated user.
+    """
+    forms = db.query(Form).filter(Form.user_id == user.id).all()
+    if not forms:
+        raise HTTPException(status_code=404, detail="No saved forms found")
+    return forms

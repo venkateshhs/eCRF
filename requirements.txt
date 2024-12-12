@@ -1,7 +1,12 @@
-fastapi
+fastapi~=0.115.5
 uvicorn
 sqlite3
-bcrypt
-sqlalchemy
-pydantic
+bcrypt~=4.2.1
+sqlalchemy~=2.0.36
+pydantic~=2.10.1
 email-validator
+
+pyshacl~=0.29.0
+rdflib~=7.1.1
+PyJWT~=2.10.0
+starlette~=0.41.3
