@@ -1,14 +1,45 @@
 <template>
-  <div class="study-selection-container">
-    <h1>Select a Study Type</h1>
+  <div class="study-planner-container">
+    <h1>Plan Your Study</h1>
+
+    <!-- Study Type Selection -->
     <div v-if="studyTypes.length > 0">
-      <div v-for="study in studyTypes" :key="study.id" class="study-type-card">
-        <h2>{{ study.name }}</h2>
-        <p>{{ study.description }}</p>
-        <button @click="selectStudyType(study)">Select</button>
-      </div>
+      <h2>Select a Study Type</h2>
+      <ul>
+        <li
+          v-for="study in studyTypes"
+          :key="study.id"
+          @click="selectStudyType(study)"
+          :class="{ selected: selectedStudyType?.id === study.id }"
+        >
+          <h3>{{ study.name }}</h3>
+          <p>{{ study.description }}</p>
+        </li>
+      </ul>
     </div>
-    <p v-else>No study types available.</p>
+
+    <!-- Form Selection -->
+    <div v-if="selectedStudyType">
+      <h2>Forms for {{ selectedStudyType.name }}</h2>
+      <ul>
+        <li v-for="form in selectedStudyType.forms" :key="form.id">
+          <label>
+            <input type="checkbox" :value="form" v-model="selectedForms" />
+            {{ form.name }} - {{ form.description }}
+          </label>
+        </li>
+      </ul>
+
+      <button @click="confirmStudyPlan" class="btn-confirm">Confirm Study Plan</button>
+    </div>
+
+    <!-- Selected Study Plan -->
+    <div v-if="studyPlan.length > 0">
+      <h2>Your Study Plan</h2>
+      <ul>
+        <li v-for="form in studyPlan" :key="form.id">{{ form.name }} - {{ form.description }}</li>
+      </ul>
+    </div>
   </div>
 </template>
 
@@ -16,10 +47,13 @@
 import axios from "axios";
 
 export default {
-  name: "StudyTypeSelectionComponent",
+  name: "StudyPlanner",
   data() {
     return {
       studyTypes: [],
+      selectedStudyType: null,
+      selectedForms: [],
+      studyPlan: [],
     };
   },
   async created() {
@@ -28,21 +62,31 @@ export default {
   methods: {
     async loadStudyTypes() {
       try {
-        const response = await axios.get("http://127.0.0.1:8000/study-types");
+        const response = await axios.get("http://127.0.0.1:8000/forms/study-types");
         this.studyTypes = response.data;
       } catch (error) {
-        console.error("Error loading study types:", error.response?.data || error.message);
+        console.error("Error loading study types:", error);
+        alert("Failed to load study types.");
       }
     },
     selectStudyType(study) {
-      this.$router.push({ name: "FormCreation", params: { studyId: study.id } });
+      this.selectedStudyType = study;
+      this.selectedForms = []; // Reset selected forms
+    },
+    confirmStudyPlan() {
+      if (this.selectedForms.length === 0) {
+        alert("Please select at least one form.");
+        return;
+      }
+      this.studyPlan = [...this.selectedForms];
+      alert("Study plan confirmed!");
     },
   },
 };
 </script>
 
 <style scoped>
-.study-selection-container {
+.study-planner-container {
   max-width: 800px;
   margin: auto;
   padding: 20px;
@@ -52,23 +96,42 @@ export default {
   box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
 }
 
-.study-type-card {
-  margin-bottom: 20px;
-  padding: 20px;
-  border: 1px solid #ddd;
-  border-radius: 5px;
+h1, h2 {
+  text-align: center;
+  color: #333;
+}
+
+ul {
+  list-style: none;
+  padding: 0;
+}
+
+li {
+  margin: 10px 0;
+  padding: 15px;
   background-color: #f9f9f9;
+  border-radius: 5px;
+  cursor: pointer;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
 }
 
-.study-type-card h2 {
-  margin-bottom: 10px;
+li.selected {
+  background-color: #e7e7e7;
+  font-weight: bold;
 }
 
-.study-type-card p {
-  margin-bottom: 20px;
+label {
+  display: flex;
+  align-items: center;
 }
 
-button {
+input[type="checkbox"] {
+  margin-right: 10px;
+}
+
+.btn-confirm {
+  display: block;
+  margin: 20px auto;
   padding: 10px 20px;
   background-color: #007bff;
   color: white;
@@ -77,7 +140,7 @@ button {
   cursor: pointer;
 }
 
-button:hover {
+.btn-confirm:hover {
   background-color: #0056b3;
 }
 </style>
