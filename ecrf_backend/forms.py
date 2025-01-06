@@ -11,10 +11,26 @@ from models import Form, User
 from users import get_current_user, oauth2_scheme
 
 from sqlalchemy.orm import Session
+from fastapi.responses import JSONResponse
 router = APIRouter(prefix="/forms", tags=["forms"])
 
 TEMPLATE_DIR = Path("shacl/templates")  # Path to your templates directory
 
+
+
+@router.get("/study-types")
+def get_study_types():
+    file_path = Path(__file__).parent / "shacl" / "study_type" / "study_type.json"
+    print(file_path)
+    try:
+        with file_path.open("r") as file:
+            data = json.load(file)
+            print(data)
+            return JSONResponse(content=data)
+    except FileNotFoundError:
+        return JSONResponse(content={"error": "File not found"}, status_code=404)
+    except json.JSONDecodeError:
+        return JSONResponse(content={"error": "Invalid JSON format"}, status_code=400)
 
 @router.get("/templates")
 def list_templates():

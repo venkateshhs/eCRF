@@ -28,7 +28,7 @@
 
     <!-- Main Content Area -->
     <main :class="['dashboard-main', { expanded: sidebarCollapsed }]">
-      <router-view></router-view>
+      <router-view></router-view> <!-- This will render the child components -->
     </main>
   </div>
 </template>
@@ -44,6 +44,7 @@ export default {
         { name: "createForm", label: "Create Form", route: "/dashboard/create-form" },
         { name: "viewForms", label: "View Forms", route: "/dashboard/view-forms" },
         { name: "analytics", label: "Analytics", route: "/dashboard/analytics" },
+        { name: "createStudy", label: "Create Study", route: "/dashboard/create-study" },
       ],
     };
   },
