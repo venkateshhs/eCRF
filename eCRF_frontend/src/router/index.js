@@ -7,7 +7,10 @@ import CreateFormComponent from "../components/CreateFormComponent.vue"; // Unif
 import ViewFormsComponent from "../components/ViewFormsComponent.vue";
 import AnalyticsComponent from "../components/AnalyticsComponent.vue";
 import ScratchFormComponent from "../components/ScratchFormComponent.vue";
-import SavedFormsComponent from "@/components/SavedFormsComponent";
+import SavedFormsComponent from "../components/SavedFormsComponent";
+import FormDetailComponent from "../components/FormDetailComponent";
+import StudyTypeSelectionComponent from '../components/StudyTypeSelectionComponent.vue';
+
 const routes = [
   { path: "/", redirect: "/login" }, // Redirect root to login
   { path: "/login", name: "Login", component: LoginComponent },
@@ -18,6 +21,8 @@ const routes = [
     component: DashboardComponent,
     children: [
       { path: "user-info", name: "UserInfo", component: UserInfoComponent },
+      {path: 'create-study',name: 'CreateStudy',component: StudyTypeSelectionComponent,
+    },
       {
         path: "create-form",
         name: "CreateForm",
@@ -37,6 +42,11 @@ const routes = [
       name: "saved-forms",
       component: SavedFormsComponent,
     },
+    {
+  path: "/saved-forms/:id",
+  name: "FormDetail",
+  component: FormDetailComponent,
+},
 ];
 
 const router = createRouter({

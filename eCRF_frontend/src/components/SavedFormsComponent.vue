@@ -44,30 +44,33 @@ export default {
     await this.loadSavedForms(); // Load forms when component is created
   },
   methods: {
-  async loadSavedForms() {
-  console.log("Token being sent:", this.token); // Debug token
+    async loadSavedForms() {
+      console.log("Token being sent:", this.token); // Debug token
 
-  try {
-    const response = await axios.get("http://127.0.0.1:8000/forms/saved-forms", {
-      headers: {
-        Authorization: `Bearer ${this.token}`,
-      },
-    });
-    this.savedForms = response.data;
-  } catch (error) {
-    console.error("Error loading saved forms:", error.response?.data || error.message);
-    if (error.response?.status === 401) {
-      alert("Authentication error. Please log in again.");
-      this.$router.push("/login");
-    } else if (error.response?.status === 422) {
-      alert("Validation error. Please check your request.");
-    } else {
-      alert("Failed to load saved forms.");
-    }
-  }
-}
-},
-
+      try {
+        const response = await axios.get("http://127.0.0.1:8000/forms/saved-forms", {
+          headers: {
+            Authorization: `Bearer ${this.token}`,
+          },
+        });
+        this.savedForms = response.data;
+      } catch (error) {
+        console.error("Error loading saved forms:", error.response?.data || error.message);
+        if (error.response?.status === 401) {
+          alert("Authentication error. Please log in again.");
+          this.$router.push("/login");
+        } else if (error.response?.status === 422) {
+          alert("Validation error. Please check your request.");
+        } else {
+          alert("Failed to load saved forms.");
+        }
+      }
+    },
+    viewForm(form) {
+      // Navigate to the FormDetail view, passing the form ID as a route parameter
+      this.$router.push({ name: "FormDetail", params: { id: form.id } });
+    },
+  },
 };
 </script>
 
