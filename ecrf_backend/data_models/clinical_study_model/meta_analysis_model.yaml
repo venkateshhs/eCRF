@@ -1,0 +1,31 @@
+id: https://example.org/ecrf/meta_analysis
+name: MetaAnalysis
+prefixes:
+  ex: https://example.org/ecrf#
+  linkml: https://w3id.org/linkml/
+
+default_prefix: ex
+
+classes:
+  MetaAnalysis:
+    is_a: SystematicReview
+    description: "A meta-analysis is a statistical method for combining data from multiple studies to provide a pooled estimate of an effect."
+    slots:
+      - analysis_id
+      - statistical_methods
+      - pooled_results
+
+slots:
+  analysis_id:
+    description: "Unique identifier for the meta-analysis."
+    range: string
+    required: true
+
+  statistical_methods:
+    description: "Statistical methods used to combine study data."
+    multivalued: true
+    range: string
+
+  pooled_results:
+    description: "Pooled results from the combined studies."
+    range: string

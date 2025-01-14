@@ -1,0 +1,43 @@
+id: https://example.org/ecrf/case_series
+name: CaseSeries
+prefixes:
+  ex: https://example.org/ecrf#
+  linkml: https://w3id.org/linkml/
+
+default_prefix: ex
+
+classes:
+  CaseSeries:
+    is_a: Study
+    description: "A case series involves tracking multiple patients with similar diagnoses or treatments over time to observe outcomes."
+    slots:
+      - series_id
+      - case_ids
+      - diagnosis
+      - treatment
+      - outcomes
+
+slots:
+  series_id:
+    description: "Unique identifier for the case series."
+    range: string
+    required: true
+
+  case_ids:
+    description: "Identifiers for the individual cases included in the series."
+    multivalued: true
+    range: string
+
+  diagnosis:
+    description: "Diagnosis shared by all cases in the series."
+    range: string
+
+  treatment:
+    description: "Treatment administered across the cases in the series."
+    range: string
+
+  outcomes:
+    description: "Observed outcomes for the cases in the series."
+    multivalued: true
+    range: string
+

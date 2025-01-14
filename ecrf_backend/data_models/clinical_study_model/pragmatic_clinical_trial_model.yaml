@@ -1,0 +1,32 @@
+id: https://example.org/ecrf/pragmatic_trial
+name: PragmaticClinicalTrial
+prefixes:
+  ex: https://example.org/ecrf#
+  linkml: https://w3id.org/linkml/
+
+default_prefix: ex
+
+classes:
+  PragmaticClinicalTrial:
+    is_a: RandomizedControlledTrial
+    description: "A pragmatic clinical trial evaluates the effectiveness of an intervention in real-world conditions."
+    slots:
+      - trial_id
+      - study_title
+      - real_world_conditions
+      - intervention_details
+      - control_details
+      - outcome_measures
+
+slots:
+  real_world_conditions:
+    description: "Details about the real-world conditions under which the trial is conducted."
+    range: string
+
+  intervention_details:
+    description: "Detailed description of the intervention being tested."
+    range: string
+
+  control_details:
+    description: "Detailed description of the control or comparator group."
+    range: string

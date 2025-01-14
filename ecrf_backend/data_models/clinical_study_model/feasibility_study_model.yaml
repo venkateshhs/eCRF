@@ -1,0 +1,39 @@
+id: https://example.org/ecrf/feasibility_study
+name: FeasibilityStudy
+prefixes:
+  ex: https://example.org/ecrf#
+  linkml: https://w3id.org/linkml/
+
+default_prefix: ex
+
+classes:
+  FeasibilityStudy:
+    is_a: Study
+    description: "A feasibility study assesses the practicality of conducting a larger clinical trial."
+    slots:
+      - study_id
+      - objectives
+      - feasibility_metrics
+      - challenges
+      - recommendations
+
+slots:
+  objectives:
+    description: "Objectives of the feasibility study."
+    multivalued: true
+    range: string
+
+  feasibility_metrics:
+    description: "Metrics used to assess feasibility (e.g., recruitment rate, retention rate)."
+    multivalued: true
+    range: string
+
+  challenges:
+    description: "Challenges identified during the feasibility study."
+    multivalued: true
+    range: string
+
+  recommendations:
+    description: "Recommendations for conducting the larger study."
+    multivalued: true
+    range: string

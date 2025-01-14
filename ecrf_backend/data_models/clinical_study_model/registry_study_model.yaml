@@ -1,0 +1,43 @@
+id: https://example.org/ecrf/registry_study
+name: RegistryStudy
+prefixes:
+  ex: https://example.org/ecrf#
+  linkml: https://w3id.org/linkml/
+
+default_prefix: ex
+
+classes:
+  RegistryStudy:
+    is_a: Study
+    description: "A registry study involves long-term tracking of patients in a registry to monitor outcomes and safety over time."
+    slots:
+      - registry_id
+      - patient_id
+      - condition
+      - treatment_history
+      - outcome_measures
+
+slots:
+  registry_id:
+    description: "Unique identifier for the patient registry."
+    range: string
+    required: true
+
+  patient_id:
+    description: "Identifier for the patient included in the registry."
+    range: Person
+    required: true
+
+  condition:
+    description: "Condition or disease being tracked in the registry."
+    range: string
+
+  treatment_history:
+    description: "Details of treatments received by the patient."
+    multivalued: true
+    range: string
+
+  outcome_measures:
+    description: "Outcomes being monitored in the registry study."
+    multivalued: true
+    range: string

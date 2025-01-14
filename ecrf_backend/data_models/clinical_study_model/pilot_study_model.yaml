@@ -1,0 +1,30 @@
+id: https://example.org/ecrf/pilot_study
+name: PilotStudy
+prefixes:
+  ex: https://example.org/ecrf#
+  linkml: https://w3id.org/linkml/
+
+default_prefix: ex
+
+classes:
+  PilotStudy:
+    is_a: FeasibilityStudy
+    description: "A pilot study is a small-scale preliminary study conducted to refine the design and methodology of a larger trial."
+    slots:
+      - pilot_sample_size
+      - preliminary_results
+      - adjustments
+
+slots:
+  pilot_sample_size:
+    description: "Sample size used in the pilot study."
+    range: integer
+
+  preliminary_results:
+    description: "Results obtained from the pilot study."
+    range: string
+
+  adjustments:
+    description: "Adjustments made to the main study based on the pilot study results."
+    multivalued: true
+    range: string

@@ -1,0 +1,49 @@
+id: https://example.org/ecrf/systematic_review
+name: SystematicReview
+prefixes:
+  ex: https://example.org/ecrf#
+  linkml: https://w3id.org/linkml/
+
+default_prefix: ex
+
+classes:
+  SystematicReview:
+    is_a: Study
+    description: "A systematic review is a structured literature review that synthesizes evidence from multiple studies on a specific research question."
+    slots:
+      - review_id
+      - research_question
+      - inclusion_criteria
+      - exclusion_criteria
+      - data_sources
+      - summary_findings
+
+slots:
+  review_id:
+    description: "Unique identifier for the systematic review."
+    range: string
+    required: true
+
+  research_question:
+    description: "The research question that the review aims to answer."
+    range: string
+    required: true
+
+  inclusion_criteria:
+    description: "Criteria for including studies in the review."
+    multivalued: true
+    range: string
+
+  exclusion_criteria:
+    description: "Criteria for excluding studies from the review."
+    multivalued: true
+    range: string
+
+  data_sources:
+    description: "Sources of data used in the review (e.g., databases, journals)."
+    multivalued: true
+    range: string
+
+  summary_findings:
+    description: "A summary of the key findings from the review."
+    range: string

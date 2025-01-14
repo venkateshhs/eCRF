@@ -1,0 +1,31 @@
+id: https://example.org/ecrf/cluster_randomized_trial
+name: ClusterRandomizedTrial
+prefixes:
+  ex: https://example.org/ecrf#
+  linkml: https://w3id.org/linkml/
+
+default_prefix: ex
+
+classes:
+  ClusterRandomizedTrial:
+    is_a: RandomizedControlledTrial
+    description: "A cluster randomized trial randomizes groups of participants (clusters) instead of individuals to different interventions."
+    slots:
+      - cluster_id
+      - randomization_method
+      - outcome_measures
+
+slots:
+  cluster_id:
+    description: "Unique identifier for each cluster in the study."
+    range: string
+    required: true
+
+  randomization_method:
+    description: "Method used to randomize clusters (e.g., stratified, block randomization)."
+    range: string
+
+  outcome_measures:
+    description: "Outcomes being measured in the study."
+    multivalued: true   #may be not ?
+    range: string

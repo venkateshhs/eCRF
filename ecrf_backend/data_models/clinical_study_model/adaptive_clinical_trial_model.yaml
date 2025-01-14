@@ -1,0 +1,28 @@
+id: https://example.org/ecrf/adaptive_clinical_trial
+name: AdaptiveClinicalTrial
+prefixes:
+  ex: https://example.org/ecrf#
+  linkml: https://w3id.org/linkml/
+
+default_prefix: ex
+
+classes:
+  AdaptiveClinicalTrial:
+    is_a: RandomizedControlledTrial
+    description: "An adaptive clinical trial allows modifications to the trial design or protocols based on interim results."
+    slots:
+      - trial_id
+      - interim_results
+      - protocol_modifications
+      - outcome_measures
+
+slots:
+  interim_results:
+    description: "Summary of interim results used to make adaptations to the trial."
+    range: string
+    multivalued: true
+
+  protocol_modifications:
+    description: "Details of modifications made to the trial protocol based on interim results."
+    range: string
+    multivalued: true

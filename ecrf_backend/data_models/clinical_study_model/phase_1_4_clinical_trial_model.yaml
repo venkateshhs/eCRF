@@ -1,0 +1,37 @@
+id: https://example.org/ecrf/phase_trials
+name: PhaseClinicalTrials
+prefixes:
+  ex: https://example.org/ecrf#
+  linkml: https://w3id.org/linkml/
+
+default_prefix: ex
+
+classes:
+  PhaseClinicalTrials:
+    is_a: Study
+    description: "Clinical trials are conducted in phases (Phase 1 to Phase 4) to assess safety, efficacy, dosage, and post-marketing surveillance."
+    slots:
+      - trial_id
+      - phase_number
+      - study_population
+      - safety_measures
+      - efficacy_measures
+
+slots:
+  phase_number:
+    description: "Phase of the clinical trial (1, 2, 3, or 4)."
+    range: integer
+
+  study_population:
+    description: "Population included in the phase trial."
+    range: string
+
+  safety_measures:
+    description: "Safety measures tracked during the trial phase."
+    multivalued: true
+    range: string
+
+  efficacy_measures:
+    description: "Efficacy measures tracked during the trial phase."
+    multivalued: true
+    range: string
