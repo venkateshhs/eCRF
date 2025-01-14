@@ -1,0 +1,45 @@
+id: https://example.org/ecrf/lab_results_form
+name: LabResultsForm
+prefixes:
+  ex: https://example.org/ecrf#
+  linkml: https://w3id.org/linkml/
+
+default_prefix: ex
+
+# Lab Results Form model
+classes:
+  LabResultsForm:
+    is_a: Instrument
+    description: "A form used to capture laboratory test results for study participants."
+    slots:
+      - form_id
+      - test_name
+      - result_value
+      - unit
+      - normal_range
+      - test_date
+
+slots:
+  form_id:
+    description: "Unique identifier for the lab results form."
+    range: string
+
+  test_name:
+    description: "Name of the laboratory test."
+    range: string
+
+  result_value:
+    description: "Result value of the test."
+    range: float
+
+  unit:
+    description: "Unit of measurement for the test result."
+    range: string
+
+  normal_range:
+    description: "Normal range for the test result."
+    range: string
+
+  test_date:
+    description: "Date the lab test was performed."
+    range: date

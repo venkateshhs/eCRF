@@ -1,0 +1,56 @@
+id: https://example.org/ecrf/study_participant
+name: StudyParticipant
+prefixes:
+  ex: https://example.org/ecrf#
+  linkml: https://w3id.org/linkml/
+
+default_prefix: ex
+
+# Study Participant model
+classes:
+  StudyParticipant:
+    is_a: Person
+    description: "A study participant is a person enrolled in a clinical study. This model includes attributes related to their enrollment, consent, and study status."
+    slots:
+      - participant_id
+      - study_id
+      - consent_status
+      - enrollment_date
+      - withdrawal_date
+      - assigned_group
+      - site_id
+
+slots:
+  participant_id:
+    description: "Unique identifier for the study participant."
+    range: string
+    required: true
+
+  study_id:
+    description: "Identifier for the study in which the participant is enrolled."
+    range: string
+    required: true
+
+  consent_status:
+    description: "Indicates whether the participant has provided consent to participate in the study."
+    range: boolean
+    required: true
+
+  enrollment_date:
+    description: "The date on which the participant was enrolled in the study."
+    range: date
+    required: true
+
+  withdrawal_date:
+    description: "The date on which the participant withdrew from the study (if applicable)."
+    range: date
+
+  assigned_group:
+    description: "The study group to which the participant is assigned (e.g., treatment or control group)."
+    range: string
+    required: false
+
+  site_id:
+    description: "Identifier for the study site where the participant is enrolled."
+    range: Site
+    required: false

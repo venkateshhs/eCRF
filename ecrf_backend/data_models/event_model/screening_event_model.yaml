@@ -1,0 +1,53 @@
+id: https://example.org/ecrf/screening_event
+name: ScreeningEvent
+prefixes:
+  ex: https://example.org/ecrf#
+  linkml: https://w3id.org/linkml/
+
+default_prefix: ex
+
+# Screening Event model
+classes:
+  ScreeningEvent:
+    is_a: ClinicalEvent
+    description: "A screening event to determine if a participant is eligible for the study. It captures the details of the screening process, including date, status, and criteria."
+    slots:
+      - event_id
+      - participant_id
+      - screening_date
+      - eligibility_status
+      - screening_outcome
+      - screening_criteria
+
+slots:
+  event_id:
+    description: "Unique identifier for the screening event."
+    range: string
+    required: true
+
+  participant_id:
+    description: "Identifier for the participant undergoing the screening."
+    range: StudyParticipant
+    required: true
+
+  screening_date:
+    description: "The date when the screening event occurred."
+    range: date
+    required: true
+
+  eligibility_status:
+    description: "Indicates whether the participant met the eligibility criteria during the screening."
+    range: string
+    required: true
+    pattern: "^(Eligible|Not Eligible|Pending)$"
+
+  screening_outcome:
+    description: "Outcome of the screening event (e.g., enrolled, not enrolled)."
+    range: string
+    required: true
+    pattern: "^(Enrolled|Not Enrolled|Pending)$"
+
+  screening_criteria:
+    description: "Details about the criteria used to determine eligibility."
+    multivalued: true
+    range: string

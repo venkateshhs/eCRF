@@ -1,0 +1,35 @@
+id: https://example.org/ecrf/enrollment_event
+name: EnrollmentEvent
+prefixes:
+  ex: https://example.org/ecrf#
+  linkml: https://w3id.org/linkml/
+
+default_prefix: ex
+
+# Enrollment Event model
+classes:
+  EnrollmentEvent:
+    is_a: ClinicalEvent
+    description: "An event marking the enrollment of a study participant into a clinical study."
+    slots:
+      - event_id
+      - participant_id
+      - enrollment_date
+      - consent_status
+
+slots:
+  event_id:
+    description: "Unique identifier for the enrollment event."
+    range: string
+
+  participant_id:
+    description: "Identifier of the study participant."
+    range: string
+
+  enrollment_date:
+    description: "Date of enrollment."
+    range: date
+
+  consent_status:
+    description: "Consent status of the participant during enrollment."
+    range: boolean

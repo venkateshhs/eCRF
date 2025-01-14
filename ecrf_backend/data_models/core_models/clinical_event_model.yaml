@@ -1,0 +1,67 @@
+id: https://example.org/ecrf/clinical_event
+name: ClinicalEvent
+prefixes:
+  ex: https://example.org/ecrf#
+  linkml: https://w3id.org/linkml/
+
+default_prefix: ex
+
+# Clinical Event model
+classes:
+  ClinicalEvent:
+    is_a: Thing
+    description: "A clinical event represents any medical event occurring during the study. It includes events such as visits, adverse events, and procedures."
+    slots:
+      - event_id
+      - event_type
+      - event_date
+      - event_status
+      - event_description
+      - related_participants
+      - severity
+      - outcome
+      - related_instrument
+
+slots:
+  event_id:
+    description: "Unique identifier for the clinical event."
+    range: string
+    required: true
+
+  event_type:
+    description: "Type of clinical event (e.g., visit, adverse event, procedure)."
+    range: string
+    required: true
+
+  event_date:
+    description: "Date when the clinical event occurred."
+    range: date
+    required: true
+
+  event_status:
+    description: "Status of the clinical event (e.g., ongoing, resolved, pending)."
+    range: string
+    pattern: "^(Ongoing|Resolved|Pending)$"
+    required: true
+
+  event_description:
+    description: "Detailed description of the clinical event."
+    range: string
+
+  related_participants:
+    description: "List of participants related to the clinical event."
+    range: StudyParticipant
+    multivalued: true
+
+  severity:
+    description: "Severity of the clinical event (e.g., mild, moderate, severe, life-threatening)."
+    range: string
+    pattern: "^(Mild|Moderate|Severe|Life-threatening)$"
+
+  outcome:
+    description: "Outcome of the clinical event (e.g., resolved, ongoing, unknown)."
+    range: string
+
+  related_instrument:
+    description: "Instrument or form associated with the clinical event."
+    range: Instrument

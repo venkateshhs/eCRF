@@ -1,0 +1,25 @@
+id: https://example.org/ecrf/option_list
+name: OptionList
+prefixes:
+  ex: https://example.org/ecrf#
+  linkml: https://w3id.org/linkml/
+
+default_prefix: ex
+
+# Option List model
+classes:
+  OptionList:
+    is_a: Thing
+    description: "A list of predefined answer options for a question."
+    slots:
+      - option_id
+      - option_text
+
+slots:
+  option_id:
+    description: "Unique identifier for the option."
+    range: string
+
+  option_text:
+    description: "The text of the option."
+    range: string

@@ -1,0 +1,35 @@
+id: https://example.org/ecrf/document
+name: Document
+prefixes:
+  ex: https://example.org/ecrf#
+  linkml: https://w3id.org/linkml/
+
+default_prefix: ex
+
+# Document model
+classes:
+  Document:
+    is_a: Thing
+    description: "A document represents a file or record associated with the study (e.g., consent forms, reports)."
+    slots:
+      - document_id
+      - document_type
+      - upload_date
+      - file_path
+
+slots:
+  document_id:
+    description: "Unique identifier for the document."
+    range: string
+
+  document_type:
+    description: "Type of document (e.g., consent form, report)."
+    range: string
+
+  upload_date:
+    description: "Date the document was uploaded."
+    range: date
+
+  file_path:
+    description: "Path to the document file."
+    range: string

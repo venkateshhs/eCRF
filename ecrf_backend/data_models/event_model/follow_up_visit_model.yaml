@@ -1,0 +1,36 @@
+id: https://example.org/ecrf/follow_up_visit
+name: FollowUpVisit
+prefixes:
+  ex: https://example.org/ecrf#
+  linkml: https://w3id.org/linkml/
+
+default_prefix: ex
+
+# Follow-Up Visit model
+classes:
+  FollowUpVisit:
+    is_a: ClinicalEvent
+    description: "A follow-up visit event to monitor the health status of a study participant."
+    slots:
+      - event_id
+      - participant_id
+      - visit_date
+      - observations
+
+slots:
+  event_id:
+    description: "Unique identifier for the follow-up visit."
+    range: string
+
+  participant_id:
+    description: "Identifier of the study participant."
+    range: string
+
+  visit_date:
+    description: "Date of the follow-up visit."
+    range: date
+
+  observations:
+    description: "Observations made during the follow-up visit."
+    multivalued: true
+    range: string

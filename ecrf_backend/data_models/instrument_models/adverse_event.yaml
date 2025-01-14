@@ -1,0 +1,46 @@
+id: https://example.org/ecrf/adverse_event_form
+name: AdverseEventForm
+prefixes:
+  ex: https://example.org/ecrf#
+  linkml: https://w3id.org/linkml/
+
+default_prefix: ex
+
+# Adverse Event Form model
+classes:
+  AdverseEventForm:
+    is_a: Instrument
+    description: "A form used to capture details of adverse events experienced by study participants."
+    slots:
+      - form_id
+      - event_date
+      - description
+      - severity
+      - related_participant
+      - outcome
+
+slots:
+  form_id:
+    description: "Unique identifier for the adverse event form."
+    range: string
+
+  event_date:
+    description: "Date the adverse event occurred."
+    range: date
+
+  description:
+    description: "Description of the adverse event."
+    range: string
+
+  severity:
+    description: "Severity of the adverse event."
+    range: string
+    pattern: "^(Mild|Moderate|Severe|Life-threatening)$"
+
+  related_participant:
+    description: "Link to the related study participant."
+    range: StudyParticipant
+
+  outcome:
+    description: "Outcome of the adverse event."
+    range: string

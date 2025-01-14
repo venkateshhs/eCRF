@@ -1,0 +1,35 @@
+id: https://example.org/ecrf/device
+name: Device
+prefixes:
+  ex: https://example.org/ecrf#
+  linkml: https://w3id.org/linkml/
+
+default_prefix: ex
+
+# Device model
+classes:
+  Device:
+    is_a: Thing
+    description: "A device represents any medical or research device used during the study."
+    slots:
+      - device_id
+      - device_name
+      - manufacturer
+      - model_number
+
+slots:
+  device_id:
+    description: "Unique identifier for the device."
+    range: string
+
+  device_name:
+    description: "Name of the device."
+    range: string
+
+  manufacturer:
+    description: "Manufacturer of the device."
+    range: string
+
+  model_number:
+    description: "Model number of the device."
+    range: string

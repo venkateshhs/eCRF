@@ -1,0 +1,41 @@
+id: https://example.org/ecrf/study
+name: Study
+prefixes:
+  ex: https://example.org/ecrf#
+  linkml: https://w3id.org/linkml/
+
+default_prefix: ex
+
+# Study model
+classes:
+  Study:
+    is_a: Thing
+    description: "A study represents a clinical trial or research project."
+    slots:
+      - study_id
+      - title
+      - start_date
+      - end_date
+      - principal_investigator
+      - site_list
+
+slots:
+  study_id:
+    description: "Unique identifier for the study."
+    range: string
+  title:
+    description: "Title of the study."
+    range: string
+  start_date:
+    description: "The start date of the study."
+    range: date
+  end_date:
+    description: "The end date of the study."
+    range: date
+  principal_investigator:
+    description: "The primary investigator responsible for the study."
+    range: Investigator
+  site_list:
+    description: "List of sites where the study is conducted."
+    multivalued: true
+    range: Site

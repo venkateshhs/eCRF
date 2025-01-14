@@ -1,0 +1,30 @@
+id: https://example.org/ecrf/response
+name: Response
+prefixes:
+  ex: https://example.org/ecrf#
+  linkml: https://w3id.org/linkml/
+
+default_prefix: ex
+
+# Response model
+classes:
+  Response:
+    is_a: Thing
+    description: "A response captures the answer provided by a participant to a question."
+    slots:
+      - response_id
+      - question_id
+      - response_value
+
+slots:
+  response_id:
+    description: "Unique identifier for the response."
+    range: string
+
+  question_id:
+    description: "Identifier of the related question."
+    range: string
+
+  response_value:
+    description: "Value of the response."
+    range: string

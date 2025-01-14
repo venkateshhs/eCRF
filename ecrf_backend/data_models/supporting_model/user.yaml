@@ -1,0 +1,59 @@
+id: https://example.org/ecrf/user
+name: User
+prefixes:
+  ex: https://example.org/ecrf#
+  linkml: https://w3id.org/linkml/
+
+default_prefix: ex
+
+# User model
+classes:
+  User:
+    is_a: Thing
+    description: "A user represents a person with access to the eCRF platform. This model includes details about the user's credentials, role, and access level."
+    slots:
+      - user_id
+      - username
+      - email
+      - role
+      - access_level
+      - status
+      - last_login
+
+slots:
+  user_id:
+    description: "Unique identifier for the user."
+    range: string
+    required: true
+
+  username:
+    description: "The username used by the user to log into the eCRF platform."
+    range: string
+    required: true
+
+  email:
+    description: "The email address associated with the user."
+    range: string
+    required: true
+    pattern: "^[\\w.%+-]+@[\\w.-]+\\.[a-zA-Z]{2,}$"
+
+  role:
+    description: "The role assigned to the user within the platform (e.g., Admin, Investigator, Data Manager)."
+    range: Role
+    required: true
+
+  access_level:
+    description: "Defines the level of access the user has within the platform (e.g., Read, Write, Admin)."
+    range: string
+    required: true
+    pattern: "^(Read|Write|Admin)$"
+
+  status:
+    description: "Current status of the user account (e.g., Active, Inactive, Suspended)."
+    range: string
+    required: true
+    pattern: "^(Active|Inactive|Suspended)$"
+
+  last_login:
+    description: "The date and time of the user's last login."
+    range: datetime

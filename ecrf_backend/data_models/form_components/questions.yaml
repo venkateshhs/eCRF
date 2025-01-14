@@ -1,0 +1,35 @@
+id: https://example.org/ecrf/question
+name: Question
+prefixes:
+  ex: https://example.org/ecrf#
+  linkml: https://w3id.org/linkml/
+
+default_prefix: ex
+
+# Question model
+classes:
+  Question:
+    is_a: Thing
+    description: "A question is a single query in a form or instrument."
+    slots:
+      - question_id
+      - text
+      - question_type
+      - is_required
+
+slots:
+  question_id:
+    description: "Unique identifier for the question."
+    range: string
+
+  text:
+    description: "The question text."
+    range: string
+
+  question_type:
+    description: "Type of question (e.g., multiple choice, text)."
+    range: string
+
+  is_required:
+    description: "Indicates whether the question is mandatory."
+    range: boolean

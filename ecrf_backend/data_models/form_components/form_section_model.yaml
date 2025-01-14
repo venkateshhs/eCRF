@@ -1,0 +1,49 @@
+id: https://example.org/ecrf/form_section
+name: FormSection
+prefixes:
+  ex: https://example.org/ecrf#
+  linkml: https://w3id.org/linkml/
+
+default_prefix: ex
+
+# Form Section model
+classes:
+  FormSection:
+    is_a: Thing
+    description: "A logical grouping of questions within a form. Form sections help organize data collection into meaningful categories."
+    slots:
+      - section_id
+      - section_label
+      - section_description
+      - questions
+      - section_order
+      - instructions
+
+slots:
+  section_id:
+    description: "Unique identifier for the form section."
+    range: string
+    required: true
+
+  section_label:
+    description: "Human-readable label for the form section."
+    range: string
+    required: true
+
+  section_description:
+    description: "A detailed description of the form section to provide context."
+    range: string
+
+  questions:
+    description: "List of questions in the form section."
+    multivalued: true
+    range: Question
+    required: true
+
+  section_order:
+    description: "Order of the section within the form."
+    range: integer
+
+  instructions:
+    description: "Instructions or guidelines for completing the form section."
+    range: string

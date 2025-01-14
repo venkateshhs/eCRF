@@ -1,0 +1,31 @@
+id: https://example.org/ecrf/role
+name: Role
+prefixes:
+  ex: https://example.org/ecrf#
+  linkml: https://w3id.org/linkml/
+
+default_prefix: ex
+
+# Role model
+classes:
+  Role:
+    is_a: Thing
+    description: "A role represents the permissions and responsibilities assigned to a user within the eCRF platform."
+    slots:
+      - role_id
+      - role_name
+      - permissions
+
+slots:
+  role_id:
+    description: "Unique identifier for the role."
+    range: string
+
+  role_name:
+    description: "Name of the role."
+    range: string
+
+  permissions:
+    description: "List of permissions associated with the role."
+    multivalued: true
+    range: string

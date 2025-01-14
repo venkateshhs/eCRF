@@ -1,0 +1,75 @@
+id: https://example.org/ecrf/person
+name: Person
+prefixes:
+  ex: https://example.org/ecrf#
+  linkml: https://w3id.org/linkml/
+
+default_prefix: ex
+
+# Person model
+classes:
+  Person:
+    is_a: Thing
+    description: "A generic person entity representing individuals involved in the study, such as participants, investigators, or healthcare providers."
+    slots:
+      - id
+      - name
+      - age
+      - gender
+      - address
+      - phone
+      - email
+      - aliases
+      - additional_details
+      - medical_history
+
+slots:
+  id:
+    description: "Unique identifier for the person."
+    range: string
+    required: true
+
+  name:
+    description: "Full name of the person."
+    range: string
+    required: true
+
+  age:
+    description: "Age of the person."
+    range: integer
+    validation:
+      min_value: 0
+      max_value: 120
+
+  gender:
+    description: "Gender of the person."
+    range: string
+    pattern: "^(Male|Female|Other|Prefer not to say)$"
+
+  address:
+    description: "Residential address of the person."
+    range: string
+
+  phone:
+    description: "Contact phone number of the person."
+    range: string
+    pattern: "^[+]?[0-9]{10,15}$"
+
+  email:
+    description: "Email address of the person."
+    range: string
+    pattern: "^[\\w.%+-]+@[\\w.-]+\\.[a-zA-Z]{2,}$"
+
+  aliases:
+    description: "Alternative names or aliases of the person."
+    multivalued: true
+    range: string
+
+  additional_details:
+    description: "Additional information about the person."
+    range: string
+
+  medical_history:
+    description: "A summary of the person's medical history, including past illnesses, conditions, or surgeries."
+    multivalued: true
+    range: string

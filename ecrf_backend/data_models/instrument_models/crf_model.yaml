@@ -1,0 +1,70 @@
+id: https://example.org/ecrf/crf
+name: CRF
+prefixes:
+  ex: https://example.org/ecrf#
+  linkml: https://w3id.org/linkml/
+
+default_prefix: ex
+
+# CRF (Case Report Form) model
+classes:
+  CRF:
+    is_a: Instrument
+    description: "A case report form (CRF) used to collect structured data from study participants. It contains multiple sections and tracks metadata such as creation date, version, and status."
+    slots:
+      - form_id
+      - form_title
+      - sections
+      - user_id
+      - creation_date
+      - modification_date
+      - version
+      - status
+      - study_id
+
+slots:
+  form_id:
+    description: "Unique identifier for the CRF."
+    range: string
+    required: true
+
+  form_title:
+    description: "Title of the case report form."
+    range: string
+    required: true
+
+  sections:
+    description: "List of sections included in the CRF."
+    multivalued: true
+    range: FormSection
+    required: true
+
+  user_id:
+    description: "Identifier of the user who created the CRF."
+    range: User
+    required: true
+
+  creation_date:
+    description: "Date when the CRF was created."
+    range: date
+    required: true
+
+  modification_date:
+    description: "Date when the CRF was last modified."
+    range: date
+
+  version:
+    description: "Version number of the CRF."
+    range: string
+    required: true
+
+  status:
+    description: "Current status of the CRF (e.g., Draft, Final, Archived)."
+    range: string
+    required: true
+    pattern: "^(Draft|Final|Archived)$"
+
+  study_id:
+    description: "Identifier of the study associated with the CRF."
+    range: Study
+    required: true
