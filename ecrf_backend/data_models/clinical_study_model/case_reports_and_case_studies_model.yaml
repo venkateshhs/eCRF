@@ -1,0 +1,60 @@
+id: https://example.org/ecrf/case_report
+name: CaseReport
+prefixes:
+  ex: https://example.org/ecrf#
+  linkml: https://w3id.org/linkml/
+
+default_prefix: ex
+
+# Case Report and Case Study model
+classes:
+  CaseReport:
+    is_a: Study
+    description: "A case report is a detailed account of an individual patient's condition, diagnosis, treatment, and outcome. Case studies provide insights into rare or novel cases."
+    slots:
+      - case_id
+      - patient_id
+      - diagnosis
+      - treatment
+      - outcome
+      - follow_up
+      - publication_date
+      - author
+
+slots:
+  case_id:
+    description: "Unique identifier for the case report."
+    range: string
+    required: true
+
+  patient_id:
+    description: "Identifier for the patient involved in the case report."
+    range: Person
+    required: true
+
+  diagnosis:
+    description: "Diagnosis provided to the patient."
+    range: string
+    required: true
+
+  treatment:
+    description: "Treatment administered to the patient."
+    range: string
+
+  outcome:
+    description: "Outcome of the treatment (e.g., recovery, ongoing condition)."
+    range: string
+
+  follow_up:
+    description: "Details of any follow-up visits or observations."
+    multivalued: true
+    range: string
+
+  publication_date:
+    description: "Date when the case report was published."
+    range: date
+
+  author:
+    description: "The author or clinician who prepared the case report."
+    range: string
+    required: true

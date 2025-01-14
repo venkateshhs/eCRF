@@ -1,0 +1,62 @@
+id: https://example.org/ecrf/case_control_study
+name: CaseControlStudy
+prefixes:
+  ex: https://example.org/ecrf#
+  linkml: https://w3id.org/linkml/
+
+default_prefix: ex
+
+# Case-Control Study model
+classes:
+  CaseControlStudy:
+    is_a: Study
+    description: "A case-control study compares participants with a specific outcome (cases) to participants without the outcome (controls) to identify risk factors."
+    slots:
+      - study_id
+      - study_title
+      - case_group
+      - control_group
+      - matching_criteria
+      - exposure_factors
+      - outcome_measures
+      - data_collection_date
+
+slots:
+  study_id:
+    description: "Unique identifier for the case-control study."
+    range: string
+    required: true
+
+  study_title:
+    description: "Title of the case-control study."
+    range: string
+    required: true
+
+  case_group:
+    description: "Description of the group of participants with the outcome of interest (cases)."
+    range: string
+    required: true
+
+  control_group:
+    description: "Description of the group of participants without the outcome of interest (controls)."
+    range: string
+    required: true
+
+  matching_criteria:
+    description: "Criteria used to match cases and controls (e.g., age, gender, location)."
+    multivalued: true
+    range: string
+
+  exposure_factors:
+    description: "Exposure factors being compared between cases and controls (e.g., smoking, diet)."
+    multivalued: true
+    range: string
+
+  outcome_measures:
+    description: "Outcomes being measured in the study."
+    multivalued: true
+    range: string
+
+  data_collection_date:
+    description: "Date when data collection was performed."
+    range: date

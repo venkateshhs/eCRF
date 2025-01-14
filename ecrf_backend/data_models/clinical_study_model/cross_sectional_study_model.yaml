@@ -1,0 +1,43 @@
+id: https://example.org/ecrf/cross_sectional_study
+name: CrossSectionalStudy
+prefixes:
+  ex: https://example.org/ecrf#
+  linkml: https://w3id.org/linkml/
+
+default_prefix: ex
+
+# Cross-Sectional Study model
+classes:
+  CrossSectionalStudy:
+    is_a: Study
+    description: "A cross-sectional study is an observational study that analyzes data from a population at a specific point in time."
+    slots:
+      - study_id
+      - study_title
+      - population_size
+      - outcome_measures
+      - data_collection_date
+
+slots:
+  study_id:
+    description: "Unique identifier for the cross-sectional study."
+    range: string
+    required: true
+
+  study_title:
+    description: "Title of the study."
+    range: string
+    required: true
+
+  population_size:
+    description: "Number of individuals in the population being studied."
+    range: integer
+
+  outcome_measures:
+    description: "Outcomes being measured in the study."
+    multivalued: true
+    range: string
+
+  data_collection_date:
+    description: "Date when data collection was performed."
+    range: date

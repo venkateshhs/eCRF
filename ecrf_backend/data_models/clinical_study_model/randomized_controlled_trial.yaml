@@ -1,0 +1,58 @@
+id: https://example.org/ecrf/rct
+name: RandomizedControlledTrial
+prefixes:
+  ex: https://example.org/ecrf#
+  linkml: https://w3id.org/linkml/
+
+default_prefix: ex
+
+# Randomized Controlled Trial (RCT) model
+classes:
+  RandomizedControlledTrial:
+    is_a: Study
+    description: "An RCT is a type of clinical study where participants are randomly assigned to different treatment groups to compare outcomes."
+    slots:
+      - trial_id
+      - study_title
+      - randomization_method
+      - intervention_group
+      - control_group
+      - blinding_type
+      - primary_outcome
+      - secondary_outcomes
+
+slots:
+  trial_id:
+    description: "Unique identifier for the randomized controlled trial."
+    range: string
+    required: true
+
+  study_title:
+    description: "Title of the study."
+    range: string
+    required: true
+
+  randomization_method:
+    description: "Method used to randomly assign participants to groups (e.g., simple randomization, block randomization)."
+    range: string
+
+  intervention_group:
+    description: "Details of the intervention group in the study."
+    range: string
+
+  control_group:
+    description: "Details of the control group in the study."
+    range: string
+
+  blinding_type:
+    description: "Type of blinding used in the study (e.g., single-blind, double-blind, open-label)."
+    range: string
+
+  primary_outcome:
+    description: "The primary outcome that the study aims to measure."
+    range: string
+
+  secondary_outcomes:
+    description: "Secondary outcomes measured in the study."
+    multivalued: true
+    range: string

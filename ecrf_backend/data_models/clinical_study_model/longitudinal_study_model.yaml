@@ -1,0 +1,43 @@
+id: https://example.org/ecrf/longitudinal_study
+name: LongitudinalStudy
+prefixes:
+  ex: https://example.org/ecrf#
+  linkml: https://w3id.org/linkml/
+
+default_prefix: ex
+
+# Longitudinal Study model
+classes:
+  LongitudinalStudy:
+    is_a: Study
+    description: "A longitudinal study involves repeated observations of the same variables over a period of time."
+    slots:
+      - study_id
+      - study_title
+      - observation_period
+      - data_collection_intervals
+      - outcome_measures
+
+slots:
+  study_id:
+    description: "Unique identifier for the longitudinal study."
+    range: string
+    required: true
+
+  study_title:
+    description: "Title of the study."
+    range: string
+    required: true
+
+  observation_period:
+    description: "Total period over which observations are made."
+    range: string
+
+  data_collection_intervals:
+    description: "Intervals at which data is collected (e.g., monthly, annually)."
+    range: string
+
+  outcome_measures:
+    description: "Outcomes being measured in the study."
+    multivalued: true
+    range: string

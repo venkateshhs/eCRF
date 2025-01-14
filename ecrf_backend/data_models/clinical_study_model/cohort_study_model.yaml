@@ -1,0 +1,49 @@
+id: https://example.org/ecrf/cohort_study
+name: CohortStudy
+prefixes:
+  ex: https://example.org/ecrf#
+  linkml: https://w3id.org/linkml/
+
+default_prefix: ex
+
+# Cohort Study model
+classes:
+  CohortStudy:
+    is_a: Study
+    description: "A cohort study is a longitudinal observational study where a group of individuals is followed over time to observe outcomes."
+    slots:
+      - study_id
+      - study_title
+      - cohort_size
+      - follow_up_duration
+      - exposure_factors
+      - outcome_measures
+
+slots:
+  study_id:
+    description: "Unique identifier for the cohort study."
+    range: string
+    required: true
+
+  study_title:
+    description: "Title of the study."
+    range: string
+    required: true
+
+  cohort_size:
+    description: "Number of participants in the cohort."
+    range: integer
+
+  follow_up_duration:
+    description: "Duration of the follow-up period in the study."
+    range: string
+
+  exposure_factors:
+    description: "Exposure factors being studied (e.g., smoking, diet)."
+    multivalued: true
+    range: string
+
+  outcome_measures:
+    description: "Outcomes being measured in the study."
+    multivalued: true
+    range: string
