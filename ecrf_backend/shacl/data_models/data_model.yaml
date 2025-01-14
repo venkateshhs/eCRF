@@ -1,0 +1,348 @@
+id: https://example.org/ecrf
+name: Thing
+prefixes:
+  ex: https://example.org/ecrf#
+  linkml: https://w3id.org/linkml/
+
+default_prefix: ex
+
+# Base model - Thing
+classes:
+  Thing:
+    description: "A generic entity that serves as a base model for other models in the eCRF platform."
+    slots:
+      - id
+      - label
+      - description
+      - has_attributes
+
+  Person:
+    is_a: Thing
+    description: "A generic person entity representing individuals involved in the study (e.g., participants, investigators). This class includes common attributes such as name, age, gender, and contact information."
+    slots:
+      - name
+      - age
+      - gender
+      - address
+      - contact_number
+      - email
+      - birth_date
+      - nationality
+
+  StudyParticipant:
+    is_a: Person
+    description: "A study participant is a person enrolled in a clinical study. This class extends the Person class and adds attributes specific to the study context, such as participant ID, study ID, consent status, and enrollment dates."
+    slots:
+      - participant_id
+      - study_id
+      - consent_status
+      - enrollment_date
+      - withdrawal_date
+      - assigned_group
+      - baseline_characteristics
+
+  ClinicalEvent:
+    is_a: Thing
+    description: "A clinical event represents any medical event occurring during the study, such as visits, adverse events, or interventions. This class is used to track and manage significant occurrences related to the participant's health during the study period."
+    slots:
+      - event_id
+      - event_type
+      - event_date
+      - related_participant
+      - severity
+      - outcome
+      - related_instrument
+
+  Instrument:
+    is_a: Thing
+    description: "An instrument is a structured form or tool used to collect data in the study. Instruments can include case report forms (CRFs), questionnaires, and surveys, which contain sections and questions to capture specific data points."
+    slots:
+      - instrument_id
+      - instrument_type
+      - questions
+      - responses
+      - version
+      - created_date
+      - modified_date
+
+  FormSection:
+    is_a: Thing
+    description: "A logical grouping of questions within a form or instrument. Form sections help organize data collection by separating different areas of interest, such as demographics, medical history, or lab results."
+    slots:
+      - section_id
+      - section_label
+      - questions
+      - section_order
+      - instructions
+
+  Question:
+    is_a: Thing
+    description: "A question is a single query in a form or instrument. Questions can be of various types, such as text, multiple-choice, or numeric, and may include validation rules and predefined answer options."
+    slots:
+      - question_id
+      - text
+      - question_type
+      - options
+      - validation
+      - is_required
+      - help_text
+
+  Site:
+    is_a: Thing
+    description: "A site represents a physical location where the study is conducted (e.g., a hospital, clinic, or research center). Sites are associated with investigators and participants."
+    slots:
+      - site_id
+      - site_name
+      - address
+      - contact_person
+      - phone_number
+      - email
+
+  Investigator:
+    is_a: Person
+    description: "An investigator is a person responsible for conducting the study at a site. Investigators oversee study procedures, ensure protocol compliance, and report findings."
+    slots:
+      - investigator_id
+      - site_id
+      - role
+      - qualifications
+      - years_of_experience
+      - specialty
+
+# Slots (Attributes for each class)
+slots:
+  id:
+    description: "Unique identifier for the entity."
+    range: string
+    required: true
+
+  label:
+    description: "A human-readable label for the entity."
+    range: string
+
+  description:
+    description: "A description of the entity."
+    range: string
+
+  has_attributes:
+    description: "Attributes associated with the entity."
+    multivalued: true
+    range: Attribute
+
+  name:
+    description: "Full name of the person."
+    range: string
+
+  age:
+    description: "Age of the person."
+    range: integer
+    validation:
+      min_value: 0
+      max_value: 120
+
+  gender:
+    description: "Gender of the person."
+    range: string
+    pattern: "^(Male|Female|Other|Prefer not to say)$"
+
+  address:
+    description: "Address of the person or site."
+    range: string
+
+  contact_number:
+    description: "Contact number of the person."
+    range: string
+    pattern: "^[+]?[0-9]{10,15}$"
+
+  email:
+    description: "Email address of the person."
+    range: string
+    pattern: "^[\w.%+-]+@[\w.-]+\.[a-zA-Z]{2,}$"
+
+  birth_date:
+    description: "Date of birth of the person."
+    range: date
+
+  nationality:
+    description: "Nationality of the person."
+    range: string
+
+  participant_id:
+    description: "Unique identifier for the study participant."
+    range: string
+
+  study_id:
+    description: "Identifier for the study the participant is enrolled in."
+    range: string
+
+  consent_status:
+    description: "Consent status of the study participant."
+    range: boolean
+
+  enrollment_date:
+    description: "Date when the participant was enrolled in the study."
+    range: date
+
+  withdrawal_date:
+    description: "Date when the participant withdrew from the study (if applicable)."
+    range: date
+
+  assigned_group:
+    description: "Group assigned to the participant (e.g., treatment or control group)."
+    range: string
+
+  baseline_characteristics:
+    description: "Baseline characteristics of the study participant (e.g., weight, height, medical history)."
+    multivalued: true
+    range: string
+
+  event_id:
+    description: "Unique identifier for the clinical event."
+    range: string
+
+  event_type:
+    description: "Type of clinical event (e.g., visit, adverse event)."
+    range: string
+
+  event_date:
+    description: "Date the clinical event occurred."
+    range: date
+
+  related_participant:
+    description: "Link to the related study participant."
+    range: StudyParticipant
+
+  severity:
+    description: "Severity of the clinical event (e.g., mild, moderate, severe)."
+    range: string
+    pattern: "^(Mild|Moderate|Severe|Life-threatening)$"
+
+  outcome:
+    description: "Outcome of the clinical event (e.g., resolved, ongoing)."
+    range: string
+
+  related_instrument:
+    description: "Instrument associated with the clinical event."
+    range: Instrument
+
+  instrument_id:
+    description: "Unique identifier for the instrument."
+    range: string
+
+  instrument_type:
+    description: "Type of instrument (e.g., survey, form)."
+    range: string
+
+  questions:
+    description: "List of questions in the form section."
+    multivalued: true
+    range: Question
+
+  responses:
+    description: "Responses captured in the instrument."
+    multivalued: true
+    range: string
+
+  version:
+    description: "Version of the instrument."
+    range: string
+
+  created_date:
+    description: "Date when the instrument was created."
+    range: date
+
+  modified_date:
+    description: "Date when the instrument was last modified."
+    range: date
+
+  section_id:
+    description: "Unique identifier for the form section."
+    range: string
+
+  section_label:
+    description: "Human-readable label for the form section."
+    range: string
+
+  section_order:
+    description: "Order of the section within the form."
+    range: integer
+
+  instructions:
+    description: "Instructions for filling out the section."
+    range: string
+
+  question_id:
+    description: "Unique identifier for the question."
+    range: string
+
+  text:
+    description: "The question text."
+    range: string
+
+  question_type:
+    description: "Type of question (e.g., multiple choice, text, numeric)."
+    range: string
+
+  options:
+    description: "List of possible answers for the question (if applicable)."
+    multivalued: true
+    range: string
+
+  validation:
+    description: "Validation rules for the question."
+    range: Validation
+
+  is_required:
+    description: "Indicates whether the question is mandatory."
+    range: boolean
+
+  help_text:
+    description: "Additional help text or guidance for the question."
+    range: string
+
+  site_id:
+    description: "Unique identifier for the site."
+    range: string
+
+  site_name:
+    description: "Name of the site."
+    range: string
+
+  contact_person:
+    description: "Name of the primary contact person at the site."
+    range: string
+
+  phone_number:
+    description: "Phone number of the site contact person."
+    range: string
+    pattern: "^[+]?[0-9]{10,15}$"
+
+  investigator_id:
+    description: "Unique identifier for the investigator."
+    range: string
+
+  role:
+    description: "Role of the investigator in the study (e.g., principal investigator, sub-investigator)."
+    range: string
+
+  qualifications:
+    description: "Qualifications of the investigator (e.g., MD, PhD)."
+    range: string
+
+  years_of_experience:
+    description: "Number of years of experience the investigator has."
+    range: integer
+
+  specialty:
+    description: "Specialty area of the investigator (e.g., cardiology, oncology)."
+    range: string
+
+# Enum for gender
+enums:
+  GenderEnum:
+    description: "Enumeration for gender options."
+    permissible_values:
+      Male: {}
+      Female: {}
+      Other: {}
+      "Prefer not to say": {}
