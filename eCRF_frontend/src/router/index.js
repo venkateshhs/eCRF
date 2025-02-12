@@ -4,7 +4,6 @@ import RegistrationComponent from "../components/RegistrationComponent.vue";
 import DashboardComponent from "../components/DashboardComponent.vue";
 import UserInfoComponent from "../components/UserInfoComponent.vue";
 import CreateFormComponent from "../components/CreateFormComponent.vue";
-import ViewFormsComponent from "../components/ViewFormsComponent.vue";
 import AnalyticsComponent from "../components/AnalyticsComponent.vue";
 import ScratchFormComponent from "../components/ScratchFormComponent.vue";
 import SavedFormsComponent from "../components/SavedFormsComponent.vue";
@@ -24,7 +23,7 @@ const routes = [
       { path: "user-info", name: "UserInfo", component: UserInfoComponent },
       { path: "create-study", name: "CreateStudy", component: StudyCreationComponent },
       { path: "create-form", name: "CreateForm", component: CreateFormComponent },
-      { path: "view-forms", name: "ViewForms", component: ViewFormsComponent },
+      { path: "view-forms", name: "ViewForms", component: SavedFormsComponent },
       { path: "analytics", name: "Analytics", component: AnalyticsComponent },
     ],
   },
