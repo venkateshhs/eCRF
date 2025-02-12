@@ -3,7 +3,7 @@ from typing import List
 from fastapi import APIRouter, HTTPException, Depends, Query
 from pathlib import Path
 import json
-
+import yaml
 from database import get_db
 from logger import logger
 from schemas import FormSchema, FormSaveSchema
@@ -15,22 +15,22 @@ from fastapi.responses import JSONResponse
 router = APIRouter(prefix="/forms", tags=["forms"])
 
 TEMPLATE_DIR = Path("shacl/templates")  # Path to your templates directory
+BASE_DIR = Path(__file__).resolve().parent.parent / "ecrf_backend" /"data_models"
 
 
-
-@router.get("/study-types")
-def get_study_types():
-    file_path = Path(__file__).parent / "shacl" / "study_type" / "study_type.json"
-    print(file_path)
-    try:
-        with file_path.open("r") as file:
-            data = json.load(file)
-            print(data)
-            return JSONResponse(content=data)
-    except FileNotFoundError:
-        return JSONResponse(content={"error": "File not found"}, status_code=404)
-    except json.JSONDecodeError:
-        return JSONResponse(content={"error": "Invalid JSON format"}, status_code=400)
+# @router.get("/study-types")
+# def get_study_types():
+#     file_path = Path(__file__).parent / "shacl" / "study_type" / "study_type.json"
+#     print(file_path)
+#     try:
+#         with file_path.open("r") as file:
+#             data = json.load(file)
+#             print(data)
+#             return JSONResponse(content=data)
+#     except FileNotFoundError:
+#         return JSONResponse(content={"error": "File not found"}, status_code=404)
+#     except json.JSONDecodeError:
+#         return JSONResponse(content={"error": "Invalid JSON format"}, status_code=400)
 
 @router.get("/templates")
 def list_templates():
@@ -125,6 +125,83 @@ def load_saved_forms(
     if not forms:
         raise HTTPException(status_code=404, detail="No saved forms found")
     return forms
+
+
+
+
+def load_yaml_file(file_path):
+    """Utility function to load a YAML file and return as dictionary."""
+    try:
+        with open(file_path, "r", encoding="utf-8") as file:
+            return yaml.safe_load(file)
+    except Exception as e:
+        print(f"Error reading {file_path}: {e}")
+        return None
+
+@router.get("/models")
+def get_study_models(user: User = Depends(get_current_user)):
+    """Dynamically loads all study-related YAML models."""
+    logger.info(f"User {user.username} is accessing study models.")
+
+    # Debug BASE_DIR
+    print(f"\n Debug: Checking BASE_DIR: {BASE_DIR}")
+
+    if not BASE_DIR.exists():
+        print(f" ERROR: BASE_DIR does not exist: {BASE_DIR}")
+        raise HTTPException(status_code=500, detail="Server configuration error: BASE_DIR missing.")
+
+    study_models = {}
+
+    # Debugging categories inside BASE_DIR
+    category_dirs = list(BASE_DIR.iterdir())
+    print(f" Found categories: {category_dirs}")
+
+    if not category_dirs:
+        raise HTTPException(status_code=404, detail="No study models found (empty BASE_DIR).")
+
+    for category in category_dirs:
+        if category.is_dir():
+            category_name = category.name
+            study_models[category_name] = {}
+
+            yaml_files = list(category.glob("*.yaml"))
+            print(f" Category '{category_name}' - YAML Files Found: {yaml_files}")
+
+            if not yaml_files:
+                print(f" WARNING: No YAML files found in {category_name}")
+
+            for yaml_file in yaml_files:
+                model_data = load_yaml_file(yaml_file)
+                if model_data:
+                    study_models[category_name][yaml_file.stem] = model_data
+                else:
+                    print(f" WARNING: Failed to load {yaml_file}")
+
+    if not study_models:
+        raise HTTPException(status_code=404, detail="No study models found")
+
+    return study_models
+
+@router.get("/models/{category}/{file_name}")
+def get_yaml_content(category: str, file_name: str, user: User = Depends(get_current_user)):
+    """Fetch and return the structured content of a YAML file."""
+    logger.info(f"User {user.username} is accessing {file_name} in {category}")
+
+    category_path = BASE_DIR / category
+    if not category_path.exists() or not category_path.is_dir():
+        raise HTTPException(status_code=404, detail="Category not found")
+
+    yaml_path = category_path / f"{file_name}.yaml"
+    if not yaml_path.exists():
+        raise HTTPException(status_code=404, detail="File not found")
+
+    yaml_content = load_yaml_file(yaml_path)
+    if not yaml_content:
+        raise HTTPException(status_code=500, detail="Error loading YAML file")
+
+    return yaml_content  # Send parsed YAML structure
+
+
 
 @router.get("/{form_id}")
 def get_form_by_id(

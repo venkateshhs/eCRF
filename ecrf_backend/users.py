@@ -1,5 +1,5 @@
 from datetime import datetime
-from fastapi import APIRouter, Depends, HTTPException, Header
+from fastapi import APIRouter, Depends, HTTPException, Header   
 from sqlalchemy.orm import Session
 from schemas import UserCreate, LoginRequest, UserResponse
 from crud import get_user_by_username, create_user
@@ -146,7 +146,7 @@ def get_current_user(authorization: str = Header(None), db: Session = Depends(ge
         user = db.query(User).filter(User.username == username).first()
         if not user:
             raise HTTPException(status_code=404, detail="User not found")
-
+        logger.info(f"User {user.username} authenticated successfully.")
         return user
 
     except ExpiredSignatureError:

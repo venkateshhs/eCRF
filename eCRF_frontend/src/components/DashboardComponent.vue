@@ -41,10 +41,11 @@ export default {
       sidebarCollapsed: false, // Tracks the visibility of the sidebar
       menuItems: [
         { name: "userInfo", label: "User Info", route: "/dashboard/user-info" },
+        { name: "createStudy", label: "Create Study", route: "/dashboard/create-study" },
         { name: "createForm", label: "Create Form", route: "/dashboard/create-form" },
         { name: "viewForms", label: "View Forms", route: "/dashboard/view-forms" },
         { name: "analytics", label: "Analytics", route: "/dashboard/analytics" },
-        { name: "createStudy", label: "Create Study", route: "/dashboard/create-study" },
+        // { name: "createStudy", label: "Create Study", route: "/dashboard/create-study" },
       ],
     };
   },
