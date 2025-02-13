@@ -1,4 +1,4 @@
-from typing import List
+from typing import List, Dict
 
 from fastapi import APIRouter, HTTPException, Depends, Query
 from pathlib import Path
@@ -15,7 +15,7 @@ from fastapi.responses import JSONResponse
 router = APIRouter(prefix="/forms", tags=["forms"])
 
 TEMPLATE_DIR = Path("shacl/templates")  # Path to your templates directory
-BASE_DIR = Path(__file__).resolve().parent.parent / "ecrf_backend" /"data_models"
+BASE_DIR = Path(__file__).resolve().parent.parent / "ecrf_backend" /"data_models" / "clinical_study_model"
 
 
 # @router.get("/study-types")
@@ -137,10 +137,14 @@ def load_yaml_file(file_path):
     except Exception as e:
         print(f"Error reading {file_path}: {e}")
         return None
+"""
+This code block has been commented becuase we are no longer rendering the study models from the yaml file since its not necessary to "label" each study. User can select each study
+by selecting from the drop down and then constructing the study from the form generation. This way users have the full freedom to create a study.
+
 
 @router.get("/models")
 def get_study_models(user: User = Depends(get_current_user)):
-    """Dynamically loads all study-related YAML models."""
+   
     logger.info(f"User {user.username} is accessing study models.")
 
     # Debug BASE_DIR
@@ -181,6 +185,43 @@ def get_study_models(user: User = Depends(get_current_user)):
         raise HTTPException(status_code=404, detail="No study models found")
 
     return study_models
+"""
+
+
+@router.get("/case-studies", response_model=List[Dict[str, str]])
+def get_case_study_names(user: dict = Depends(get_current_user)):
+    """
+    Returns a list of available case study names along with descriptions.
+    """
+    if not BASE_DIR.exists():
+        raise HTTPException(status_code=500, detail="Server configuration error: BASE_DIR missing.")
+
+    case_studies = []
+
+    yaml_files = list(BASE_DIR.glob("*.yaml"))
+    if not yaml_files:
+        raise HTTPException(status_code=404, detail="No case studies found.")
+
+    for yaml_file in yaml_files:
+        data = load_yaml_file(yaml_file)
+
+        if not data or "classes" not in data:
+            continue  # Skip files without proper structure
+
+        # Extract name from file name
+        study_name = yaml_file.stem.replace("_", " ").title()
+
+        # Get the first class description
+        class_data = next(iter(data["classes"].values()), {})
+        study_description = class_data.get("description", "No description available.")
+
+        case_studies.append({
+            "name": study_name,
+            "description": study_description
+        })
+
+    return case_studies
+
 
 @router.get("/models/{category}/{file_name}")
 def get_yaml_content(category: str, file_name: str, user: User = Depends(get_current_user)):

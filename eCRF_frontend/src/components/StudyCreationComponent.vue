@@ -1,40 +1,45 @@
 <template>
   <div class="study-creation-container">
-    <h1>Create a New Study</h1>
+    <h1>Study Management</h1>
 
-    <div v-if="studyModels">
-      <div v-for="(category, categoryName) in studyModels" :key="categoryName" class="category-section">
-        <div class="category-header">
-          <h2>{{ categoryName }}</h2>
-          <button @click="toggleCategory(categoryName)" class="icon-button collapse-button">
-            <i :class="expandedCategories[categoryName] ? 'fas fa-chevron-up' : 'fas fa-chevron-down'"></i>
-          </button>
-        </div>
-
-        <table v-if="expandedCategories[categoryName]" class="yaml-table">
-          <thead>
-            <tr>
-              <th>Model Name</th>
-              <th>Description</th>
-              <th>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="(model, modelName) in category" :key="modelName">
-              <td><strong>{{ model.name }}</strong></td>
-              <td>{{ getModelDescription(model) }}</td>
-              <td>
-                <button @click="viewYamlFile(categoryName, modelName)" class="icon-button view-button">
-                  <i class="fas fa-eye"></i> View Details
-                </button>
-              </td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
+    <!-- Main Options -->
+    <div class="options-container">
+      <button @click="viewExistingStudies" class="btn-primary">View Existing Studies</button>
+      <button @click="startNewStudy" class="btn-secondary">Create New Study</button>
     </div>
 
-    <p v-else>Loading study models...</p>
+    <!-- New Study Creation -->
+    <div v-if="creatingNewStudy" class="new-study-form">
+      <h2>Create a New Study</h2>
+
+      <label for="studyType">Select Case Study:</label>
+      <select v-model="selectedCaseStudyName" @change="loadCaseStudyDetails">
+        <option disabled value="">-- Select Case Study --</option>
+        <option v-for="caseStudy in caseStudies" :key="caseStudy.name" :value="caseStudy.name">
+          {{ caseStudy.name }}
+        </option>
+        <option value="custom">Custom Study</option>
+      </select>
+
+      <!-- Display Study Details -->
+      <div v-if="selectedCaseStudy && selectedCaseStudyName !== 'custom'">
+        <h3>{{ selectedCaseStudy.name }}</h3>
+        <p>{{ selectedCaseStudy.description }}</p>
+        <button @click="proceedToForm" class="btn-next">Proceed</button>
+      </div>
+
+      <!-- Custom Study Creation -->
+      <div v-if="selectedCaseStudyName === 'custom'" class="custom-study">
+        <h3>Create Custom Study</h3>
+        <label>Study Name:</label>
+        <input type="text" v-model="customStudy.name" placeholder="Enter study name" required />
+
+        <label>Study Description:</label>
+        <textarea v-model="customStudy.description" placeholder="Enter study description" required></textarea>
+
+        <button @click="proceedToCustomStudy" class="btn-primary">Proceed with Custom Study</button>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -45,66 +50,70 @@ export default {
   name: "StudyCreationComponent",
   data() {
     return {
-      studyModels: null,
-      expandedCategories: {}, // Track expanded state for each category
+      caseStudies: [],  // Stores API response
+      creatingNewStudy: false,
+      selectedCaseStudyName: "", // Holds selected study name
+      selectedCaseStudy: null, // Stores selected study object
+      customStudy: { name: "", description: "" },
     };
   },
   async created() {
-    await this.loadStudyModels();
+    await this.loadCaseStudies();
   },
   computed: {
     token() {
       return this.$store.state.token;
-    }
+    },
   },
   methods: {
-    async loadStudyModels() {
-      if (!this.token) {
-        alert("Authentication error: No token found. Please log in again.");
-        this.$router.push("/login");
+    async loadCaseStudies() {
+      try {
+        const response = await axios.get("http://127.0.0.1:8000/forms/case-studies", {
+          headers: { Authorization: `Bearer ${this.token}`, "Accept": "application/json" },
+        });
+        this.caseStudies = response.data;
+      } catch (error) {
+        console.error("Error loading case studies:", error);
+      }
+    },
+    viewExistingStudies() {
+      this.$router.push("/dashboard/view-forms");
+    },
+    startNewStudy() {
+      this.creatingNewStudy = true;
+    },
+    loadCaseStudyDetails() {
+      if (this.selectedCaseStudyName === "custom") {
+        this.selectedCaseStudy = null;
+      } else {
+        this.selectedCaseStudy = this.caseStudies.find(cs => cs.name === this.selectedCaseStudyName);
+      }
+    },
+    proceedToForm() {
+      if (!this.selectedCaseStudy) return;
+
+      this.$router.push({
+        name: "CreateFormScratch",
+        query: { studyDetails: JSON.stringify(this.selectedCaseStudy) },
+      });
+    },
+    proceedToCustomStudy() {
+      if (!this.customStudy.name.trim() || !this.customStudy.description.trim()) {
+        alert("Please fill in all details for the custom study.");
         return;
       }
 
-      try {
-        const response = await axios.get("http://127.0.0.1:8000/forms/models", {
-          headers: {
-            Authorization: `Bearer ${this.token}`,
-            "Accept": "application/json",
-          },
-        });
-
-        this.studyModels = response.data;
-        this.initializeExpandedCategories();
-      } catch (error) {
-        console.error("Error loading study models:", error.response?.data || error);
-      }
+      this.$router.push({
+        name: "CreateFormScratch",
+        query: { studyDetails: JSON.stringify({ ...this.customStudy, isCustom: true }) },
+      });
     },
-    initializeExpandedCategories() {
-      for (const category in this.studyModels) {
-        this.$set(this.expandedCategories, category, false);
-      }
-    },
-    toggleCategory(categoryName) {
-      this.expandedCategories[categoryName] = !this.expandedCategories[categoryName];
-    },
-    getModelDescription(model) {
-      if (model.classes) {
-        const classKeys = Object.keys(model.classes);
-        if (classKeys.length > 0) {
-          return model.classes[classKeys[0]].description || "No description available.";
-        }
-      }
-      return "No description available.";
-    },
-    viewYamlFile(category, fileName) {
-      this.$router.push(`/dashboard/view-yaml/${category}/${fileName}`);
-    }
-  }
+  },
 };
 </script>
 
 <style scoped>
-/* General Layout */
+/* Main Layout */
 .study-creation-container {
   max-width: 900px;
   margin: auto;
@@ -118,83 +127,79 @@ h1 {
   text-align: center;
 }
 
-/* Category Section */
-.category-section {
-  margin-bottom: 20px;
-  padding: 15px;
-  background-color: #f9f9f9;
-  border-radius: 5px;
-}
-
-.category-header {
+/* Options Container */
+.options-container {
   display: flex;
-  justify-content: space-between;
-  align-items: center;
+  justify-content: center;
+  gap: 20px;
+  margin-bottom: 30px;
 }
 
-/* Table Styling */
-.yaml-table {
-  width: 100%;
-  border-collapse: collapse;
+.btn-primary, .btn-secondary {
+  padding: 10px 20px;
+  border-radius: 5px;
+  font-size: 16px;
+  cursor: pointer;
+}
+
+.btn-primary {
+  background-color: #007bff;
+  color: white;
+  border: none;
+}
+
+.btn-primary:hover {
+  background-color: #0056b3;
+}
+
+.btn-secondary {
+  background-color: #28a745;
+  color: white;
+  border: none;
+}
+
+.btn-secondary:hover {
+  background-color: #218838;
+}
+
+/* New Study Form */
+.new-study-form {
+  padding: 20px;
+  background-color: #f9f9f9;
+  border-radius: 8px;
+}
+
+label {
+  font-weight: bold;
+  display: block;
   margin-top: 10px;
 }
 
-.yaml-table th, .yaml-table td {
+select, input, textarea {
+  width: 100%;
+  padding: 8px;
   border: 1px solid #ccc;
-  padding: 10px;
-  text-align: left;
-}
-
-.yaml-table th {
-  background-color: #007bff;
-  color: white;
-}
-
-.yaml-table tr:nth-child(even) {
-  background-color: #f2f2f2;
+  border-radius: 5px;
+  margin-top: 5px;
 }
 
 /* Buttons */
-.icon-button {
-  background: none;
-  border: none;
-  padding: 8px 12px;
-  font-size: 16px;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  border-radius: 5px;
-  transition: background-color 0.3s ease;
-}
-
-.icon-button i {
-  font-size: 18px;
-}
-
-/* Collapse Button */
-.collapse-button {
-  background-color: transparent;
-  color: #007bff;
-  font-size: 20px;
-  transition: transform 0.3s ease;
-}
-
-.collapse-button:hover {
-  background-color: transparent;
-  color: #0056b3;
-}
-
-/* View Details Button */
-.view-button {
-  background-color: #007bff;
+.btn-next {
+  background-color: #28a745;
   color: white;
+  padding: 10px 15px;
   border: none;
-  padding: 8px 12px;
-  font-size: 14px;
+  border-radius: 5px;
+  cursor: pointer;
+  margin-top: 15px;
 }
 
-.view-button:hover {
-  background-color: #0056b3;
+.btn-next:hover {
+  background-color: #218838;
+}
+
+/* Custom Study Section */
+.custom-study {
+  margin-top: 20px;
 }
 </style>
