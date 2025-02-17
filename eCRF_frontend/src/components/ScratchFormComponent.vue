@@ -1,47 +1,51 @@
 <template>
   <div class="create-form-container">
     <div class="header-container">
-      <button @click="goBack" class="btn-back">⬅ Back</button>
+      <button @click="goBack" class="btn-back">
+        <i class="fas fa-arrow-left"></i> Back
+      </button>
       <h1>Create Form from Scratch</h1>
     </div>
 
     <div class="scratch-form-content">
-      <!-- Form Area (Left) -->
+      <!-- Form Area -->
       <div class="form-area">
-        <h2>Form Preview</h2>
+        <!-- Editable Form Name at Top Center -->
+        <div class="form-heading-container">
+          <input
+            type="text"
+            v-model="formName"
+            class="form-name-input heading-input"
+            placeholder="Untitled Form"
+          />
+        </div>
+
+        <!-- Render Form Sections -->
         <div
           v-for="(section, sectionIndex) in formSections"
           :key="sectionIndex"
           class="form-section"
           :class="{ active: activeSection === sectionIndex }"
           @click.self="setActiveSection(sectionIndex)"
+          tabindex="0"
         >
           <!-- Section Header -->
           <div class="section-header">
             <h3>{{ section.title }}</h3>
             <div class="field-actions">
-              <button @click.prevent="editSection(sectionIndex)" class="icon-button edit-button">
+              <button @click.prevent="editSection(sectionIndex)" class="icon-button">
                 <i class="fas fa-edit"></i>
               </button>
-              <button
-                @click.prevent="addNewSectionBelow(sectionIndex)"
-                class="icon-button add-button"
-              >
+              <button @click.prevent="addNewSectionBelow(sectionIndex)" class="icon-button">
                 <i class="fas fa-plus"></i>
               </button>
-              <button @click.prevent="copySection(sectionIndex)" class="icon-button copy-button">
+              <button @click.prevent="copySection(sectionIndex)" class="icon-button">
                 <i class="fas fa-copy"></i>
               </button>
-              <button
-                @click.prevent="deleteSection(sectionIndex)"
-                class="icon-button delete-button"
-              >
+              <button @click.prevent="deleteSection(sectionIndex)" class="icon-button">
                 <i class="fas fa-trash"></i>
               </button>
-              <button
-                @click.prevent="toggleSection(sectionIndex)"
-                class="icon-button collapse-button"
-              >
+              <button @click.prevent="toggleSection(sectionIndex)" class="icon-button">
                 <i :class="section.collapsed ? 'fas fa-angle-down' : 'fas fa-angle-up'"></i>
               </button>
             </div>
@@ -57,29 +61,18 @@
               <div class="field-header">
                 <label v-if="field.type !== 'button'" :for="field.name">{{ field.label }}</label>
                 <div class="field-actions">
-                  <button
-                    @click.prevent="editField(sectionIndex, fieldIndex)"
-                    class="icon-button edit-button"
-                  >
+                  <button @click.prevent="editField(sectionIndex, fieldIndex)" class="icon-button">
                     <i class="fas fa-edit"></i>
                   </button>
-                  <button
-                    @click.prevent="addSimilarField(sectionIndex, fieldIndex)"
-                    class="icon-button add-button"
-                  >
+                  <button @click.prevent="addSimilarField(sectionIndex, fieldIndex)" class="icon-button">
                     <i class="fas fa-plus"></i>
                   </button>
-                  <button
-                    @click.prevent="removeField(sectionIndex, fieldIndex)"
-                    class="icon-button delete-button"
-                  >
+                  <button @click.prevent="removeField(sectionIndex, fieldIndex)" class="icon-button">
                     <i class="fas fa-trash"></i>
                   </button>
                 </div>
               </div>
-
               <div class="field-box">
-                <!-- Render Fields Dynamically -->
                 <input
                   v-if="field.type === 'text'"
                   type="text"
@@ -128,9 +121,6 @@
                     {{ option }}
                   </label>
                 </div>
-                <div v-if="field.type === 'paragraph'" class="paragraph-field">
-                  <p>{{ field.content }}</p>
-                </div>
                 <button v-if="field.type === 'button'" type="button" class="form-button">
                   {{ field.label }}
                 </button>
@@ -139,21 +129,18 @@
           </div>
         </div>
 
+        <!-- Form Actions: Horizontally Aligned -->
         <div class="form-actions">
-          <input
-            v-model="formName"
-            type="text"
-            class="form-name-input"
-            placeholder="Enter Form Name"
-          />
-          <button @click.prevent="addNewSection" class="btn-add-section">+ Add Section</button>
-          <button @click.prevent="clearForm" class="btn-clear">Clear Form</button>
-          <button @click.prevent="saveForm" class="btn-save">Save Form</button>
-          <button @click="navigateToSavedForms" class="btn-view-saved">View Saved Forms</button>
+          <div class="button-row">
+            <button @click.prevent="addNewSection" class="btn-option">+ Add Section</button>
+            <button @click.prevent="clearForm" class="btn-option">Clear Form</button>
+            <button @click.prevent="saveForm" class="btn-primary">Save Form</button>
+            <button @click="navigateToSavedForms" class="btn-option">View Saved Forms</button>
+          </div>
         </div>
       </div>
 
-      <!-- Available Fields Area (Right) -->
+      <!-- Available Fields Area -->
       <div class="available-fields">
         <h2>Available Fields</h2>
         <div class="tabs">
@@ -208,10 +195,6 @@
   </div>
 </template>
 
-
-
-
-
 <script>
 import axios from "axios";
 
@@ -230,16 +213,14 @@ export default {
   },
   computed: {
     token() {
-      return this.$store.state.token; // Retrieve the token directly from Vuex
+      return this.$store.state.token;
     },
   },
   async mounted() {
-  await this.loadAvailableFields();
+    await this.loadAvailableFields();
   },
-
-
   methods: {
-  navigateToSavedForms() {
+    navigateToSavedForms() {
       this.$router.push("/saved-forms");
     },
     async saveForm() {
@@ -248,17 +229,13 @@ export default {
         this.$router.push("/login");
         return;
       }
-
       const formData = {
         form_name: this.formName || "Untitled Form",
         form_structure: this.formSections,
       };
-
       try {
         await axios.post("http://127.0.0.1:8000/forms/save-form", formData, {
-          headers: {
-            Authorization: `Bearer ${this.token}`, // Use the Vuex token
-          },
+          headers: { Authorization: `Bearer ${this.token}` },
         });
         alert(`Form "${this.formName}" saved successfully!`);
       } catch (error) {
@@ -273,41 +250,39 @@ export default {
     },
     async loadAvailableFields() {
       try {
-      const generalResponse = await axios.get("http://127.0.0.1:8000/forms/available-fields");
-      const specializedResponse = await axios.get("http://127.0.0.1:8000/forms/specialized-fields");
-      this.generalFields = generalResponse.data || [];
-      this.specializedFieldSections = specializedResponse.data || [];
+        const generalResponse = await axios.get("http://127.0.0.1:8000/forms/available-fields");
+        const specializedResponse = await axios.get("http://127.0.0.1:8000/forms/specialized-fields");
+        this.generalFields = generalResponse.data || [];
+        this.specializedFieldSections = specializedResponse.data || [];
       } catch (error) {
         console.error("Error loading fields:", error.response?.data || error.message);
       }
     },
-
     goBack() {
       this.$router.back("/dashboard");
     },
     toggleSection(sectionIndex) {
-  this.formSections.forEach((section, index) => {
-    if (index === sectionIndex) {
-      section.collapsed = !section.collapsed;
-      if (!section.collapsed) {
-        this.setActiveSection(sectionIndex); // Set the active section if expanded
-      }
-    } else {
-      section.collapsed = true; // Collapse all other sections
-    }
-  });
-},
+      this.formSections.forEach((section, index) => {
+        if (index === sectionIndex) {
+          section.collapsed = !section.collapsed;
+          if (!section.collapsed) {
+            this.setActiveSection(sectionIndex);
+          }
+        } else {
+          section.collapsed = true;
+        }
+      });
+    },
     setActiveSection(sectionIndex) {
       this.activeSection = sectionIndex;
     },
     addFieldToActiveSection(field) {
-  const section = this.formSections[this.activeSection];
-  if (section.collapsed) {
-    this.toggleSection(this.activeSection); // Expand the active section if collapsed
-  }
-  section.fields.push({ ...field, name: `${field.type}_${Date.now()}` }); // Ensure unique field name
-},
-
+      const section = this.formSections[this.activeSection];
+      if (section.collapsed) {
+        this.toggleSection(this.activeSection);
+      }
+      section.fields.push({ ...field, name: `${field.type}_${Date.now()}` });
+    },
     addNewSection() {
       this.formSections.push({
         title: `New Section ${this.formSections.length + 1}`,
@@ -341,27 +316,18 @@ export default {
         this.formSections[index].title = newTitle;
       }
     },
-   copySection(sectionIndex) {
-  const sectionToCopy = this.formSections[sectionIndex];
-
-  // Create a deep copy of the section
-  const newSection = JSON.parse(JSON.stringify(sectionToCopy));
-
-  // Modify the copied section's title and fields
-  newSection.title = `${sectionToCopy.title} (Copy)`;
-  newSection.fields = sectionToCopy.fields.map((field) => ({
-    ...field,
-    name: `${field.name}_copy_${Date.now()}`, // Ensure unique field name
-  }));
-  newSection.collapsed = true; // Collapse the new section initially
-
-  // Insert the copied section into the list
-  this.formSections.splice(sectionIndex + 1, 0, newSection);
-
-  // Automatically expand the copied section
-  this.toggleSection(sectionIndex + 1);
-},
-
+    copySection(sectionIndex) {
+      const sectionToCopy = this.formSections[sectionIndex];
+      const newSection = JSON.parse(JSON.stringify(sectionToCopy));
+      newSection.title = `${sectionToCopy.title} (Copy)`;
+      newSection.fields = sectionToCopy.fields.map((field) => ({
+        ...field,
+        name: `${field.name}_copy_${Date.now()}`,
+      }));
+      newSection.collapsed = true;
+      this.formSections.splice(sectionIndex + 1, 0, newSection);
+      this.toggleSection(sectionIndex + 1);
+    },
     clearForm() {
       if (confirm("Are you sure you want to clear the form?")) {
         this.formSections = [{ title: "Default Section", fields: [], collapsed: false }];
@@ -376,7 +342,7 @@ export default {
       const field = this.formSections[sectionIndex].fields[fieldIndex];
       const newLabel = prompt("Enter new label for the field:", field.label);
       if (newLabel) {
-        field.label = newLabel;
+        this.formSections[sectionIndex].fields[fieldIndex].label = newLabel;
       }
     },
     addSimilarField(sectionIndex, fieldIndex) {
@@ -392,148 +358,178 @@ export default {
 </script>
 
 <style scoped>
-/* Main container for the page */
+/* Container: Full width, full viewport height */
 .create-form-container {
-  max-width: 1200px;
-  margin: auto;
+  width: 100%;
+  min-height: 100vh;
+  margin: 0 auto;
   padding: 20px;
-  font-family: Arial, sans-serif;
-  background-color: #fff;
-  border-radius: 10px;
-  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
+  background-color: #f9f9f9;
+}
+
+/* Header */
+.header-container {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 15px;
+}
+
+.btn-back {
+  background: none;
+  border: none;
+  font-size: 16px;
+  cursor: pointer;
+  color: #555;
 }
 
 h1 {
-  text-align: center;
+  font-size: 24px;
+  font-weight: 500;
   color: #333;
+  flex: 1;
+  text-align: center;
 }
 
-/* Layout handling for the main content */
+/* Scratch Form Content */
 .scratch-form-content {
   display: flex;
   justify-content: space-between;
   gap: 20px;
-  margin-top: 20px;
-  flex-wrap: wrap; /* Enables wrapping for smaller screens */
+  flex-wrap: wrap;
 }
+
+/* Form Area */
+.form-area {
+  flex: 3;
+  background-color: #fff;
+  padding: 20px;
+  border-radius: 8px;
+  border: 1px solid #ddd;
+}
+
+/* Editable Form Heading */
+.form-heading-container {
+  text-align: center;
+  margin-bottom: 20px;
+}
+
+.heading-input {
+  font-size: 22px;
+  font-weight: 500;
+  text-align: center;
+  border: none;
+  border-bottom: 1px solid #ccc;
+  outline: none;
+  width: 100%;
+  max-width: 400px;
+}
+
+/* Form Section */
+.form-section {
+  padding: 15px;
+  border-bottom: 1px solid #ddd;
+  transition: all 0.3s ease;
+}
+
+.form-section.active {
+  background-color: #e7f3ff;
+  border-left: 3px solid #444;
+}
+
+/* Section Header */
 .section-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 10px 0;
-  cursor: pointer;
-  font-size: 16px;
 }
-.general-fields {
+
+.field-actions {
   display: flex;
-  flex-direction: column;
   gap: 10px;
 }
-.collapse-button {
-  background: none;
-  border: none;
-  font-size: 20px;
-  cursor: pointer;
-}
 
-.field-buttons {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  margin-bottom: 10px;
-}
-/* Form Preview (Left Side) */
-.form-area {
-  flex: 3;
-  padding: 20px;
-  background-color: #f9f9f9;
-  border-radius: 10px;
-  position: relative;
-  overflow: hidden; /* Prevents content overflow */
-  word-wrap: break-word; /* Wraps long content */
-}
-/* Highlight active section with a brighter background and bold border */
-.form-section {
-  transition: all 0.3s ease;
-  filter: brightness(1); /* Default reduced brightness */
-}
-
-.form-section.active {
-  filter: brightness(1); /* Full brightness for active section */
-  border: 1px solid #007bff; /* Highlight border */
-  background-color: #e7f3ff; /* Subtle background color */
-}
-
-/* Collapse animation for sections */
-.section-content {
-  max-height: 0;
-  overflow: hidden;
-  transition: max-height 0.3s ease-in-out;
-}
-
-.form-section:not(.active) .section-content {
-  max-height: 0;
-}
-
-.form-section.active .section-content {
-  max-height: 1000px; /* Large enough to fit expanded content */
-}
-
-/* Collapse animation for sections */
-.section-content {
-  transition: max-height 0.3s ease-in-out;
-}
-.form-area form {
-  display: flex;
-  flex-direction: column; /* Ensures fields are stacked vertically */
-  gap: 15px; /* Adds consistent spacing between fields */
-}
-
-/* Field Layout */
-.field-layout {
-  border: 1px solid #ddd;
-  margin-bottom: 15px;
-  padding: 15px;
-  border-radius: 5px;
-  background-color: #fff;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1); /* Optional shadow for separation */
-}
-
-/* Handles overflow issues for dynamically added fields */
+/* Field Box */
 .field-box {
-  width: 100%; /* Ensures the field takes full width of its container */
-  max-width: 100%; /* Prevents exceeding container width */
-  padding: 10px;
-  background-color: #fdfdfd;
-  border-radius: 5px;
+  margin-top: 10px;
 }
 
-/* Input field styles */
+/* Input Styles */
 input,
 textarea,
 select {
-  width: 100%; /* Ensures the field fills the container */
-  padding: 10px;
-  margin-top: 5px;
-  font-size: 14px;
+  width: 100%;
+  padding: 8px;
   border: 1px solid #ccc;
   border-radius: 5px;
+  margin-top: 5px;
   box-sizing: border-box;
 }
 
 input:focus,
 textarea:focus,
 select:focus {
-  border-color: #007bff;
+  border-color: #444;
   outline: none;
 }
 
-/* Actions for editing fields (add/edit/delete buttons) */
-.field-actions {
+/* Form Actions: Horizontal Button Row */
+.form-actions {
   display: flex;
-  gap: 10px;
+  align-items: center;
+  justify-content: center;
+  gap: 15px;
+  margin-top: 20px;
 }
 
+.form-name-input {
+  flex: 1;
+  padding: 8px;
+  border: 1px solid #ccc;
+  border-radius: 5px;
+}
+
+/* Button Row */
+.button-row {
+  display: flex;
+  gap: 15px;
+  width: 100%;
+}
+
+/* Minimalist Buttons */
+.btn-option {
+  background: #f4f4f4;
+  color: #333;
+  padding: 10px;
+  border: 1px solid #ddd;
+  border-radius: 5px;
+  text-align: center;
+  cursor: pointer;
+  transition: background 0.3s ease;
+  flex: 1;
+}
+
+.btn-option:hover {
+  background: #e0e0e0;
+}
+
+.btn-primary {
+  background-color: #444;
+  color: white;
+  padding: 10px;
+  border: none;
+  border-radius: 5px;
+  text-align: center;
+  cursor: pointer;
+  transition: background 0.3s ease;
+  flex: 1;
+}
+
+.btn-primary:hover {
+  background-color: #333;
+}
+
+/* Icon Button */
 .icon-button {
   background: none;
   border: none;
@@ -550,32 +546,22 @@ select:focus {
   background-color: #f4f4f4;
 }
 
-.icon-pencil::before {
-  content: "✏️"; /* Pencil for edit */
-}
-
-.icon-plus::before {
-  content: "➕"; /* Plus for add */
-}
-
-.icon-trash::before {
-  content: "🗑️"; /* Trash for delete */
-}
-
-/* Right-side available fields section */
+/* Available Fields Section */
 .available-fields {
   flex: 1;
-  padding: 20px;
   background-color: #fff;
+  padding: 20px;
   border: 1px solid #ddd;
-  border-radius: 10px;
-  max-width: 300px; /* Prevents the available fields from growing too wide */
-  overflow: auto; /* Ensures scrollable content if needed */
+  border-radius: 8px;
+  width: 320px;
+  max-height: calc(100vh - 60px);
+  overflow-y: auto;
 }
 
+/* Tabs for Available Fields */
 .tabs {
   display: flex;
-  justify-content: space-around;
+  gap: 10px;
   margin-bottom: 15px;
 }
 
@@ -584,18 +570,21 @@ select:focus {
   border: 1px solid #ddd;
   border-radius: 5px;
   cursor: pointer;
+  background: #f4f4f4;
+  flex: 1;
 }
 
 .tabs button.active {
-  background-color: #007bff;
+  background-color: #444;
   color: white;
   border: none;
 }
 
 .tabs button:not(.active):hover {
-  background-color: #f4f4f4;
+  background-color: #e0e0e0;
 }
 
+/* Available Field Button */
 .available-field-button {
   display: flex;
   align-items: center;
@@ -607,109 +596,29 @@ select:focus {
   border-radius: 5px;
   cursor: pointer;
   transition: background-color 0.2s ease;
+  margin-bottom: 10px;
 }
 
 .available-field-button i {
   font-size: 18px;
-  color: #007bff;
+  color: #555;
 }
 
 .available-field-button:hover {
   background-color: #e0e0e0;
 }
 
-/* Form action buttons (Submit and Clear) */
-.form-actions {
-  display: flex;
-  justify-content: space-between;
-  margin-top: 20px;
-  gap: 20px;
-}
-
-.btn-clear {
-  background-color: #ffc107;
-  color: white;
-  padding: 10px 20px;
-  border-radius: 5px;
-  font-size: 16px;
-}
-
-.btn-clear:hover {
-  background-color: #e0a800;
-}
-
-.btn-submit {
-  background-color: #007bff;
-  color: white;
-  padding: 10px 20px;
-  border-radius: 5px;
-  font-size: 16px;
-}
-
-.btn-submit:hover {
-  background-color: #0056b3;
-}
-
-.saved-forms {
-  margin-top: 20px;
-  padding: 10px;
-  background-color: #f7f7f7;
-  border-radius: 8px;
-}
-
-.saved-forms ul {
-  list-style-type: none;
-  padding: 0;
-}
-
-.saved-forms li {
-  margin-bottom: 10px;
-}
-
-.saved-forms button {
-  background-color: #007bff;
-  color: white;
-  border: none;
-  padding: 5px 10px;
-  border-radius: 5px;
-  cursor: pointer;
-}
-
-.btn-save {
-  background-color: #007bff; /* Blue background for Save Form */
-  color: white; /* White text */
-  padding: 10px 20px;
-  border-radius: 5px;
-  font-size: 16px;
-  border: none; /* Optional, to remove any border */
-}
-
-.btn-save:hover {
-  background-color: #0056b3; /* Darker blue on hover */
-}
-.saved-forms button:hover {
-  background-color: #0056b3;
-}
-
-.form-name-input {
-  width: 50%;
-  padding: 5px;
-  margin-bottom: 10px;
-  font-size: 16px;
-}
-
-/* Mobile responsive adjustments */
+/* Responsive Design */
 @media (max-width: 768px) {
   .scratch-form-content {
-    flex-direction: column; /* Stacks the form and available fields */
+    flex-direction: column;
   }
-
   .form-area {
     max-width: 100%;
   }
-
   .available-fields {
     max-width: 100%;
+    width: 100%;
   }
 }
 </style>
