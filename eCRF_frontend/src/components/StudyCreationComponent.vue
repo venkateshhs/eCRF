@@ -2,14 +2,8 @@
   <div class="study-creation-container">
     <h1>Study Management</h1>
 
-    <!-- Main Options -->
-    <div class="options-container">
-      <button @click="viewExistingStudies" class="btn-primary">View Existing Studies</button>
-      <button @click="startNewStudy" class="btn-secondary">Create New Study</button>
-    </div>
-
-    <!-- New Study Creation -->
-    <div v-if="creatingNewStudy" class="new-study-form">
+    <!-- Study Selection -->
+    <div class="new-study-form">
       <h2>Create a New Study</h2>
 
       <label for="studyType">Select Case Study:</label>
@@ -37,7 +31,7 @@
         <label>Study Description:</label>
         <textarea v-model="customStudy.description" placeholder="Enter study description" required></textarea>
 
-        <button @click="proceedToCustomStudy" class="btn-primary">Proceed with Custom Study</button>
+        <button @click="proceedToCustomStudy" class="btn-option">Proceed with Custom Study</button>
       </div>
     </div>
   </div>
@@ -50,8 +44,7 @@ export default {
   name: "StudyCreationComponent",
   data() {
     return {
-      caseStudies: [],  // Stores API response
-      creatingNewStudy: false,
+      caseStudies: [], // Stores API response
       selectedCaseStudyName: "", // Holds selected study name
       selectedCaseStudy: null, // Stores selected study object
       customStudy: { name: "", description: "" },
@@ -75,12 +68,6 @@ export default {
       } catch (error) {
         console.error("Error loading case studies:", error);
       }
-    },
-    viewExistingStudies() {
-      this.$router.push("/dashboard/view-forms");
-    },
-    startNewStudy() {
-      this.creatingNewStudy = true;
     },
     loadCaseStudyDetails() {
       if (this.selectedCaseStudyName === "custom") {
@@ -127,41 +114,6 @@ h1 {
   text-align: center;
 }
 
-/* Options Container */
-.options-container {
-  display: flex;
-  justify-content: center;
-  gap: 20px;
-  margin-bottom: 30px;
-}
-
-.btn-primary, .btn-secondary {
-  padding: 10px 20px;
-  border-radius: 5px;
-  font-size: 16px;
-  cursor: pointer;
-}
-
-.btn-primary {
-  background-color: #007bff;
-  color: white;
-  border: none;
-}
-
-.btn-primary:hover {
-  background-color: #0056b3;
-}
-
-.btn-secondary {
-  background-color: #28a745;
-  color: white;
-  border: none;
-}
-
-.btn-secondary:hover {
-  background-color: #218838;
-}
-
 /* New Study Form */
 .new-study-form {
   padding: 20px;
@@ -183,19 +135,41 @@ select, input, textarea {
   margin-top: 5px;
 }
 
-/* Buttons */
+/* Minimalistic Button */
+.btn-option {
+  display: block;
+  width: 100%;
+  padding: 10px;
+  margin-top: 15px;
+  background: #f7f7f7;
+  border: 1px solid #ddd;
+  border-radius: 5px;
+  font-size: 16px;
+  cursor: pointer;
+  text-align: center;
+  transition: background 0.3s ease;
+}
+
+.btn-option:hover {
+  background: #e0e0e0;
+}
+
+/* Proceed Button */
 .btn-next {
-  background-color: #28a745;
-  color: white;
+  background: #f7f7f7;
+  color: black;
   padding: 10px 15px;
-  border: none;
+  border: 1px solid #ccc;
   border-radius: 5px;
   cursor: pointer;
+  text-align: center;
+  width: 100%;
   margin-top: 15px;
+  transition: background 0.3s ease;
 }
 
 .btn-next:hover {
-  background-color: #218838;
+  background: #e0e0e0;
 }
 
 /* Custom Study Section */

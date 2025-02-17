@@ -19,16 +19,23 @@
       </button>
       <nav v-if="!sidebarCollapsed">
         <ul>
-          <li v-for="item in menuItems" :key="item.name" @click="navigate(item.route)">
-            {{ item.label }}
-          </li>
+          <li @click="setActiveSection('study-management')" class="nav-item">Study Management</li>
+          <li @click="navigate('/dashboard/user-info')" class="nav-item">User Management</li>
         </ul>
       </nav>
     </aside>
 
-    <!-- Main Content Area -->
+    <!-- Main Content -->
     <main :class="['dashboard-main', { expanded: sidebarCollapsed }]">
-      <router-view></router-view> <!-- This will render the child components -->
+      <!-- Study Management (Default Screen) -->
+      <div v-if="activeSection === 'study-management'">
+        <h1>Study Management</h1>
+        <button @click="navigate('/dashboard/create-study')" class="btn-option">Create Study</button>
+        <button @click="navigate('/dashboard/view-forms')" class="btn-option">Open Study</button>
+      </div>
+
+      <!-- Study Creation & User Management Pages -->
+      <router-view v-else></router-view>
     </main>
   </div>
 </template>
@@ -38,79 +45,87 @@ export default {
   name: "DashboardComponent",
   data() {
     return {
-      sidebarCollapsed: false, // Tracks the visibility of the sidebar
-      menuItems: [
-        { name: "userInfo", label: "User Info", route: "/dashboard/user-info" },
-        { name: "createStudy", label: "Create Study", route: "/dashboard/create-study" },
-        { name: "createForm", label: "Create Form", route: "/dashboard/create-form" },
-        { name: "viewForms", label: "View Forms", route: "/dashboard/view-forms" },  // Updated route
-        { name: "analytics", label: "Analytics", route: "/dashboard/analytics" },
-      ],
+      sidebarCollapsed: false,
+      activeSection: "study-management", // Default to Study Management on load
     };
   },
   methods: {
     toggleSidebar() {
-      this.sidebarCollapsed = !this.sidebarCollapsed; // Toggles the collapse state
+      this.sidebarCollapsed = !this.sidebarCollapsed;
+    },
+    setActiveSection(section) {
+      this.activeSection = section; // Show Study Management when clicked
     },
     navigate(route) {
-      this.$router.push(route); // Navigate to the selected route
+      this.activeSection = ""; // Hide Study Management UI when navigating elsewhere
+      this.$router.push(route);
     },
     logout() {
-      this.$store.commit("setUser", null); // Clear user info in Vuex
-      this.$router.push("/"); // Redirect to login page
+      this.$store.commit("setUser", null);
+      this.$router.push("/");
     },
+  },
+  mounted() {
+    if (this.$route.path === "/dashboard") {
+      this.activeSection = "study-management"; // Ensure Study Management is visible on refresh
+    }
   },
 };
 </script>
 
-
 <style scoped>
-/* General Layout */
+/* Layout */
 .dashboard-layout {
   display: grid;
   grid-template-areas:
     "header header"
     "sidebar main";
   grid-template-rows: 70px 1fr;
-  grid-template-columns: 250px 1fr; /* Sidebar starts expanded */
+  grid-template-columns: 220px 1fr;
   height: 100vh;
-  font-family: Arial, sans-serif;
-  transition: grid-template-columns 0.3s ease; /* Smooth resize */
+  font-family: "Inter", sans-serif;
+  transition: grid-template-columns 0.3s ease;
 }
 
+/* Header */
 .dashboard-header {
   grid-area: header;
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 0 20px;
-  background-color: #007bff;
-  color: white;
+  padding: 10px 20px;
+  background: #f5f5f5;
+  border-bottom: 1px solid #ddd;
 }
 
 .logo-container img {
-  width: 120px;
+  width: 110px;
 }
 
 .user-actions .btn-logout {
   background: none;
   border: none;
-  color: white;
+  font-size: 14px;
+  color: #444;
   cursor: pointer;
-  font-size: 16px;
+}
+
+.btn-logout:hover {
+  text-decoration: underline;
 }
 
 /* Sidebar */
 .dashboard-sidebar {
   grid-area: sidebar;
-  background-color: #f4f4f9;
+  background: #f9f9f9;
   padding: 20px;
   border-right: 1px solid #ddd;
-  transition: width 0.3s ease; /* Smooth collapse/expand */
+  transition: width 0.3s ease;
 }
 
 .dashboard-sidebar.collapsed {
-  width: 70px; /* Collapsed width */
+  width: 70px;
+  padding: 10px;
 }
 
 .hamburger-menu {
@@ -121,49 +136,85 @@ export default {
   display: flex;
   flex-direction: column;
   align-items: center;
+  gap: 4px;
 }
 
 .hamburger-menu span {
   display: block;
-  width: 25px;
-  height: 3px;
-  background-color: #333;
-  margin: 5px 0;
+  width: 20px;
+  height: 2px;
+  background: #333;
   transition: all 0.3s ease;
 }
 
 .hamburger-menu:hover span {
-  background-color: #007bff;
+  background: #000;
 }
 
+/* Sidebar Navigation */
 .dashboard-sidebar nav ul {
   list-style: none;
   padding: 0;
 }
 
-.dashboard-sidebar nav li {
-  margin: 10px 0;
+.nav-item {
+  padding: 10px;
+  font-size: 15px;
+  color: #444;
   cursor: pointer;
-  font-size: 16px;
+  border-radius: 4px;
+  transition: background 0.3s ease;
 }
 
-.dashboard-sidebar nav li:hover {
-  color: #007bff;
+.nav-item:hover {
+  background: #eaeaea;
 }
 
-/* Main Content Area */
+/* Main Content */
 .dashboard-main {
   grid-area: main;
-  padding: 20px;
+  padding: 30px;
   background: #fff;
-  transition: margin-left 0.3s ease; /* Smooth resize */
+  transition: margin-left 0.3s ease;
 }
 
 .dashboard-main.expanded {
-  margin-left: -180px; /* Shrinks based on sidebar width */
+  margin-left: -150px;
 }
 
-.dashboard-main h1 {
+/* Minimalistic Buttons */
+.btn-option {
+  display: block;
+  width: 100%;
+  padding: 12px;
+  margin: 10px 0;
+  background: #f0f0f0;
+  border: 1px solid #ccc;
+  border-radius: 5px;
+  font-size: 16px;
   color: #333;
+  cursor: pointer;
+  transition: background 0.3s ease, color 0.3s ease;
+  text-align: center;
+}
+
+.btn-option:hover {
+  background: #e0e0e0;
+  color: #000;
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+  .dashboard-layout {
+    grid-template-columns: 70px 1fr;
+  }
+
+  .dashboard-sidebar {
+    width: 70px;
+  }
+
+  .dashboard-main {
+    padding: 20px;
+  }
 }
 </style>
