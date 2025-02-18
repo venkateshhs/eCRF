@@ -1,28 +1,49 @@
 <template>
   <div class="create-form-container">
+    <!-- Header -->
     <div class="header-container">
       <button @click="goBack" class="btn-back">
         <i class="fas fa-arrow-left"></i> Back
       </button>
-      <h1>Create Form from Scratch</h1>
     </div>
 
+    <!-- Meta Information Section (displayed only if there is any meta info) -->
+    <div class="meta-info-container" v-if="hasMetaInfo">
+      <h2>Study Meta Information</h2>
+      <p v-if="studyDetails.name"><strong>Study Name:</strong> {{ studyDetails.name }}</p>
+      <p v-if="studyDetails.description"><strong>Description:</strong> {{ studyDetails.description }}</p>
+      <p v-if="studyDetails.numberOfForms"><strong>Number of Forms:</strong> {{ studyDetails.numberOfForms }}</p>
+      <p v-if="metaInfo.numberOfSubjects"><strong>Number of Subjects:</strong> {{ metaInfo.numberOfSubjects }}</p>
+      <p v-if="metaInfo.numberOfVisits"><strong>Number of Visits per Subject:</strong> {{ metaInfo.numberOfVisits }}</p>
+      <p v-if="metaInfo.studyMetaDescription"><strong>Study Meta Description:</strong> {{ metaInfo.studyMetaDescription }}</p>
+    </div>
+
+    <!-- Main Content: Form Area & Available Fields (side by side) -->
     <div class="scratch-form-content">
       <!-- Form Area -->
       <div class="form-area">
-        <!-- Editable Form Name at Top Center -->
+        <!-- Editable Form Name and Navigation -->
         <div class="form-heading-container">
+          <button @click="prevForm" class="nav-button" :disabled="currentFormIndex === 0">
+            <i class="fas fa-chevron-left"></i>
+          </button>
           <input
             type="text"
             v-model="formName"
             class="form-name-input heading-input"
             placeholder="Untitled Form"
           />
+          <button @click="nextForm" class="nav-button" :disabled="currentFormIndex === totalForms - 1">
+            <i class="fas fa-chevron-right"></i>
+          </button>
+        </div>
+        <div class="form-indicator">
+          Form {{ currentFormIndex + 1 }} / {{ totalForms }} forms
         </div>
 
-        <!-- Render Form Sections -->
+        <!-- Render Current Form Sections -->
         <div
-          v-for="(section, sectionIndex) in formSections"
+          v-for="(section, sectionIndex) in currentForm.sections"
           :key="sectionIndex"
           class="form-section"
           :class="{ active: activeSection === sectionIndex }"
@@ -50,7 +71,6 @@
               </button>
             </div>
           </div>
-
           <!-- Section Content -->
           <div v-if="!section.collapsed" class="section-content">
             <div
@@ -129,7 +149,7 @@
           </div>
         </div>
 
-        <!-- Form Actions: Horizontally Aligned -->
+        <!-- Form Actions: Horizontal Button Row -->
         <div class="form-actions">
           <div class="button-row">
             <button @click.prevent="addNewSection" class="btn-option">+ Add Section</button>
@@ -140,24 +160,17 @@
         </div>
       </div>
 
-      <!-- Available Fields Area -->
+      <!-- Available Fields Area (Fixed on Right) -->
       <div class="available-fields">
         <h2>Available Fields</h2>
         <div class="tabs">
-          <button
-            :class="{ active: activeTab === 'general' }"
-            @click="activeTab = 'general'"
-          >
+          <button :class="{ active: activeTab === 'general' }" @click="activeTab = 'general'">
             General Fields
           </button>
-          <button
-            :class="{ active: activeTab === 'specialized' }"
-            @click="activeTab = 'specialized'"
-          >
+          <button :class="{ active: activeTab === 'specialized' }" @click="activeTab = 'specialized'">
             Specialized Fields
           </button>
         </div>
-
         <!-- General Fields Tab -->
         <div v-if="activeTab === 'general'" class="general-fields">
           <div
@@ -169,7 +182,6 @@
             <i :class="field.icon"></i> {{ field.label }}
           </div>
         </div>
-
         <!-- Specialized Fields Tab -->
         <div v-if="activeTab === 'specialized'" class="specialized-fields">
           <div
@@ -192,60 +204,140 @@
         </div>
       </div>
     </div>
+
+    <!-- Save Dialog Modal -->
+    <div v-if="showSaveDialog" class="modal-overlay">
+      <div class="modal">
+        <p>{{ saveDialogMessage }}</p>
+        <button @click="closeSaveDialog" class="btn-primary modal-btn">OK</button>
+      </div>
+    </div>
   </div>
 </template>
 
 <script>
+// eslint-disable-next-line
 import axios from "axios";
-
 export default {
   name: "ScratchFormComponent",
   data() {
     return {
-      formSections: [{ title: "Default Section", fields: [], collapsed: false }],
-      savedForms: [],
-      generalFields: [],
-      specializedFieldSections: [],
+      // Array of forms; each form has a formName and sections (default structure)
+      forms: [],
+      currentFormIndex: 0,
+      totalForms: 1,
       activeSection: 0,
       activeTab: "general",
-      formName: "Untitled Form",
+      // Available fields for dynamic addition
+      generalFields: [],
+      specializedFieldSections: [],
+      showSaveDialog: false,
+      saveDialogMessage: "",
+      // Default form structure for each form
+      defaultFormStructure: [{ title: "Default Section", fields: [], collapsed: false }],
+      // Local meta information from studyDetails query (if provided)
+      studyDetails: {},
+      metaInfo: {
+        numberOfSubjects: null,
+        numberOfVisits: null,
+        studyMetaDescription: ""
+      },
     };
   },
   computed: {
     token() {
       return this.$store.state.token;
     },
+    currentForm() {
+      // Fallback if forms array is empty
+      return this.forms[this.currentFormIndex] || { formName: "", sections: [] };
+    },
+    formName: {
+      get() {
+        return this.currentForm.formName;
+      },
+      set(value) {
+        // Update the current form's name
+        this.$set(this.forms, this.currentFormIndex, {
+          ...this.currentForm,
+          formName: value,
+        });
+      },
+    },
+    // Compute if there is any meta information to display
+    hasMetaInfo() {
+      return (
+        this.studyDetails.name ||
+        this.studyDetails.description ||
+        this.studyDetails.numberOfForms ||
+        this.metaInfo.numberOfSubjects ||
+        this.metaInfo.numberOfVisits ||
+        this.metaInfo.studyMetaDescription
+      );
+    },
   },
   async mounted() {
+    // Read studyDetails from query; expects properties "numberOfForms", "name", "description", and optionally "metaInfo"
+    const details = this.$route.query.studyDetails ? JSON.parse(this.$route.query.studyDetails) : {};
+    this.studyDetails = details;
+    this.totalForms = details.numberOfForms || 1;
+    // If metaInfo is provided in query, update local metaInfo; otherwise, remain default
+    if (details.metaInfo) {
+      this.metaInfo = details.metaInfo;
+    }
+    // Initialize forms array with default structure and default names "Form1", "Form2", etc.
+    for (let i = 0; i < this.totalForms; i++) {
+      this.forms.push({
+        formName: `Form${i + 1}`,
+        sections: JSON.parse(JSON.stringify(this.defaultFormStructure)),
+      });
+    }
     await this.loadAvailableFields();
   },
   methods: {
     navigateToSavedForms() {
       this.$router.push("/saved-forms");
     },
+    // Simulated save function (axios call commented out)
     async saveForm() {
       if (!this.token) {
         alert("Authentication error: No token found. Please log in again.");
         this.$router.push("/login");
         return;
       }
+      // eslint-disable-next-line no-unused-vars
       const formData = {
-        form_name: this.formName || "Untitled Form",
-        form_structure: this.formSections,
+        form_name: this.currentForm.formName,
+        form_structure: this.currentForm.sections,
       };
+      /* Uncomment below to commit to the database:
       try {
         await axios.post("http://127.0.0.1:8000/forms/save-form", formData, {
           headers: { Authorization: `Bearer ${this.token}` },
         });
-        alert(`Form "${this.formName}" saved successfully!`);
       } catch (error) {
         if (error.response?.status === 401) {
           alert("Your session has expired. Please log in again.");
           this.$router.push("/login");
+          return;
         } else {
           console.error("Error saving form:", error);
           alert("Failed to save form. Please try again.");
+          return;
         }
+      }
+      */
+      // Simulate successful save by showing modal dialog
+      this.saveDialogMessage = `Form "${this.currentForm.formName}" saved successfully!`;
+      this.showSaveDialog = true;
+    },
+    closeSaveDialog() {
+      this.showSaveDialog = false;
+      // If more forms remain, automatically navigate to the next form
+      if (this.currentFormIndex < this.totalForms - 1) {
+        this.nextForm();
+      } else {
+        alert("All forms have been saved.");
       }
     },
     async loadAvailableFields() {
@@ -261,8 +353,21 @@ export default {
     goBack() {
       this.$router.back("/dashboard");
     },
+    // Multi-form navigation
+    prevForm() {
+      if (this.currentFormIndex > 0) {
+        this.currentFormIndex--;
+        this.activeSection = 0;
+      }
+    },
+    nextForm() {
+      if (this.currentFormIndex < this.totalForms - 1) {
+        this.currentFormIndex++;
+        this.activeSection = 0;
+      }
+    },
     toggleSection(sectionIndex) {
-      this.formSections.forEach((section, index) => {
+      this.currentForm.sections.forEach((section, index) => {
         if (index === sectionIndex) {
           section.collapsed = !section.collapsed;
           if (!section.collapsed) {
@@ -277,22 +382,22 @@ export default {
       this.activeSection = sectionIndex;
     },
     addFieldToActiveSection(field) {
-      const section = this.formSections[this.activeSection];
+      const section = this.currentForm.sections[this.activeSection];
       if (section.collapsed) {
         this.toggleSection(this.activeSection);
       }
       section.fields.push({ ...field, name: `${field.type}_${Date.now()}` });
     },
     addNewSection() {
-      this.formSections.push({
-        title: `New Section ${this.formSections.length + 1}`,
+      this.currentForm.sections.push({
+        title: `New Section ${this.currentForm.sections.length + 1}`,
         fields: [],
         collapsed: true,
       });
-      this.toggleSection(this.formSections.length - 1);
+      this.toggleSection(this.currentForm.sections.length - 1);
     },
     addNewSectionBelow(index) {
-      this.formSections.splice(index + 1, 0, {
+      this.currentForm.sections.splice(index + 1, 0, {
         title: `New Section ${index + 2}`,
         fields: [],
         collapsed: true,
@@ -301,23 +406,23 @@ export default {
     },
     deleteSection(index) {
       if (confirm("Are you sure you want to delete this section?")) {
-        this.formSections.splice(index, 1);
+        this.currentForm.sections.splice(index, 1);
         if (this.activeSection >= index) {
           this.activeSection = Math.max(0, this.activeSection - 1);
         }
-        if (this.formSections.length > 0) {
+        if (this.currentForm.sections.length > 0) {
           this.toggleSection(this.activeSection);
         }
       }
     },
     editSection(index) {
-      const newTitle = prompt("Enter a new title for this section:", this.formSections[index].title);
+      const newTitle = prompt("Enter a new title for this section:", this.currentForm.sections[index].title);
       if (newTitle) {
-        this.formSections[index].title = newTitle;
+        this.currentForm.sections[index].title = newTitle;
       }
     },
     copySection(sectionIndex) {
-      const sectionToCopy = this.formSections[sectionIndex];
+      const sectionToCopy = this.currentForm.sections[sectionIndex];
       const newSection = JSON.parse(JSON.stringify(sectionToCopy));
       newSection.title = `${sectionToCopy.title} (Copy)`;
       newSection.fields = sectionToCopy.fields.map((field) => ({
@@ -325,33 +430,33 @@ export default {
         name: `${field.name}_copy_${Date.now()}`,
       }));
       newSection.collapsed = true;
-      this.formSections.splice(sectionIndex + 1, 0, newSection);
+      this.currentForm.sections.splice(sectionIndex + 1, 0, newSection);
       this.toggleSection(sectionIndex + 1);
     },
     clearForm() {
       if (confirm("Are you sure you want to clear the form?")) {
-        this.formSections = [{ title: "Default Section", fields: [], collapsed: false }];
+        this.currentForm.sections = [{ title: "Default Section", fields: [], collapsed: false }];
         this.activeSection = 0;
       }
     },
     submitForm() {
-      console.log("Form submitted with data:", this.formSections);
+      console.log("Form submitted with data:", this.currentForm.sections);
       alert("Form submitted successfully!");
     },
     editField(sectionIndex, fieldIndex) {
-      const field = this.formSections[sectionIndex].fields[fieldIndex];
+      const field = this.currentForm.sections[sectionIndex].fields[fieldIndex];
       const newLabel = prompt("Enter new label for the field:", field.label);
       if (newLabel) {
-        this.formSections[sectionIndex].fields[fieldIndex].label = newLabel;
+        this.currentForm.sections[sectionIndex].fields[fieldIndex].label = newLabel;
       }
     },
     addSimilarField(sectionIndex, fieldIndex) {
-      const field = this.formSections[sectionIndex].fields[fieldIndex];
+      const field = this.currentForm.sections[sectionIndex].fields[fieldIndex];
       const newField = { ...field, name: `${field.type}_${Date.now()}` };
-      this.formSections[sectionIndex].fields.splice(fieldIndex + 1, 0, newField);
+      this.currentForm.sections[sectionIndex].fields.splice(fieldIndex + 1, 0, newField);
     },
     removeField(sectionIndex, fieldIndex) {
-      this.formSections[sectionIndex].fields.splice(fieldIndex, 1);
+      this.currentForm.sections[sectionIndex].fields.splice(fieldIndex, 1);
     },
   },
 };
@@ -391,27 +496,13 @@ h1 {
   text-align: center;
 }
 
-/* Scratch Form Content */
-.scratch-form-content {
-  display: flex;
-  justify-content: space-between;
-  gap: 20px;
-  flex-wrap: wrap;
-}
-
-/* Form Area */
-.form-area {
-  flex: 3;
-  background-color: #fff;
-  padding: 20px;
-  border-radius: 8px;
-  border: 1px solid #ddd;
-}
-
-/* Editable Form Heading */
+/* Form Navigation: Editable Form Name & Navigation Buttons */
 .form-heading-container {
-  text-align: center;
-  margin-bottom: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  margin-bottom: 5px;
 }
 
 .heading-input {
@@ -423,6 +514,62 @@ h1 {
   outline: none;
   width: 100%;
   max-width: 400px;
+}
+
+.nav-button {
+  background: #f4f4f4;
+  border: 1px solid #ddd;
+  border-radius: 5px;
+  padding: 8px 12px;
+  cursor: pointer;
+  transition: background 0.3s ease;
+}
+
+.nav-button:hover {
+  background: #e0e0e0;
+}
+
+.form-indicator {
+  text-align: center;
+  font-size: 16px;
+  color: #555;
+  margin-bottom: 20px;
+}
+
+/* Meta Information Section (plain text display) */
+.meta-info-container {
+  background: #fff;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  padding: 15px;
+  margin-bottom: 20px;
+}
+.meta-info-container h2 {
+  margin-top: 0;
+  text-align: center;
+}
+.meta-info-container p {
+  margin: 5px 0;
+  font-size: 14px;
+  color: #444;
+}
+
+/* Main Content Layout: Two columns (no wrapping) */
+.scratch-form-content {
+  display: flex;
+  flex-wrap: nowrap;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+/* Form Area */
+.form-area {
+  flex: 1;
+  background-color: #fff;
+  padding: 20px;
+  border-radius: 8px;
+  border: 1px solid #ddd;
+  min-width: 600px;
 }
 
 /* Form Section */
@@ -489,7 +636,7 @@ select:focus {
   border-radius: 5px;
 }
 
-/* Button Row */
+/* Button Row Container */
 .button-row {
   display: flex;
   gap: 15px;
@@ -546,9 +693,9 @@ select:focus {
   background-color: #f4f4f4;
 }
 
-/* Available Fields Section */
+/* Available Fields Section (Right Column) */
 .available-fields {
-  flex: 1;
+  flex-shrink: 0;
   background-color: #fff;
   padding: 20px;
   border: 1px solid #ddd;
@@ -606,6 +753,41 @@ select:focus {
 
 .available-field-button:hover {
   background-color: #e0e0e0;
+}
+
+/* Modal Dialog */
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0,0,0,0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.modal {
+  background: #fff;
+  padding: 20px;
+  border-radius: 8px;
+  width: 300px;
+  box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+}
+
+.modal p {
+  margin-bottom: 15px;
+  text-align: center;
+}
+
+.modal-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.modal-actions button {
+  flex: 1;
 }
 
 /* Responsive Design */
