@@ -257,11 +257,11 @@ export default {
         return this.currentForm.formName;
       },
       set(value) {
-        // Update the current form's name
-        this.$set(this.forms, this.currentFormIndex, {
+        // Directly update the forms array element
+        this.forms[this.currentFormIndex] = {
           ...this.currentForm,
           formName: value,
-        });
+        };
       },
     },
     // Compute if there is any meta information to display
