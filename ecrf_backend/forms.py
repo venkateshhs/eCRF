@@ -222,10 +222,12 @@ def get_case_study_names(user: dict = Depends(get_current_user)):
 
     return case_studies
 
-
+"""
+NO longer used since since we are not specifying the study type and its structure, rather just using yaml names to indicate
+the study type as a meta information
 @router.get("/models/{category}/{file_name}")
 def get_yaml_content(category: str, file_name: str, user: User = Depends(get_current_user)):
-    """Fetch and return the structured content of a YAML file."""
+    # Fetch and return the structured content of a YAML file.
     logger.info(f"User {user.username} is accessing {file_name} in {category}")
 
     category_path = BASE_DIR / category
@@ -241,7 +243,7 @@ def get_yaml_content(category: str, file_name: str, user: User = Depends(get_cur
         raise HTTPException(status_code=500, detail="Error loading YAML file")
 
     return yaml_content  # Send parsed YAML structure
-
+"""
 
 
 @router.get("/{form_id}")
