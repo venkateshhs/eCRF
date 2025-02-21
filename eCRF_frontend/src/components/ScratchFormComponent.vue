@@ -7,15 +7,28 @@
       </button>
     </div>
 
-    <!-- Meta Information Section (displayed only if there is any meta info) -->
-    <div class="meta-info-container" v-if="hasMetaInfo">
-      <h2>Study Meta Information</h2>
-      <p v-if="studyDetails.name"><strong>Study Name:</strong> {{ studyDetails.name }}</p>
-      <p v-if="studyDetails.description"><strong>Description:</strong> {{ studyDetails.description }}</p>
-      <p v-if="studyDetails.numberOfForms"><strong>Number of Forms:</strong> {{ studyDetails.numberOfForms }}</p>
-      <p v-if="metaInfo.numberOfSubjects"><strong>Number of Subjects:</strong> {{ metaInfo.numberOfSubjects }}</p>
-      <p v-if="metaInfo.numberOfVisits"><strong>Number of Visits per Subject:</strong> {{ metaInfo.numberOfVisits }}</p>
-      <p v-if="metaInfo.studyMetaDescription"><strong>Study Meta Description:</strong> {{ metaInfo.studyMetaDescription }}</p>
+    <!-- Meta Information Section -->
+    <div class="meta-info-container" :class="{ collapsed: metaInfoCollapsed }">
+      <div class="meta-header">
+        <h2>Study Meta Information</h2>
+        <div class="meta-actions">
+          <button @click="openMetaEditDialog" class="btn-meta-edit">
+            <i class="fas fa-edit"></i> Edit
+          </button>
+          <button @click="toggleMetaInfo" class="btn-meta-toggle">
+            <i :class="metaInfoCollapsed ? 'fas fa-chevron-down' : 'fas fa-chevron-up'"></i>
+          </button>
+        </div>
+      </div>
+      <!-- Show meta info only if not collapsed -->
+      <div v-if="!metaInfoCollapsed">
+        <p v-if="studyDetails.name"><strong>Study Name:</strong> {{ studyDetails.name }}</p>
+        <p v-if="studyDetails.description"><strong>Description:</strong> {{ studyDetails.description }}</p>
+        <p v-if="studyDetails.numberOfForms"><strong>Number of Forms:</strong> {{ studyDetails.numberOfForms }}</p>
+        <p v-if="metaInfo.numberOfSubjects"><strong>Number of Subjects:</strong> {{ metaInfo.numberOfSubjects }}</p>
+        <p v-if="metaInfo.numberOfVisits"><strong>Number of Visits per Subject:</strong> {{ metaInfo.numberOfVisits }}</p>
+        <p v-if="metaInfo.studyMetaDescription"><strong>Study Meta Description:</strong> {{ metaInfo.studyMetaDescription }}</p>
+      </div>
     </div>
 
     <!-- Main Content: Form Area & Available Fields (side by side) -->
@@ -212,11 +225,56 @@
         <button @click="closeSaveDialog" class="btn-primary modal-btn">OK</button>
       </div>
     </div>
+
+    <!-- Meta Edit Dialog Modal -->
+    <div v-if="showMetaEditDialog" class="modal-overlay">
+      <div class="modal meta-edit-modal">
+        <h3>Edit Meta Information</h3>
+        <div class="meta-edit-field">
+          <label>Study Name:</label>
+          <input type="text" v-model="metaEditForm.name" placeholder="Enter study name" />
+        </div>
+        <div class="meta-edit-field">
+          <label>Description:</label>
+          <textarea v-model="metaEditForm.description" placeholder="Enter description"></textarea>
+        </div>
+        <div class="meta-edit-field">
+          <label>Number of Forms:</label>
+          <input type="number" v-model.number="metaEditForm.numberOfForms" placeholder="Enter number of forms" />
+        </div>
+        <div class="meta-edit-field">
+          <label>Number of Subjects:</label>
+          <input type="number" v-model.number="metaEditForm.numberOfSubjects" placeholder="Enter number of subjects" />
+        </div>
+        <div class="meta-edit-field">
+          <label>Number of Visits per Subject:</label>
+          <input type="number" v-model.number="metaEditForm.numberOfVisits" placeholder="Enter number of visits" />
+        </div>
+        <div class="meta-edit-field">
+          <label>Study Meta Description:</label>
+          <textarea v-model="metaEditForm.studyMetaDescription" placeholder="Enter meta description"></textarea>
+        </div>
+        <div class="modal-actions">
+          <button @click="saveMetaInfo" class="btn-primary modal-btn">Save</button>
+          <button @click="closeMetaEditDialog" class="btn-option modal-btn">Cancel</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Reinitialization Confirmation Modal -->
+    <div v-if="showReinitConfirm" class="modal-overlay">
+      <div class="modal">
+        <p>Changing the number of forms will reinitialize your current forms. Proceed?</p>
+        <div class="modal-actions">
+          <button @click="confirmReinit" class="btn-primary modal-btn">Yes</button>
+          <button @click="cancelReinit" class="btn-option modal-btn">No</button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
 <script>
-// eslint-disable-next-line
 import axios from "axios";
 export default {
   name: "ScratchFormComponent",
@@ -242,6 +300,21 @@ export default {
         numberOfVisits: null,
         studyMetaDescription: ""
       },
+      // For editing meta info in a modal dialog
+      showMetaEditDialog: false,
+      metaEditForm: {
+        name: "",
+        description: "",
+        numberOfForms: null,
+        numberOfSubjects: null,
+        numberOfVisits: null,
+        studyMetaDescription: ""
+      },
+      // For confirming reinitialization when numberOfForms changes
+      showReinitConfirm: false,
+      pendingMetaEdit: null,
+      // Default collapsed state is true
+      metaInfoCollapsed: true,
     };
   },
   computed: {
@@ -264,7 +337,6 @@ export default {
         };
       },
     },
-    // Compute if there is any meta information to display
     hasMetaInfo() {
       return (
         this.studyDetails.name ||
@@ -277,15 +349,12 @@ export default {
     },
   },
   async mounted() {
-    // Read studyDetails from query; expects properties "numberOfForms", "name", "description", and optionally "metaInfo"
     const details = this.$route.query.studyDetails ? JSON.parse(this.$route.query.studyDetails) : {};
     this.studyDetails = details;
     this.totalForms = details.numberOfForms || 1;
-    // If metaInfo is provided in query, update local metaInfo; otherwise, remain default
     if (details.metaInfo) {
       this.metaInfo = details.metaInfo;
     }
-    // Initialize forms array with default structure and default names "Form1", "Form2", etc.
     for (let i = 0; i < this.totalForms; i++) {
       this.forms.push({
         formName: `Form${i + 1}`,
@@ -298,7 +367,6 @@ export default {
     navigateToSavedForms() {
       this.$router.push("/saved-forms");
     },
-    // Simulated save function (axios call commented out)
     async saveForm() {
       if (!this.token) {
         alert("Authentication error: No token found. Please log in again.");
@@ -327,13 +395,11 @@ export default {
         }
       }
       */
-      // Simulate successful save by showing modal dialog
       this.saveDialogMessage = `Form "${this.currentForm.formName}" saved successfully!`;
       this.showSaveDialog = true;
     },
     closeSaveDialog() {
       this.showSaveDialog = false;
-      // If more forms remain, automatically navigate to the next form
       if (this.currentFormIndex < this.totalForms - 1) {
         this.nextForm();
       } else {
@@ -353,7 +419,6 @@ export default {
     goBack() {
       this.$router.back("/dashboard");
     },
-    // Multi-form navigation
     prevForm() {
       if (this.currentFormIndex > 0) {
         this.currentFormIndex--;
@@ -458,6 +523,60 @@ export default {
     removeField(sectionIndex, fieldIndex) {
       this.currentForm.sections[sectionIndex].fields.splice(fieldIndex, 1);
     },
+    // Meta Info Editing Methods
+    openMetaEditDialog() {
+      this.metaEditForm = {
+        name: this.studyDetails.name || "",
+        description: this.studyDetails.description || "",
+        numberOfForms: this.studyDetails.numberOfForms || 1,
+        numberOfSubjects: this.metaInfo.numberOfSubjects,
+        numberOfVisits: this.metaInfo.numberOfVisits,
+        studyMetaDescription: this.metaInfo.studyMetaDescription || "",
+      };
+      this.showMetaEditDialog = true;
+    },
+    closeMetaEditDialog() {
+      this.showMetaEditDialog = false;
+    },
+    saveMetaInfo() {
+      if (this.metaEditForm.numberOfForms !== this.totalForms) {
+        this.pendingMetaEdit = { ...this.metaEditForm };
+        this.showReinitConfirm = true;
+        return;
+      }
+      this.updateMetaData();
+      this.showMetaEditDialog = false;
+    },
+    updateMetaData() {
+      this.studyDetails.name = this.metaEditForm.name;
+      this.studyDetails.description = this.metaEditForm.description;
+      this.studyDetails.numberOfForms = this.metaEditForm.numberOfForms;
+      this.metaInfo.numberOfSubjects = this.metaEditForm.numberOfSubjects;
+      this.metaInfo.numberOfVisits = this.metaEditForm.numberOfVisits;
+      this.metaInfo.studyMetaDescription = this.metaEditForm.studyMetaDescription;
+    },
+    toggleMetaInfo() {
+      this.metaInfoCollapsed = !this.metaInfoCollapsed;
+    },
+    // Reinitialization Confirmation Methods
+    confirmReinit() {
+      this.totalForms = this.pendingMetaEdit.numberOfForms;
+      this.forms = [];
+      for (let i = 0; i < this.totalForms; i++) {
+        this.forms.push({
+          formName: `Form${i + 1}`,
+          sections: JSON.parse(JSON.stringify(this.defaultFormStructure)),
+        });
+      }
+      this.updateMetaData();
+      this.showReinitConfirm = false;
+      this.showMetaEditDialog = false;
+      this.pendingMetaEdit = null;
+    },
+    cancelReinit() {
+      this.showReinitConfirm = false;
+      this.pendingMetaEdit = null;
+    },
   },
 };
 </script>
@@ -479,7 +598,6 @@ export default {
   gap: 10px;
   margin-bottom: 15px;
 }
-
 .btn-back {
   background: none;
   border: none;
@@ -487,7 +605,6 @@ export default {
   cursor: pointer;
   color: #555;
 }
-
 h1 {
   font-size: 24px;
   font-weight: 500;
@@ -496,57 +613,40 @@ h1 {
   text-align: center;
 }
 
-/* Form Navigation: Editable Form Name & Navigation Buttons */
-.form-heading-container {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 10px;
-  margin-bottom: 5px;
-}
-
-.heading-input {
-  font-size: 22px;
-  font-weight: 500;
-  text-align: center;
-  border: none;
-  border-bottom: 1px solid #ccc;
-  outline: none;
-  width: 100%;
-  max-width: 400px;
-}
-
-.nav-button {
-  background: #f4f4f4;
-  border: 1px solid #ddd;
-  border-radius: 5px;
-  padding: 8px 12px;
-  cursor: pointer;
-  transition: background 0.3s ease;
-}
-
-.nav-button:hover {
-  background: #e0e0e0;
-}
-
-.form-indicator {
-  text-align: center;
-  font-size: 16px;
-  color: #555;
-  margin-bottom: 20px;
-}
-
-/* Meta Information Section (plain text display) */
+/* Meta Information Section */
 .meta-info-container {
   background: #fff;
   border: 1px solid #ddd;
   border-radius: 8px;
   padding: 15px;
   margin-bottom: 20px;
+  transition: padding 0.3s ease, font-size 0.3s ease;
 }
-.meta-info-container h2 {
-  margin-top: 0;
-  text-align: center;
+.meta-info-container.collapsed {
+  padding: 5px 10px;
+  font-size: 12px;
+}
+.meta-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.meta-actions {
+  display: flex;
+  gap: 10px;
+}
+.btn-meta-edit,
+.btn-meta-toggle {
+  background: #f4f4f4;
+  border: 1px solid #ddd;
+  border-radius: 5px;
+  padding: 5px 8px;
+  cursor: pointer;
+  transition: background 0.3s ease;
+}
+.btn-meta-edit:hover,
+.btn-meta-toggle:hover {
+  background: #e0e0e0;
 }
 .meta-info-container p {
   margin: 5px 0;
@@ -572,13 +672,48 @@ h1 {
   min-width: 600px;
 }
 
+/* Form Navigation: Editable Form Name & Navigation Buttons */
+.form-heading-container {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  margin-bottom: 5px;
+}
+.heading-input {
+  font-size: 22px;
+  font-weight: 500;
+  text-align: center;
+  border: none;
+  border-bottom: 1px solid #ccc;
+  outline: none;
+  width: 100%;
+  max-width: 400px;
+}
+.nav-button {
+  background: #f4f4f4;
+  border: 1px solid #ddd;
+  border-radius: 5px;
+  padding: 8px 12px;
+  cursor: pointer;
+  transition: background 0.3s ease;
+}
+.nav-button:hover {
+  background: #e0e0e0;
+}
+.form-indicator {
+  text-align: center;
+  font-size: 16px;
+  color: #555;
+  margin-bottom: 20px;
+}
+
 /* Form Section */
 .form-section {
   padding: 15px;
   border-bottom: 1px solid #ddd;
   transition: all 0.3s ease;
 }
-
 .form-section.active {
   background-color: #e7f3ff;
   border-left: 3px solid #444;
@@ -590,18 +725,13 @@ h1 {
   justify-content: space-between;
   align-items: center;
 }
-
 .field-actions {
   display: flex;
   gap: 10px;
 }
-
-/* Field Box */
 .field-box {
   margin-top: 10px;
 }
-
-/* Input Styles */
 input,
 textarea,
 select {
@@ -612,7 +742,6 @@ select {
   margin-top: 5px;
   box-sizing: border-box;
 }
-
 input:focus,
 textarea:focus,
 select:focus {
@@ -628,22 +757,11 @@ select:focus {
   gap: 15px;
   margin-top: 20px;
 }
-
-.form-name-input {
-  flex: 1;
-  padding: 8px;
-  border: 1px solid #ccc;
-  border-radius: 5px;
-}
-
-/* Button Row Container */
 .button-row {
   display: flex;
   gap: 15px;
   width: 100%;
 }
-
-/* Minimalist Buttons */
 .btn-option {
   background: #f4f4f4;
   color: #333;
@@ -655,11 +773,9 @@ select:focus {
   transition: background 0.3s ease;
   flex: 1;
 }
-
 .btn-option:hover {
   background: #e0e0e0;
 }
-
 .btn-primary {
   background-color: #444;
   color: white;
@@ -671,7 +787,6 @@ select:focus {
   transition: background 0.3s ease;
   flex: 1;
 }
-
 .btn-primary:hover {
   background-color: #333;
 }
@@ -688,7 +803,6 @@ select:focus {
   border-radius: 3px;
   transition: background-color 0.3s ease;
 }
-
 .icon-button:hover {
   background-color: #f4f4f4;
 }
@@ -704,14 +818,11 @@ select:focus {
   max-height: calc(100vh - 60px);
   overflow-y: auto;
 }
-
-/* Tabs for Available Fields */
 .tabs {
   display: flex;
   gap: 10px;
   margin-bottom: 15px;
 }
-
 .tabs button {
   padding: 10px;
   border: 1px solid #ddd;
@@ -720,18 +831,14 @@ select:focus {
   background: #f4f4f4;
   flex: 1;
 }
-
 .tabs button.active {
   background-color: #444;
   color: white;
   border: none;
 }
-
 .tabs button:not(.active):hover {
   background-color: #e0e0e0;
 }
-
-/* Available Field Button */
 .available-field-button {
   display: flex;
   align-items: center;
@@ -745,12 +852,10 @@ select:focus {
   transition: background-color 0.2s ease;
   margin-bottom: 10px;
 }
-
 .available-field-button i {
   font-size: 18px;
   color: #555;
 }
-
 .available-field-button:hover {
   background-color: #e0e0e0;
 }
@@ -767,7 +872,6 @@ select:focus {
   align-items: center;
   justify-content: center;
 }
-
 .modal {
   background: #fff;
   padding: 20px;
@@ -775,19 +879,37 @@ select:focus {
   width: 300px;
   box-shadow: 0 4px 10px rgba(0,0,0,0.1);
 }
-
 .modal p {
   margin-bottom: 15px;
   text-align: center;
 }
-
 .modal-actions {
   display: flex;
   gap: 10px;
 }
-
 .modal-actions button {
   flex: 1;
+}
+
+/* Meta Edit Modal Styles */
+.meta-edit-modal {
+  width: 350px;
+}
+.meta-edit-field {
+  margin-bottom: 10px;
+}
+.meta-edit-field label {
+  font-weight: bold;
+  margin-bottom: 5px;
+  display: block;
+}
+.meta-edit-field input,
+.meta-edit-field textarea {
+  width: 100%;
+  padding: 6px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  box-sizing: border-box;
 }
 
 /* Responsive Design */
