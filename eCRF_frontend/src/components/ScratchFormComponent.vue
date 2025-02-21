@@ -2,7 +2,7 @@
   <div class="create-form-container">
     <!-- Header -->
     <div class="header-container">
-      <button @click="goBack" class="btn-back">
+      <button @click="goBack" class="btn-back" title="Go Back">
         <i class="fas fa-arrow-left"></i> Back
       </button>
     </div>
@@ -12,10 +12,10 @@
       <div class="meta-header">
         <h2>Study Meta Information</h2>
         <div class="meta-actions">
-          <button @click="openMetaEditDialog" class="btn-meta-edit">
-            <i class="fas fa-edit"></i> Edit
+          <button @click="openMetaEditDialog" class="btn-meta-edit" title="Edit Meta Information">
+            <i class="fas fa-edit"></i>
           </button>
-          <button @click="toggleMetaInfo" class="btn-meta-toggle">
+          <button @click="toggleMetaInfo" class="btn-meta-toggle" :title="metaInfoCollapsed ? 'Expand Meta Information' : 'Collapse Meta Information'">
             <i :class="metaInfoCollapsed ? 'fas fa-chevron-down' : 'fas fa-chevron-up'"></i>
           </button>
         </div>
@@ -31,13 +31,13 @@
       </div>
     </div>
 
-    <!-- Main Content: Form Area & Available Fields (side by side) -->
+    <!-- Main Content: Form Area & Available Fields -->
     <div class="scratch-form-content">
       <!-- Form Area -->
       <div class="form-area">
         <!-- Editable Form Name and Navigation -->
         <div class="form-heading-container">
-          <button @click="prevForm" class="nav-button" :disabled="currentFormIndex === 0">
+          <button @click="prevForm" class="nav-button" :disabled="currentFormIndex === 0" title="Previous Form">
             <i class="fas fa-chevron-left"></i>
           </button>
           <input
@@ -46,7 +46,7 @@
             class="form-name-input heading-input"
             placeholder="Untitled Form"
           />
-          <button @click="nextForm" class="nav-button" :disabled="currentFormIndex === totalForms - 1">
+          <button @click="nextForm" class="nav-button" :disabled="currentFormIndex === totalForms - 1" title="Next Form">
             <i class="fas fa-chevron-right"></i>
           </button>
         </div>
@@ -67,19 +67,27 @@
           <div class="section-header">
             <h3>{{ section.title }}</h3>
             <div class="field-actions">
-              <button @click.prevent="editSection(sectionIndex)" class="icon-button">
+              <button
+                @click.prevent="openInputDialog('Enter a new title for this section:', section.title, newVal => editSection(sectionIndex, newVal))"
+                class="icon-button"
+                title="Edit Section Title"
+              >
                 <i class="fas fa-edit"></i>
               </button>
-              <button @click.prevent="addNewSectionBelow(sectionIndex)" class="icon-button">
+              <button @click.prevent="addNewSectionBelow(sectionIndex)" class="icon-button" title="Add New Section Below">
                 <i class="fas fa-plus"></i>
               </button>
-              <button @click.prevent="copySection(sectionIndex)" class="icon-button">
+              <button @click.prevent="copySection(sectionIndex)" class="icon-button" title="Copy Section">
                 <i class="fas fa-copy"></i>
               </button>
-              <button @click.prevent="deleteSection(sectionIndex)" class="icon-button">
+              <button
+                @click.prevent="confirmDeleteSection(sectionIndex)"
+                class="icon-button"
+                title="Delete Section"
+              >
                 <i class="fas fa-trash"></i>
               </button>
-              <button @click.prevent="toggleSection(sectionIndex)" class="icon-button">
+              <button @click.prevent="toggleSection(sectionIndex)" class="icon-button" :title="section.collapsed ? 'Expand Section' : 'Collapse Section'">
                 <i :class="section.collapsed ? 'fas fa-angle-down' : 'fas fa-angle-up'"></i>
               </button>
             </div>
@@ -94,13 +102,25 @@
               <div class="field-header">
                 <label v-if="field.type !== 'button'" :for="field.name">{{ field.label }}</label>
                 <div class="field-actions">
-                  <button @click.prevent="editField(sectionIndex, fieldIndex)" class="icon-button">
+                  <button
+                    @click.prevent="openInputDialog('Enter new label for the field:', field.label, newVal => editField(sectionIndex, fieldIndex, newVal))"
+                    class="icon-button"
+                    title="Edit Field Label"
+                  >
                     <i class="fas fa-edit"></i>
                   </button>
-                  <button @click.prevent="addSimilarField(sectionIndex, fieldIndex)" class="icon-button">
+                  <button
+                    @click.prevent="addSimilarField(sectionIndex, fieldIndex)"
+                    class="icon-button"
+                    title="Add Similar Field"
+                  >
                     <i class="fas fa-plus"></i>
                   </button>
-                  <button @click.prevent="removeField(sectionIndex, fieldIndex)" class="icon-button">
+                  <button
+                    @click.prevent="removeField(sectionIndex, fieldIndex)"
+                    class="icon-button"
+                    title="Delete Field"
+                  >
                     <i class="fas fa-trash"></i>
                   </button>
                 </div>
@@ -154,7 +174,12 @@
                     {{ option }}
                   </label>
                 </div>
-                <button v-if="field.type === 'button'" type="button" class="form-button">
+                <button
+                  v-if="field.type === 'button'"
+                  type="button"
+                  class="form-button"
+                  title="Button Action"
+                >
                   {{ field.label }}
                 </button>
               </div>
@@ -165,10 +190,18 @@
         <!-- Form Actions: Horizontal Button Row -->
         <div class="form-actions">
           <div class="button-row">
-            <button @click.prevent="addNewSection" class="btn-option">+ Add Section</button>
-            <button @click.prevent="clearForm" class="btn-option">Clear Form</button>
-            <button @click.prevent="saveForm" class="btn-primary">Save Form</button>
-            <button @click="navigateToSavedForms" class="btn-option">View Saved Forms</button>
+            <button @click.prevent="addNewSection" class="btn-option" title="Add New Section">
+              + Add Section
+            </button>
+            <button @click.prevent="confirmClearForm" class="btn-option" title="Clear Form">
+              Clear Form
+            </button>
+            <button @click.prevent="saveForm" class="btn-primary" title="Save Form">
+              Save Form
+            </button>
+            <button @click="navigateToSavedForms" class="btn-option" title="View Saved Forms">
+              View Saved Forms
+            </button>
           </div>
         </div>
       </div>
@@ -177,10 +210,10 @@
       <div class="available-fields">
         <h2>Available Fields</h2>
         <div class="tabs">
-          <button :class="{ active: activeTab === 'general' }" @click="activeTab = 'general'">
+          <button :class="{ active: activeTab === 'general' }" @click="activeTab = 'general'" title="General Fields">
             General Fields
           </button>
-          <button :class="{ active: activeTab === 'specialized' }" @click="activeTab = 'specialized'">
+          <button :class="{ active: activeTab === 'specialized' }" @click="activeTab = 'specialized'" title="Specialized Fields">
             Specialized Fields
           </button>
         </div>
@@ -191,6 +224,7 @@
             :key="index"
             class="available-field-button"
             @click="addFieldToActiveSection(field)"
+            :title="`Add field: ${field.label}`"
           >
             <i :class="field.icon"></i> {{ field.label }}
           </div>
@@ -209,6 +243,7 @@
                 :key="fieldIndex"
                 class="available-field-button"
                 @click="addFieldToActiveSection(field)"
+                :title="`Add field: ${field.label}`"
               >
                 <i :class="field.icon"></i> {{ field.label }}
               </button>
@@ -222,7 +257,27 @@
     <div v-if="showSaveDialog" class="modal-overlay">
       <div class="modal">
         <p>{{ saveDialogMessage }}</p>
-        <button @click="closeSaveDialog" class="btn-primary modal-btn">OK</button>
+        <button @click="closeSaveDialog" class="btn-primary modal-btn" title="Close Save Dialog">OK</button>
+      </div>
+    </div>
+
+    <!-- Generic Dialog Modal (for alerts) -->
+    <div v-if="showGenericDialog" class="modal-overlay">
+      <div class="modal">
+        <p>{{ genericDialogMessage }}</p>
+        <button @click="closeGenericDialog" class="btn-primary modal-btn" title="Close Alert">OK</button>
+      </div>
+    </div>
+
+    <!-- Input Dialog Modal (for editing text) -->
+    <div v-if="showInputDialog" class="modal-overlay">
+      <div class="modal input-dialog-modal">
+        <p>{{ inputDialogMessage }}</p>
+        <input type="text" v-model="inputDialogValue" class="input-dialog-field" />
+        <div class="modal-actions">
+          <button @click="confirmInputDialog" class="btn-primary modal-btn" title="Save Input">Save</button>
+          <button @click="cancelInputDialog" class="btn-option modal-btn" title="Cancel Input">Cancel</button>
+        </div>
       </div>
     </div>
 
@@ -255,8 +310,8 @@
           <textarea v-model="metaEditForm.studyMetaDescription" placeholder="Enter meta description"></textarea>
         </div>
         <div class="modal-actions">
-          <button @click="saveMetaInfo" class="btn-primary modal-btn">Save</button>
-          <button @click="closeMetaEditDialog" class="btn-option modal-btn">Cancel</button>
+          <button @click="saveMetaInfo" class="btn-primary modal-btn" title="Save Meta Information">Save</button>
+          <button @click="closeMetaEditDialog" class="btn-option modal-btn" title="Cancel Meta Edit">Cancel</button>
         </div>
       </div>
     </div>
@@ -266,8 +321,19 @@
       <div class="modal">
         <p>Changing the number of forms will reinitialize your current forms. Proceed?</p>
         <div class="modal-actions">
-          <button @click="confirmReinit" class="btn-primary modal-btn">Yes</button>
-          <button @click="cancelReinit" class="btn-option modal-btn">No</button>
+          <button @click="confirmReinit" class="btn-primary modal-btn" title="Confirm Reinitialization">Yes</button>
+          <button @click="cancelReinit" class="btn-option modal-btn" title="Cancel Reinitialization">No</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Confirm Dialog Modal (for delete/clear actions) -->
+    <div v-if="showConfirmDialog" class="modal-overlay">
+      <div class="modal">
+        <p>{{ confirmDialogMessage }}</p>
+        <div class="modal-actions">
+          <button @click="confirmDialogYes" class="btn-primary modal-btn" title="Confirm">Yes</button>
+          <button @click="closeConfirmDialog" class="btn-option modal-btn" title="Cancel">No</button>
         </div>
       </div>
     </div>
@@ -280,27 +346,29 @@ export default {
   name: "ScratchFormComponent",
   data() {
     return {
-      // Array of forms; each form has a formName and sections (default structure)
       forms: [],
       currentFormIndex: 0,
       totalForms: 1,
       activeSection: 0,
       activeTab: "general",
-      // Available fields for dynamic addition
       generalFields: [],
       specializedFieldSections: [],
       showSaveDialog: false,
       saveDialogMessage: "",
-      // Default form structure for each form
+      showGenericDialog: false,
+      genericDialogMessage: "",
+      genericDialogCallback: null,
+      showInputDialog: false,
+      inputDialogMessage: "",
+      inputDialogValue: "",
+      inputDialogCallback: null,
       defaultFormStructure: [{ title: "Default Section", fields: [], collapsed: false }],
-      // Local meta information from studyDetails query (if provided)
       studyDetails: {},
       metaInfo: {
         numberOfSubjects: null,
         numberOfVisits: null,
         studyMetaDescription: ""
       },
-      // For editing meta info in a modal dialog
       showMetaEditDialog: false,
       metaEditForm: {
         name: "",
@@ -310,11 +378,12 @@ export default {
         numberOfVisits: null,
         studyMetaDescription: ""
       },
-      // For confirming reinitialization when numberOfForms changes
       showReinitConfirm: false,
       pendingMetaEdit: null,
-      // Default collapsed state is true
       metaInfoCollapsed: true,
+      showConfirmDialog: false,
+      confirmDialogMessage: "",
+      confirmDialogCallback: null,
     };
   },
   computed: {
@@ -322,7 +391,6 @@ export default {
       return this.$store.state.token;
     },
     currentForm() {
-      // Fallback if forms array is empty
       return this.forms[this.currentFormIndex] || { formName: "", sections: [] };
     },
     formName: {
@@ -330,7 +398,6 @@ export default {
         return this.currentForm.formName;
       },
       set(value) {
-        // Directly update the forms array element
         this.forms[this.currentFormIndex] = {
           ...this.currentForm,
           formName: value,
@@ -369,8 +436,9 @@ export default {
     },
     async saveForm() {
       if (!this.token) {
-        alert("Authentication error: No token found. Please log in again.");
-        this.$router.push("/login");
+        this.openGenericDialog("Authentication error: No token found. Please log in again.", () => {
+          this.$router.push("/login");
+        });
         return;
       }
       // eslint-disable-next-line no-unused-vars
@@ -385,12 +453,13 @@ export default {
         });
       } catch (error) {
         if (error.response?.status === 401) {
-          alert("Your session has expired. Please log in again.");
-          this.$router.push("/login");
+          this.openGenericDialog("Your session has expired. Please log in again.", () => {
+            this.$router.push("/login");
+          });
           return;
         } else {
           console.error("Error saving form:", error);
-          alert("Failed to save form. Please try again.");
+          this.openGenericDialog("Failed to save form. Please try again.");
           return;
         }
       }
@@ -403,8 +472,57 @@ export default {
       if (this.currentFormIndex < this.totalForms - 1) {
         this.nextForm();
       } else {
-        alert("All forms have been saved.");
+        this.openGenericDialog("All forms have been saved.");
       }
+    },
+    openGenericDialog(message, callback = null) {
+      this.genericDialogMessage = message;
+      this.genericDialogCallback = callback;
+      this.showGenericDialog = true;
+    },
+    closeGenericDialog() {
+      this.showGenericDialog = false;
+      if (this.genericDialogCallback) {
+        this.genericDialogCallback();
+        this.genericDialogCallback = null;
+      }
+    },
+    openInputDialog(message, defaultValue, callback) {
+      this.inputDialogMessage = message;
+      this.inputDialogValue = defaultValue;
+      this.inputDialogCallback = callback;
+      this.showInputDialog = true;
+    },
+    confirmInputDialog() {
+      if (this.inputDialogCallback) {
+        this.inputDialogCallback(this.inputDialogValue);
+      }
+      this.showInputDialog = false;
+      this.inputDialogMessage = "";
+      this.inputDialogValue = "";
+      this.inputDialogCallback = null;
+    },
+    cancelInputDialog() {
+      this.showInputDialog = false;
+      this.inputDialogMessage = "";
+      this.inputDialogValue = "";
+      this.inputDialogCallback = null;
+    },
+    openConfirmDialog(message, callback) {
+      this.confirmDialogMessage = message;
+      this.confirmDialogCallback = callback;
+      this.showConfirmDialog = true;
+    },
+    confirmDialogYes() {
+      if (this.confirmDialogCallback) {
+        this.confirmDialogCallback();
+      }
+      this.closeConfirmDialog();
+    },
+    closeConfirmDialog() {
+      this.showConfirmDialog = false;
+      this.confirmDialogMessage = "";
+      this.confirmDialogCallback = null;
     },
     async loadAvailableFields() {
       try {
@@ -469,8 +587,12 @@ export default {
       });
       this.toggleSection(index + 1);
     },
-    deleteSection(index) {
-      if (confirm("Are you sure you want to delete this section?")) {
+    confirmDeleteSection(index) {
+      if (this.currentForm.sections.length === 1 && this.currentForm.sections[0].title === "Default Section") {
+        this.openGenericDialog("Default section cannot be deleted.");
+        return;
+      }
+      this.openConfirmDialog("Are you sure you want to delete this section?", () => {
         this.currentForm.sections.splice(index, 1);
         if (this.activeSection >= index) {
           this.activeSection = Math.max(0, this.activeSection - 1);
@@ -478,12 +600,24 @@ export default {
         if (this.currentForm.sections.length > 0) {
           this.toggleSection(this.activeSection);
         }
+      });
+    },
+    confirmClearForm() {
+      this.openConfirmDialog("Are you sure you want to clear the form?", () => {
+        this.currentForm.sections = [{ title: "Default Section", fields: [], collapsed: false }];
+        this.activeSection = 0;
+      });
+    },
+    // For editing a section title via input dialog.
+    editSection(index, newVal) {
+      if (newVal) {
+        this.currentForm.sections[index].title = newVal;
       }
     },
-    editSection(index) {
-      const newTitle = prompt("Enter a new title for this section:", this.currentForm.sections[index].title);
-      if (newTitle) {
-        this.currentForm.sections[index].title = newTitle;
+    // For editing a field label via input dialog.
+    editField(sectionIndex, fieldIndex, newVal) {
+      if (newVal) {
+        this.currentForm.sections[sectionIndex].fields[fieldIndex].label = newVal;
       }
     },
     copySection(sectionIndex) {
@@ -499,21 +633,11 @@ export default {
       this.toggleSection(sectionIndex + 1);
     },
     clearForm() {
-      if (confirm("Are you sure you want to clear the form?")) {
-        this.currentForm.sections = [{ title: "Default Section", fields: [], collapsed: false }];
-        this.activeSection = 0;
-      }
+      this.confirmClearForm();
     },
     submitForm() {
       console.log("Form submitted with data:", this.currentForm.sections);
-      alert("Form submitted successfully!");
-    },
-    editField(sectionIndex, fieldIndex) {
-      const field = this.currentForm.sections[sectionIndex].fields[fieldIndex];
-      const newLabel = prompt("Enter new label for the field:", field.label);
-      if (newLabel) {
-        this.currentForm.sections[sectionIndex].fields[fieldIndex].label = newLabel;
-      }
+      this.openGenericDialog("Form submitted successfully!");
     },
     addSimilarField(sectionIndex, fieldIndex) {
       const field = this.currentForm.sections[sectionIndex].fields[fieldIndex];
@@ -521,6 +645,7 @@ export default {
       this.currentForm.sections[sectionIndex].fields.splice(fieldIndex + 1, 0, newField);
     },
     removeField(sectionIndex, fieldIndex) {
+      // Directly remove the field without confirmation.
       this.currentForm.sections[sectionIndex].fields.splice(fieldIndex, 1);
     },
     // Meta Info Editing Methods
@@ -560,25 +685,21 @@ export default {
     },
     // Reinitialization Confirmation Methods
     confirmReinit() {
-  // Update totalForms and reinitialize the forms array
-  this.totalForms = this.pendingMetaEdit.numberOfForms;
-  this.forms = [];
-  for (let i = 0; i < this.totalForms; i++) {
-    this.forms.push({
-      formName: `Form${i + 1}`,
-      sections: JSON.parse(JSON.stringify(this.defaultFormStructure)),
-    });
-  }
-  // Reset navigation state
-  this.currentFormIndex = 0;
-  this.activeSection = 0;
-  // Update meta information
-  this.updateMetaData();
-  // Close modals and clear pending edits
-  this.showReinitConfirm = false;
-  this.showMetaEditDialog = false;
-  this.pendingMetaEdit = null;
-},
+      this.totalForms = this.pendingMetaEdit.numberOfForms;
+      this.forms = [];
+      for (let i = 0; i < this.totalForms; i++) {
+        this.forms.push({
+          formName: `Form${i + 1}`,
+          sections: JSON.parse(JSON.stringify(this.defaultFormStructure)),
+        });
+      }
+      this.currentFormIndex = 0;
+      this.activeSection = 0;
+      this.updateMetaData();
+      this.showReinitConfirm = false;
+      this.showMetaEditDialog = false;
+      this.pendingMetaEdit = null;
+    },
     cancelReinit() {
       this.showReinitConfirm = false;
       this.pendingMetaEdit = null;
@@ -684,7 +805,11 @@ h1 {
   align-items: center;
   justify-content: center;
   gap: 10px;
-  margin-bottom: 5px;
+  margin-bottom: 10px;
+  background-color: #fff;
+  padding: 10px;
+  border: 1px solid #ddd;
+  border-radius: 8px;
 }
 .heading-input {
   font-size: 22px;
@@ -895,6 +1020,19 @@ select:focus {
 }
 .modal-actions button {
   flex: 1;
+}
+
+/* Input Dialog Modal Styles */
+.input-dialog-modal {
+  width: 300px;
+}
+.input-dialog-field {
+  width: 100%;
+  padding: 8px;
+  border: 1px solid #ccc;
+  border-radius: 5px;
+  margin-bottom: 15px;
+  box-sizing: border-box;
 }
 
 /* Meta Edit Modal Styles */
