@@ -560,19 +560,25 @@ export default {
     },
     // Reinitialization Confirmation Methods
     confirmReinit() {
-      this.totalForms = this.pendingMetaEdit.numberOfForms;
-      this.forms = [];
-      for (let i = 0; i < this.totalForms; i++) {
-        this.forms.push({
-          formName: `Form${i + 1}`,
-          sections: JSON.parse(JSON.stringify(this.defaultFormStructure)),
-        });
-      }
-      this.updateMetaData();
-      this.showReinitConfirm = false;
-      this.showMetaEditDialog = false;
-      this.pendingMetaEdit = null;
-    },
+  // Update totalForms and reinitialize the forms array
+  this.totalForms = this.pendingMetaEdit.numberOfForms;
+  this.forms = [];
+  for (let i = 0; i < this.totalForms; i++) {
+    this.forms.push({
+      formName: `Form${i + 1}`,
+      sections: JSON.parse(JSON.stringify(this.defaultFormStructure)),
+    });
+  }
+  // Reset navigation state
+  this.currentFormIndex = 0;
+  this.activeSection = 0;
+  // Update meta information
+  this.updateMetaData();
+  // Close modals and clear pending edits
+  this.showReinitConfirm = false;
+  this.showMetaEditDialog = false;
+  this.pendingMetaEdit = null;
+},
     cancelReinit() {
       this.showReinitConfirm = false;
       this.pendingMetaEdit = null;
