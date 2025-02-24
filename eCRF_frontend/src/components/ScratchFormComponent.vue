@@ -360,6 +360,10 @@
             <label>Max Value:</label>
             <input type="number" v-model.number="constraintsForm.max" placeholder="Max" />
           </div>
+          <div class="constraint-field">
+            <label>Max Digits:</label>
+            <input type="number" v-model.number="constraintsForm.maxDigits" placeholder="Max Digits" />
+          </div>
         </div>
         <div v-else-if="currentFieldType === 'text' || currentFieldType === 'textarea'" class="constraints-fields">
           <div class="constraint-field">
@@ -373,6 +377,10 @@
           <div class="constraint-field">
             <label>Pattern (Regex):</label>
             <input type="text" v-model="constraintsForm.pattern" placeholder="e.g. ^[A-Za-z]+$" />
+          </div>
+          <div class="constraint-field">
+            <label>Required:</label>
+            <input type="checkbox" v-model="constraintsForm.required" />
           </div>
         </div>
         <div class="modal-actions">
@@ -433,9 +441,11 @@ export default {
       constraintsForm: {
         min: null,
         max: null,
+        maxDigits: null,
         minLength: null,
         maxLength: null,
-        pattern: ""
+        pattern: "",
+        required: false,
       },
       currentFieldConstraints: null,
       currentFieldType: "",
@@ -708,16 +718,15 @@ export default {
     openConstraintsDialog(sectionIndex, fieldIndex) {
       const field = this.currentForm.sections[sectionIndex].fields[fieldIndex];
       this.currentFieldIndices = { sectionIndex, fieldIndex };
-      // Save current field type for conditional inputs
       this.currentFieldType = field.type;
-      // If constraints exist, load them; otherwise, set default constraints based on type
+      // Load existing constraints if they exist; otherwise, set defaults
       if (field.constraints) {
         this.constraintsForm = { ...field.constraints };
       } else {
         if (field.type === "number") {
-          this.constraintsForm = { min: null, max: null };
+          this.constraintsForm = { min: null, max: null, maxDigits: null };
         } else if (field.type === "text" || field.type === "textarea") {
-          this.constraintsForm = { minLength: null, maxLength: null, pattern: "" };
+          this.constraintsForm = { minLength: null, maxLength: null, pattern: "", required: false };
         } else {
           this.constraintsForm = {};
         }
@@ -725,7 +734,6 @@ export default {
       this.showConstraintsDialog = true;
     },
     confirmConstraintsDialog() {
-      // Update the constraints of the current field
       const { sectionIndex, fieldIndex } = this.currentFieldIndices;
       this.currentForm.sections[sectionIndex].fields[fieldIndex].constraints = { ...this.constraintsForm };
       this.showConstraintsDialog = false;
