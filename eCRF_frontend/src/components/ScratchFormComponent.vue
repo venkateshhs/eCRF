@@ -123,6 +123,14 @@
                   >
                     <i class="fas fa-trash"></i>
                   </button>
+                  <!-- Edit field constraints -->
+                  <button
+                    @click.prevent="openConstraintsDialog(sectionIndex, fieldIndex)"
+                    class="icon-button"
+                    title="Edit Field Constraints"
+                  >
+                    <i class="fas fa-cog"></i>
+                  </button>
                 </div>
               </div>
               <div class="field-box">
@@ -337,6 +345,42 @@
         </div>
       </div>
     </div>
+
+    <!-- Constraints Edit Dialog Modal -->
+    <div v-if="showConstraintsDialog" class="modal-overlay">
+      <div class="modal constraints-edit-modal">
+        <h3>Edit Field Constraints</h3>
+        <!-- Display different inputs based on field type -->
+        <div v-if="currentFieldType === 'number'" class="constraints-fields">
+          <div class="constraint-field">
+            <label>Min Value:</label>
+            <input type="number" v-model.number="constraintsForm.min" placeholder="Min" />
+          </div>
+          <div class="constraint-field">
+            <label>Max Value:</label>
+            <input type="number" v-model.number="constraintsForm.max" placeholder="Max" />
+          </div>
+        </div>
+        <div v-else-if="currentFieldType === 'text' || currentFieldType === 'textarea'" class="constraints-fields">
+          <div class="constraint-field">
+            <label>Min Length:</label>
+            <input type="number" v-model.number="constraintsForm.minLength" placeholder="Min Length" />
+          </div>
+          <div class="constraint-field">
+            <label>Max Length:</label>
+            <input type="number" v-model.number="constraintsForm.maxLength" placeholder="Max Length" />
+          </div>
+          <div class="constraint-field">
+            <label>Pattern (Regex):</label>
+            <input type="text" v-model="constraintsForm.pattern" placeholder="e.g. ^[A-Za-z]+$" />
+          </div>
+        </div>
+        <div class="modal-actions">
+          <button @click="confirmConstraintsDialog" class="btn-primary modal-btn" title="Save Constraints">Save</button>
+          <button @click="cancelConstraintsDialog" class="btn-option modal-btn" title="Cancel Constraints">Cancel</button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -384,6 +428,18 @@ export default {
       showConfirmDialog: false,
       confirmDialogMessage: "",
       confirmDialogCallback: null,
+      // New state for constraints editing
+      showConstraintsDialog: false,
+      constraintsForm: {
+        min: null,
+        max: null,
+        minLength: null,
+        maxLength: null,
+        pattern: ""
+      },
+      currentFieldConstraints: null,
+      currentFieldType: "",
+      currentFieldIndices: { sectionIndex: null, fieldIndex: null },
     };
   },
   computed: {
@@ -647,6 +703,35 @@ export default {
     removeField(sectionIndex, fieldIndex) {
       // Directly remove the field without confirmation.
       this.currentForm.sections[sectionIndex].fields.splice(fieldIndex, 1);
+    },
+    // Field Constraints Editing Methods
+    openConstraintsDialog(sectionIndex, fieldIndex) {
+      const field = this.currentForm.sections[sectionIndex].fields[fieldIndex];
+      this.currentFieldIndices = { sectionIndex, fieldIndex };
+      // Save current field type for conditional inputs
+      this.currentFieldType = field.type;
+      // If constraints exist, load them; otherwise, set default constraints based on type
+      if (field.constraints) {
+        this.constraintsForm = { ...field.constraints };
+      } else {
+        if (field.type === "number") {
+          this.constraintsForm = { min: null, max: null };
+        } else if (field.type === "text" || field.type === "textarea") {
+          this.constraintsForm = { minLength: null, maxLength: null, pattern: "" };
+        } else {
+          this.constraintsForm = {};
+        }
+      }
+      this.showConstraintsDialog = true;
+    },
+    confirmConstraintsDialog() {
+      // Update the constraints of the current field
+      const { sectionIndex, fieldIndex } = this.currentFieldIndices;
+      this.currentForm.sections[sectionIndex].fields[fieldIndex].constraints = { ...this.constraintsForm };
+      this.showConstraintsDialog = false;
+    },
+    cancelConstraintsDialog() {
+      this.showConstraintsDialog = false;
     },
     // Meta Info Editing Methods
     openMetaEditDialog() {
@@ -1049,6 +1134,29 @@ select:focus {
 }
 .meta-edit-field input,
 .meta-edit-field textarea {
+  width: 100%;
+  padding: 6px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  box-sizing: border-box;
+}
+
+/* Constraints Edit Modal Styles */
+.constraints-edit-modal {
+  width: 300px;
+}
+.constraints-fields {
+  margin-bottom: 15px;
+}
+.constraint-field {
+  margin-bottom: 10px;
+}
+.constraint-field label {
+  font-weight: bold;
+  margin-bottom: 3px;
+  display: block;
+}
+.constraint-field input {
   width: 100%;
   padding: 6px;
   border: 1px solid #ccc;
