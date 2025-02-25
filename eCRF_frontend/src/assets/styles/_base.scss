@@ -1,0 +1,69 @@
+@import "@/assets/styles/_variables.scss";
+
+
+.btn-primary {
+  background-color: $primary-color;
+  color: white;
+  padding: $button-padding;
+  border: none;
+  border-radius: $button-border-radius;
+  text-align: center;
+  cursor: pointer;
+  transition: background 0.3s ease;
+}
+.btn-primary:hover {
+  background-color: $primary-hover;
+}
+.btn-option {
+  background-color: $secondary-color;
+  color: $text-color;
+  padding: $button-padding;
+  border: 1px solid $border-color;
+  border-radius: $button-border-radius;
+  text-align: center;
+  cursor: pointer;
+  transition: background 0.3s ease;
+}
+
+.btn-option:hover {
+  background-color: $secondary-hover;
+}
+
+.nav-button {
+  background: $secondary-color;
+  border: 1px solid $border-color;
+  border-radius: $button-border-radius;
+  padding: $button-padding;
+  cursor: pointer;
+  transition: background 0.3s ease;
+}
+
+.nav-button:hover {
+  background-color: $secondary-hover;
+}
+
+.icon-button {
+  background: none;
+  border: none;
+  padding: 5px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 3px;
+  transition: background-color 0.3s ease;
+}
+
+.icon-button:hover {
+  background-color: $secondary-hover;
+}
+
+@mixin button-reset {
+  background: none;
+  border: none;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  cursor: pointer;
+  outline: none;
+}

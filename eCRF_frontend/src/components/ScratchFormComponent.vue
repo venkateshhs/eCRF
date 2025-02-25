@@ -3,7 +3,7 @@
     <!-- Header -->
     <div class="header-container">
       <button @click="goBack" class="btn-back" title="Go Back">
-        <i class="fas fa-arrow-left"></i> Back
+        <i :class="icons.back"></i> Back
       </button>
     </div>
 
@@ -13,14 +13,17 @@
         <h2>Study Meta Information</h2>
         <div class="meta-actions">
           <button @click="openMetaEditDialog" class="btn-meta-edit" title="Edit Meta Information">
-            <i class="fas fa-edit"></i>
+            <i :class="icons.edit"></i>
           </button>
-          <button @click="toggleMetaInfo" class="btn-meta-toggle" :title="metaInfoCollapsed ? 'Expand Meta Information' : 'Collapse Meta Information'">
-            <i :class="metaInfoCollapsed ? 'fas fa-chevron-down' : 'fas fa-chevron-up'"></i>
+          <button
+            @click="toggleMetaInfo"
+            class="btn-meta-toggle"
+            :title="metaInfoCollapsed ? 'Expand Meta Information' : 'Collapse Meta Information'"
+          >
+            <i :class="metaInfoCollapsed ? icons.toggleDown : icons.toggleUp"></i>
           </button>
         </div>
       </div>
-      <!-- Show meta info only if not collapsed -->
       <div v-if="!metaInfoCollapsed">
         <p v-if="studyDetails.name"><strong>Study Name:</strong> {{ studyDetails.name }}</p>
         <p v-if="studyDetails.description"><strong>Description:</strong> {{ studyDetails.description }}</p>
@@ -38,7 +41,7 @@
         <!-- Editable Form Name and Navigation -->
         <div class="form-heading-container">
           <button @click="prevForm" class="nav-button" :disabled="currentFormIndex === 0" title="Previous Form">
-            <i class="fas fa-chevron-left"></i>
+            <i :class="icons.prev"></i>
           </button>
           <input
             type="text"
@@ -47,7 +50,7 @@
             placeholder="Untitled Form"
           />
           <button @click="nextForm" class="nav-button" :disabled="currentFormIndex === totalForms - 1" title="Next Form">
-            <i class="fas fa-chevron-right"></i>
+            <i :class="icons.next"></i>
           </button>
         </div>
         <div class="form-indicator">
@@ -72,27 +75,27 @@
                 class="icon-button"
                 title="Edit Section Title"
               >
-                <i class="fas fa-edit"></i>
+                <i :class="icons.edit"></i>
               </button>
               <button @click.prevent="addNewSectionBelow(sectionIndex)" class="icon-button" title="Add New Section Below">
-                <i class="fas fa-plus"></i>
+                <i :class="icons.add"></i>
               </button>
               <button @click.prevent="copySection(sectionIndex)" class="icon-button" title="Copy Section">
-                <i class="fas fa-copy"></i>
+                <i :class="icons.copy"></i>
               </button>
               <button
                 @click.prevent="confirmDeleteSection(sectionIndex)"
                 class="icon-button"
                 title="Delete Section"
               >
-                <i class="fas fa-trash"></i>
+                <i :class="icons.delete"></i>
               </button>
-              <button @click.prevent="toggleSection(sectionIndex)" class="icon-button" :title="section.collapsed ? 'Expand Section' : 'Collapse Section'">
-                <i :class="section.collapsed ? 'fas fa-angle-down' : 'fas fa-angle-up'"></i>
+              <button @click.prevent="toggleSection(sectionIndex)" class="icon-button"
+                      :title="section.collapsed ? 'Expand Section' : 'Collapse Section'">
+                <i :class="section.collapsed ? icons.toggleDown : icons.toggleUp"></i>
               </button>
             </div>
           </div>
-          <!-- Section Content -->
           <div v-if="!section.collapsed" class="section-content">
             <div
               v-for="(field, fieldIndex) in section.fields"
@@ -107,29 +110,28 @@
                     class="icon-button"
                     title="Edit Field Label"
                   >
-                    <i class="fas fa-edit"></i>
+                    <i :class="icons.edit"></i>
                   </button>
                   <button
                     @click.prevent="addSimilarField(sectionIndex, fieldIndex)"
                     class="icon-button"
                     title="Add Similar Field"
                   >
-                    <i class="fas fa-plus"></i>
+                    <i :class="icons.add"></i>
                   </button>
                   <button
                     @click.prevent="removeField(sectionIndex, fieldIndex)"
                     class="icon-button"
                     title="Delete Field"
                   >
-                    <i class="fas fa-trash"></i>
+                    <i :class="icons.delete"></i>
                   </button>
-                  <!-- Edit field constraints -->
                   <button
                     @click.prevent="openConstraintsDialog(sectionIndex, fieldIndex)"
                     class="icon-button"
                     title="Edit Field Constraints"
                   >
-                    <i class="fas fa-cog"></i>
+                    <i :class="icons.cog"></i>
                   </button>
                 </div>
               </div>
@@ -195,7 +197,7 @@
           </div>
         </div>
 
-        <!-- Form Actions: Horizontal Button Row -->
+        <!-- Form Actions -->
         <div class="form-actions">
           <div class="button-row">
             <button @click.prevent="addNewSection" class="btn-option" title="Add New Section">
@@ -214,7 +216,7 @@
         </div>
       </div>
 
-      <!-- Available Fields Area (Fixed on Right) -->
+      <!-- Available Fields Section -->
       <div class="available-fields">
         <h2>Available Fields</h2>
         <div class="tabs">
@@ -228,7 +230,6 @@
             SHACL Components
           </button>
         </div>
-        <!-- General Fields Tab -->
         <div v-if="activeTab === 'general'" class="general-fields">
           <div
             v-for="(field, index) in generalFields"
@@ -240,7 +241,6 @@
             <i :class="field.icon"></i> {{ field.label }}
           </div>
         </div>
-        <!-- Specialized Fields Tab -->
         <div v-if="activeTab === 'specialized'" class="specialized-fields">
           <div
             v-for="(section, sectionIndex) in specializedFieldSections"
@@ -261,7 +261,6 @@
             </div>
           </div>
         </div>
-        <!-- SHACL Components Tab -->
         <div v-if="activeTab === 'shacl'" class="shacl-components">
           <p>No SHACL components available.</p>
         </div>
@@ -276,7 +275,7 @@
       </div>
     </div>
 
-    <!-- Generic Dialog Modal (for alerts) -->
+    <!-- Generic Dialog Modal -->
     <div v-if="showGenericDialog" class="modal-overlay">
       <div class="modal">
         <p>{{ genericDialogMessage }}</p>
@@ -284,7 +283,7 @@
       </div>
     </div>
 
-    <!-- Input Dialog Modal (for editing text) -->
+    <!-- Input Dialog Modal -->
     <div v-if="showInputDialog" class="modal-overlay">
       <div class="modal input-dialog-modal">
         <p>{{ inputDialogMessage }}</p>
@@ -342,7 +341,7 @@
       </div>
     </div>
 
-    <!-- Confirm Dialog Modal (for delete/clear actions) -->
+    <!-- Confirm Dialog Modal -->
     <div v-if="showConfirmDialog" class="modal-overlay">
       <div class="modal">
         <p>{{ confirmDialogMessage }}</p>
@@ -357,7 +356,6 @@
     <div v-if="showConstraintsDialog" class="modal-overlay">
       <div class="modal constraints-edit-modal">
         <h3>Edit Field Constraints</h3>
-        <!-- Display different inputs based on field type -->
         <div v-if="currentFieldType === 'number'" class="constraints-fields">
           <div class="constraint-field">
             <label>Min Value:</label>
@@ -401,6 +399,8 @@
 
 <script>
 import axios from "axios";
+import icons from "@/assets/styles/icons"; // Make sure this file exports your icon classes
+
 export default {
   name: "ScratchFormComponent",
   data() {
@@ -443,7 +443,6 @@ export default {
       showConfirmDialog: false,
       confirmDialogMessage: "",
       confirmDialogCallback: null,
-      // New state for constraints editing
       showConstraintsDialog: false,
       constraintsForm: {
         min: null,
@@ -487,6 +486,9 @@ export default {
         this.metaInfo.studyMetaDescription
       );
     },
+    icons() {
+      return icons;
+    },
   },
   async mounted() {
     const details = this.$route.query.studyDetails ? JSON.parse(this.$route.query.studyDetails) : {};
@@ -514,12 +516,12 @@ export default {
         });
         return;
       }
-      // eslint-disable-next-line no-unused-vars
+      // Uncomment below to commit to the database:
+      /*
       const formData = {
         form_name: this.currentForm.formName,
         form_structure: this.currentForm.sections,
       };
-      /* Uncomment below to commit to the database:
       try {
         await axios.post("http://127.0.0.1:8000/forms/save-form", formData, {
           headers: { Authorization: `Bearer ${this.token}` },
@@ -723,7 +725,6 @@ export default {
       const field = this.currentForm.sections[sectionIndex].fields[fieldIndex];
       this.currentFieldIndices = { sectionIndex, fieldIndex };
       this.currentFieldType = field.type;
-      // Load existing constraints if they exist; otherwise, set defaults
       if (field.constraints) {
         this.constraintsForm = { ...field.constraints };
       } else {
@@ -805,50 +806,51 @@ export default {
 };
 </script>
 
-<style scoped>
-/* Container: Full width, full viewport height */
+<style lang="scss" scoped>
+@import "@/assets/styles/_base.scss";
+
+// Additional component-specific styles
 .create-form-container {
+  // Use full width and a light background
   width: 100%;
   min-height: 100vh;
-  margin: 0 auto;
   padding: 20px;
-  background-color: #f9f9f9;
+  background-color: $light-background; // from your _variables.scss
 }
 
-/* Header */
 .header-container {
   display: flex;
   align-items: center;
   gap: 10px;
   margin-bottom: 15px;
 }
+
 .btn-back {
-  background: none;
-  border: none;
+  @include button-reset;
   font-size: 16px;
-  cursor: pointer;
-  color: #555;
+  color: $text-color;
 }
+
 h1 {
   font-size: 24px;
   font-weight: 500;
-  color: #333;
+  color: $text-color;
   flex: 1;
   text-align: center;
 }
 
 /* Meta Information Section */
 .meta-info-container {
-  background: #fff;
-  border: 1px solid #ddd;
+  background: white;
+  border: 1px solid $border-color;
   border-radius: 8px;
   padding: 15px;
   margin-bottom: 20px;
   transition: padding 0.3s ease, font-size 0.3s ease;
-}
-.meta-info-container.collapsed {
-  padding: 5px 10px;
-  font-size: 12px;
+  &.collapsed {
+    padding: 5px 10px;
+    font-size: 12px;
+  }
 }
 .meta-header {
   display: flex;
@@ -861,24 +863,24 @@ h1 {
 }
 .btn-meta-edit,
 .btn-meta-toggle {
-  background: #f4f4f4;
-  border: 1px solid #ddd;
-  border-radius: 5px;
+  @include button-reset;
+  background: $secondary-color;
+  border: 1px solid $border-color;
+  border-radius: $button-border-radius;
   padding: 5px 8px;
   cursor: pointer;
   transition: background 0.3s ease;
-}
-.btn-meta-edit:hover,
-.btn-meta-toggle:hover {
-  background: #e0e0e0;
+  &:hover {
+    background: $secondary-hover;
+  }
 }
 .meta-info-container p {
   margin: 5px 0;
   font-size: 14px;
-  color: #444;
+  color: $text-color;
 }
 
-/* Main Content Layout: Two columns (no wrapping) */
+/* Main Content Layout */
 .scratch-form-content {
   display: flex;
   flex-wrap: nowrap;
@@ -889,23 +891,21 @@ h1 {
 /* Form Area */
 .form-area {
   flex: 1;
-  background-color: #fff;
+  background: white;
   padding: 20px;
+  border: 1px solid $border-color;
   border-radius: 8px;
-  border: 1px solid #ddd;
   min-width: 600px;
 }
-
-/* Form Navigation: Editable Form Name & Navigation Buttons */
 .form-heading-container {
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 10px;
   margin-bottom: 10px;
-  background-color: #fff;
+  background: white;
   padding: 10px;
-  border: 1px solid #ddd;
+  border: 1px solid $border-color;
   border-radius: 8px;
 }
 .heading-input {
@@ -913,41 +913,39 @@ h1 {
   font-weight: 500;
   text-align: center;
   border: none;
-  border-bottom: 1px solid #ccc;
+  border-bottom: 1px solid $border-color;
   outline: none;
   width: 100%;
   max-width: 400px;
 }
 .nav-button {
-  background: #f4f4f4;
-  border: 1px solid #ddd;
-  border-radius: 5px;
-  padding: 8px 12px;
+  background: $secondary-color;
+  border: 1px solid $border-color;
+  border-radius: $button-border-radius;
+  padding: $button-padding;
   cursor: pointer;
   transition: background 0.3s ease;
-}
-.nav-button:hover {
-  background: #e0e0e0;
+  &:hover {
+    background: $secondary-hover;
+  }
 }
 .form-indicator {
   text-align: center;
   font-size: 16px;
-  color: #555;
+  color: $text-color;
   margin-bottom: 20px;
 }
 
 /* Form Section */
 .form-section {
   padding: 15px;
-  border-bottom: 1px solid #ddd;
+  border-bottom: 1px solid $border-color;
   transition: all 0.3s ease;
+  &.active {
+    background: #e7f3ff;
+    border-left: 3px solid $text-color;
+  }
 }
-.form-section.active {
-  background-color: #e7f3ff;
-  border-left: 3px solid #444;
-}
-
-/* Section Header */
 .section-header {
   display: flex;
   justify-content: space-between;
@@ -965,7 +963,7 @@ textarea,
 select {
   width: 100%;
   padding: 8px;
-  border: 1px solid #ccc;
+  border: 1px solid $border-color;
   border-radius: 5px;
   margin-top: 5px;
   box-sizing: border-box;
@@ -973,11 +971,11 @@ select {
 input:focus,
 textarea:focus,
 select:focus {
-  border-color: #444;
+  border-color: $text-color;
   outline: none;
 }
 
-/* Form Actions: Horizontal Button Row */
+/* Form Actions */
 .form-actions {
   display: flex;
   align-items: center;
@@ -991,38 +989,37 @@ select:focus {
   width: 100%;
 }
 .btn-option {
-  background: #f4f4f4;
-  color: #333;
-  padding: 10px;
-  border: 1px solid #ddd;
-  border-radius: 5px;
+  background: $secondary-color;
+  color: $text-color;
+  padding: $button-padding;
+  border: 1px solid $border-color;
+  border-radius: $button-border-radius;
   text-align: center;
   cursor: pointer;
   transition: background 0.3s ease;
   flex: 1;
-}
-.btn-option:hover {
-  background: #e0e0e0;
+  &:hover {
+    background: $secondary-hover;
+  }
 }
 .btn-primary {
-  background-color: #444;
+  background: $primary-color;
   color: white;
-  padding: 10px;
+  padding: $button-padding;
   border: none;
-  border-radius: 5px;
+  border-radius: $button-border-radius;
   text-align: center;
   cursor: pointer;
   transition: background 0.3s ease;
   flex: 1;
-}
-.btn-primary:hover {
-  background-color: #333;
+  &:hover {
+    background: $primary-hover;
+  }
 }
 
 /* Icon Button */
 .icon-button {
-  background: none;
-  border: none;
+  @include button-reset;
   padding: 5px;
   cursor: pointer;
   display: flex;
@@ -1030,17 +1027,17 @@ select:focus {
   justify-content: center;
   border-radius: 3px;
   transition: background-color 0.3s ease;
-}
-.icon-button:hover {
-  background-color: #f4f4f4;
+  &:hover {
+    background-color: $secondary-hover;
+  }
 }
 
-/* Available Fields Section (Right Column) */
+/* Available Fields Section */
 .available-fields {
   flex-shrink: 0;
-  background-color: #fff;
+  background: white;
   padding: 20px;
-  border: 1px solid #ddd;
+  border: 1px solid $border-color;
   border-radius: 8px;
   width: 320px;
   max-height: calc(100vh - 60px);
@@ -1053,19 +1050,22 @@ select:focus {
 }
 .tabs button {
   padding: 10px;
-  border: 1px solid #ddd;
-  border-radius: 5px;
+  border: 1px solid $border-color;
+  border-radius: $button-border-radius;
   cursor: pointer;
-  background: #f4f4f4;
+  background: $secondary-color;
   flex: 1;
+  &:hover {
+    background: $secondary-hover;
+  }
 }
 .tabs button.active {
-  background-color: #444;
+  background: $primary-color;
   color: white;
   border: none;
 }
 .tabs button:not(.active):hover {
-  background-color: #e0e0e0;
+  background: $secondary-hover;
 }
 .available-field-button {
   display: flex;
@@ -1073,22 +1073,22 @@ select:focus {
   gap: 10px;
   padding: 10px 15px;
   font-size: 14px;
-  background-color: #f9f9f9;
-  border: 1px solid #ccc;
-  border-radius: 5px;
+  background: #f9f9f9;
+  border: 1px solid $border-color;
+  border-radius: $button-border-radius;
   cursor: pointer;
   transition: background-color 0.2s ease;
   margin-bottom: 10px;
-}
-.available-field-button i {
-  font-size: 18px;
-  color: #555;
-}
-.available-field-button:hover {
-  background-color: #e0e0e0;
+  i {
+    font-size: 18px;
+    color: $text-color;
+  }
+  &:hover {
+    background: $secondary-hover;
+  }
 }
 
-/* Modal Dialog */
+/* Modal Dialogs */
 .modal-overlay {
   position: fixed;
   top: 0;
@@ -1101,7 +1101,7 @@ select:focus {
   justify-content: center;
 }
 .modal {
-  background: #fff;
+  background: white;
   padding: 20px;
   border-radius: 8px;
   width: 300px;
@@ -1119,41 +1119,41 @@ select:focus {
   flex: 1;
 }
 
-/* Input Dialog Modal Styles */
+/* Input Dialog Modal */
 .input-dialog-modal {
   width: 300px;
 }
 .input-dialog-field {
   width: 100%;
   padding: 8px;
-  border: 1px solid #ccc;
+  border: 1px solid $border-color;
   border-radius: 5px;
   margin-bottom: 15px;
   box-sizing: border-box;
 }
 
-/* Meta Edit Modal Styles */
+/* Meta Edit Modal */
 .meta-edit-modal {
   width: 350px;
 }
 .meta-edit-field {
   margin-bottom: 10px;
-}
-.meta-edit-field label {
-  font-weight: bold;
-  margin-bottom: 5px;
-  display: block;
-}
-.meta-edit-field input,
-.meta-edit-field textarea {
-  width: 100%;
-  padding: 6px;
-  border: 1px solid #ccc;
-  border-radius: 4px;
-  box-sizing: border-box;
+  label {
+    font-weight: bold;
+    margin-bottom: 5px;
+    display: block;
+  }
+  input,
+  textarea {
+    width: 100%;
+    padding: 6px;
+    border: 1px solid $border-color;
+    border-radius: 4px;
+    box-sizing: border-box;
+  }
 }
 
-/* Constraints Edit Modal Styles */
+/* Constraints Edit Modal */
 .constraints-edit-modal {
   width: 300px;
 }
@@ -1162,18 +1162,18 @@ select:focus {
 }
 .constraint-field {
   margin-bottom: 10px;
-}
-.constraint-field label {
-  font-weight: bold;
-  margin-bottom: 3px;
-  display: block;
-}
-.constraint-field input {
-  width: 100%;
-  padding: 6px;
-  border: 1px solid #ccc;
-  border-radius: 4px;
-  box-sizing: border-box;
+  label {
+    font-weight: bold;
+    margin-bottom: 3px;
+    display: block;
+  }
+  input {
+    width: 100%;
+    padding: 6px;
+    border: 1px solid $border-color;
+    border-radius: 4px;
+    box-sizing: border-box;
+  }
 }
 
 /* Responsive Design */
