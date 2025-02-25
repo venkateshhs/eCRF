@@ -224,6 +224,9 @@
           <button :class="{ active: activeTab === 'specialized' }" @click="activeTab = 'specialized'" title="Specialized Fields">
             Specialized Fields
           </button>
+          <button :class="{ active: activeTab === 'shacl' }" @click="activeTab = 'shacl'" title="SHACL Components">
+            SHACL Components
+          </button>
         </div>
         <!-- General Fields Tab -->
         <div v-if="activeTab === 'general'" class="general-fields">
@@ -257,6 +260,10 @@
               </button>
             </div>
           </div>
+        </div>
+        <!-- SHACL Components Tab -->
+        <div v-if="activeTab === 'shacl'" class="shacl-components">
+          <p>No SHACL components available.</p>
         </div>
       </div>
     </div>
@@ -674,13 +681,11 @@ export default {
         this.activeSection = 0;
       });
     },
-    // For editing a section title via input dialog.
     editSection(index, newVal) {
       if (newVal) {
         this.currentForm.sections[index].title = newVal;
       }
     },
-    // For editing a field label via input dialog.
     editField(sectionIndex, fieldIndex, newVal) {
       if (newVal) {
         this.currentForm.sections[sectionIndex].fields[fieldIndex].label = newVal;
@@ -711,7 +716,6 @@ export default {
       this.currentForm.sections[sectionIndex].fields.splice(fieldIndex + 1, 0, newField);
     },
     removeField(sectionIndex, fieldIndex) {
-      // Directly remove the field without confirmation.
       this.currentForm.sections[sectionIndex].fields.splice(fieldIndex, 1);
     },
     // Field Constraints Editing Methods
