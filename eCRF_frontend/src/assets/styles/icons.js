@@ -1,5 +1,3 @@
-
-
 export default {
   edit: "fas fa-edit",
   add: "fas fa-plus",

@@ -261,8 +261,8 @@
             </div>
           </div>
         </div>
-        <div v-if="activeTab === 'shacl'" class="shacl-components">
-          <p>No SHACL components available.</p>
+        <div>
+    <ShaclComponents v-if="activeTab === 'shacl'" :shaclComponents="shaclComponents" />
         </div>
       </div>
     </div>
@@ -400,9 +400,11 @@
 <script>
 import axios from "axios";
 import icons from "@/assets/styles/icons"; // Make sure this file exports your icon classes
+import ShaclComponents from "./ShaclComponents.vue";
 
 export default {
   name: "ScratchFormComponent",
+  components: { ShaclComponents },
   data() {
     return {
       forms: [],
@@ -410,6 +412,7 @@ export default {
       totalForms: 1,
       activeSection: 0,
       activeTab: "general",
+      shaclComponents: [],
       generalFields: [],
       specializedFieldSections: [],
       showSaveDialog: false,
