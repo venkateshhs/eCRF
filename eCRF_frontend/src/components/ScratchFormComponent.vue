@@ -252,6 +252,12 @@
             <button @click="navigateToSavedForms" class="btn-option" title="View Saved Forms">
               View Saved Forms
             </button>
+            <button @click="openDownloadDialog" class="btn-option" title="Download Form">
+              Download Form
+            </button>
+            <button @click="openUploadDialog" class="btn-option" title="Upload Form">
+              Upload Form
+            </button>
           </div>
         </div>
       </div>
@@ -403,14 +409,40 @@
         />
       </div>
     </div>
+
+    <!-- Download Dialog Modal -->
+    <div v-if="showDownloadDialog" class="modal-overlay">
+      <div class="modal">
+        <p>Select format to download the form:</p>
+        <div class="modal-actions">
+          <button @click="downloadFormData('json')" class="btn-primary" title="Download as JSON">JSON</button>
+          <button @click="downloadFormData('yaml')" class="btn-primary" title="Download as YAML">YAML</button>
+        </div>
+        <div class="modal-actions">
+          <button @click="closeDownloadDialog" class="btn-option" title="Cancel">Cancel</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Upload Dialog Modal -->
+    <div v-if="showUploadDialog" class="modal-overlay">
+      <div class="modal">
+        <p>Select a YAML/JSON file to upload:</p>
+        <input type="file" @change="handleFileChange" accept=".json,.yaml,.yml" />
+        <div class="modal-actions">
+          <button @click="closeUploadDialog" class="btn-option" title="Cancel">Cancel</button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
 <script>
 import axios from "axios";
-import icons from "@/assets/styles/icons"; // Make sure this file exports your icon classes
+import icons from "@/assets/styles/icons";
 import ShaclComponents from "./ShaclComponents.vue";
 import FieldConstraintsDialog from "./FieldConstraintsDialog.vue";
+import yaml from "js-yaml";
 
 export default {
   name: "ScratchFormComponent",
@@ -469,6 +501,8 @@ export default {
       currentFieldConstraints: null,
       currentFieldType: "",
       currentFieldIndices: { sectionIndex: null, fieldIndex: null },
+      showDownloadDialog: false,
+      showUploadDialog: false,
     };
   },
   computed: {
@@ -757,17 +791,14 @@ export default {
       // Update the field constraints
       field.constraints = { ...updatedConstraints };
       // Reflect ALL selected constraints in the input field by updating its properties.
-      // For text and textarea fields:
       if (field.type === "text" || field.type === "textarea") {
         field.placeholder = updatedConstraints.placeholder || field.placeholder;
         field.required = updatedConstraints.required || false;
         field.readonly = updatedConstraints.readonly || false;
-        // Set minlength, maxlength, and pattern if available.
         field.minLength = updatedConstraints.minLength;
         field.maxLength = updatedConstraints.maxLength;
         field.pattern = updatedConstraints.pattern;
       }
-      // For number fields:
       if (field.type === "number") {
         field.placeholder = updatedConstraints.placeholder || field.placeholder;
         field.required = updatedConstraints.required || false;
@@ -776,7 +807,6 @@ export default {
         field.max = updatedConstraints.max;
         field.step = updatedConstraints.step;
       }
-      // For date fields:
       if (field.type === "date") {
         field.placeholder = updatedConstraints.placeholder || field.placeholder;
         field.required = updatedConstraints.required || false;
@@ -784,16 +814,12 @@ export default {
         field.minDate = updatedConstraints.minDate;
         field.maxDate = updatedConstraints.maxDate;
       }
-      // For select, radio, and checkbox fields the options might be updated externally,
-      // but required can be reflected as well.
       if (field.type === "select" || field.type === "radio" || field.type === "checkbox") {
         field.required = updatedConstraints.required || false;
       }
-      // For all field types, update the field's value with the defaultValue if provided.
       if (updatedConstraints.defaultValue !== undefined) {
         field.value = updatedConstraints.defaultValue;
       }
-      // Help text is stored in constraints and is displayed (see help-text below input)
       this.showConstraintsDialog = false;
     },
     cancelConstraintsDialog() {
@@ -855,6 +881,96 @@ export default {
       this.showReinitConfirm = false;
       this.pendingMetaEdit = null;
     },
+    // Download Form Methods
+    openDownloadDialog() {
+      this.showDownloadDialog = true;
+    },
+    closeDownloadDialog() {
+      this.showDownloadDialog = false;
+    },
+    downloadFormData(format) {
+
+  const dataToDownload = {
+    studyDetails: this.studyDetails,
+    metaInfo: this.metaInfo,
+    forms: this.forms
+  };
+  let dataStr;
+  let fileName;
+
+  // Determine fileName prefix: use study name if provided, otherwise "formData"
+  const namePrefix = (this.studyDetails.name && this.studyDetails.name.trim() !== "")
+                      ? this.studyDetails.name.trim().replace(/\s+/g, "_")
+                      : "formData";
+
+  if (format === "json") {
+    dataStr = JSON.stringify(dataToDownload, null, 2);
+    fileName = `${namePrefix}.json`;
+  } else if (format === "yaml") {
+    try {
+      dataStr = yaml.dump(dataToDownload);
+      fileName = `${namePrefix}.yaml`;
+    } catch (e) {
+      console.error("YAML conversion error", e);
+      dataStr = "Error converting to YAML";
+      fileName = "formData.txt";
+    }
+  }
+
+  const blob = new Blob([dataStr], { type: "text/plain;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = fileName;
+  link.click();
+  URL.revokeObjectURL(url);
+  this.showDownloadDialog = false;
+  },
+    // Upload Form Methods
+    openUploadDialog() {
+      this.showUploadDialog = true;
+    },
+    closeUploadDialog() {
+      this.showUploadDialog = false;
+    },
+    handleFileChange(e) {
+    const file = e.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = (evt) => {
+        const fileContent = evt.target.result;
+        let parsedData;
+        // Trim file content to remove extra whitespace or BOM characters
+        const trimmedContent = fileContent.trim();
+        try {
+          parsedData = JSON.parse(trimmedContent);
+        } catch (jsonErr) {
+          try {
+            parsedData = yaml.load(trimmedContent);
+          } catch (yamlErr) {
+            this.openGenericDialog("Failed to parse file. Please ensure it's valid JSON or YAML.");
+            return;
+          }
+        }
+        // Update the state with uploaded data
+        if (parsedData.studyDetails) {
+          this.studyDetails = parsedData.studyDetails;
+        }
+        if (parsedData.metaInfo) {
+          this.metaInfo = parsedData.metaInfo;
+        }
+        if (parsedData.forms) {
+          this.forms = parsedData.forms;
+          this.totalForms = parsedData.forms.length;
+          this.currentFormIndex = 0;
+          this.activeSection = (this.forms[0] && this.forms[0].sections && this.forms[0].sections.length > 0) ? 0 : null;
+        } else {
+          this.openGenericDialog("Uploaded file does not contain valid form data.");
+        }
+      };
+      reader.readAsText(file);
+      this.closeUploadDialog();
+   }
   },
 };
 </script>
