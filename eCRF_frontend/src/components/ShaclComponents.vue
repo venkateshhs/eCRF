@@ -7,7 +7,7 @@
 
     <ul v-else>
       <li
-        v-for="(iri, index) in nodeShapeIRIs ?? []"
+        v-for="(iri, index) in filteredShapeIRIs"
         :key="index"
         @click="openDialog(iri)"
         class="shape-item"
@@ -16,57 +16,76 @@
       </li>
     </ul>
 
-    <!-- Dialog for Person Record -->
+    <!-- Dialog for displaying shape details -->
     <div v-if="dialogVisible" class="dialog-overlay" @click="closeDialog">
       <div class="dialog" @click.stop>
-        <h3>{{ getClassName(personData.iri) }}</h3>
-
+        <h3>{{ getClassName(shapeData.iri) }}</h3>
         <div class="scrollable-content">
           <form>
-            <div v-for="(prop, index) in personData.properties" :key="index" class="form-group">
+            <div
+              v-for="(prop, index) in shapeData.properties"
+              :key="index"
+              class="form-group"
+            >
               <label :for="'input-' + index">{{ prop.name }}</label>
-
-              <!-- Render appropriate input field -->
+              <!-- Render input based on datatype -->
               <template v-if="prop.datatype === 'string'">
-                <input type="text" :id="'input-' + index" v-model="prop.value" placeholder="Enter text" />
+                <input
+                  type="text"
+                  :id="'input-' + index"
+                  v-model="prop.value"
+                  placeholder="Enter text"
+                />
               </template>
-
               <template v-else-if="prop.datatype === 'number'">
-                <input type="number" :id="'input-' + index" v-model="prop.value" placeholder="Enter number" />
+                <input
+                  type="number"
+                  :id="'input-' + index"
+                  v-model="prop.value"
+                  placeholder="Enter number"
+                />
               </template>
-
               <template v-else-if="prop.datatype === 'date'">
                 <input type="date" :id="'input-' + index" v-model="prop.value" />
               </template>
-
               <template v-else-if="prop.datatype === 'select'">
                 <select :id="'input-' + index" v-model="prop.value">
-                  <option v-for="option in prop.options" :key="option" :value="option">
+                  <option
+                    v-for="option in prop.options"
+                    :key="option"
+                    :value="option"
+                  >
                     {{ option }}
                   </option>
                 </select>
               </template>
-
               <template v-else-if="prop.datatype === 'uri'">
-                <input type="url" :id="'input-' + index" v-model="prop.value" placeholder="Enter URL" />
+                <input
+                  type="url"
+                  :id="'input-' + index"
+                  v-model="prop.value"
+                  placeholder="Enter URL"
+                />
               </template>
-
               <template v-else-if="prop.datatype === 'boolean'">
                 <input type="checkbox" :id="'input-' + index" v-model="prop.value" />
               </template>
-
               <div class="action-buttons">
-                <button @click.prevent="editField(index)" class="btn">Edit</button>
-                <button @click.prevent="deleteField(index)" class="btn btn-delete">Delete</button>
+                <button @click.prevent="editField(index)" class="btn">
+                  Edit
+                </button>
+                <button @click.prevent="deleteField(index)" class="btn btn-delete">
+                  Delete
+                </button>
               </div>
             </div>
           </form>
         </div>
-
         <div class="add-section">
-          <button class="btn btn-add" @click="addField">+ Add New Field</button>
+          <button class="btn btn-add" @click="addField">
+            + Add New Field
+          </button>
         </div>
-
         <button class="close-button" @click="closeDialog">Close</button>
       </div>
     </div>
@@ -74,19 +93,72 @@
 </template>
 
 <script>
-import { ref, onMounted } from "vue";
+import { ref, onMounted, computed } from "vue";
 import { useShapeData } from "shacl-vue";
 
 export default {
   name: "ShaclComponents",
   setup() {
-    const config = { value: { shapes_url: "/dlschemas_shacl.ttl" } };
+    // Configuration for the schema; filtering enabled by default.
+    const config = {
+      value: {
+        shapes_url: "/dlschemas_shacl.ttl",
+        showOnlyClassesWithId: true,
+      },
+    };
+
     const { getSHACLschema, nodeShapes, nodeShapeIRIs } = useShapeData(config);
 
     const loading = ref(true);
     const error = ref(null);
+    // Renamed from personData to shapeData so any SHACL class can be rendered.
+    const shapeData = ref({ iri: "", properties: [] });
     const dialogVisible = ref(false);
-    const personData = ref({ iri: "", properties: [] });
+
+    // Helper to derive a class name from the IRI.
+    function getClassName(uri) {
+      const name = uri.split("/").pop();
+      console.log(`Transforming IRI: ${uri} --> Class Name: ${name}`);
+      return name;
+    }
+
+    // Dynamic filtering: if showOnlyClassesWithId is true,
+    // filter the IRIs to only those whose shape contains a property whose path ends with "/id".
+    const filteredShapeIRIs = computed(() => {
+      if (!nodeShapeIRIs.value) {
+        console.log("No nodeShapeIRIs available, returning empty array.");
+        return [];
+      }
+      console.log("Original nodeShapeIRIs:", nodeShapeIRIs.value);
+      let result = [];
+      if (config.value.showOnlyClassesWithId) {
+        result = nodeShapeIRIs.value.filter((iri) => {
+          const shape = nodeShapes.value[iri];
+          if (!shape || !shape.properties) {
+            console.log(`Shape ${iri} has no properties; excluding.`);
+            return false;
+          }
+          const hasId = shape.properties.some((prop) => {
+            const path = prop["http://www.w3.org/ns/shacl#path"];
+            // Dynamic check: property path ends with "/id" (case-insensitive)
+            const match =
+              typeof path === "string" && path.toLowerCase().endsWith("/id");
+            console.log(
+              `Shape ${iri}: property path ${path} ${
+                match ? "matches" : "does not match"
+              } the dynamic id check.`
+            );
+            return match;
+          });
+          return hasId;
+        });
+        console.log("Filtered IRIs with dynamic id check:", result);
+      } else {
+        result = nodeShapeIRIs.value;
+        console.log("showOnlyClassesWithId flag is false, returning all IRIs:", result);
+      }
+      return result;
+    });
 
     const dataTypeMapping = {
       "http://www.w3.org/2001/XMLSchema#string": "string",
@@ -98,56 +170,73 @@ export default {
 
     onMounted(async () => {
       try {
+        console.log("Fetching SHACL schema...");
         await getSHACLschema();
         loading.value = false;
+        console.log("SHACL schema loaded.");
       } catch (err) {
         error.value = err.message;
         loading.value = false;
+        console.error("Error loading SHACL schema:", err);
       }
     });
 
-    function getClassName(uri) {
-      return uri.split("/").pop();
-    }
-
+    // Generic openDialog: opens the dialog and populates shapeData with the selected shape.
     function openDialog(iri) {
-      const personRecord = nodeShapes.value[iri];
-
-      if (personRecord) {
-        personData.value = {
+      console.log("Opening dialog for IRI:", iri);
+      const record = nodeShapes.value[iri];
+      if (record) {
+        shapeData.value = {
           iri,
-          properties: personRecord.properties.map(prop => ({
-            name: prop["http://www.w3.org/ns/shacl#name"] || "Unnamed",
-            datatype: dataTypeMapping[prop["http://www.w3.org/ns/shacl#datatype"]] || "unknown",
-            options: prop["http://www.w3.org/ns/shacl#in"] || [],
-            value: null,
-          })),
+          properties: record.properties.map((prop, idx) => {
+            const fieldName = prop["http://www.w3.org/ns/shacl#name"] || "Unnamed";
+            const fieldType =
+              dataTypeMapping[prop["http://www.w3.org/ns/shacl#datatype"]] || "unknown";
+            console.log(
+              `Mapping property #${idx}: Name: ${fieldName}, DataType: ${fieldType}`
+            );
+            return {
+              name: fieldName,
+              datatype: fieldType,
+              options: prop["http://www.w3.org/ns/shacl#in"] || [],
+              value: null,
+            };
+          }),
         };
+        console.log("Shape Data set to:", shapeData.value);
         dialogVisible.value = true;
+      } else {
+        console.warn("No record found for IRI:", iri);
       }
     }
 
     function closeDialog() {
+      console.log("Closing dialog.");
       dialogVisible.value = false;
     }
 
     function editField(index) {
-      const newValue = prompt(`Edit field "${personData.value.properties[index].name}"`, personData.value.properties[index].value);
+      const field = shapeData.value.properties[index];
+      const newValue = prompt(`Edit field "${field.name}"`, field.value);
       if (newValue !== null) {
-        personData.value.properties[index].value = newValue;
+        console.log(`Field "${field.name}" updated from "${field.value}" to "${newValue}"`);
+        shapeData.value.properties[index].value = newValue;
       }
     }
 
     function deleteField(index) {
-      if (confirm(`Are you sure you want to delete "${personData.value.properties[index].name}"?`)) {
-        personData.value.properties.splice(index, 1);
+      const field = shapeData.value.properties[index];
+      if (confirm(`Are you sure you want to delete "${field.name}"?`)) {
+        console.log(`Deleting field "${field.name}" at index ${index}`);
+        shapeData.value.properties.splice(index, 1);
       }
     }
 
     function addField() {
       const newFieldName = prompt("Enter the name for the new field:");
       if (newFieldName) {
-        personData.value.properties.push({
+        console.log(`Adding new field with name: "${newFieldName}"`);
+        shapeData.value.properties.push({
           name: newFieldName,
           datatype: "string",
           value: "",
@@ -155,7 +244,19 @@ export default {
       }
     }
 
-    return { nodeShapeIRIs, loading, error, dialogVisible, personData, openDialog, closeDialog, editField, deleteField, addField, getClassName };
+    return {
+      filteredShapeIRIs,
+      loading,
+      error,
+      dialogVisible,
+      shapeData,
+      openDialog,
+      closeDialog,
+      editField,
+      deleteField,
+      addField,
+      getClassName,
+    };
   },
 };
 </script>
