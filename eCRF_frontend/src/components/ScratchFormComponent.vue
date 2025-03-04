@@ -141,38 +141,74 @@
                   type="text"
                   :id="field.name"
                   v-model="field.value"
-                  :placeholder="field.placeholder"
+                  :placeholder="field.constraints?.placeholder || field.placeholder"
+                  :required="field.constraints?.required"
+                  :readonly="field.constraints?.readonly"
+                  :minlength="field.constraints?.minLength"
+                  :maxlength="field.constraints?.maxLength"
+                  :pattern="field.constraints?.pattern"
                 />
                 <textarea
                   v-if="field.type === 'textarea'"
                   :id="field.name"
                   v-model="field.value"
-                  :placeholder="field.placeholder"
+                  :placeholder="field.constraints?.placeholder || field.placeholder"
                   :rows="field.rows"
+                  :required="field.constraints?.required"
+                  :readonly="field.constraints?.readonly"
+                  :minlength="field.constraints?.minLength"
+                  :maxlength="field.constraints?.maxLength"
+                  :pattern="field.constraints?.pattern"
                 ></textarea>
+                <!-- Number Input -->
                 <input
                   v-if="field.type === 'number'"
                   type="number"
                   :id="field.name"
                   v-model="field.value"
-                  :placeholder="field.placeholder"
+                  :placeholder="field.constraints?.placeholder || field.placeholder"
+                  :required="field.constraints?.required"
+                  :readonly="field.constraints?.readonly"
+                  :min="field.constraints?.min"
+                  :max="field.constraints?.max"
+                  :step="field.constraints?.step"
                 />
+                <!-- Date Input -->
                 <input
                   v-if="field.type === 'date'"
                   type="date"
                   :id="field.name"
                   v-model="field.value"
+                  :placeholder="field.constraints?.placeholder || field.placeholder"
+                  :required="field.constraints?.required"
+                  :readonly="field.constraints?.readonly"
+                  :min="field.constraints?.minDate"
+                  :max="field.constraints?.maxDate"
                 />
-                <select v-if="field.type === 'select'" :id="field.name" v-model="field.value">
+                <!-- Select Field -->
+                <select
+                  v-if="field.type === 'select'"
+                  :id="field.name"
+                  v-model="field.value"
+                  :required="field.constraints?.required"
+                >
                   <option v-for="option in field.options" :key="option" :value="option">
                     {{ option }}
                   </option>
                 </select>
+                <!-- Checkbox Group -->
                 <div v-if="field.type === 'checkbox'" class="checkbox-group">
                   <label v-for="(option, i) in field.options" :key="i">
-                    <input type="checkbox" v-model="field.value" :value="option" /> {{ option }}
+                    <input
+                      type="checkbox"
+                      v-model="field.value"
+                      :value="option"
+                      :required="field.constraints?.required"
+                      :readonly="field.constraints?.readonly"
+                    /> {{ option }}
                   </label>
                 </div>
+                <!-- Radio Group -->
                 <div v-if="field.type === 'radio'" class="radio-group">
                   <label v-for="option in field.options" :key="option">
                     <input
@@ -180,10 +216,12 @@
                       :name="field.name"
                       v-model="field.value"
                       :value="option"
+                      :required="field.constraints?.required"
                     />
                     {{ option }}
                   </label>
                 </div>
+                <!-- Button -->
                 <button
                   v-if="field.type === 'button'"
                   type="button"
@@ -192,6 +230,8 @@
                 >
                   {{ field.label }}
                 </button>
+                <!-- Optional help text from constraints -->
+                <small v-if="field.constraints?.helpText" class="help-text">{{ field.constraints.helpText }}</small>
               </div>
             </div>
           </div>
@@ -262,7 +302,7 @@
           </div>
         </div>
         <div>
-    <ShaclComponents v-if="activeTab === 'shacl'" :shaclComponents="shaclComponents" />
+          <ShaclComponents v-if="activeTab === 'shacl'" :shaclComponents="shaclComponents" />
         </div>
       </div>
     </div>
@@ -355,43 +395,12 @@
     <!-- Constraints Edit Dialog Modal -->
     <div v-if="showConstraintsDialog" class="modal-overlay">
       <div class="modal constraints-edit-modal">
-        <h3>Edit Field Constraints</h3>
-        <div v-if="currentFieldType === 'number'" class="constraints-fields">
-          <div class="constraint-field">
-            <label>Min Value:</label>
-            <input type="number" v-model.number="constraintsForm.min" placeholder="Min" />
-          </div>
-          <div class="constraint-field">
-            <label>Max Value:</label>
-            <input type="number" v-model.number="constraintsForm.max" placeholder="Max" />
-          </div>
-          <div class="constraint-field">
-            <label>Max Digits:</label>
-            <input type="number" v-model.number="constraintsForm.maxDigits" placeholder="Max Digits" />
-          </div>
-        </div>
-        <div v-else-if="currentFieldType === 'text' || currentFieldType === 'textarea'" class="constraints-fields">
-          <div class="constraint-field">
-            <label>Min Length:</label>
-            <input type="number" v-model.number="constraintsForm.minLength" placeholder="Min Length" />
-          </div>
-          <div class="constraint-field">
-            <label>Max Length:</label>
-            <input type="number" v-model.number="constraintsForm.maxLength" placeholder="Max Length" />
-          </div>
-          <div class="constraint-field">
-            <label>Pattern (Regex):</label>
-            <input type="text" v-model="constraintsForm.pattern" placeholder="e.g. ^[A-Za-z]+$" />
-          </div>
-          <div class="constraint-field">
-            <label>Required:</label>
-            <input type="checkbox" v-model="constraintsForm.required" />
-          </div>
-        </div>
-        <div class="modal-actions">
-          <button @click="confirmConstraintsDialog" class="btn-primary modal-btn" title="Save Constraints">Save</button>
-          <button @click="cancelConstraintsDialog" class="btn-option modal-btn" title="Cancel Constraints">Cancel</button>
-        </div>
+        <FieldConstraintsDialog
+          :currentFieldType="currentFieldType"
+          :constraintsForm="constraintsForm"
+          @updateConstraints="confirmConstraintsDialog"
+          @closeConstraintsDialog="cancelConstraintsDialog"
+        />
       </div>
     </div>
   </div>
@@ -401,10 +410,11 @@
 import axios from "axios";
 import icons from "@/assets/styles/icons"; // Make sure this file exports your icon classes
 import ShaclComponents from "./ShaclComponents.vue";
+import FieldConstraintsDialog from "./FieldConstraintsDialog.vue";
 
 export default {
   name: "ScratchFormComponent",
-  components: { ShaclComponents },
+  components: { ShaclComponents, FieldConstraintsDialog },
   data() {
     return {
       forms: [],
@@ -741,9 +751,49 @@ export default {
       }
       this.showConstraintsDialog = true;
     },
-    confirmConstraintsDialog() {
+    confirmConstraintsDialog(updatedConstraints) {
       const { sectionIndex, fieldIndex } = this.currentFieldIndices;
-      this.currentForm.sections[sectionIndex].fields[fieldIndex].constraints = { ...this.constraintsForm };
+      const field = this.currentForm.sections[sectionIndex].fields[fieldIndex];
+      // Update the field constraints
+      field.constraints = { ...updatedConstraints };
+      // Reflect ALL selected constraints in the input field by updating its properties.
+      // For text and textarea fields:
+      if (field.type === "text" || field.type === "textarea") {
+        field.placeholder = updatedConstraints.placeholder || field.placeholder;
+        field.required = updatedConstraints.required || false;
+        field.readonly = updatedConstraints.readonly || false;
+        // Set minlength, maxlength, and pattern if available.
+        field.minLength = updatedConstraints.minLength;
+        field.maxLength = updatedConstraints.maxLength;
+        field.pattern = updatedConstraints.pattern;
+      }
+      // For number fields:
+      if (field.type === "number") {
+        field.placeholder = updatedConstraints.placeholder || field.placeholder;
+        field.required = updatedConstraints.required || false;
+        field.readonly = updatedConstraints.readonly || false;
+        field.min = updatedConstraints.min;
+        field.max = updatedConstraints.max;
+        field.step = updatedConstraints.step;
+      }
+      // For date fields:
+      if (field.type === "date") {
+        field.placeholder = updatedConstraints.placeholder || field.placeholder;
+        field.required = updatedConstraints.required || false;
+        field.readonly = updatedConstraints.readonly || false;
+        field.minDate = updatedConstraints.minDate;
+        field.maxDate = updatedConstraints.maxDate;
+      }
+      // For select, radio, and checkbox fields the options might be updated externally,
+      // but required can be reflected as well.
+      if (field.type === "select" || field.type === "radio" || field.type === "checkbox") {
+        field.required = updatedConstraints.required || false;
+      }
+      // For all field types, update the field's value with the defaultValue if provided.
+      if (updatedConstraints.defaultValue !== undefined) {
+        field.value = updatedConstraints.defaultValue;
+      }
+      // Help text is stored in constraints and is displayed (see help-text below input)
       this.showConstraintsDialog = false;
     },
     cancelConstraintsDialog() {
@@ -814,11 +864,10 @@ export default {
 
 // Additional component-specific styles
 .create-form-container {
-  // Use full width and a light background
   width: 100%;
   min-height: 100vh;
   padding: 20px;
-  background-color: $light-background; // from your _variables.scss
+  background-color: $light-background;
 }
 
 .header-container {
@@ -976,6 +1025,11 @@ textarea:focus,
 select:focus {
   border-color: $text-color;
   outline: none;
+}
+.help-text {
+  font-size: 12px;
+  color: $secondary-color;
+  margin-top: 3px;
 }
 
 /* Form Actions */
