@@ -7,32 +7,14 @@
       </button>
     </div>
 
-    <!-- Meta Information Section -->
-    <div class="meta-info-container" :class="{ collapsed: metaInfoCollapsed }">
-      <div class="meta-header">
-        <h2>Study Meta Information</h2>
-        <div class="meta-actions">
-          <button @click="openMetaEditDialog" class="btn-meta-edit" title="Edit Meta Information">
-            <i :class="icons.edit"></i>
-          </button>
-          <button
-            @click="toggleMetaInfo"
-            class="btn-meta-toggle"
-            :title="metaInfoCollapsed ? 'Expand Meta Information' : 'Collapse Meta Information'"
-          >
-            <i :class="metaInfoCollapsed ? icons.toggleDown : icons.toggleUp"></i>
-          </button>
-        </div>
-      </div>
-      <div v-if="!metaInfoCollapsed">
-        <p v-if="studyDetails.name"><strong>Study Name:</strong> {{ studyDetails.name }}</p>
-        <p v-if="studyDetails.description"><strong>Description:</strong> {{ studyDetails.description }}</p>
-        <p v-if="studyDetails.numberOfForms"><strong>Number of Forms:</strong> {{ studyDetails.numberOfForms }}</p>
-        <p v-if="metaInfo.numberOfSubjects"><strong>Number of Subjects:</strong> {{ metaInfo.numberOfSubjects }}</p>
-        <p v-if="metaInfo.numberOfVisits"><strong>Number of Visits per Subject:</strong> {{ metaInfo.numberOfVisits }}</p>
-        <p v-if="metaInfo.studyMetaDescription"><strong>Study Meta Description:</strong> {{ metaInfo.studyMetaDescription }}</p>
-      </div>
-    </div>
+    <!-- Study Meta Information Section -->
+    <StudyMetaInfo
+      :studyDetails="studyDetails"
+      :metaInfo="metaInfo"
+      :metaInfoCollapsed="metaInfoCollapsed"
+      @toggle-meta-info="toggleMetaInfo"
+      @open-meta-edit-dialog="openMetaEditDialog"
+    />
 
     <!-- Main Content: Form Area & Available Fields -->
     <div class="scratch-form-content">
@@ -355,15 +337,15 @@
         </div>
         <div class="meta-edit-field">
           <label>Number of Forms:</label>
-          <input type="number" v-model.number="metaEditForm.numberOfForms" placeholder="Enter number of forms" />
+          <input type="number" v-model="metaEditForm.numberOfForms" placeholder="Enter number of forms" />
         </div>
         <div class="meta-edit-field">
           <label>Number of Subjects:</label>
-          <input type="number" v-model.number="metaEditForm.numberOfSubjects" placeholder="Enter number of subjects" />
+          <input type="number" v-model="metaEditForm.numberOfSubjects" placeholder="Enter number of subjects" />
         </div>
         <div class="meta-edit-field">
           <label>Number of Visits per Subject:</label>
-          <input type="number" v-model.number="metaEditForm.numberOfVisits" placeholder="Enter number of visits" />
+          <input type="number" v-model="metaEditForm.numberOfVisits" placeholder="Enter number of visits" />
         </div>
         <div class="meta-edit-field">
           <label>Study Meta Description:</label>
@@ -440,13 +422,14 @@
 <script>
 import axios from "axios";
 import icons from "@/assets/styles/icons";
+import StudyMetaInfo from "./StudyMetaInfo.vue";
 import ShaclComponents from "./ShaclComponents.vue";
 import FieldConstraintsDialog from "./FieldConstraintsDialog.vue";
 import yaml from "js-yaml";
 
 export default {
   name: "ScratchFormComponent",
-  components: { ShaclComponents, FieldConstraintsDialog },
+  components: { StudyMetaInfo, ShaclComponents, FieldConstraintsDialog },
   data() {
     return {
       forms: [],
@@ -473,6 +456,7 @@ export default {
         numberOfVisits: null,
         studyMetaDescription: ""
       },
+      metaInfoCollapsed: true,
       showMetaEditDialog: false,
       metaEditForm: {
         name: "",
@@ -484,7 +468,6 @@ export default {
       },
       showReinitConfirm: false,
       pendingMetaEdit: null,
-      metaInfoCollapsed: true,
       showConfirmDialog: false,
       confirmDialogMessage: "",
       confirmDialogCallback: null,
@@ -522,16 +505,6 @@ export default {
           formName: value,
         };
       },
-    },
-    hasMetaInfo() {
-      return (
-        this.studyDetails.name ||
-        this.studyDetails.description ||
-        this.studyDetails.numberOfForms ||
-        this.metaInfo.numberOfSubjects ||
-        this.metaInfo.numberOfVisits ||
-        this.metaInfo.studyMetaDescription
-      );
     },
     icons() {
       return icons;
@@ -788,9 +761,7 @@ export default {
     confirmConstraintsDialog(updatedConstraints) {
       const { sectionIndex, fieldIndex } = this.currentFieldIndices;
       const field = this.currentForm.sections[sectionIndex].fields[fieldIndex];
-      // Update the field constraints
       field.constraints = { ...updatedConstraints };
-      // Reflect ALL selected constraints in the input field by updating its properties.
       if (field.type === "text" || field.type === "textarea") {
         field.placeholder = updatedConstraints.placeholder || field.placeholder;
         field.required = updatedConstraints.required || false;
@@ -889,43 +860,38 @@ export default {
       this.showDownloadDialog = false;
     },
     downloadFormData(format) {
-
-  const dataToDownload = {
-    studyDetails: this.studyDetails,
-    metaInfo: this.metaInfo,
-    forms: this.forms
-  };
-  let dataStr;
-  let fileName;
-
-  // Determine fileName prefix: use study name if provided, otherwise "formData"
-  const namePrefix = (this.studyDetails.name && this.studyDetails.name.trim() !== "")
+      const dataToDownload = {
+        studyDetails: this.studyDetails,
+        metaInfo: this.metaInfo,
+        forms: this.forms
+      };
+      let dataStr;
+      let fileName;
+      const namePrefix = (this.studyDetails.name && this.studyDetails.name.trim() !== "")
                       ? this.studyDetails.name.trim().replace(/\s+/g, "_")
                       : "formData";
-
-  if (format === "json") {
-    dataStr = JSON.stringify(dataToDownload, null, 2);
-    fileName = `${namePrefix}.json`;
-  } else if (format === "yaml") {
-    try {
-      dataStr = yaml.dump(dataToDownload);
-      fileName = `${namePrefix}.yaml`;
-    } catch (e) {
-      console.error("YAML conversion error", e);
-      dataStr = "Error converting to YAML";
-      fileName = "formData.txt";
-    }
-  }
-
-  const blob = new Blob([dataStr], { type: "text/plain;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = fileName;
-  link.click();
-  URL.revokeObjectURL(url);
-  this.showDownloadDialog = false;
-  },
+      if (format === "json") {
+        dataStr = JSON.stringify(dataToDownload, null, 2);
+        fileName = `${namePrefix}.json`;
+      } else if (format === "yaml") {
+        try {
+          dataStr = yaml.dump(dataToDownload);
+          fileName = `${namePrefix}.yaml`;
+        } catch (e) {
+          console.error("YAML conversion error", e);
+          dataStr = "Error converting to YAML";
+          fileName = "formData.txt";
+        }
+      }
+      const blob = new Blob([dataStr], { type: "text/plain;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = fileName;
+      link.click();
+      URL.revokeObjectURL(url);
+      this.showDownloadDialog = false;
+    },
     // Upload Form Methods
     openUploadDialog() {
       this.showUploadDialog = true;
@@ -934,13 +900,12 @@ export default {
       this.showUploadDialog = false;
     },
     handleFileChange(e) {
-    const file = e.target.files[0];
+      const file = e.target.files[0];
       if (!file) return;
       const reader = new FileReader();
       reader.onload = (evt) => {
         const fileContent = evt.target.result;
         let parsedData;
-        // Trim file content to remove extra whitespace or BOM characters
         const trimmedContent = fileContent.trim();
         try {
           parsedData = JSON.parse(trimmedContent);
@@ -952,7 +917,6 @@ export default {
             return;
           }
         }
-        // Update the state with uploaded data
         if (parsedData.studyDetails) {
           this.studyDetails = parsedData.studyDetails;
         }
@@ -970,7 +934,7 @@ export default {
       };
       reader.readAsText(file);
       this.closeUploadDialog();
-   }
+    },
   },
 };
 </script>
@@ -978,27 +942,23 @@ export default {
 <style lang="scss" scoped>
 @import "@/assets/styles/_base.scss";
 
-// Additional component-specific styles
 .create-form-container {
   width: 100%;
   min-height: 100vh;
   padding: 20px;
   background-color: $light-background;
 }
-
 .header-container {
   display: flex;
   align-items: center;
   gap: 10px;
   margin-bottom: 15px;
 }
-
 .btn-back {
   @include button-reset;
   font-size: 16px;
   color: $text-color;
 }
-
 h1 {
   font-size: 24px;
   font-weight: 500;
@@ -1006,57 +966,12 @@ h1 {
   flex: 1;
   text-align: center;
 }
-
-/* Meta Information Section */
-.meta-info-container {
-  background: white;
-  border: 1px solid $border-color;
-  border-radius: 8px;
-  padding: 15px;
-  margin-bottom: 20px;
-  transition: padding 0.3s ease, font-size 0.3s ease;
-  &.collapsed {
-    padding: 5px 10px;
-    font-size: 12px;
-  }
-}
-.meta-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-.meta-actions {
-  display: flex;
-  gap: 10px;
-}
-.btn-meta-edit,
-.btn-meta-toggle {
-  @include button-reset;
-  background: $secondary-color;
-  border: 1px solid $border-color;
-  border-radius: $button-border-radius;
-  padding: 5px 8px;
-  cursor: pointer;
-  transition: background 0.3s ease;
-  &:hover {
-    background: $secondary-hover;
-  }
-}
-.meta-info-container p {
-  margin: 5px 0;
-  font-size: 14px;
-  color: $text-color;
-}
-
-/* Main Content Layout */
 .scratch-form-content {
   display: flex;
   flex-wrap: nowrap;
   justify-content: space-between;
   gap: 20px;
 }
-
-/* Form Area */
 .form-area {
   flex: 1;
   background: white;
@@ -1103,8 +1018,6 @@ h1 {
   color: $text-color;
   margin-bottom: 20px;
 }
-
-/* Form Section */
 .form-section {
   padding: 15px;
   border-bottom: 1px solid $border-color;
@@ -1147,8 +1060,6 @@ select:focus {
   color: $secondary-color;
   margin-top: 3px;
 }
-
-/* Form Actions */
 .form-actions {
   display: flex;
   align-items: center;
@@ -1189,8 +1100,6 @@ select:focus {
     background: $primary-hover;
   }
 }
-
-/* Icon Button */
 .icon-button {
   @include button-reset;
   padding: 5px;
@@ -1204,8 +1113,6 @@ select:focus {
     background-color: $secondary-hover;
   }
 }
-
-/* Available Fields Section */
 .available-fields {
   flex-shrink: 0;
   background: white;
@@ -1260,8 +1167,6 @@ select:focus {
     background: $secondary-hover;
   }
 }
-
-/* Modal Dialogs */
 .modal-overlay {
   position: fixed;
   top: 0;
@@ -1291,8 +1196,6 @@ select:focus {
 .modal-actions button {
   flex: 1;
 }
-
-/* Input Dialog Modal */
 .input-dialog-modal {
   width: 300px;
 }
@@ -1304,8 +1207,6 @@ select:focus {
   margin-bottom: 15px;
   box-sizing: border-box;
 }
-
-/* Meta Edit Modal */
 .meta-edit-modal {
   width: 350px;
 }
@@ -1325,8 +1226,6 @@ select:focus {
     box-sizing: border-box;
   }
 }
-
-/* Constraints Edit Modal */
 .constraints-edit-modal {
   width: 300px;
 }
@@ -1348,8 +1247,6 @@ select:focus {
     box-sizing: border-box;
   }
 }
-
-/* Responsive Design */
 @media (max-width: 768px) {
   .scratch-form-content {
     flex-direction: column;
