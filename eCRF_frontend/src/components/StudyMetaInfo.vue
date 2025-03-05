@@ -25,13 +25,15 @@
 
       <!-- File Attachment Option -->
       <div class="file-attachment">
-        <label for="meta-file-upload" class="attach-file-label">Attach File:</label>
-        <input type="file" id="meta-file-upload" ref="metaFileInput" @change="handleMetaFile" />
-        <div v-if="metaFile" class="attached-file-info">
-          <span>{{ metaFile.name }}</span>
-          <button @click="removeMetaFile" class="btn-remove-file" title="Remove attached file">
-            <i :class="icons.delete"></i>
-          </button>
+        <label for="meta-file-upload" class="attach-file-label">Attach File(s):</label>
+        <input type="file" id="meta-file-upload" ref="metaFileInput" @change="handleMetaFile" multiple />
+        <div v-if="metaFiles.length" class="attached-files-info">
+          <div v-for="(file, index) in metaFiles" :key="index" class="attached-file-info">
+            <span>{{ file.name }}</span>
+            <button @click="removeMetaFile(index)" class="btn-remove-file" title="Remove attached file">
+              <i :class="icons.delete"></i>
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -58,26 +60,21 @@ export default {
   },
   data() {
     return {
-      metaFile: null,
+      metaFiles: [],
       icons,
     };
   },
   methods: {
     handleMetaFile(event) {
-      const file = event.target.files[0];
-      if (file) {
-        this.metaFile = file;
-        // Optionally, read file content for further processing.
-        const reader = new FileReader();
-        reader.onload = (e) => {
-          console.log("File loaded:", e.target.result);
-        };
-        reader.readAsDataURL(file);
+      const files = event.target.files;
+      if (files && files.length) {
+        for (let i = 0; i < files.length; i++) {
+          this.metaFiles.push(files[i]);
+        }
       }
     },
-    removeMetaFile() {
-      this.metaFile = null;
-      // Clear the file input so that it doesn't retain the file name
+    removeMetaFile(index) {
+      this.metaFiles.splice(index, 1);
       if (this.$refs.metaFileInput) {
         this.$refs.metaFileInput.value = "";
       }
@@ -138,11 +135,14 @@ export default {
   font-weight: bold;
   margin-right: 10px;
 }
-.attached-file-info {
+.attached-files-info {
   margin-top: 5px;
+}
+.attached-file-info {
   display: flex;
   align-items: center;
   gap: 10px;
+  margin-top: 5px;
 }
 .btn-remove-file {
   background: transparent;
