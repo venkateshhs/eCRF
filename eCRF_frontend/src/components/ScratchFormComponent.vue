@@ -240,6 +240,9 @@
             <button @click="openUploadDialog" class="btn-option" title="Upload Form">
               Upload Form
             </button>
+            <button @click="openPreviewDialog" class="btn-option" title="Preview Form">
+              Preview Form
+            </button>
           </div>
         </div>
       </div>
@@ -291,6 +294,18 @@
         </div>
         <div>
           <ShaclComponents v-if="activeTab === 'shacl'" :shaclComponents="shaclComponents" />
+        </div>
+      </div>
+    </div>
+
+    <!-- Preview Dialog Modal -->
+    <div v-if="showPreviewDialog" class="modal-overlay">
+      <div class="modal preview-modal">
+        <FormPreview :form="currentForm" />
+        <div class="modal-actions">
+          <button @click="closePreviewDialog" class="btn-primary modal-btn" title="Close Preview">
+            Close
+          </button>
         </div>
       </div>
     </div>
@@ -425,11 +440,12 @@ import icons from "@/assets/styles/icons";
 import StudyMetaInfo from "./StudyMetaInfo.vue";
 import ShaclComponents from "./ShaclComponents.vue";
 import FieldConstraintsDialog from "./FieldConstraintsDialog.vue";
+import FormPreview from "./FormPreview.vue";
 import yaml from "js-yaml";
 
 export default {
   name: "ScratchFormComponent",
-  components: { StudyMetaInfo, ShaclComponents, FieldConstraintsDialog },
+  components: { StudyMetaInfo, ShaclComponents, FieldConstraintsDialog, FormPreview },
   data() {
     return {
       forms: [],
@@ -486,6 +502,7 @@ export default {
       currentFieldIndices: { sectionIndex: null, fieldIndex: null },
       showDownloadDialog: false,
       showUploadDialog: false,
+      showPreviewDialog: false,
     };
   },
   computed: {
@@ -935,6 +952,13 @@ export default {
       reader.readAsText(file);
       this.closeUploadDialog();
     },
+    // Preview Methods
+    openPreviewDialog() {
+      this.showPreviewDialog = true;
+    },
+    closePreviewDialog() {
+      this.showPreviewDialog = false;
+    },
   },
 };
 </script>
@@ -1246,6 +1270,11 @@ select:focus {
     border-radius: 4px;
     box-sizing: border-box;
   }
+}
+.preview-modal {
+  width: 500px;
+  max-height: 80vh;
+  overflow-y: auto;
 }
 @media (max-width: 768px) {
   .scratch-form-content {
