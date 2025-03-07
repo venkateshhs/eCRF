@@ -9,4 +9,6 @@ export default {
   prev: "fas fa-chevron-left",
   next: "fas fa-chevron-right",
   cog: "fas fa-cog",
+  book: "fas fa-book",
+  user: "fas fa-user",
 };

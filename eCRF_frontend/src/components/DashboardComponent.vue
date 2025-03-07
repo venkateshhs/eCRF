@@ -17,36 +17,44 @@
         <span></span>
         <span></span>
       </button>
-      <nav v-if="!sidebarCollapsed">
+      <nav>
         <ul>
-          <li @click="setActiveSection('study-management')" class="nav-item">Study Management</li>
-          <li @click="navigate('/dashboard/user-info')" class="nav-item">User Management</li>
+          <li @click="setActiveSection('study-management')" class="nav-item">
+            <i :class="icons.book" v-if="sidebarCollapsed"></i>
+            <span v-if="!sidebarCollapsed">Study Management</span>
+          </li>
+          <li @click="navigate('/dashboard/user-info')" class="nav-item">
+            <i :class="icons.user" v-if="sidebarCollapsed"></i>
+            <span v-if="!sidebarCollapsed">User Management</span>
+          </li>
         </ul>
       </nav>
     </aside>
 
     <!-- Main Content -->
     <main :class="['dashboard-main', { expanded: sidebarCollapsed }]">
-      <!-- Study Management (Default Screen) -->
       <div v-if="activeSection === 'study-management'">
         <h1>Study Management</h1>
-        <button @click="navigate('/dashboard/create-study')" class="btn-option">Create Study</button>
-        <button @click="navigate('/dashboard/view-forms')" class="btn-option">Open Study</button>
+        <div class="button-container">
+          <button @click="navigate('/dashboard/create-study')" class="btn-option">Create Study</button>
+          <button @click="navigate('/dashboard/view-forms')" class="btn-option">Open Study</button>
+        </div>
       </div>
-
-      <!-- Study Creation & User Management Pages -->
       <router-view v-else></router-view>
     </main>
   </div>
 </template>
 
 <script>
+import icons from "@/assets/styles/icons";
+
 export default {
   name: "DashboardComponent",
   data() {
     return {
       sidebarCollapsed: false,
-      activeSection: "study-management", // Default to Study Management on load
+      activeSection: "study-management",
+      icons,
     };
   },
   methods: {
@@ -54,10 +62,10 @@ export default {
       this.sidebarCollapsed = !this.sidebarCollapsed;
     },
     setActiveSection(section) {
-      this.activeSection = section; // Show Study Management when clicked
+      this.activeSection = section;
     },
     navigate(route) {
-      this.activeSection = ""; // Hide Study Management UI when navigating elsewhere
+      this.activeSection = "";
       this.$router.push(route);
     },
     logout() {
@@ -67,7 +75,7 @@ export default {
   },
   mounted() {
     if (this.$route.path === "/dashboard") {
-      this.activeSection = "study-management"; // Ensure Study Management is visible on refresh
+      this.activeSection = "study-management";
     }
   },
 };
@@ -164,6 +172,9 @@ export default {
   cursor: pointer;
   border-radius: 4px;
   transition: background 0.3s ease;
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
 
 .nav-item:hover {
@@ -182,12 +193,16 @@ export default {
   margin-left: -150px;
 }
 
-/* Minimalistic Buttons */
+/* Horizontal Button Layout */
+.button-container {
+  display: flex;
+  gap: 15px;
+  margin-top: 20px;
+}
+
 .btn-option {
-  display: block;
-  width: 100%;
+  flex: 1;
   padding: 12px;
-  margin: 10px 0;
   background: #f0f0f0;
   border: 1px solid #ccc;
   border-radius: 5px;
