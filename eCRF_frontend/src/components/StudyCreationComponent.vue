@@ -19,17 +19,17 @@
       <div v-if="selectedCaseStudy && selectedCaseStudyName !== 'custom'">
         <h3>{{ selectedCaseStudy.name }}</h3>
         <p>{{ selectedCaseStudy.description }}</p>
-        <!-- Number of Forms Input with Hint -->
+
+        <!-- Persistent Study ID (Non-Editable) -->
+        <div class="study-id-container">
+          <label>Study ID (Persistent & Searchable):</label>
+          <input type="text" :value="studyId" readonly class="study-id-input" />
+        </div>
+
         <label for="numForms">Number of Forms:</label>
-        <input
-          id="numForms"
-          type="number"
-          v-model.number="numberOfForms"
-          placeholder="Enter number of forms"
-        />
+        <input id="numForms" type="number" v-model.number="numberOfForms" placeholder="Enter number of forms" />
         <small class="hint">Different forms per visit per condition</small>
 
-        <!-- Button to add meta information -->
         <button @click="openMetaDialog" class="btn-option">Add Study Meta Information</button>
       </div>
 
@@ -37,18 +37,19 @@
       <div v-if="selectedCaseStudyName === 'custom'" class="custom-study">
         <h3>Create Custom Study</h3>
         <label>Study Name:</label>
-        <input type="text" v-model="customStudy.name" placeholder="Enter study name" required />
+        <input type="text" v-model="customStudy.name" placeholder="Enter study name" @input="updateCustomStudyId" required />
 
         <label>Study Description:</label>
         <textarea v-model="customStudy.description" placeholder="Enter study description" required></textarea>
 
+        <!-- Persistent Study ID (Non-Editable) -->
+        <div class="study-id-container">
+          <label>Study ID (Persistent & Searchable):</label>
+          <input type="text" :value="studyId" readonly class="study-id-input" />
+        </div>
+
         <label for="numFormsCustom">Number of Forms:</label>
-        <input
-          id="numFormsCustom"
-          type="number"
-          v-model.number="numberOfForms"
-          placeholder="Enter number of forms"
-        />
+        <input id="numFormsCustom" type="number" v-model.number="numberOfForms" placeholder="Enter number of forms" />
         <small class="hint">Different forms per visit per condition</small>
 
         <button @click="openMetaDialog" class="btn-option">Add Study Meta Information</button>
@@ -60,24 +61,13 @@
       <div class="modal">
         <h3>Study Meta Information</h3>
         <label>Number of Subjects:</label>
-        <input
-          type="number"
-          v-model.number="metaInfo.numberOfSubjects"
-          placeholder="Enter number of subjects"
-        />
+        <input type="number" v-model.number="metaInfo.numberOfSubjects" placeholder="Enter number of subjects" />
 
         <label>Number of Visits per Subject:</label>
-        <input
-          type="number"
-          v-model.number="metaInfo.numberOfVisits"
-          placeholder="Enter number of visits per subject"
-        />
+        <input type="number" v-model.number="metaInfo.numberOfVisits" placeholder="Enter number of visits per subject" />
 
         <label>Study Meta Description:</label>
-        <textarea
-          v-model="metaInfo.studyMetaDescription"
-          placeholder="Enter additional study information"
-        ></textarea>
+        <textarea v-model="metaInfo.studyMetaDescription" placeholder="Enter additional study information"></textarea>
 
         <div class="modal-actions">
           <button @click="proceedToFormWithMeta" class="btn-primary">Proceed</button>
@@ -90,32 +80,44 @@
 
 <script>
 import axios from "axios";
+import Cookies from "js-cookie";
+
 export default {
   name: "StudyCreationComponent",
   data() {
     return {
-      caseStudies: [], // API response with case study names and descriptions
+      caseStudies: [],
       selectedCaseStudyName: "",
       selectedCaseStudy: null,
       customStudy: { name: "", description: "" },
       numberOfForms: 1,
       showMetaDialog: false,
+      studyId: "",
       metaInfo: {
         numberOfSubjects: null,
         numberOfVisits: null,
         studyMetaDescription: "",
       },
+      studyCounter: 1,
     };
   },
   async created() {
+    this.retrieveToken();
     await this.loadCaseStudies();
+    this.getStoredStudyCounter();
   },
   computed: {
     token() {
-      return this.$store.state.token;
+      return Cookies.get("auth_token");
     },
   },
   methods: {
+    retrieveToken() {
+      const token = this.$store.state.token;
+      if (token) {
+        Cookies.set("auth_token", token, { expires: 7 });
+      }
+    },
     async loadCaseStudies() {
       try {
         const response = await axios.get("http://127.0.0.1:8000/forms/case-studies", {
@@ -126,13 +128,33 @@ export default {
         console.error("Error loading case studies:", error);
       }
     },
+    getStoredStudyCounter() {
+      let storedCounter = localStorage.getItem("study_counter");
+      if (storedCounter) {
+        this.studyCounter = parseInt(storedCounter, 10);
+      } else {
+        this.studyCounter = 1;
+        localStorage.setItem("study_counter", this.studyCounter);
+      }
+    },
     loadCaseStudyDetails() {
       if (this.selectedCaseStudyName === "custom") {
         this.selectedCaseStudy = null;
+        this.updateCustomStudyId();
       } else {
-        this.selectedCaseStudy = this.caseStudies.find(
-          cs => cs.name === this.selectedCaseStudyName
-        );
+        this.selectedCaseStudy = this.caseStudies.find(cs => cs.name === this.selectedCaseStudyName);
+        this.studyId = this.generateStudyId(this.selectedCaseStudyName);
+      }
+    },
+    generateStudyId(studyName) {
+      if (!studyName) return null;
+      const prefix = studyName.split(" ").map(word => word[0]).join("").toUpperCase().substring(0, 4);
+      const datePart = new Date().toISOString().slice(0, 10).replace(/-/g, "");
+      return `${prefix}-${datePart}-${String(this.studyCounter).padStart(3, "0")}`;
+    },
+    updateCustomStudyId() {
+      if (this.customStudy.name) {
+        this.studyId = this.generateStudyId(this.customStudy.name);
       }
     },
     openMetaDialog() {
@@ -162,23 +184,20 @@ export default {
 </script>
 
 <style scoped>
-/* Container: Full width and full viewport height */
-.study-creation-container {
-  max-width: 900px;
-  margin: auto;
-  padding: 20px;
-  background-color: #fff;
-  border-radius: 10px;
-  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
+.study-id-container {
+  margin-top: 10px;
 }
 
-/* Headings */
-h1 {
-  text-align: center;
-  color: #333;
+.study-id-input {
+  width: 100%;
+  padding: 8px;
+  border: 1px solid #ccc;
+  background-color: #f3f3f3;
+  border-radius: 5px;
+  cursor: not-allowed;
+  color: #555;
 }
 
-/* New Study Form */
 .new-study-form {
   padding: 20px;
   background-color: #f9f9f9;
@@ -192,13 +211,14 @@ label {
   margin-top: 10px;
 }
 
-select, input, textarea {
+select,
+input,
+textarea {
   width: 100%;
   padding: 8px;
   border: 1px solid #ccc;
   border-radius: 5px;
   margin-top: 5px;
-  box-sizing: border-box;
 }
 
 .hint {
@@ -207,7 +227,6 @@ select, input, textarea {
   margin-top: 3px;
 }
 
-/* Minimalist Buttons */
 .btn-option {
   display: block;
   width: 100%;
@@ -216,34 +235,14 @@ select, input, textarea {
   background: #f7f7f7;
   border: 1px solid #ddd;
   border-radius: 5px;
-  font-size: 16px;
   cursor: pointer;
-  text-align: center;
-  transition: background 0.3s ease;
 }
 
 .btn-option:hover {
   background: #e0e0e0;
 }
 
-.btn-next {
-  background: #f7f7f7;
-  color: black;
-  padding: 10px 15px;
-  border: 1px solid #ccc;
-  border-radius: 5px;
-  cursor: pointer;
-  text-align: center;
-  width: 100%;
-  margin-top: 15px;
-  transition: background 0.3s ease;
-}
 
-.btn-next:hover {
-  background: #e0e0e0;
-}
-
-/* Modal Styles */
 .modal-overlay {
   position: fixed;
   top: 0;
@@ -264,10 +263,6 @@ select, input, textarea {
   box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
 }
 
-.modal label {
-  margin-top: 10px;
-}
-
 .modal-actions {
   display: flex;
   gap: 10px;
@@ -276,245 +271,5 @@ select, input, textarea {
 
 .modal-actions button {
   flex: 1;
-}
-
-/* Study Creation Container */
-.study-creation-container {
-  width: 100%;
-  min-height: 100vh;
-  margin: 0 auto;
-  padding: 20px;
-  background-color: #f9f9f9;
-}
-
-/* Scratch Form Content */
-.scratch-form-content {
-  display: flex;
-  justify-content: space-between;
-  gap: 20px;
-  flex-wrap: wrap;
-}
-
-/* Form Area */
-.form-area {
-  flex: 3;
-  background-color: #fff;
-  padding: 20px;
-  border-radius: 8px;
-  border: 1px solid #ddd;
-}
-
-/* Centered Editable Form Name */
-.form-heading-container {
-  text-align: center;
-  margin-bottom: 20px;
-}
-
-.heading-input {
-  font-size: 22px;
-  font-weight: 500;
-  text-align: center;
-  border: none;
-  border-bottom: 1px solid #ccc;
-  outline: none;
-  width: 100%;
-  max-width: 400px;
-}
-
-/* Form Section */
-.form-section {
-  padding: 15px;
-  border-bottom: 1px solid #ddd;
-  transition: all 0.3s ease;
-}
-
-.form-section.active {
-  background-color: #e7f3ff;
-  border-left: 3px solid #444;
-}
-
-/* Section Header */
-.section-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.field-actions {
-  display: flex;
-  gap: 10px;
-}
-
-/* Field Box */
-.field-box {
-  margin-top: 10px;
-}
-
-/* Input Styles */
-input,
-textarea,
-select {
-  width: 100%;
-  padding: 8px;
-  border: 1px solid #ccc;
-  border-radius: 5px;
-  margin-top: 5px;
-  box-sizing: border-box;
-}
-
-input:focus,
-textarea:focus,
-select:focus {
-  border-color: #444;
-  outline: none;
-}
-
-/* Form Actions: Horizontal Button Row */
-.form-actions {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 15px;
-  margin-top: 20px;
-}
-
-.form-name-input {
-  flex: 1;
-  padding: 8px;
-  border: 1px solid #ccc;
-  border-radius: 5px;
-}
-
-/* Button Row Container */
-.button-row {
-  display: flex;
-  gap: 15px;
-  width: 100%;
-}
-
-/* Minimalist Buttons */
-.btn-option {
-  background: #f4f4f4;
-  color: #333;
-  padding: 10px;
-  border: 1px solid #ddd;
-  border-radius: 5px;
-  text-align: center;
-  cursor: pointer;
-  transition: background 0.3s ease;
-  flex: 1;
-}
-
-.btn-option:hover {
-  background: #e0e0e0;
-}
-
-.btn-primary {
-  background-color: #444;
-  color: white;
-  padding: 10px;
-  border: none;
-  border-radius: 5px;
-  text-align: center;
-  cursor: pointer;
-  transition: background 0.3s ease;
-  flex: 1;
-}
-
-.btn-primary:hover {
-  background-color: #333;
-}
-
-/* Icon Button */
-.icon-button {
-  background: none;
-  border: none;
-  padding: 5px;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 3px;
-  transition: background-color 0.3s ease;
-}
-
-.icon-button:hover {
-  background-color: #f4f4f4;
-}
-
-/* Available Fields Section */
-.available-fields {
-  flex: 1;
-  background-color: #fff;
-  padding: 20px;
-  border: 1px solid #ddd;
-  border-radius: 8px;
-  width: 320px;
-  max-height: calc(100vh - 60px);
-  overflow-y: auto;
-}
-
-/* Tabs for Available Fields */
-.tabs {
-  display: flex;
-  gap: 10px;
-  margin-bottom: 15px;
-}
-
-.tabs button {
-  padding: 10px;
-  border: 1px solid #ddd;
-  border-radius: 5px;
-  cursor: pointer;
-  background: #f4f4f4;
-  flex: 1;
-}
-
-.tabs button.active {
-  background-color: #444;
-  color: white;
-  border: none;
-}
-
-.tabs button:not(.active):hover {
-  background-color: #e0e0e0;
-}
-
-/* Available Field Button */
-.available-field-button {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 10px 15px;
-  font-size: 14px;
-  background-color: #f9f9f9;
-  border: 1px solid #ccc;
-  border-radius: 5px;
-  cursor: pointer;
-  transition: background-color 0.2s ease;
-  margin-bottom: 10px;
-}
-
-.available-field-button i {
-  font-size: 18px;
-  color: #555;
-}
-
-.available-field-button:hover {
-  background-color: #e0e0e0;
-}
-
-/* Responsive Design */
-@media (max-width: 768px) {
-  .scratch-form-content {
-    flex-direction: column;
-  }
-  .form-area {
-    max-width: 100%;
-  }
-  .available-fields {
-    max-width: 100%;
-    width: 100%;
-  }
 }
 </style>
