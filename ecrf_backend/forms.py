@@ -187,12 +187,12 @@ def get_study_models(user: User = Depends(get_current_user)):
     return study_models
 """
 
-
+"""
+# doesnt make sense to call an api to just to get file names from yaml files, this has been changed to  get the study type and description
+# from a study_types.json file from public folder. 
 @router.get("/case-studies", response_model=List[Dict[str, str]])
 def get_case_study_names(user: dict = Depends(get_current_user)):
-    """
-    Returns a list of available case study names along with descriptions.
-    """
+
     if not BASE_DIR.exists():
         raise HTTPException(status_code=500, detail="Server configuration error: BASE_DIR missing.")
 
@@ -222,7 +222,7 @@ def get_case_study_names(user: dict = Depends(get_current_user)):
 
     return case_studies
 
-"""
+
 NO longer used since since we are not specifying the study type and its structure, rather just using yaml names to indicate
 the study type as a meta information
 @router.get("/models/{category}/{file_name}")

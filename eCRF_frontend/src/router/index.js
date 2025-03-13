@@ -3,13 +3,13 @@ import LoginComponent from "../components/LoginComponent.vue";
 import RegistrationComponent from "../components/RegistrationComponent.vue";
 import DashboardComponent from "../components/DashboardComponent.vue";
 import UserInfoComponent from "../components/UserInfoComponent.vue";
-import CreateFormComponent from "../components/CreateFormComponent.vue";
+// import CreateFormComponent from "../components/CreateFormComponent.vue";
 import AnalyticsComponent from "../components/AnalyticsComponent.vue";
 import ScratchFormComponent from "../components/ScratchFormComponent.vue";
 import SavedFormsComponent from "../components/SavedFormsComponent.vue";
 import FormDetailComponent from "../components/FormDetailComponent.vue";
 import StudyCreationComponent from "../components/StudyCreationComponent.vue";
-import YamlViewerComponent from "../components/YamlViewerComponent.vue";
+//import YamlViewerComponent from "../components/YamlViewerComponent.vue";
 
 const routes = [
   { path: "/", redirect: "/login" },
@@ -22,17 +22,17 @@ const routes = [
     children: [
       { path: "user-info", name: "UserInfo", component: UserInfoComponent },
       { path: "create-study", name: "CreateStudy", component: StudyCreationComponent },
-      { path: "create-form", name: "CreateForm", component: CreateFormComponent },
+      //{ path: "create-form", name: "CreateForm", component: CreateFormComponent },
       { path: "view-forms", name: "ViewForms", component: SavedFormsComponent },
       { path: "analytics", name: "Analytics", component: AnalyticsComponent },
     ],
   },
-  {
-    path: "/dashboard/view-yaml/:category/:fileName",
-    name: "YamlViewer",
-    component: YamlViewerComponent,
-    props: true,
-  },
+//  {
+//    path: "/dashboard/view-yaml/:category/:fileName",
+//    name: "YamlViewer",
+//    component: YamlViewerComponent,
+//    props: true,
+//  },
   {
     path: "/dashboard/create-form-scratch",
     name: "CreateFormScratch",

@@ -1,0 +1,34 @@
+[
+  {
+    "name": "Case Report",
+    "description": "A case report is a detailed account of an individual patient's condition, diagnosis, treatment, and outcome. Case studies provide insights into rare or novel cases."
+  },
+  {
+    "name": "Cross Sectional Study",
+    "description": "A cross-sectional study is an observational study that analyzes data from a population at a specific point in time."
+  },
+  {
+    "name": "Longitudinal Study",
+    "description": "A longitudinal study involves repeated observations of the same variables over a period of time."
+  },
+  {
+    "name": "Meta Analysis",
+    "description": "A meta-analysis is a statistical method for combining data from multiple studies to provide a pooled estimate of an effect."
+  },
+  {
+    "name": "Phase Clinical Trials",
+    "description": "Clinical trials are conducted in phases (Phase 1 to Phase 4) to assess safety, efficacy, dosage, and post-marketing surveillance."
+  },
+  {
+    "name": "Pragmatic Clinical Trial",
+    "description": "A pragmatic clinical trial evaluates the effectiveness of an intervention in real-world conditions."
+  },
+  {
+    "name": "Registry Study",
+    "description": "A registry study involves long-term tracking of patients in a registry to monitor outcomes and safety over time."
+  },
+  {
+    "name": "Systematic Review",
+    "description": "A systematic review is a structured literature review that synthesizes evidence from multiple studies on a specific research question."
+  }
+]

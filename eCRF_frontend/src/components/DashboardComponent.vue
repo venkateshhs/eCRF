@@ -60,16 +60,20 @@ export default {
   methods: {
     toggleSidebar() {
       this.sidebarCollapsed = !this.sidebarCollapsed;
+      console.log("Sidebar toggled. Collapsed:", this.sidebarCollapsed);
     },
     setActiveSection(section) {
       this.activeSection = section;
+      console.log("Active section set to:", section);
     },
     navigate(route) {
       this.activeSection = "";
+      console.log("Navigating to route:", route);
       this.$router.push(route);
     },
     logout() {
       this.$store.commit("setUser", null);
+      console.log("User logged out.");
       this.$router.push("/");
     },
   },
