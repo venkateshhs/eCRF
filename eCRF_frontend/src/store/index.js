@@ -10,6 +10,7 @@ const store = createStore({
     token: null, // JWT token after successful login
     forms: [], // Store all forms
     currentForm: null, // Store the currently selected form for editing/viewing
+    studyDetails: null, // Store study details (used in study creation)
   },
   mutations: {
     setUser(state, user) {
@@ -23,6 +24,7 @@ const store = createStore({
       state.token = null;
       state.forms = [];
       state.currentForm = null;
+      state.studyDetails = null;
     },
     setForms(state, forms) {
       state.forms = forms;
@@ -30,40 +32,36 @@ const store = createStore({
     setCurrentForm(state, form) {
       state.currentForm = form;
     },
+    setStudyDetails(state, details) {
+      state.studyDetails = details;
+    },
   },
   actions: {
     // Login action
     async login({ commit }, payload) {
       console.log("Attempting login with payload:", payload);
-
       try {
         const response = await axios.post(`${API_BASE_URL}/users/login`, payload);
         console.log("Login successful, API response:", response.data);
-
         const { access_token } = response.data;
-
         commit("setToken", access_token);
         console.log("access token:", response.data.access_token);
         localStorage.setItem("access_token", response.data.access_token);
-
         const userResponse = await axios.get(`${API_BASE_URL}/users/me`, {
           headers: { Authorization: `Bearer ${access_token}` },
         });
-
         console.log("Fetched user data:", userResponse.data);
         commit("setUser", userResponse.data);
-
-        return true; // Signal success to the component
+        return true;
       } catch (error) {
         console.error("Login failed, error from API:", error.response?.data || error.message);
-        return false; // Signal failure to the component
+        return false;
       }
     },
 
     // Register action
     async register(_, payload) {
       console.log("Registering user with payload:", payload);
-
       try {
         await axios.post(`${API_BASE_URL}/users/register`, payload);
         console.log("Registration successful");
@@ -81,7 +79,6 @@ const store = createStore({
     // Change password action
     async changePassword({ state }, payload) {
       console.log("Changing password:", payload);
-
       try {
         const response = await axios.post(
           `${API_BASE_URL}/users/change-password`,
@@ -93,7 +90,6 @@ const store = createStore({
             headers: { Authorization: `Bearer ${state.token}` },
           }
         );
-
         console.log("Password changed successfully:", response.data);
         return true;
       } catch (error) {
@@ -109,7 +105,6 @@ const store = createStore({
         console.warn("No token found in localStorage. Cannot fetch user data.");
         return false;
       }
-
       try {
         const response = await axios.get(`${API_BASE_URL}/users/me`, {
           headers: { Authorization: `Bearer ${token}` },
@@ -192,6 +187,7 @@ const store = createStore({
     getUser: (state) => state.user,
     getForms: (state) => state.forms,
     getCurrentForm: (state) => state.currentForm,
+    getStudyDetails: (state) => state.studyDetails,
   },
 });
 

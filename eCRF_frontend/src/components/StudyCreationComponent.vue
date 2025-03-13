@@ -21,7 +21,6 @@
         <label for="numForms">Number of Forms:</label>
         <input id="numForms" type="number" v-model.number="numberOfForms" placeholder="Enter number of forms" />
         <small class="hint">Different forms per visit per condition</small>
-        <button @click="openMetaDialog" class="btn-option">Add Study Meta Information</button>
       </div>
       <div v-if="selectedCaseStudyName === 'custom'" class="custom-study">
         <h3>Create Custom Study</h3>
@@ -36,23 +35,29 @@
         <label for="numFormsCustom">Number of Forms:</label>
         <input id="numFormsCustom" type="number" v-model.number="numberOfForms" placeholder="Enter number of forms" />
         <small class="hint">Different forms per visit per condition</small>
-        <button @click="openMetaDialog" class="btn-option">Add Study Meta Information</button>
       </div>
-    </div>
-    <div v-if="showMetaDialog" class="modal-overlay">
-      <div class="modal">
-        <h3>Study Meta Information</h3>
+      <!-- Toggle Switch for Meta Data -->
+      <div class="meta-toggle-container">
+        <label class="switch">
+          <input type="checkbox" v-model="includeMeta" />
+          <span class="slider round"></span>
+        </label>
+        <span class="toggle-label">Include Study Meta Information</span>
+      </div>
+      <!-- Meta Information Container (only if toggle is checked) -->
+      <div v-if="includeMeta" class="meta-container">
         <label>Number of Subjects:</label>
         <input type="number" v-model.number="metaInfo.numberOfSubjects" placeholder="Enter number of subjects" />
         <label>Number of Visits per Subject:</label>
         <input type="number" v-model.number="metaInfo.numberOfVisits" placeholder="Enter number of visits per subject" />
         <label>Study Meta Description:</label>
         <textarea v-model="metaInfo.studyMetaDescription" placeholder="Enter additional study information"></textarea>
-        <div class="modal-actions">
-          <button @click="proceedToFormWithMeta" class="btn-primary">Proceed</button>
-          <button @click="closeMetaDialog" class="btn-option">Cancel</button>
-        </div>
       </div>
+    </div>
+    <!-- Independent Proceed and Cancel Buttons -->
+    <div class="form-actions">
+      <button @click="proceedToFormWithMeta" class="btn-option">Proceed</button>
+      <button @click="cancelMetaInfo" class="btn-option">Cancel</button>
     </div>
   </div>
 </template>
@@ -67,10 +72,10 @@ export default {
       selectedCaseStudy: null,
       customStudy: { name: "", description: "" },
       numberOfForms: 1,
-      showMetaDialog: false,
+      includeMeta: false,
       studyId: "",
       metaInfo: { numberOfSubjects: null, numberOfVisits: null, studyMetaDescription: "" },
-      studyCounter: 1
+      studyCounter: 1,
     };
   },
   created() {
@@ -126,15 +131,6 @@ export default {
       this.studyId = this.generateStudyId(this.customStudy.name);
       console.log("Updated study ID:", this.studyId);
     },
-    openMetaDialog() {
-      if (!this.numberOfForms) this.numberOfForms = 1;
-      this.showMetaDialog = true;
-      console.log("Meta dialog opened. Number of forms:", this.numberOfForms);
-    },
-    closeMetaDialog() {
-      this.showMetaDialog = false;
-      console.log("Meta dialog closed.");
-    },
     proceedToFormWithMeta() {
       let studyDetails = {};
       if (this.selectedCaseStudyName === "custom") {
@@ -143,16 +139,19 @@ export default {
         studyDetails = { ...this.selectedCaseStudy };
       }
       studyDetails.numberOfForms = this.numberOfForms;
-      studyDetails.metaInfo = { ...this.metaInfo };
+      studyDetails.metaInfo = this.includeMeta ? { ...this.metaInfo } : {};
       console.log("Proceeding with study details:", studyDetails);
       this.studyCounter++;
       console.log("Incremented study counter to:", this.studyCounter);
-      this.$router.push({
-        name: "CreateFormScratch",
-        query: { studyDetails: JSON.stringify(studyDetails) }
-      });
-    }
-  }
+      this.$store.commit("setStudyDetails", studyDetails);
+      this.$router.push({ name: "CreateFormScratch" });
+    },
+    cancelMetaInfo() {
+      this.includeMeta = false;
+      this.metaInfo = { numberOfSubjects: null, numberOfVisits: null, studyMetaDescription: "" };
+      console.log("Meta information canceled and reset.");
+    },
+  },
 };
 </script>
 
@@ -188,6 +187,7 @@ textarea {
   border: 1px solid #ccc;
   border-radius: 5px;
   margin-top: 5px;
+  box-sizing: border-box;
 }
 .hint {
   font-size: 12px;
@@ -203,6 +203,7 @@ textarea {
   border: 1px solid #ddd;
   border-radius: 5px;
   cursor: pointer;
+  text-align: center;
 }
 .btn-option:hover {
   background: #e0e0e0;
@@ -232,5 +233,68 @@ textarea {
 }
 .modal-actions button {
   flex: 1;
+}
+
+/* Additional minimal CSS for new elements */
+.meta-toggle-container {
+  margin-top: 15px;
+  display: flex;
+  align-items: center;
+}
+.switch {
+  position: relative;
+  display: inline-block;
+  width: 50px;
+  height: 24px;
+  margin-right: 10px;
+}
+.switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+.slider {
+  position: absolute;
+  cursor: pointer;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: #ccc;
+  transition: 0.4s;
+  border-radius: 24px;
+}
+.slider:before {
+  position: absolute;
+  content: "";
+  height: 18px;
+  width: 18px;
+  left: 3px;
+  bottom: 3px;
+  background-color: white;
+  transition: 0.4s;
+  border-radius: 50%;
+}
+.switch input:checked + .slider {
+  background-color: #2196F3;
+}
+.switch input:checked + .slider:before {
+  transform: translateX(26px);
+}
+.toggle-label {
+  font-size: 14px;
+  color: #333;
+}
+.meta-container {
+  margin-top: 15px;
+  padding: 15px;
+  background-color: #fff;
+  border: 1px solid #ccc;
+  border-radius: 8px;
+}
+.form-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 20px;
 }
 </style>

@@ -14,6 +14,7 @@
       :metaInfoCollapsed="metaInfoCollapsed"
       @toggle-meta-info="toggleMetaInfo"
       @open-meta-edit-dialog="openMetaEditDialog"
+      @reload-forms="reloadForms"
     />
 
     <!-- Main Content: Form Area & Available Fields -->
@@ -142,7 +143,6 @@
                   :maxlength="field.constraints?.maxLength"
                   :pattern="field.constraints?.pattern"
                 ></textarea>
-                <!-- Number Input -->
                 <input
                   v-if="field.type === 'number'"
                   type="number"
@@ -155,7 +155,6 @@
                   :max="field.constraints?.max"
                   :step="field.constraints?.step"
                 />
-                <!-- Date Input -->
                 <input
                   v-if="field.type === 'date'"
                   type="date"
@@ -167,7 +166,6 @@
                   :min="field.constraints?.minDate"
                   :max="field.constraints?.maxDate"
                 />
-                <!-- Select Field -->
                 <select
                   v-if="field.type === 'select'"
                   :id="field.name"
@@ -178,7 +176,6 @@
                     {{ option }}
                   </option>
                 </select>
-                <!-- Checkbox Group -->
                 <div v-if="field.type === 'checkbox'" class="checkbox-group">
                   <label v-for="(option, i) in field.options" :key="i">
                     <input
@@ -190,7 +187,6 @@
                     /> {{ option }}
                   </label>
                 </div>
-                <!-- Radio Group -->
                 <div v-if="field.type === 'radio'" class="radio-group">
                   <label v-for="option in field.options" :key="option">
                     <input
@@ -203,7 +199,6 @@
                     {{ option }}
                   </label>
                 </div>
-                <!-- Button -->
                 <button
                   v-if="field.type === 'button'"
                   type="button"
@@ -212,7 +207,6 @@
                 >
                   {{ field.label }}
                 </button>
-                <!-- Optional help text from constraints -->
                 <small v-if="field.constraints?.helpText" class="help-text">{{ field.constraints.helpText }}</small>
               </div>
             </div>
@@ -334,52 +328,6 @@
         <div class="modal-actions">
           <button @click="confirmInputDialog" class="btn-primary modal-btn" title="Save Input">Save</button>
           <button @click="cancelInputDialog" class="btn-option modal-btn" title="Cancel Input">Cancel</button>
-        </div>
-      </div>
-    </div>
-
-    <!-- Meta Edit Dialog Modal -->
-    <div v-if="showMetaEditDialog" class="modal-overlay">
-      <div class="modal meta-edit-modal">
-        <h3>Edit Meta Information</h3>
-        <div class="meta-edit-field">
-          <label>Study Name:</label>
-          <input type="text" v-model="metaEditForm.name" placeholder="Enter study name" />
-        </div>
-        <div class="meta-edit-field">
-          <label>Description:</label>
-          <textarea v-model="metaEditForm.description" placeholder="Enter description"></textarea>
-        </div>
-        <div class="meta-edit-field">
-          <label>Number of Forms:</label>
-          <input type="number" v-model="metaEditForm.numberOfForms" placeholder="Enter number of forms" />
-        </div>
-        <div class="meta-edit-field">
-          <label>Number of Subjects:</label>
-          <input type="number" v-model="metaEditForm.numberOfSubjects" placeholder="Enter number of subjects" />
-        </div>
-        <div class="meta-edit-field">
-          <label>Number of Visits per Subject:</label>
-          <input type="number" v-model="metaEditForm.numberOfVisits" placeholder="Enter number of visits" />
-        </div>
-        <div class="meta-edit-field">
-          <label>Study Meta Description:</label>
-          <textarea v-model="metaEditForm.studyMetaDescription" placeholder="Enter meta description"></textarea>
-        </div>
-        <div class="modal-actions">
-          <button @click="saveMetaInfo" class="btn-primary modal-btn" title="Save Meta Information">Save</button>
-          <button @click="closeMetaEditDialog" class="btn-option modal-btn" title="Cancel Meta Edit">Cancel</button>
-        </div>
-      </div>
-    </div>
-
-    <!-- Reinitialization Confirmation Modal -->
-    <div v-if="showReinitConfirm" class="modal-overlay">
-      <div class="modal">
-        <p>Changing the number of forms will reinitialize your current forms. Proceed?</p>
-        <div class="modal-actions">
-          <button @click="confirmReinit" class="btn-primary modal-btn" title="Confirm Reinitialization">Yes</button>
-          <button @click="cancelReinit" class="btn-option modal-btn" title="Cancel Reinitialization">No</button>
         </div>
       </div>
     </div>
@@ -528,7 +476,8 @@ export default {
     },
   },
   async mounted() {
-    const details = this.$route.query.studyDetails ? JSON.parse(this.$route.query.studyDetails) : {};
+    // Get studyDetails from Vuex store
+    const details = this.$store.state.studyDetails || {};
     this.studyDetails = details;
     this.totalForms = details.numberOfForms || 1;
     if (details.metaInfo) {
@@ -543,6 +492,18 @@ export default {
     await this.loadAvailableFields();
   },
   methods: {
+    reloadForms(newTotal) {
+      this.totalForms = newTotal;
+      this.forms = [];
+      for (let i = 0; i < this.totalForms; i++) {
+        this.forms.push({
+          formName: `Form${i + 1}`,
+          sections: JSON.parse(JSON.stringify(this.defaultFormStructure)),
+        });
+      }
+      this.currentFormIndex = 0;
+      this.activeSection = 0;
+    },
     navigateToSavedForms() {
       this.$router.push("/saved-forms");
     },
@@ -812,62 +773,6 @@ export default {
     },
     cancelConstraintsDialog() {
       this.showConstraintsDialog = false;
-    },
-    // Meta Info Editing Methods
-    openMetaEditDialog() {
-      this.metaEditForm = {
-        name: this.studyDetails.name || "",
-        description: this.studyDetails.description || "",
-        numberOfForms: this.studyDetails.numberOfForms || 1,
-        numberOfSubjects: this.metaInfo.numberOfSubjects,
-        numberOfVisits: this.metaInfo.numberOfVisits,
-        studyMetaDescription: this.metaInfo.studyMetaDescription || "",
-      };
-      this.showMetaEditDialog = true;
-    },
-    closeMetaEditDialog() {
-      this.showMetaEditDialog = false;
-    },
-    saveMetaInfo() {
-      if (this.metaEditForm.numberOfForms !== this.totalForms) {
-        this.pendingMetaEdit = { ...this.metaEditForm };
-        this.showReinitConfirm = true;
-        return;
-      }
-      this.updateMetaData();
-      this.showMetaEditDialog = false;
-    },
-    updateMetaData() {
-      this.studyDetails.name = this.metaEditForm.name;
-      this.studyDetails.description = this.metaEditForm.description;
-      this.studyDetails.numberOfForms = this.metaEditForm.numberOfForms;
-      this.metaInfo.numberOfSubjects = this.metaEditForm.numberOfSubjects;
-      this.metaInfo.numberOfVisits = this.metaEditForm.numberOfVisits;
-      this.metaInfo.studyMetaDescription = this.metaEditForm.studyMetaDescription;
-    },
-    toggleMetaInfo() {
-      this.metaInfoCollapsed = !this.metaInfoCollapsed;
-    },
-    // Reinitialization Confirmation Methods
-    confirmReinit() {
-      this.totalForms = this.pendingMetaEdit.numberOfForms;
-      this.forms = [];
-      for (let i = 0; i < this.totalForms; i++) {
-        this.forms.push({
-          formName: `Form${i + 1}`,
-          sections: JSON.parse(JSON.stringify(this.defaultFormStructure)),
-        });
-      }
-      this.currentFormIndex = 0;
-      this.activeSection = 0;
-      this.updateMetaData();
-      this.showReinitConfirm = false;
-      this.showMetaEditDialog = false;
-      this.pendingMetaEdit = null;
-    },
-    cancelReinit() {
-      this.showReinitConfirm = false;
-      this.pendingMetaEdit = null;
     },
     // Download Form Methods
     openDownloadDialog() {
@@ -1215,6 +1120,7 @@ select:focus {
 .modal-actions {
   display: flex;
   gap: 10px;
+  margin-top: 15px;
 }
 .modal-actions button {
   flex: 1;
