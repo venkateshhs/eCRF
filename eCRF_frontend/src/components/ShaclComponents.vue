@@ -94,26 +94,22 @@
 
 <script>
 import { ref, onMounted, computed } from "vue";
-import { useShapeData } from "shacl-vue";
+import { ShapesDataset } from "shacl-tulip";
 
 export default {
   name: "ShaclComponents",
   setup() {
-    // Configuration for the schema; filtering enabled by default.
-    const config = {
-      value: {
-        shapes_url: "/dlschemas_shacl.ttl",
-        showOnlyClassesWithId: true,
-      },
-    };
-
-    const { getSHACLschema, nodeShapes, nodeShapeIRIs } = useShapeData(config);
-
     const loading = ref(true);
     const error = ref(null);
-    // Renamed from personData to shapeData so any SHACL class can be rendered.
     const shapeData = ref({ iri: "", properties: [] });
     const dialogVisible = ref(false);
+    const nodeShapes = ref({});
+    const nodeShapeIRIs = ref([]);
+
+    // Simple configuration: only show classes having an "/id" property.
+    const config = {
+      showOnlyClassesWithId: true,
+    };
 
     // Helper to derive a class name from the IRI.
     function getClassName(uri) {
@@ -122,8 +118,7 @@ export default {
       return name;
     }
 
-    // Dynamic filtering: if showOnlyClassesWithId is true,
-    // filter the IRIs to only those whose shape contains a property whose path ends with "/id".
+
     const filteredShapeIRIs = computed(() => {
       if (!nodeShapeIRIs.value) {
         console.log("No nodeShapeIRIs available, returning empty array.");
@@ -131,7 +126,7 @@ export default {
       }
       console.log("Original nodeShapeIRIs:", nodeShapeIRIs.value);
       let result = [];
-      if (config.value.showOnlyClassesWithId) {
+      if (config.showOnlyClassesWithId) {
         result = nodeShapeIRIs.value.filter((iri) => {
           const shape = nodeShapes.value[iri];
           if (!shape || !shape.properties) {
@@ -140,7 +135,6 @@ export default {
           }
           const hasId = shape.properties.some((prop) => {
             const path = prop["http://www.w3.org/ns/shacl#path"];
-            // Dynamic check: property path ends with "/id" (case-insensitive)
             const match =
               typeof path === "string" && path.toLowerCase().endsWith("/id");
             console.log(
@@ -160,6 +154,7 @@ export default {
       return result;
     });
 
+    // Mapping datatype IRIs to simple string names.
     const dataTypeMapping = {
       "http://www.w3.org/2001/XMLSchema#string": "string",
       "http://www.w3.org/2001/XMLSchema#integer": "number",
@@ -168,17 +163,28 @@ export default {
       "http://www.w3.org/2001/XMLSchema#anyURI": "uri",
     };
 
-    onMounted(async () => {
-      try {
-        console.log("Fetching SHACL schema...");
-        await getSHACLschema();
+    // Load the SHACL schema using shacl-tulip.
+    onMounted(() => {
+      console.log("Fetching SHACL schema...");
+      const shapesDS = new ShapesDataset();
+      const fileUrl = "/dlschemas_shacl.ttl";
+
+      shapesDS.addEventListener("graphLoaded", (event) => {
+        console.log("Shapes graph fully loaded:", event.detail);
+        console.log("Property Groups:", shapesDS.propertyGroups);
+        console.log("Node Shapes:", shapesDS.nodeShapes);
+        console.log("Node Shape IRIs:", shapesDS.nodeShapeIRIs);
+        // Update reactive variables.
+        nodeShapes.value = shapesDS.nodeShapes;
+        nodeShapeIRIs.value = shapesDS.nodeShapeIRIs;
         loading.value = false;
-        console.log("SHACL schema loaded.");
-      } catch (err) {
+      });
+
+      shapesDS.loadRDF(fileUrl).catch((err) => {
         error.value = err.message;
         loading.value = false;
         console.error("Error loading SHACL schema:", err);
-      }
+      });
     });
 
     // Generic openDialog: opens the dialog and populates shapeData with the selected shape.
@@ -219,7 +225,9 @@ export default {
       const field = shapeData.value.properties[index];
       const newValue = prompt(`Edit field "${field.name}"`, field.value);
       if (newValue !== null) {
-        console.log(`Field "${field.name}" updated from "${field.value}" to "${newValue}"`);
+        console.log(
+          `Field "${field.name}" updated from "${field.value}" to "${newValue}"`
+        );
         shapeData.value.properties[index].value = newValue;
       }
     }

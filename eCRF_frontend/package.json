@@ -13,7 +13,7 @@
     "core-js": "^3.8.3",
     "jquery": "^3.7.1",
     "js-cookie": "^3.0.5",
-    "shacl-vue": "^0.0.5",
+    "shacl-tulip": "file:../shacl-tulip",
     "vue": "^3.2.13",
     "vue-router": "^4.4.5",
     "vuex": "^4.1.0"
