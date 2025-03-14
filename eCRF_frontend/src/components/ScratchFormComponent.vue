@@ -9,6 +9,7 @@
 
     <!-- Study Meta Information Section -->
     <StudyMetaInfo
+      ref="studyMetaInfo"
       :studyDetails="studyDetails"
       :metaInfo="metaInfo"
       :metaInfoCollapsed="metaInfoCollapsed"
@@ -222,10 +223,10 @@
             <button @click.prevent="confirmClearForm" class="btn-option" title="Clear Form">
               Clear Form
             </button>
-            <button @click.prevent="saveForm" class="btn-primary" title="Save Form">
+            <button @click.prevent="saveForm" class="btn-primary" title="Save Study">
               Save Form
             </button>
-            <button @click="navigateToSavedForms" class="btn-option" title="View Saved Forms">
+            <button @click="navigateToSavedForms" class="btn-option" title="View Saved Study">
               View Saved Forms
             </button>
             <button @click="openDownloadDialog" class="btn-option" title="Download Form">
@@ -451,6 +452,10 @@ export default {
       showDownloadDialog: false,
       showUploadDialog: false,
       showPreviewDialog: false,
+      // For any additional form-level file attachments if needed
+      selectedFiles: [],
+      // storageOption for form-level attachments; meta file attachments come from StudyMetaInfo
+      storageOption: "db"
     };
   },
   computed: {
@@ -492,6 +497,13 @@ export default {
     await this.loadAvailableFields();
   },
   methods: {
+    // Normalizes form keys from formName to form_name as expected by backend schema.
+    normalizeForms(formsArray) {
+      return formsArray.map(form => ({
+        form_name: form.formName,
+        sections: form.sections
+      }));
+    },
     reloadForms(newTotal) {
       this.totalForms = newTotal;
       this.forms = [];
@@ -514,30 +526,73 @@ export default {
         });
         return;
       }
-      // Uncomment below to commit to the database:
-      /*
-      const formData = {
-        form_name: this.currentForm.formName,
-        form_structure: this.currentForm.sections,
+      // Build the study payload
+      const studyData = {
+        name: this.studyDetails.name || "Untitled Study",
+        description: this.studyDetails.description || "",
+        meta_info: JSON.stringify(this.metaInfo),
+        // Normalize forms so that keys match the backend schema (form_name vs formName)
+        forms: JSON.stringify(this.normalizeForms(this.forms)),
+        storage_option: this.storageOption,
       };
-      try {
-        await axios.post("http://127.0.0.1:8000/forms/save-form", formData, {
-          headers: { Authorization: `Bearer ${this.token}` },
-        });
-      } catch (error) {
-        if (error.response?.status === 401) {
-          this.openGenericDialog("Your session has expired. Please log in again.", () => {
-            this.$router.push("/login");
+
+      // Conditionally add number_of_subjects and number_of_visits if defined
+      if (this.metaInfo.numberOfSubjects !== undefined) {
+        studyData.number_of_subjects = this.metaInfo.numberOfSubjects;
+      }
+      if (this.metaInfo.numberOfVisits !== undefined) {
+        studyData.number_of_visits = this.metaInfo.numberOfVisits;
+      }
+
+      const formData = new FormData();
+      for (const key in studyData) {
+        formData.append(key, studyData[key]);
+      }
+
+      // Append meta file attachments from StudyMetaInfo component
+      if (this.$refs.studyMetaInfo) {
+        const metaComp = this.$refs.studyMetaInfo;
+        if (metaComp.metaFiles && metaComp.metaFiles.length > 0) {
+          metaComp.metaFiles.forEach(fileObj => {
+            formData.append("meta_files", fileObj.file);
+            formData.append("meta_file_descriptions", fileObj.description || "");
           });
-          return;
-        } else {
-          console.error("Error saving form:", error);
-          this.openGenericDialog("Failed to save form. Please try again.");
-          return;
+          formData.append("meta_storage_option", metaComp.metaStorageOption);
         }
       }
-      */
-      this.saveDialogMessage = `Form "${this.currentForm.formName}" saved successfully!`;
+
+      // Append any additional form-level file attachments if needed
+      if (this.selectedFiles && this.selectedFiles.length > 0) {
+        Array.from(this.selectedFiles).forEach(file => {
+          formData.append("files", file);
+        });
+      }
+
+      // Debug: Log all FormData entries
+      for (let [key, value] of formData.entries()) {
+        if (value instanceof File) {
+          console.log(`${key}: ${value.name} (${value.type})`);
+        } else {
+          console.log(`${key}:`, value);
+        }
+      }
+
+      try {
+        const response = await axios.post("http://127.0.0.1:8000/forms/save-study", formData, {
+          headers: {
+            "Content-Type": "multipart/form-data",
+            Authorization: `Bearer ${this.token}`,
+          },
+        });
+        this.openSaveDialog(`Study "${response.data.name}" saved successfully!`);
+      } catch (error) {
+        console.error("Error saving study:", error.response?.data || error.message);
+        this.openGenericDialog("Failed to save study. Please try again.");
+      }
+    },
+    // Added missing openSaveDialog method
+    openSaveDialog(message) {
+      this.saveDialogMessage = message;
       this.showSaveDialog = true;
     },
     closeSaveDialog() {

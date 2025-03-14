@@ -29,10 +29,16 @@
         <strong>Study Meta Description:</strong> {{ studyDetails.metaInfo.studyMetaDescription }}
       </p>
 
-      <!-- File Attachment Option -->
+      <!-- File Attachment Option with Storage Selector -->
       <div class="file-attachment">
         <label for="meta-file-upload" class="attach-file-label">Attach File(s):</label>
         <input type="file" id="meta-file-upload" ref="metaFileInput" @change="handleMetaFile" multiple />
+        <!-- New storage option selector for meta files -->
+        <label for="meta-storage-option" class="attach-file-label">Storage Option:</label>
+        <select id="meta-storage-option" v-model="metaStorageOption">
+          <option value="db">Store in Database</option>
+          <option value="local">Store on Local Disk</option>
+        </select>
         <div v-if="metaFiles.length" class="attached-files-info">
           <div v-for="(fileObj, index) in metaFiles" :key="index" class="attached-file-info">
             <span>{{ fileObj.file.name }}</span>
@@ -140,6 +146,8 @@ export default {
         numberOfVisits: null,
         studyMetaDescription: "",
       },
+      // New property for choosing storage option for meta file attachments:
+      metaStorageOption: "db",
     };
   },
   computed: {
@@ -320,8 +328,6 @@ export default {
   border: none;
   cursor: pointer;
 }
-
-/* Description Dialog Modal */
 .modal-overlay {
   position: fixed;
   top: 0;

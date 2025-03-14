@@ -1,17 +1,19 @@
 from typing import List, Dict
 
-from fastapi import APIRouter, HTTPException, Depends, Query
+from fastapi import APIRouter, HTTPException, Depends, Query, UploadFile, File, Form as FastForm
 from pathlib import Path
 import json
 import yaml
 from database import get_db
-from logger import logger
-from schemas import FormSchema, FormSaveSchema
+import schemas, crud, models
+# from logger import logger
+# from schemas import FormSchema, FormSaveSchema
 from models import Form, User
 from users import get_current_user, oauth2_scheme
-
+from fastapi.responses import FileResponse, StreamingResponse
+import io
 from sqlalchemy.orm import Session
-from fastapi.responses import JSONResponse
+# from fastapi.responses import JSONResponse
 router = APIRouter(prefix="/forms", tags=["forms"])
 
 TEMPLATE_DIR = Path("shacl/templates")  # Path to your templates directory
@@ -259,3 +261,71 @@ def get_form_by_id(
     if not form:
         raise HTTPException(status_code=404, detail="Form not found")
     return form
+
+
+@router.post("/save-study", response_model=schemas.Study)
+async def create_study(
+    name: str = FastForm(...),
+    description: str = FastForm(None),
+    number_of_subjects: int = FastForm(None),
+    number_of_visits: int = FastForm(None),
+    meta_info: str = FastForm(None),  # JSON string
+    forms: str = FastForm(...),       # JSON string for forms
+    storage_option: str = FastForm("db"),  # "db" or "local"; defaults to "db"
+    files: list[UploadFile] = File(None),
+    _db: Session = Depends(get_db),
+    _user: User = Depends(get_current_user)
+):
+    # Parse JSON strings into Python objects
+    meta_info_dict = json.loads(meta_info) if meta_info else {}
+    forms_list = json.loads(forms)
+
+    study_data = schemas.StudyCreate(
+        name=name,
+        description=description,
+        number_of_subjects=number_of_subjects,
+        number_of_visits=number_of_visits,
+        meta_info=meta_info_dict,
+        forms=forms_list,
+    )
+    db_study = crud.create_study(_db, study_data, _user.id)
+
+    # Process uploaded files, if any
+    if files:
+        for uploaded_file in files:
+            file_content = await uploaded_file.read()
+            crud.create_study_file(
+                _db,
+                study_id=db_study.id,
+                file_name=uploaded_file.filename,
+                file_data=file_content,
+                content_type=uploaded_file.content_type,
+                storage_option=storage_option,
+                description=None  # Optionally, include a description
+            )
+
+    _db.refresh(db_study)
+    return db_study
+
+@router.get("/studies/{study_id}/files/{file_id}")
+def download_study_file(study_id: int, file_id: int, db: Session = Depends(get_db)):
+    db_file = db.query(models.StudyFile).filter(
+        models.StudyFile.id == file_id,
+        models.StudyFile.study_id == study_id
+    ).first()
+
+    if not db_file:
+        raise HTTPException(status_code=404, detail="File not found")
+
+    if db_file.storage_type == "local":
+        # Serve file from disk
+        return FileResponse(db_file.file_path,
+                            media_type=db_file.content_type,
+                            filename=db_file.file_name)
+    elif db_file.storage_type == "db":
+        # Stream file from binary data stored in DB
+        return StreamingResponse(io.BytesIO(db_file.file_data),
+                                 media_type=db_file.content_type,
+                                 headers={"Content-Disposition": f"attachment; filename={db_file.file_name}"})
+    else:
+        raise HTTPException(status_code=500, detail="Invalid storage type")
