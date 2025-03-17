@@ -16,6 +16,7 @@
       </div>
     </div>
     <div v-if="!metaInfoCollapsed">
+      <p v-if="studyDetails.id"><strong>Study ID:</strong> {{ studyDetails.id }}</p>
       <p v-if="studyDetails.name"><strong>Study Name:</strong> {{ studyDetails.name }}</p>
       <p v-if="studyDetails.description"><strong>Description:</strong> {{ studyDetails.description }}</p>
       <p v-if="studyDetails.numberOfForms"><strong>Number of Forms:</strong> {{ studyDetails.numberOfForms }}</p>
@@ -170,6 +171,13 @@ export default {
         numberOfVisits: this.getStudyDetails.metaInfo?.numberOfVisits,
         studyMetaDescription: this.getStudyDetails.metaInfo?.studyMetaDescription || "",
       };
+    }
+   // TODO later remove these lines
+    console.log("Initial Vuex studyDetails:", this.getStudyDetails);
+  },
+  watch: {
+    studyDetails(newVal) {
+      console.log("Updated Vuex studyDetails:", newVal);
     }
   },
   methods: {

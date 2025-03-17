@@ -132,14 +132,13 @@ export default {
       console.log("Updated study ID:", this.studyId);
     },
     proceedToFormWithMeta() {
-      let studyDetails = {};
-      if (this.selectedCaseStudyName === "custom") {
-        studyDetails = { ...this.customStudy, isCustom: true };
-      } else {
-        studyDetails = { ...this.selectedCaseStudy };
-      }
-      studyDetails.numberOfForms = this.numberOfForms;
-      studyDetails.metaInfo = this.includeMeta ? { ...this.metaInfo } : {};
+      const studyDetails = {
+        id: this.studyId,
+        name: this.selectedCaseStudyName === "custom" ? this.customStudy.name : this.selectedCaseStudy.name,
+        description: this.selectedCaseStudyName === "custom" ? this.customStudy.description : this.selectedCaseStudy.description,
+        numberOfForms: this.numberOfForms,
+        metaInfo: this.includeMeta ? { ...this.metaInfo } : {},
+      };
       console.log("Proceeding with study details:", studyDetails);
       this.studyCounter++;
       console.log("Incremented study counter to:", this.studyCounter);
