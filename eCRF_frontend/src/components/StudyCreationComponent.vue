@@ -38,11 +38,13 @@
         </option>
       </select>
 
-      <!-- Auto-Generated Study ID -->
+      <!-- Auto-Generated Study ID (Commented out: Study ID will be generated on the server) -->
+      <!--
       <div class="study-id-container">
         <label>Study ID (Persistent & Searchable):</label>
         <input type="text" :value="studyId" readonly class="study-id-input" />
       </div>
+      -->
 
       <!-- Case Study Description -->
       <div v-if="selectedCaseStudy && selectedCaseStudyName !== 'custom'">
@@ -110,7 +112,8 @@ export default {
       customStudy: { name: "", description: "" },
       numberOfForms: 1,
       includeMeta: false,
-      studyId: "",
+      // studyId is no longer generated on the client; it will be created on the server.
+      //studyId: "",
       metaInfo: { numberOfSubjects: null, numberOfVisits: null, studyMetaDescription: "" },
       studyCounter: 1,
       showErrors: false,
@@ -118,10 +121,10 @@ export default {
   },
   created() {
     this.fetchStudyTypes();
-    // Pre-generate study ID on load if custom study is selected.
-    if (this.selectedCaseStudyName === "custom") {
-      this.studyId = this.generateStudyId("CUSTOM");
-    }
+    // Removed client-side study ID generation.
+    // if (this.selectedCaseStudyName === "custom") {
+    //   this.studyId = this.generateStudyId("CUSTOM");
+    // }
   },
   methods: {
     fetchStudyTypes() {
@@ -135,30 +138,33 @@ export default {
     loadCaseStudyDetails() {
       if (this.selectedCaseStudyName === "custom") {
         this.selectedCaseStudy = null;
-        // Generate study ID for custom study when switching to custom.
-        this.studyId = this.generateStudyId("CUSTOM");
+        // Removed client-side study ID generation.
+        // this.studyId = this.generateStudyId("CUSTOM");
       } else {
         this.selectedCaseStudy = this.caseStudies.find(
           (cs) => cs.name === this.selectedCaseStudyName
         );
         if (this.selectedCaseStudy) {
-          this.studyId = this.generateStudyId(this.selectedCaseStudy.name);
+          // Removed client-side study ID generation.
+          // this.studyId = this.generateStudyId(this.selectedCaseStudy.name);
         }
       }
     },
-    generateStudyId(studyName) {
-      const prefix =
-        this.selectedCaseStudyName === "custom"
-          ? "CS"
-          : studyName?.split(" ").map((word) => word[0]).join("").toUpperCase().substring(0, 4);
-      const datePart = new Date().toISOString().slice(0, 10).replace(/-/g, "");
-      return `${prefix}-${datePart}-${String(this.studyCounter).padStart(3, "0")}`;
-    },
+    // Removed client-side study ID generation method.
+    // generateStudyId(studyName) {
+    //   const prefix =
+    //     this.selectedCaseStudyName === "custom"
+    //       ? "CS"
+    //       : studyName?.split(" ").map((word) => word[0]).join("").toUpperCase().substring(0, 4);
+    //   const datePart = new Date().toISOString().slice(0, 10).replace(/-/g, "");
+    //   return `${prefix}-${datePart}-${String(this.studyCounter).padStart(3, "0")}`;
+    // },
     validateAndProceed() {
       this.showErrors = true;
       if (!this.customStudy.name || !this.customStudy.description) return;
       const studyDetails = {
-        id: this.studyId,
+        // Removed studyId from client submission; it will be generated on the server.
+        // id: this.studyId,
         name: this.customStudy.name,
         description: this.customStudy.description,
         numberOfForms: this.numberOfForms,
@@ -173,7 +179,7 @@ export default {
         // If toggle is off, erase all data and reload the original form.
         this.resetForm();
       } else {
-        // If toggle is on, perform current functionality: clear meta info and turn off toggle.
+        // If toggle is on, clear meta info and turn off the toggle.
         this.includeMeta = false;
         this.metaInfo = { numberOfSubjects: null, numberOfVisits: null, studyMetaDescription: "" };
       }
@@ -187,7 +193,8 @@ export default {
       this.includeMeta = false;
       this.metaInfo = { numberOfSubjects: null, numberOfVisits: null, studyMetaDescription: "" };
       this.showErrors = false;
-      this.studyId = this.generateStudyId("CUSTOM");
+      // Removed client-side study ID generation.
+      // this.studyId = this.generateStudyId("CUSTOM");
     },
   },
 };
