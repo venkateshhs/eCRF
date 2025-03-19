@@ -37,15 +37,6 @@
           {{ caseStudy.name }}
         </option>
       </select>
-
-      <!-- Auto-Generated Study ID (Commented out: Study ID will be generated on the server) -->
-      <!--
-      <div class="study-id-container">
-        <label>Study ID (Persistent & Searchable):</label>
-        <input type="text" :value="studyId" readonly class="study-id-input" />
-      </div>
-      -->
-
       <!-- Case Study Description -->
       <div v-if="selectedCaseStudy && selectedCaseStudyName !== 'custom'">
         <h3>{{ selectedCaseStudy?.name }}</h3>
@@ -62,7 +53,77 @@
       />
       <small class="hint">Different forms per visit per condition</small>
 
-      <!-- Metadata Toggle Button using a Toggle Switch -->
+      <!-- Added Custom Fields List (Main) -->
+      <div class="custom-fields-section" v-if="customFields.length">
+        <h3>Added Custom Fields</h3>
+        <div
+          v-for="(field, index) in customFields"
+          :key="index"
+          class="custom-field-row"
+        >
+          <div class="custom-field-display">
+            <!-- Field Name rendered as label similar to other fields -->
+            <label class="added-field-label">{{ field.fieldName }}</label>
+            <!-- Field Value rendered as the appropriate control -->
+            <div class="added-field-value">
+              <template v-if="field.fieldType === 'date'">
+                <input type="date" v-model="field.fieldValue" class="field-value" />
+              </template>
+              <template v-else-if="field.fieldType === 'number'">
+                <input type="number" v-model="field.fieldValue" class="field-value" />
+              </template>
+              <template v-else-if="field.fieldType === 'area'">
+                <textarea v-model="field.fieldValue" class="field-value"></textarea>
+              </template>
+              <template v-else>
+                <input type="text" v-model="field.fieldValue" class="field-value" />
+              </template>
+            </div>
+          </div>
+          <button type="button" @click="removeCustomField(index, 'main')" class="remove-btn">
+            Remove
+          </button>
+        </div>
+      </div>
+
+      <!-- New Custom Field Input (Main) -->
+      <div class="new-field-section">
+        <h3>Add New Custom Field</h3>
+        <div class="custom-field-inputs">
+          <select v-model="newCustomField.fieldType" class="field-type">
+            <option value="">Select Field Type</option>
+            <option value="text">Text</option>
+            <option value="number">Number</option>
+            <option value="date">Date</option>
+            <option value="area">Area</option>
+          </select>
+          <input
+            type="text"
+            v-model="newCustomField.fieldName"
+            placeholder="Field Name"
+            class="field-name"
+          />
+          <template v-if="newCustomField.fieldType === 'date'">
+            <input type="date" v-model="newCustomField.fieldValue" class="field-value" />
+          </template>
+          <template v-else-if="newCustomField.fieldType === 'number'">
+            <input type="number" v-model="newCustomField.fieldValue" class="field-value" />
+          </template>
+          <template v-else-if="newCustomField.fieldType === 'area'">
+            <textarea
+              v-model="newCustomField.fieldValue"
+              placeholder="Field Value"
+              class="field-value"
+            ></textarea>
+          </template>
+          <template v-else>
+            <input type="text" v-model="newCustomField.fieldValue" placeholder="Field Value" class="field-value" />
+          </template>
+          <button type="button" @click="addField('main')" class="add-btn">Add Field</button>
+        </div>
+      </div>
+
+      <!-- Metadata Toggle Button -->
       <div class="meta-toggle-container">
         <label class="switch">
           <input type="checkbox" v-model="includeMeta" />
@@ -90,6 +151,74 @@
           v-model="metaInfo.studyMetaDescription"
           placeholder="Enter additional study information"
         ></textarea>
+
+        <!-- Added Meta Custom Fields List -->
+        <div class="custom-fields-section meta-custom-fields" v-if="metaCustomFields.length">
+          <h3>Added Meta Custom Fields</h3>
+          <div
+            v-for="(field, index) in metaCustomFields"
+            :key="index"
+            class="custom-field-row"
+          >
+            <div class="custom-field-display">
+              <label class="added-field-label">{{ field.fieldName }}</label>
+              <div class="added-field-value">
+                <template v-if="field.fieldType === 'date'">
+                  <input type="date" v-model="field.fieldValue" class="field-value" />
+                </template>
+                <template v-else-if="field.fieldType === 'number'">
+                  <input type="number" v-model="field.fieldValue" class="field-value" />
+                </template>
+                <template v-else-if="field.fieldType === 'area'">
+                  <textarea v-model="field.fieldValue" class="field-value"></textarea>
+                </template>
+                <template v-else>
+                  <input type="text" v-model="field.fieldValue" class="field-value" />
+                </template>
+              </div>
+            </div>
+            <button type="button" @click="removeCustomField(index, 'meta')" class="remove-btn">
+              Remove
+            </button>
+          </div>
+        </div>
+
+        <!-- New Meta Custom Field Input -->
+        <div class="new-field-section">
+          <h3>Add New Meta Custom Field</h3>
+          <div class="custom-field-inputs">
+            <select v-model="newMetaCustomField.fieldType" class="field-type">
+              <option value="">Select Field Type</option>
+              <option value="text">Text</option>
+              <option value="number">Number</option>
+              <option value="date">Date</option>
+              <option value="area">Area</option>
+            </select>
+            <input
+              type="text"
+              v-model="newMetaCustomField.fieldName"
+              placeholder="Field Name"
+              class="field-name"
+            />
+            <template v-if="newMetaCustomField.fieldType === 'date'">
+              <input type="date" v-model="newMetaCustomField.fieldValue" class="field-value" />
+            </template>
+            <template v-else-if="newMetaCustomField.fieldType === 'number'">
+              <input type="number" v-model="newMetaCustomField.fieldValue" class="field-value" />
+            </template>
+            <template v-else-if="newMetaCustomField.fieldType === 'area'">
+              <textarea
+                v-model="newMetaCustomField.fieldValue"
+                placeholder="Field Value"
+                class="field-value"
+              ></textarea>
+            </template>
+            <template v-else>
+              <input type="text" v-model="newMetaCustomField.fieldValue" placeholder="Field Value" class="field-value" />
+            </template>
+            <button type="button" @click="addField('meta')" class="add-btn">Add Field</button>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -112,19 +241,21 @@ export default {
       customStudy: { name: "", description: "" },
       numberOfForms: 1,
       includeMeta: false,
-      // studyId is no longer generated on the client; it will be created on the server.
-      //studyId: "",
+      // studyId is removed; generated on the server.
+      studyId: "",
       metaInfo: { numberOfSubjects: null, numberOfVisits: null, studyMetaDescription: "" },
+      // Arrays to store added custom fields.
+      customFields: [],
+      metaCustomFields: [],
+      // Temporary objects for new custom field inputs.
+      newCustomField: { fieldType: "", fieldName: "", fieldValue: "" },
+      newMetaCustomField: { fieldType: "", fieldName: "", fieldValue: "" },
       studyCounter: 1,
       showErrors: false,
     };
   },
   created() {
     this.fetchStudyTypes();
-    // Removed client-side study ID generation.
-    // if (this.selectedCaseStudyName === "custom") {
-    //   this.studyId = this.generateStudyId("CUSTOM");
-    // }
   },
   methods: {
     fetchStudyTypes() {
@@ -138,37 +269,44 @@ export default {
     loadCaseStudyDetails() {
       if (this.selectedCaseStudyName === "custom") {
         this.selectedCaseStudy = null;
-        // Removed client-side study ID generation.
-        // this.studyId = this.generateStudyId("CUSTOM");
       } else {
         this.selectedCaseStudy = this.caseStudies.find(
           (cs) => cs.name === this.selectedCaseStudyName
         );
-        if (this.selectedCaseStudy) {
-          // Removed client-side study ID generation.
-          // this.studyId = this.generateStudyId(this.selectedCaseStudy.name);
-        }
       }
     },
-    // Removed client-side study ID generation method.
-    // generateStudyId(studyName) {
-    //   const prefix =
-    //     this.selectedCaseStudyName === "custom"
-    //       ? "CS"
-    //       : studyName?.split(" ").map((word) => word[0]).join("").toUpperCase().substring(0, 4);
-    //   const datePart = new Date().toISOString().slice(0, 10).replace(/-/g, "");
-    //   return `${prefix}-${datePart}-${String(this.studyCounter).padStart(3, "0")}`;
-    // },
+    // Adds a new custom field to the specified section (main or meta)
+    addField(section) {
+      if (section === "main") {
+        if (!this.newCustomField.fieldType || !this.newCustomField.fieldName) return;
+        this.customFields.push({ ...this.newCustomField });
+        this.newCustomField = { fieldType: "", fieldName: "", fieldValue: "" };
+      } else if (section === "meta") {
+        if (!this.newMetaCustomField.fieldType || !this.newMetaCustomField.fieldName) return;
+        this.metaCustomFields.push({ ...this.newMetaCustomField });
+        this.newMetaCustomField = { fieldType: "", fieldName: "", fieldValue: "" };
+      }
+    },
+    // Removes a custom field by index from the specified section.
+    removeCustomField(index, section) {
+      if (section === "main") {
+        this.customFields.splice(index, 1);
+      } else if (section === "meta") {
+        this.metaCustomFields.splice(index, 1);
+      }
+    },
     validateAndProceed() {
       this.showErrors = true;
       if (!this.customStudy.name || !this.customStudy.description) return;
       const studyDetails = {
-        // Removed studyId from client submission; it will be generated on the server.
-        // id: this.studyId,
+        // The server will generate the unique study ID.
         name: this.customStudy.name,
         description: this.customStudy.description,
         numberOfForms: this.numberOfForms,
-        metaInfo: this.includeMeta ? { ...this.metaInfo } : {},
+        metaInfo: this.includeMeta
+          ? { ...this.metaInfo, customFields: this.metaCustomFields }
+          : {},
+        customFields: this.customFields,
       };
       this.studyCounter++;
       this.$store.commit("setStudyDetails", studyDetails);
@@ -176,42 +314,35 @@ export default {
     },
     cancelMetaInfo() {
       if (!this.includeMeta) {
-        // If toggle is off, erase all data and reload the original form.
         this.resetForm();
       } else {
-        // If toggle is on, clear meta info and turn off the toggle.
         this.includeMeta = false;
         this.metaInfo = { numberOfSubjects: null, numberOfVisits: null, studyMetaDescription: "" };
+        this.metaCustomFields = [];
       }
     },
     resetForm() {
-      // Reset all form fields to their initial state.
       this.selectedCaseStudyName = "custom";
       this.selectedCaseStudy = null;
       this.customStudy = { name: "", description: "" };
       this.numberOfForms = 1;
       this.includeMeta = false;
       this.metaInfo = { numberOfSubjects: null, numberOfVisits: null, studyMetaDescription: "" };
+      this.customFields = [];
+      this.metaCustomFields = [];
+      this.newCustomField = { fieldType: "", fieldName: "", fieldValue: "" };
+      this.newMetaCustomField = { fieldType: "", fieldName: "", fieldValue: "" };
       this.showErrors = false;
-      // Removed client-side study ID generation.
-      // this.studyId = this.generateStudyId("CUSTOM");
     },
   },
 };
 </script>
 
 <style scoped>
-.study-id-container {
-  margin-top: 10px;
-}
-.study-id-input {
-  width: 100%;
-  padding: 8px;
-  border: 1px solid #ccc;
-  background-color: #f3f3f3;
-  border-radius: 5px;
-  cursor: not-allowed;
-  color: #555;
+.study-creation-container {
+  max-width: 1200px;
+  margin: 0 auto;
+  font-family: Arial, sans-serif;
 }
 .new-study-form {
   padding: 20px;
@@ -229,10 +360,16 @@ input,
 textarea {
   width: 100%;
   padding: 8px;
+  font-size: 14px;
   border: 1px solid #ccc;
   border-radius: 5px;
   margin-top: 5px;
   box-sizing: border-box;
+}
+.hint {
+  font-size: 12px;
+  color: #777;
+  margin-top: 3px;
 }
 .btn-option {
   display: block;
@@ -298,6 +435,91 @@ textarea {
 }
 .meta-container {
   margin-top: 15px;
+}
+
+/* New Field Input Section */
+.new-field-section {
+  margin-top: 20px;
+  padding: 10px;
+  border: 1px solid #ddd;
+  border-radius: 5px;
+  background-color: #fff;
+}
+.new-field-section h3 {
+  margin-top: 0;
+  margin-bottom: 10px;
+}
+.custom-field-inputs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+.field-type,
+.field-name,
+.field-value {
+  flex: 1 1 150px;
+}
+
+/* Added Fields List */
+.custom-fields-section {
+  border: 1px dashed #ccc;
+  padding: 10px;
+  margin-bottom: 20px;
+  border-radius: 5px;
+}
+.custom-fields-section h3 {
+  margin-top: 0;
+  margin-bottom: 10px;
+}
+.custom-field-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 10px;
+  border-bottom: 1px solid #eee;
+  padding-bottom: 10px;
+}
+.custom-field-display {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+.added-field-label {
+  font-weight: bold;
+  font-size: 16px;
+  margin-bottom: 5px;
+}
+.added-field-value input,
+.added-field-value textarea {
+  width: 100%;
+  padding: 8px;
+  font-size: 14px;
+  border: 1px solid #ccc;
+  border-radius: 5px;
+  box-sizing: border-box;
+}
+.remove-btn {
+  align-self: flex-end;
+  margin-left: 10px;
+  background-color: #ccc;
+  border: 1px solid #bbb;
+  padding: 5px 10px;
+  border-radius: 3px;
+  cursor: pointer;
+}
+.remove-btn:hover {
+  background-color: #bbb;
+}
+.add-btn {
+  background-color: #ccc;
+  border: 1px solid #bbb;
+  padding: 5px 10px;
+  border-radius: 3px;
+  cursor: pointer;
+}
+.add-btn:hover {
+  background-color: #bbb;
 }
 
 /* Error text styling */
