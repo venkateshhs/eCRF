@@ -35,9 +35,20 @@
     <main :class="['dashboard-main', { expanded: sidebarCollapsed }]">
       <div v-if="activeSection === 'study-management'">
         <h1>Study Management</h1>
-        <div class="button-container">
+        <div class="button-container" v-if="!showStudyOptions">
           <button @click="navigate('/dashboard/create-study')" class="btn-option">Create Study</button>
-          <button @click="navigate('/dashboard/view-forms')" class="btn-option">Open Study</button>
+          <button @click="toggleStudyOptions" class="btn-option">Open Study</button>
+        </div>
+
+        <!-- New Buttons After Clicking "Open Study" -->
+        <div v-if="showStudyOptions" class="button-container">
+          <button class="btn-option">Edit Existing Study</button>
+          <button class="btn-option">Add Data</button>
+        </div>
+        <div v-if="showStudyOptions" class="back-button-container">
+            <button @click="toggleStudyOptions" class="btn-back">
+                <i :class="icons.arrowLeft"></i>
+            </button>
         </div>
       </div>
       <router-view v-else></router-view>
@@ -54,6 +65,7 @@ export default {
     return {
       sidebarCollapsed: false,
       activeSection: "study-management",
+      showStudyOptions: false, // Tracks whether to show new buttons
       icons,
     };
   },
@@ -64,7 +76,12 @@ export default {
     },
     setActiveSection(section) {
       this.activeSection = section;
+      this.showStudyOptions = false; // Reset buttons when changing sections
       console.log("Active section set to:", section);
+    },
+    toggleStudyOptions() {
+      this.showStudyOptions = !this.showStudyOptions;
+      console.log("Study options toggled:", this.showStudyOptions);
     },
     navigate(route) {
       this.activeSection = "";
@@ -221,7 +238,29 @@ export default {
   background: #e0e0e0;
   color: #000;
 }
+.back-button-container {
+  display: flex;
+  justify-content: flex-start; /* Align to the left */
+  margin-top: 10px;
+}
 
+.btn-back {
+  padding: 8px 12px;
+  background: #f0f0f0;
+  border: 1px solid #bbb;
+  font-size: 14px;
+  color: #555;
+  cursor: pointer;
+  transition: background 0.3s ease, color 0.3s ease;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.btn-back:hover {
+  background: #e0e0e0;
+  color: #333;
+}
 /* Responsive Design */
 @media (max-width: 768px) {
   .dashboard-layout {
