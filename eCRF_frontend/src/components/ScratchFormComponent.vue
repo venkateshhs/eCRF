@@ -224,10 +224,10 @@
               Clear Form
             </button>
             <button @click.prevent="saveForm" class="btn-primary" title="Save Study">
-              Save Form
+              Save Study
             </button>
             <button @click="navigateToSavedForms" class="btn-option" title="View Saved Study">
-              View Saved Forms
+              View Saved Study
             </button>
             <button @click="openDownloadDialog" class="btn-option" title="Download Form">
               Download Form
