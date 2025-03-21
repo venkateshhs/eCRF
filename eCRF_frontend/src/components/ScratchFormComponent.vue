@@ -229,14 +229,14 @@
             <button @click="navigateToSavedForms" class="btn-option" title="View Saved Study">
               View Saved Study
             </button>
-            <button @click="openDownloadDialog" class="btn-option" title="Download Form">
-              Download Form
+            <button @click="openDownloadDialog" class="btn-option" title="Download Study">
+              Download Study
             </button>
-            <button @click="openUploadDialog" class="btn-option" title="Upload Form">
-              Upload Form
+            <button @click="openUploadDialog" class="btn-option" title="Upload Study">
+              Upload Study
             </button>
-            <button @click="openPreviewDialog" class="btn-option" title="Preview Form">
-              Preview Form
+            <button @click="openPreviewDialog" class="btn-option" title="Preview Study">
+              Preview Study
             </button>
           </div>
         </div>
@@ -293,10 +293,24 @@
       </div>
     </div>
 
-    <!-- Preview Dialog Modal -->
+    <!-- Preview Dialog Modal with Sticky Navigation -->
     <div v-if="showPreviewDialog" class="modal-overlay">
       <div class="modal preview-modal">
-        <FormPreview :form="currentForm" />
+        <!-- Sticky Navigation Header -->
+        <div class="preview-header">
+          <button @click="prevPreview" :disabled="previewFormIndex === 0" title="Previous Form">
+            <i :class="icons.prev"></i>
+          </button>
+          <span>Form {{ previewFormIndex + 1 }} of {{ forms.length }}</span>
+          <button @click="nextPreview" :disabled="previewFormIndex === forms.length - 1" title="Next Form">
+            <i :class="icons.next"></i>
+          </button>
+        </div>
+        <!-- Scrollable Preview Content -->
+        <div class="preview-content">
+          <FormPreview :form="forms[previewFormIndex]" />
+        </div>
+        <!-- Fixed Footer -->
         <div class="modal-actions">
           <button @click="closePreviewDialog" class="btn-primary modal-btn" title="Close Preview">
             Close
@@ -452,10 +466,9 @@ export default {
       showDownloadDialog: false,
       showUploadDialog: false,
       showPreviewDialog: false,
-      // For any additional form-level file attachments if needed
       selectedFiles: [],
-      // storageOption for form-level attachments; meta file attachments come from StudyMetaInfo
-      storageOption: "db"
+      storageOption: "db",
+      previewFormIndex: 0
     };
   },
   computed: {
@@ -480,6 +493,15 @@ export default {
       return icons;
     },
   },
+  watch: {
+    // Watch the forms array and persist changes to localStorage.
+    forms: {
+      handler(newForms) {
+        localStorage.setItem("scratchForms", JSON.stringify(newForms));
+      },
+      deep: true,
+    }
+  },
   async mounted() {
     // Get studyDetails from Vuex store
     const details = this.$store.state.studyDetails || {};
@@ -488,20 +510,26 @@ export default {
     if (details.metaInfo) {
       this.metaInfo = details.metaInfo;
     }
-    for (let i = 0; i < this.totalForms; i++) {
-      this.forms.push({
-        formName: `Form${i + 1}`,
-        sections: JSON.parse(JSON.stringify(this.defaultFormStructure)),
-      });
+    // Attempt to load forms from localStorage.
+    const storedForms = localStorage.getItem("scratchForms");
+    if (storedForms) {
+      this.forms = JSON.parse(storedForms);
+      this.totalForms = this.forms.length;
+    } else {
+      for (let i = 0; i < this.totalForms; i++) {
+        this.forms.push({
+          formName: `Form${i + 1}`,
+          sections: JSON.parse(JSON.stringify(this.defaultFormStructure)),
+        });
+      }
     }
     await this.loadAvailableFields();
   },
   methods: {
-    // Normalizes form keys from formName to form_name as expected by backend schema.
     normalizeForms(formsArray) {
       return formsArray.map(form => ({
         form_name: form.formName,
-        sections: form.sections
+        sections: form.sections,
       }));
     },
     reloadForms(newTotal) {
@@ -526,30 +554,23 @@ export default {
         });
         return;
       }
-      // Build the study payload
       const studyData = {
         name: this.studyDetails.name || "Untitled Study",
         description: this.studyDetails.description || "",
         meta_info: JSON.stringify(this.metaInfo),
-        // Normalize forms so that keys match the backend schema (form_name vs formName)
         forms: JSON.stringify(this.normalizeForms(this.forms)),
         storage_option: this.storageOption,
       };
-
-      // Conditionally add number_of_subjects and number_of_visits if defined
       if (this.metaInfo.numberOfSubjects !== undefined) {
         studyData.number_of_subjects = this.metaInfo.numberOfSubjects;
       }
       if (this.metaInfo.numberOfVisits !== undefined) {
         studyData.number_of_visits = this.metaInfo.numberOfVisits;
       }
-
       const formData = new FormData();
       for (const key in studyData) {
         formData.append(key, studyData[key]);
       }
-
-      // Append meta file attachments from StudyMetaInfo component
       if (this.$refs.studyMetaInfo) {
         const metaComp = this.$refs.studyMetaInfo;
         if (metaComp.metaFiles && metaComp.metaFiles.length > 0) {
@@ -560,15 +581,11 @@ export default {
           formData.append("meta_storage_option", metaComp.metaStorageOption);
         }
       }
-
-      // Append any additional form-level file attachments if needed
       if (this.selectedFiles && this.selectedFiles.length > 0) {
         Array.from(this.selectedFiles).forEach(file => {
           formData.append("files", file);
         });
       }
-
-      // Debug: Log all FormData entries
       for (let [key, value] of formData.entries()) {
         if (value instanceof File) {
           console.log(`${key}: ${value.name} (${value.type})`);
@@ -576,7 +593,6 @@ export default {
           console.log(`${key}:`, value);
         }
       }
-
       try {
         const response = await axios.post("http://127.0.0.1:8000/forms/save-study", formData, {
           headers: {
@@ -590,7 +606,6 @@ export default {
         this.openGenericDialog("Failed to save study. Please try again.");
       }
     },
-    // Added missing openSaveDialog method
     openSaveDialog(message) {
       this.saveDialogMessage = message;
       this.showSaveDialog = true;
@@ -773,7 +788,6 @@ export default {
     removeField(sectionIndex, fieldIndex) {
       this.currentForm.sections[sectionIndex].fields.splice(fieldIndex, 1);
     },
-    // Field Constraints Editing Methods
     openConstraintsDialog(sectionIndex, fieldIndex) {
       const field = this.currentForm.sections[sectionIndex].fields[fieldIndex];
       this.currentFieldIndices = { sectionIndex, fieldIndex };
@@ -829,7 +843,6 @@ export default {
     cancelConstraintsDialog() {
       this.showConstraintsDialog = false;
     },
-    // Download Form Methods
     openDownloadDialog() {
       this.showDownloadDialog = true;
     },
@@ -839,8 +852,7 @@ export default {
     downloadFormData(format) {
       const dataToDownload = {
         studyDetails: this.studyDetails,
-        metaInfo: this.metaInfo,
-        forms: this.forms
+        forms: this.forms,
       };
       let dataStr;
       let fileName;
@@ -869,7 +881,6 @@ export default {
       URL.revokeObjectURL(url);
       this.showDownloadDialog = false;
     },
-    // Upload Form Methods
     openUploadDialog() {
       this.showUploadDialog = true;
     },
@@ -877,47 +888,65 @@ export default {
       this.showUploadDialog = false;
     },
     handleFileChange(e) {
-      const file = e.target.files[0];
-      if (!file) return;
-      const reader = new FileReader();
-      reader.onload = (evt) => {
-        const fileContent = evt.target.result;
-        let parsedData;
-        const trimmedContent = fileContent.trim();
-        try {
-          parsedData = JSON.parse(trimmedContent);
-        } catch (jsonErr) {
-          try {
-            parsedData = yaml.load(trimmedContent);
-          } catch (yamlErr) {
-            this.openGenericDialog("Failed to parse file. Please ensure it's valid JSON or YAML.");
-            return;
-          }
-        }
-        if (parsedData.studyDetails) {
-          this.studyDetails = parsedData.studyDetails;
-        }
-        if (parsedData.metaInfo) {
-          this.metaInfo = parsedData.metaInfo;
-        }
-        if (parsedData.forms) {
-          this.forms = parsedData.forms;
-          this.totalForms = parsedData.forms.length;
-          this.currentFormIndex = 0;
-          this.activeSection = (this.forms[0] && this.forms[0].sections && this.forms[0].sections.length > 0) ? 0 : null;
-        } else {
-          this.openGenericDialog("Uploaded file does not contain valid form data.");
-        }
-      };
-      reader.readAsText(file);
-      this.closeUploadDialog();
-    },
+  const file = e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = (evt) => {
+    const fileContent = evt.target.result;
+    let parsedData;
+    const trimmedContent = fileContent.trim();
+    try {
+      parsedData = JSON.parse(trimmedContent);
+    } catch (jsonErr) {
+      try {
+        parsedData = yaml.load(trimmedContent);
+      } catch (yamlErr) {
+        this.openGenericDialog("Failed to parse file. Please ensure it's valid JSON or YAML.");
+        return;
+      }
+    }
+    if (parsedData.studyDetails) {
+      // Update local state
+      this.studyDetails = parsedData.studyDetails;
+      // Update Vuex store so that computed getters in StudyMetaInfo reflect the new details
+      this.$store.commit("setStudyDetails", parsedData.studyDetails);
+    }
+    if (parsedData.metaInfo) {
+      // Optionally update local metaInfo (if used elsewhere)
+      this.metaInfo = parsedData.metaInfo;
+    }
+    if (parsedData.forms) {
+      this.forms = parsedData.forms;
+      this.totalForms = parsedData.forms.length;
+      this.currentFormIndex = 0;
+      this.activeSection =
+        (this.forms[0] && this.forms[0].sections && this.forms[0].sections.length > 0)
+          ? 0
+          : null;
+    } else {
+      this.openGenericDialog("Uploaded file does not contain valid form data.");
+    }
+  };
+  reader.readAsText(file);
+  this.closeUploadDialog();
+},
     // Preview Methods
     openPreviewDialog() {
+      this.previewFormIndex = this.currentFormIndex;
       this.showPreviewDialog = true;
     },
     closePreviewDialog() {
       this.showPreviewDialog = false;
+    },
+    prevPreview() {
+      if (this.previewFormIndex > 0) {
+        this.previewFormIndex--;
+      }
+    },
+    nextPreview() {
+      if (this.previewFormIndex < this.forms.length - 1) {
+        this.previewFormIndex++;
+      }
     },
   },
 };
@@ -1173,12 +1202,10 @@ select:focus {
   text-align: center;
 }
 .modal-actions {
-  display: flex;
-  gap: 10px;
-  margin-top: 15px;
-}
-.modal-actions button {
-  flex: 1;
+  padding: 10px;
+  background-color: #f2f2f2;
+  text-align: center;
+  flex-shrink: 0;
 }
 .input-dialog-modal {
   width: 300px;
@@ -1231,10 +1258,29 @@ select:focus {
     box-sizing: border-box;
   }
 }
+/* Preview Modal Styles with Sticky Header/Footer */
 .preview-modal {
+  display: flex;
+  flex-direction: column;
+  height: 80vh;
   width: 500px;
-  max-height: 80vh;
+  background: white;
+  border-radius: 8px;
+  overflow: hidden;
+}
+.preview-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px;
+  background-color: #f2f2f2;
+  flex-shrink: 0;
+}
+.preview-content {
+  flex: 1;
   overflow-y: auto;
+  padding: 10px;
+  background: white;
 }
 @media (max-width: 768px) {
   .scratch-form-content {
