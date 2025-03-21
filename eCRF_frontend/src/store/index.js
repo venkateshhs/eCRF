@@ -1,5 +1,6 @@
 import { createStore } from "vuex";
 import axios from "axios";
+import createPersistedState from "vuex-persistedstate";
 
 // Dynamically set the base URL based on environment variables or defaults
 const API_BASE_URL = process.env.VUE_APP_API_URL || "http://127.0.0.1:8000";
@@ -189,6 +190,13 @@ const store = createStore({
     getCurrentForm: (state) => state.currentForm,
     getStudyDetails: (state) => state.studyDetails,
   },
+  plugins: [
+    createPersistedState({
+      key: "myAppStudyDetails",
+      paths: ["studyDetails"],
+      storage: window.localStorage,
+    }),
+  ],
 });
 
 export default store;

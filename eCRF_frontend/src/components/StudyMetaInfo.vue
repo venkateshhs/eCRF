@@ -185,13 +185,12 @@ export default {
       metaFiles: [],
       pendingFiles: [],
       showDescriptionDialog: false,
-      metaInfoCollapsed: true, // collapsed by default
+      metaInfoCollapsed: true,
       showMetaEditDialog: false,
       showReinitConfirm: false,
       pendingMetaEdit: null,
       icons,
       metaStorageOption: "db",
-      // metaEditForm holds the editable copy of study details (including custom fields)
       metaEditForm: {
         name: "",
         description: "",
@@ -234,6 +233,9 @@ export default {
     },
   },
   methods: {
+  refreshPage() {
+      this.$router.go(0);
+    },
     handleMetaFile(event) {
       const files = event.target.files;
       if (files && files.length) {
@@ -498,58 +500,7 @@ export default {
   margin: 0;
 }
 
-/* Toggle Slider Styling from Reference Code */
-.meta-toggle-container {
-  margin-top: 15px;
-  display: flex;
-  align-items: center;
-}
-.switch {
-  position: relative;
-  display: inline-block;
-  width: 50px;
-  height: 24px;
-  margin-right: 10px;
-}
-.switch input {
-  opacity: 0;
-  width: 0;
-  height: 0;
-}
-.slider {
-  position: absolute;
-  cursor: pointer;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background-color: #ccc;
-  transition: 0.4s;
-  border-radius: 24px;
-}
-.slider:before {
-  position: absolute;
-  content: "";
-  height: 18px;
-  width: 18px;
-  left: 3px;
-  bottom: 3px;
-  background-color: white;
-  transition: 0.4s;
-  border-radius: 50%;
-}
-.switch input:checked + .slider {
-  background-color: #2196F3;
-}
-.switch input:checked + .slider:before {
-  transform: translateX(26px);
-}
-.toggle-label {
-  font-size: 14px;
-  color: #333;
-}
 
-/* New Field Input Section */
 .new-field-section {
   margin-top: 20px;
   padding: 10px;
@@ -587,9 +538,6 @@ export default {
   padding: 5px 10px;
   border-radius: 3px;
   cursor: pointer;
-}
-.add-btn:hover {
-  background-color: #bbb;
 }
 
 /* Added Fields Lists */
@@ -631,23 +579,12 @@ export default {
   box-sizing: border-box;
 }
 .remove-btn {
+  align-self: flex-end;
+  margin-left: 10px;
   background-color: #ccc;
   border: 1px solid #bbb;
   padding: 5px 10px;
   border-radius: 3px;
   cursor: pointer;
-  align-self: flex-end;
-  margin-left: 10px;
-}
-.remove-btn:hover {
-  background-color: #bbb;
-}
-
-/* Error Text Styling */
-.error-text {
-  color: red !important;
-  font-size: 12px;
-  margin-top: 3px;
-  display: block;
 }
 </style>
