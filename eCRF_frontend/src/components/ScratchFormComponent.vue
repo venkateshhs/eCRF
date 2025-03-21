@@ -493,6 +493,15 @@ export default {
       return icons;
     },
   },
+  watch: {
+    // Watch the forms array and persist changes to localStorage.
+    forms: {
+      handler(newForms) {
+        localStorage.setItem("scratchForms", JSON.stringify(newForms));
+      },
+      deep: true,
+    }
+  },
   async mounted() {
     // Get studyDetails from Vuex store
     const details = this.$store.state.studyDetails || {};
@@ -501,11 +510,18 @@ export default {
     if (details.metaInfo) {
       this.metaInfo = details.metaInfo;
     }
-    for (let i = 0; i < this.totalForms; i++) {
-      this.forms.push({
-        formName: `Form${i + 1}`,
-        sections: JSON.parse(JSON.stringify(this.defaultFormStructure)),
-      });
+    // Attempt to load forms from localStorage.
+    const storedForms = localStorage.getItem("scratchForms");
+    if (storedForms) {
+      this.forms = JSON.parse(storedForms);
+      this.totalForms = this.forms.length;
+    } else {
+      for (let i = 0; i < this.totalForms; i++) {
+        this.forms.push({
+          formName: `Form${i + 1}`,
+          sections: JSON.parse(JSON.stringify(this.defaultFormStructure)),
+        });
+      }
     }
     await this.loadAvailableFields();
   },
@@ -513,7 +529,7 @@ export default {
     normalizeForms(formsArray) {
       return formsArray.map(form => ({
         form_name: form.formName,
-        sections: form.sections
+        sections: form.sections,
       }));
     },
     reloadForms(newTotal) {
@@ -836,7 +852,7 @@ export default {
     downloadFormData(format) {
       const dataToDownload = {
         studyDetails: this.studyDetails,
-        forms: this.forms
+        forms: this.forms,
       };
       let dataStr;
       let fileName;
@@ -931,7 +947,7 @@ export default {
       if (this.previewFormIndex < this.forms.length - 1) {
         this.previewFormIndex++;
       }
-    }
+    },
   },
 };
 </script>
