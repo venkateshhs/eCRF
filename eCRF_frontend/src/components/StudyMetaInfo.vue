@@ -233,9 +233,7 @@ export default {
     },
   },
   methods: {
-  refreshPage() {
-      this.$router.go(0);
-    },
+
     handleMetaFile(event) {
       const files = event.target.files;
       if (files && files.length) {
