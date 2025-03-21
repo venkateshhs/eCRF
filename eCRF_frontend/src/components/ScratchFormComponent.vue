@@ -229,14 +229,14 @@
             <button @click="navigateToSavedForms" class="btn-option" title="View Saved Study">
               View Saved Study
             </button>
-            <button @click="openDownloadDialog" class="btn-option" title="Download Form">
-              Download Form
+            <button @click="openDownloadDialog" class="btn-option" title="Download Study">
+              Download Study
             </button>
-            <button @click="openUploadDialog" class="btn-option" title="Upload Form">
-              Upload Form
+            <button @click="openUploadDialog" class="btn-option" title="Upload Study">
+              Upload Study
             </button>
-            <button @click="openPreviewDialog" class="btn-option" title="Preview Form">
-              Preview Form
+            <button @click="openPreviewDialog" class="btn-option" title="Preview Study">
+              Preview Study
             </button>
           </div>
         </div>
@@ -829,7 +829,7 @@ export default {
     cancelConstraintsDialog() {
       this.showConstraintsDialog = false;
     },
-    // Download Form Methods
+    // Download Study Methods
     openDownloadDialog() {
       this.showDownloadDialog = true;
     },
@@ -839,7 +839,6 @@ export default {
     downloadFormData(format) {
       const dataToDownload = {
         studyDetails: this.studyDetails,
-        metaInfo: this.metaInfo,
         forms: this.forms
       };
       let dataStr;
@@ -869,7 +868,7 @@ export default {
       URL.revokeObjectURL(url);
       this.showDownloadDialog = false;
     },
-    // Upload Form Methods
+    // Upload Study Methods
     openUploadDialog() {
       this.showUploadDialog = true;
     },
@@ -877,41 +876,48 @@ export default {
       this.showUploadDialog = false;
     },
     handleFileChange(e) {
-      const file = e.target.files[0];
-      if (!file) return;
-      const reader = new FileReader();
-      reader.onload = (evt) => {
-        const fileContent = evt.target.result;
-        let parsedData;
-        const trimmedContent = fileContent.trim();
-        try {
-          parsedData = JSON.parse(trimmedContent);
-        } catch (jsonErr) {
-          try {
-            parsedData = yaml.load(trimmedContent);
-          } catch (yamlErr) {
-            this.openGenericDialog("Failed to parse file. Please ensure it's valid JSON or YAML.");
-            return;
-          }
-        }
-        if (parsedData.studyDetails) {
-          this.studyDetails = parsedData.studyDetails;
-        }
-        if (parsedData.metaInfo) {
-          this.metaInfo = parsedData.metaInfo;
-        }
-        if (parsedData.forms) {
-          this.forms = parsedData.forms;
-          this.totalForms = parsedData.forms.length;
-          this.currentFormIndex = 0;
-          this.activeSection = (this.forms[0] && this.forms[0].sections && this.forms[0].sections.length > 0) ? 0 : null;
-        } else {
-          this.openGenericDialog("Uploaded file does not contain valid form data.");
-        }
-      };
-      reader.readAsText(file);
-      this.closeUploadDialog();
-    },
+  const file = e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = (evt) => {
+    const fileContent = evt.target.result;
+    let parsedData;
+    const trimmedContent = fileContent.trim();
+    try {
+      parsedData = JSON.parse(trimmedContent);
+    } catch (jsonErr) {
+      try {
+        parsedData = yaml.load(trimmedContent);
+      } catch (yamlErr) {
+        this.openGenericDialog("Failed to parse file. Please ensure it's valid JSON or YAML.");
+        return;
+      }
+    }
+    if (parsedData.studyDetails) {
+      // Update local state
+      this.studyDetails = parsedData.studyDetails;
+      // Update Vuex store so that computed getters in StudyMetaInfo reflect the new details
+      this.$store.commit("setStudyDetails", parsedData.studyDetails);
+    }
+    if (parsedData.metaInfo) {
+      // Optionally update local metaInfo (if used elsewhere)
+      this.metaInfo = parsedData.metaInfo;
+    }
+    if (parsedData.forms) {
+      this.forms = parsedData.forms;
+      this.totalForms = parsedData.forms.length;
+      this.currentFormIndex = 0;
+      this.activeSection =
+        (this.forms[0] && this.forms[0].sections && this.forms[0].sections.length > 0)
+          ? 0
+          : null;
+    } else {
+      this.openGenericDialog("Uploaded file does not contain valid form data.");
+    }
+  };
+  reader.readAsText(file);
+  this.closeUploadDialog();
+},
     // Preview Methods
     openPreviewDialog() {
       this.showPreviewDialog = true;
