@@ -30,11 +30,30 @@
         <strong>Study Meta Description:</strong> {{ studyDetails.metaInfo.studyMetaDescription }}
       </p>
 
+      <!-- Display Study Custom Fields (without field type) -->
+      <div v-if="studyDetails.customFields && studyDetails.customFields.length">
+        <h3>Study Custom Fields</h3>
+        <ul>
+          <li v-for="(field, index) in studyDetails.customFields" :key="'study-field-' + index">
+            <strong>{{ field.fieldName }}</strong>: {{ field.fieldValue }}
+          </li>
+        </ul>
+      </div>
+
+      <!-- Display Meta Custom Fields (without field type) -->
+      <div v-if="studyDetails.metaCustomFields && studyDetails.metaCustomFields.length">
+        <h3>Meta Custom Fields</h3>
+        <ul>
+          <li v-for="(field, index) in studyDetails.metaCustomFields" :key="'meta-field-' + index">
+            <strong>{{ field.fieldName }}</strong>: {{ field.fieldValue }}
+          </li>
+        </ul>
+      </div>
+
       <!-- File Attachment Option with Storage Selector -->
       <div class="file-attachment">
         <label for="meta-file-upload" class="attach-file-label">Attach File(s):</label>
         <input type="file" id="meta-file-upload" ref="metaFileInput" @change="handleMetaFile" multiple />
-        <!-- New storage option selector for meta files -->
         <label for="meta-storage-option" class="attach-file-label">Storage Option:</label>
         <select id="meta-storage-option" v-model="metaStorageOption">
           <option value="db">Store in Database</option>
@@ -83,6 +102,44 @@
         <label>Study Meta Description:</label>
         <textarea v-model="metaEditForm.studyMetaDescription" placeholder="Enter meta description"></textarea>
       </div>
+      <!-- Editing Study Custom Fields -->
+      <div class="meta-edit-field" v-if="metaEditForm.customFields && metaEditForm.customFields.length">
+        <label>Study Custom Fields:</label>
+        <div v-for="(field, index) in metaEditForm.customFields" :key="'edit-study-' + index">
+          <p><strong>{{ field.fieldName }}</strong>:</p>
+          <div v-if="field.fieldType === 'date'">
+            <input type="date" v-model="field.fieldValue" />
+          </div>
+          <div v-else-if="field.fieldType === 'number'">
+            <input type="number" v-model="field.fieldValue" />
+          </div>
+          <div v-else-if="field.fieldType === 'area'">
+            <textarea v-model="field.fieldValue"></textarea>
+          </div>
+          <div v-else>
+            <input type="text" v-model="field.fieldValue" />
+          </div>
+        </div>
+      </div>
+      <!-- Editing Meta Custom Fields -->
+      <div class="meta-edit-field" v-if="metaEditForm.metaCustomFields && metaEditForm.metaCustomFields.length">
+        <label>Meta Custom Fields:</label>
+        <div v-for="(field, index) in metaEditForm.metaCustomFields" :key="'edit-meta-' + index">
+          <p><strong>{{ field.fieldName }}</strong>:</p>
+          <div v-if="field.fieldType === 'date'">
+            <input type="date" v-model="field.fieldValue" />
+          </div>
+          <div v-else-if="field.fieldType === 'number'">
+            <input type="number" v-model="field.fieldValue" />
+          </div>
+          <div v-else-if="field.fieldType === 'area'">
+            <textarea v-model="field.fieldValue"></textarea>
+          </div>
+          <div v-else>
+            <input type="text" v-model="field.fieldValue" />
+          </div>
+        </div>
+      </div>
       <div class="modal-actions">
         <button @click="saveMetaEditDialog" class="btn-primary modal-btn" title="Save Meta Information">Save</button>
         <button @click="cancelMetaEditDialog" class="btn-option modal-btn" title="Cancel Meta Edit">Cancel</button>
@@ -107,12 +164,7 @@
       <h3>Enter Description for Attached File(s)</h3>
       <div v-for="(fileObj, index) in pendingFiles" :key="index" class="description-item">
         <p><strong>{{ fileObj.file.name }}</strong></p>
-        <input
-          type="text"
-          v-model="fileObj.description"
-          placeholder="Enter description for this file"
-          class="file-description-input"
-        />
+        <input type="text" v-model="fileObj.description" placeholder="Enter description for this file" class="file-description-input" />
       </div>
       <div class="modal-actions">
         <button @click="saveDescriptions" class="btn-primary modal-btn" title="Save Descriptions">Save</button>
@@ -133,12 +185,12 @@ export default {
       metaFiles: [],
       pendingFiles: [],
       showDescriptionDialog: false,
-      metaInfoCollapsed: true, // collapsed by default
+      metaInfoCollapsed: true,
       showMetaEditDialog: false,
       showReinitConfirm: false,
       pendingMetaEdit: null,
       icons,
-      // metaEditForm holds the editable copy of study details (including metaInfo)
+      metaStorageOption: "db",
       metaEditForm: {
         name: "",
         description: "",
@@ -146,9 +198,9 @@ export default {
         numberOfSubjects: null,
         numberOfVisits: null,
         studyMetaDescription: "",
+        customFields: [],
+        metaCustomFields: [],
       },
-      // New property for choosing storage option for meta file attachments:
-      metaStorageOption: "db",
     };
   },
   computed: {
@@ -157,11 +209,10 @@ export default {
       return this.getStudyDetails || {};
     },
     metaInfo() {
-      return (this.getStudyDetails.metaInfo) ? this.getStudyDetails.metaInfo : {};
+      return this.getStudyDetails.metaInfo ? this.getStudyDetails.metaInfo : {};
     },
   },
   created() {
-    // Initialize metaEditForm from Vuex store if available
     if (this.getStudyDetails) {
       this.metaEditForm = {
         name: this.getStudyDetails.name || "",
@@ -170,17 +221,19 @@ export default {
         numberOfSubjects: this.getStudyDetails.metaInfo?.numberOfSubjects,
         numberOfVisits: this.getStudyDetails.metaInfo?.numberOfVisits,
         studyMetaDescription: this.getStudyDetails.metaInfo?.studyMetaDescription || "",
+        customFields: this.getStudyDetails.customFields || [],
+        metaCustomFields: this.getStudyDetails.metaCustomFields || [],
       };
     }
-   // TODO later remove these lines
     console.log("Initial Vuex studyDetails:", this.getStudyDetails);
   },
   watch: {
     studyDetails(newVal) {
       console.log("Updated Vuex studyDetails:", newVal);
-    }
+    },
   },
   methods: {
+
     handleMetaFile(event) {
       const files = event.target.files;
       if (files && files.length) {
@@ -220,7 +273,6 @@ export default {
       this.$emit("toggle-meta-info", this.metaInfoCollapsed);
     },
     openMetaEditDialog() {
-      // Initialize metaEditForm from current Vuex store values
       this.metaEditForm = {
         name: this.getStudyDetails.name || "",
         description: this.getStudyDetails.description || "",
@@ -228,6 +280,8 @@ export default {
         numberOfSubjects: this.getStudyDetails.metaInfo?.numberOfSubjects,
         numberOfVisits: this.getStudyDetails.metaInfo?.numberOfVisits,
         studyMetaDescription: this.getStudyDetails.metaInfo?.studyMetaDescription || "",
+        customFields: this.getStudyDetails.customFields || [],
+        metaCustomFields: this.getStudyDetails.metaCustomFields || [],
       };
       this.showMetaEditDialog = true;
     },
@@ -235,7 +289,6 @@ export default {
       this.showMetaEditDialog = false;
     },
     saveMetaEditDialog() {
-      // If numberOfForms changed compared to stored value, prompt reinit confirmation
       if (this.getStudyDetails.numberOfForms !== this.metaEditForm.numberOfForms) {
         this.pendingMetaEdit = { ...this.metaEditForm };
         this.showMetaEditDialog = false;
@@ -245,18 +298,18 @@ export default {
       }
     },
     commitMetaEdit() {
-      // Merge updated metaEditForm into stored studyDetails and commit to Vuex
       let updatedDetails = { ...this.getStudyDetails, ...this.metaEditForm };
       updatedDetails.metaInfo = {
         numberOfSubjects: this.metaEditForm.numberOfSubjects,
         numberOfVisits: this.metaEditForm.numberOfVisits,
         studyMetaDescription: this.metaEditForm.studyMetaDescription,
       };
+      updatedDetails.customFields = this.metaEditForm.customFields;
+      updatedDetails.metaCustomFields = this.metaEditForm.metaCustomFields;
       this.$store.commit("setStudyDetails", updatedDetails);
       this.showMetaEditDialog = false;
     },
     confirmReinit() {
-      // Emit event to reload form container with new number of forms
       this.$emit("reload-forms", this.pendingMetaEdit.numberOfForms);
       this.commitMetaEdit();
       this.showReinitConfirm = false;
@@ -266,6 +319,32 @@ export default {
       this.showReinitConfirm = false;
       this.pendingMetaEdit = null;
       this.commitMetaEdit();
+    },
+    validateAndProceed() {
+      this.showErrors = true;
+      if (!this.customStudy.name || !this.customStudy.description) return;
+      const studyDetails = {
+        name: this.customStudy.name,
+        description: this.customStudy.description,
+        numberOfForms: this.numberOfForms,
+        metaInfo: { ...this.metaInfo },
+        customFields: this.customFields,
+        metaCustomFields: this.metaCustomFields,
+      };
+      this.$store.commit("setStudyDetails", studyDetails);
+      this.$router.push({ name: "CreateFormScratch" });
+    },
+    resetForm() {
+      this.selectedCaseStudyName = "custom";
+      this.selectedCaseStudy = null;
+      this.customStudy = { name: "", description: "" };
+      this.numberOfForms = 1;
+      this.metaInfo = { numberOfSubjects: null, numberOfVisits: null, studyMetaDescription: "" };
+      this.customFields = [];
+      this.metaCustomFields = [];
+      this.newField = { fieldType: "", fieldName: "", fieldValue: "", isMeta: false };
+      this.showCustomFieldEditor = false;
+      this.showErrors = false;
     },
   },
 };
@@ -374,71 +453,13 @@ export default {
 .modal-actions button {
   flex: 1;
 }
-
-/* Additional CSS for Toggle Switch and Container */
-.meta-toggle-container {
-  margin-top: 15px;
-  display: flex;
-  align-items: center;
-}
-.switch {
-  position: relative;
-  display: inline-block;
-  width: 50px;
-  height: 24px;
-  margin-right: 10px;
-}
-.switch input {
-  opacity: 0;
-  width: 0;
-  height: 0;
-}
-.slider {
-  position: absolute;
-  cursor: pointer;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background-color: #ccc;
-  transition: 0.4s;
-  border-radius: 24px;
-}
-.slider:before {
-  position: absolute;
-  content: "";
-  height: 18px;
-  width: 18px;
-  left: 3px;
-  bottom: 3px;
-  background-color: white;
-  transition: 0.4s;
-  border-radius: 50%;
-}
-.switch input:checked + .slider {
-  background-color: #2196F3;
-}
-.switch input:checked + .slider:before {
-  transform: translateX(26px);
-}
-.toggle-label {
-  font-size: 14px;
-  color: #333;
-}
-.meta-container {
-  margin-top: 15px;
-  padding: 15px;
-  background-color: #fff;
-  border: 1px solid #ccc;
-  border-radius: 8px;
-}
-
-/* New styles for Meta Edit Dialog */
 .modal.meta-edit-dialog {
   background: white;
   padding: 20px;
   border-radius: 8px;
   width: 400px;
+  max-height: 80vh;
+  overflow-y: auto;
   box-shadow: 0 4px 10px rgba(0,0,0,0.1);
 }
 .modal.meta-edit-dialog h3 {
@@ -463,8 +484,6 @@ export default {
   gap: 10px;
   margin-top: 15px;
 }
-
-/* New styles for Reinitialization Confirmation Dialog */
 .modal.forms-confirm-dialog {
   background: white;
   padding: 20px;
@@ -474,5 +493,96 @@ export default {
 }
 .modal.forms-confirm-dialog h3 {
   margin-top: 0;
+}
+.modal.forms-confirm-dialog p {
+  margin: 0;
+}
+
+
+.new-field-section {
+  margin-top: 20px;
+  padding: 10px;
+  border: 1px solid #ddd;
+  border-radius: 5px;
+  background-color: #fff;
+}
+.new-field-section h3 {
+  margin-top: 0;
+  margin-bottom: 10px;
+}
+.custom-field-inputs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+.field-type,
+.field-name,
+.field-value {
+  flex: 1 1 150px;
+}
+.meta-checkbox-label {
+  display: flex;
+  align-items: center;
+  font-size: 14px;
+  margin-top: 5px;
+}
+.meta-checkbox-label input {
+  margin-right: 5px;
+}
+.add-btn {
+  background-color: #ccc;
+  border: 1px solid #bbb;
+  padding: 5px 10px;
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+/* Added Fields Lists */
+.custom-fields-section {
+  border: 1px dashed #ccc;
+  padding: 10px;
+  margin-top: 10px;
+  border-radius: 5px;
+}
+.custom-fields-section h3 {
+  margin-top: 0;
+  margin-bottom: 10px;
+}
+.custom-field-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 10px;
+  border-bottom: 1px solid #eee;
+  padding-bottom: 10px;
+}
+.custom-field-display {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+.added-field-label {
+  font-weight: bold;
+  font-size: 14px;
+  margin-bottom: 5px;
+}
+.added-field-value input,
+.added-field-value textarea {
+  width: 100%;
+  padding: 8px;
+  font-size: 14px;
+  border: 1px solid #ccc;
+  border-radius: 5px;
+  box-sizing: border-box;
+}
+.remove-btn {
+  align-self: flex-end;
+  margin-left: 10px;
+  background-color: #ccc;
+  border: 1px solid #bbb;
+  padding: 5px 10px;
+  border-radius: 3px;
+  cursor: pointer;
 }
 </style>
