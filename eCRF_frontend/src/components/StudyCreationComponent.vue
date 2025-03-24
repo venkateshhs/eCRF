@@ -220,6 +220,7 @@ export default {
         metaInfo: { ...this.metaInfo },
         customFields: this.customFields,
         metaCustomFields: this.metaCustomFields,
+        studyType: this.selectedCaseStudyName || "custom"
       };
       this.$store.commit("setStudyDetails", studyDetails);
       this.$router.push({ name: "CreateFormScratch" });

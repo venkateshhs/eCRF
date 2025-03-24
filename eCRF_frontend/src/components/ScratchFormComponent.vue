@@ -441,6 +441,7 @@ export default {
         name: "",
         description: "",
         numberOfForms: null,
+        studyType: "",
         numberOfSubjects: null,
         numberOfVisits: null,
         studyMetaDescription: ""
@@ -550,39 +551,49 @@ export default {
     },
     // Modified save study method: Send JSON payload to create a study
     async saveForm() {
-    if (!this.token) {
-    this.openGenericDialog("Authentication error: No token found. Please log in again.", () => {
-      this.$router.push("/login");
-    });
-    return;
-  }
-  // Construct payload with study_metadata and study_content
-  const payload = {
-    study_metadata: {
-      created_by: this.$store.state.user ? this.$store.state.user.id : 0,
-      study_name: this.studyDetails.name || "Untitled Study",
-      study_description: this.studyDetails.description || ""
-    },
-    study_content: {
-      study_data: {
-        forms: this.normalizeForms(this.forms),
-        meta_info: this.metaInfo
+      if (!this.token) {
+        this.openGenericDialog("Authentication error: No token found. Please log in again.", () => {
+          this.$router.push("/login");
+        });
+        return;
       }
-    }
-  };
-  try {
-    // Updated URL to include the "/forms" prefix
-    const response = await axios.post("http://127.0.0.1:8000/forms/studies/", payload, {
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${this.token}`,
-      },
-    });
-    this.openSaveDialog(`Study "${response.data.metadata.study_name}" saved successfully!`);
-  } catch (error) {
-    console.error("Error saving study:", error.response?.data || error.message);
-    this.openGenericDialog("Failed to save study. Please try again.");
-  }
+      // Construct payload: study_metadata holds audit data; study_content holds complete study details.
+      const payload = {
+        study_metadata: {
+          created_by: this.$store.state.user ? this.$store.state.user.id : 0,
+          study_name: this.studyDetails.name || "Untitled Study",
+          study_description: this.studyDetails.description || ""
+        },
+        study_content: {
+          study_data: {
+            // All study details from the Vuex store are placed inside meta_info.
+            meta_info: {
+              name: this.studyDetails.name || "",
+              description: this.studyDetails.description || "",
+              numberOfForms: this.studyDetails.numberOfForms || 1,
+              numberOfSubjects: this.studyDetails.metaInfo?.numberOfSubjects,
+              studyType: this.studyDetails.metaInfo?.studyType,
+              numberOfVisits: this.studyDetails.metaInfo?.numberOfVisits,
+              studyMetaDescription: this.studyDetails.metaInfo?.studyMetaDescription || "",
+              customFields: this.studyDetails.customFields || [],
+              metaCustomFields: this.studyDetails.metaCustomFields || []
+            },
+            forms: this.normalizeForms(this.forms)
+          }
+        }
+      };
+      try {
+        const response = await axios.post("http://127.0.0.1:8000/forms/studies/", payload, {
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${this.token}`,
+          },
+        });
+        this.openSaveDialog(`Study "${response.data.metadata.study_name}" saved successfully!`);
+      } catch (error) {
+        console.error("Error saving study:", error.response?.data || error.message);
+        this.openGenericDialog("Failed to save study. Please try again.");
+      }
     },
     openSaveDialog(message) {
       this.saveDialogMessage = message;
@@ -866,48 +877,46 @@ export default {
       this.showUploadDialog = false;
     },
     handleFileChange(e) {
-  const file = e.target.files[0];
-  if (!file) return;
-  const reader = new FileReader();
-  reader.onload = (evt) => {
-    const fileContent = evt.target.result;
-    let parsedData;
-    const trimmedContent = fileContent.trim();
-    try {
-      parsedData = JSON.parse(trimmedContent);
-    } catch (jsonErr) {
-      try {
-        parsedData = yaml.load(trimmedContent);
-      } catch (yamlErr) {
-        this.openGenericDialog("Failed to parse file. Please ensure it's valid JSON or YAML.");
-        return;
-      }
-    }
-    if (parsedData.studyDetails) {
-      // Update local state
-      this.studyDetails = parsedData.studyDetails;
-      // Update Vuex store so that computed getters in StudyMetaInfo reflect the new details
-      this.$store.commit("setStudyDetails", parsedData.studyDetails);
-    }
-    if (parsedData.metaInfo) {
-      // Optionally update local metaInfo (if used elsewhere)
-      this.metaInfo = parsedData.metaInfo;
-    }
-    if (parsedData.forms) {
-      this.forms = parsedData.forms;
-      this.totalForms = parsedData.forms.length;
-      this.currentFormIndex = 0;
-      this.activeSection =
-        (this.forms[0] && this.forms[0].sections && this.forms[0].sections.length > 0)
-          ? 0
-          : null;
-    } else {
-      this.openGenericDialog("Uploaded file does not contain valid form data.");
-    }
-  };
-  reader.readAsText(file);
-  this.closeUploadDialog();
-},
+      const file = e.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = (evt) => {
+        const fileContent = evt.target.result;
+        let parsedData;
+        const trimmedContent = fileContent.trim();
+        try {
+          parsedData = JSON.parse(trimmedContent);
+        } catch (jsonErr) {
+          try {
+            parsedData = yaml.load(trimmedContent);
+          } catch (yamlErr) {
+            this.openGenericDialog("Failed to parse file. Please ensure it's valid JSON or YAML.");
+            return;
+          }
+        }
+        if (parsedData.studyDetails) {
+          // Update local state and Vuex store with study details
+          this.studyDetails = parsedData.studyDetails;
+          this.$store.commit("setStudyDetails", parsedData.studyDetails);
+        }
+        if (parsedData.metaInfo) {
+          this.metaInfo = parsedData.metaInfo;
+        }
+        if (parsedData.forms) {
+          this.forms = parsedData.forms;
+          this.totalForms = parsedData.forms.length;
+          this.currentFormIndex = 0;
+          this.activeSection =
+            (this.forms[0] && this.forms[0].sections && this.forms[0].sections.length > 0)
+              ? 0
+              : null;
+        } else {
+          this.openGenericDialog("Uploaded file does not contain valid form data.");
+        }
+      };
+      reader.readAsText(file);
+      this.closeUploadDialog();
+    },
     // Preview Methods
     openPreviewDialog() {
       this.previewFormIndex = this.currentFormIndex;
