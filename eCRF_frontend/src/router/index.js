@@ -44,8 +44,8 @@ const routes = [
     component: SavedFormsComponent,
   },
   {
-    path: "/saved-forms/:id",
-    name: "FormDetail",
+    path: "/studies/:id",
+    name: "StudyDetail",
     component: FormDetailComponent,
   },
 ];

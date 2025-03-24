@@ -1,19 +1,20 @@
+import os
+import shutil
 from typing import List, Dict
 
-from fastapi import APIRouter, HTTPException, Depends, Query, UploadFile, File, Form as FastForm
+from fastapi import APIRouter, HTTPException, Depends, Query, UploadFile, File, Form
 from pathlib import Path
 import json
 import yaml
 from database import get_db
 import schemas, crud, models
-# from logger import logger
-# from schemas import FormSchema, FormSaveSchema
-from models import Form, User
+from logger import logger
+from models import User
 from users import get_current_user, oauth2_scheme
 from fastapi.responses import FileResponse, StreamingResponse
 import io
 from sqlalchemy.orm import Session
-# from fastapi.responses import JSONResponse
+
 router = APIRouter(prefix="/forms", tags=["forms"])
 
 TEMPLATE_DIR = Path("shacl/templates")  # Path to your templates directory
@@ -98,16 +99,15 @@ async def get_specialized_fields():
         raise HTTPException(status_code=500, detail=f"Error loading available fields: {str(e)}")
 
 
-
+"""
+# Currently not used since we are not saving forms separately, rather saving the study as a whole
 @router.post("/save-form")
 def save_form(
         form_data: dict,
         db: Session = Depends(get_db),
         user: User = Depends(get_current_user)
 ):
-    """
-    Save a form for the authenticated user.
-    """
+
     new_form = Form(user_id=user.id, **form_data)
     db.add(new_form)
     db.commit()
@@ -120,14 +120,12 @@ def load_saved_forms(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user)
 ):
-    """
-    Load all saved forms for the authenticated user.
-    """
+
     forms = db.query(Form).filter(Form.user_id == user.id).all()
     if not forms:
         raise HTTPException(status_code=404, detail="No saved forms found")
     return forms
-
+"""
 
 
 
@@ -247,85 +245,98 @@ def get_yaml_content(category: str, file_name: str, user: User = Depends(get_cur
     return yaml_content  # Send parsed YAML structure
 """
 
-
+"""
 @router.get("/{form_id}")
 def get_form_by_id(
     form_id: int,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user)
 ):
-    """
-    Retrieve a specific saved form by its ID.
-    """
+
     form = db.query(Form).filter(Form.id == form_id, Form.user_id == user.id).first()
     if not form:
         raise HTTPException(status_code=404, detail="Form not found")
     return form
+"""
 
-
-@router.post("/save-study", response_model=schemas.Study)
-async def create_study(
-    name: str = FastForm(...),
-    description: str = FastForm(None),
-    number_of_subjects: int = FastForm(None),
-    number_of_visits: int = FastForm(None),
-    meta_info: str = FastForm(None),  # JSON string
-    forms: str = FastForm(...),       # JSON string for forms
-    storage_option: str = FastForm("db"),  # "db" or "local"; defaults to "db"
-    files: list[UploadFile] = File(None),
-    _db: Session = Depends(get_db),
-    _user: User = Depends(get_current_user)
+@router.post("/studies/", response_model=schemas.StudyFull)
+def create_study(
+    study_metadata: schemas.StudyMetadataCreate,
+    study_content: schemas.StudyContentCreate,
+    db: Session = Depends(get_db)
 ):
-    # Parse JSON strings into Python objects
-    meta_info_dict = json.loads(meta_info) if meta_info else {}
-    forms_list = json.loads(forms)
+    try:
+        metadata, content = crud.create_study(db, study_metadata, study_content)
+    except Exception as e:
+        logger.error("Error creating study: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
+    return {"metadata": metadata, "content": content}
 
-    study_data = schemas.StudyCreate(
-        name=name,
-        description=description,
-        number_of_subjects=number_of_subjects,
-        number_of_visits=number_of_visits,
-        meta_info=meta_info_dict,
-        forms=forms_list,
-    )
-    db_study = crud.create_study(_db, study_data, _user.id)
+@router.get("/studies", response_model=List[schemas.StudyMetadataOut])
+def list_studies(
+    db: Session = Depends(get_db),
+    user: dict = Depends(get_current_user)
+):
+    studies = db.query(models.StudyMetadata).all()
+    return studies
 
-    # Process uploaded files, if any
-    if files:
-        for uploaded_file in files:
-            file_content = await uploaded_file.read()
-            crud.create_study_file(
-                _db,
-                study_id=db_study.id,
-                file_name=uploaded_file.filename,
-                file_data=file_content,
-                content_type=uploaded_file.content_type,
-                storage_option=storage_option,
-                description=None  # Optionally, include a description
-            )
+@router.get("/studies/{study_id}", response_model=schemas.StudyFull)
+def read_study(study_id: int, db: Session = Depends(get_db)):
+    result = crud.get_study_full(db, study_id)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Study not found")
+    metadata, content = result
+    return {"metadata": metadata, "content": content}
 
-    _db.refresh(db_study)
-    return db_study
+@router.put("/studies/{study_id}", response_model=schemas.StudyFull)
+def update_study(
+    study_id: int,
+    metadata_update: schemas.StudyMetadataUpdate,
+    content_update: schemas.StudyContentUpdate,
+    db: Session = Depends(get_db)
+):
+    try:
+        result = crud.update_study(db, study_id, metadata_update, content_update)
+    except Exception as e:
+        logger.error("Error updating study: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
+    if result is None:
+        raise HTTPException(status_code=404, detail="Study not found")
+    metadata, content = result
+    return {"metadata": metadata, "content": content}
 
-@router.get("/studies/{study_id}/files/{file_id}")
-def download_study_file(study_id: int, file_id: int, db: Session = Depends(get_db)):
-    db_file = db.query(models.StudyFile).filter(
-        models.StudyFile.id == file_id,
-        models.StudyFile.study_id == study_id
-    ).first()
+@router.get("/studies/{study_id}/files", response_model=List[schemas.FileOut])
+def read_files_for_study(study_id: int, db: Session = Depends(get_db)):
+    files = crud.get_files_for_study(db, study_id)
+    return files
 
-    if not db_file:
-        raise HTTPException(status_code=404, detail="File not found")
-
-    if db_file.storage_type == "local":
-        # Serve file from disk
-        return FileResponse(db_file.file_path,
-                            media_type=db_file.content_type,
-                            filename=db_file.file_name)
-    elif db_file.storage_type == "db":
-        # Stream file from binary data stored in DB
-        return StreamingResponse(io.BytesIO(db_file.file_data),
-                                 media_type=db_file.content_type,
-                                 headers={"Content-Disposition": f"attachment; filename={db_file.file_name}"})
-    else:
-        raise HTTPException(status_code=500, detail="Invalid storage type")
+@router.post("/studies/{study_id}/files", response_model=schemas.FileOut)
+def upload_file(
+    study_id: int,
+    uploaded_file: UploadFile = File(...),
+    description: str = Form(""),
+    storage_option: str = Form("local"),
+    db: Session = Depends(get_db)
+):
+    try:
+        upload_dir = "uploads"
+        os.makedirs(upload_dir, exist_ok=True)
+        file_location = os.path.join(upload_dir, uploaded_file.filename)
+        with open(file_location, "wb") as f:
+            shutil.copyfileobj(uploaded_file.file, f)
+    except Exception as e:
+        logger.error("File upload error: %s", e)
+        raise HTTPException(status_code=500, detail="Error saving file")
+    try:
+        file_data = schemas.FileCreate(
+            study_id=study_id,
+            file_name=uploaded_file.filename,
+            file_path=file_location,
+            description=description,
+            storage_option=storage_option
+        )
+        db_file = crud.create_file(db, file_data)
+    except Exception as e:
+        logger.error("Error creating file record: %s", e)
+        raise HTTPException(status_code=500, detail="Error creating file record")
+    return db_file

@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, ForeignKey, DateTime, func, LargeBinary, JSON, Text
+from sqlalchemy import Column, Integer, String, ForeignKey, DateTime, func, JSON, Text
 from sqlalchemy.orm import relationship
 from database import Base
 
@@ -7,13 +7,15 @@ class User(Base):
     __tablename__ = "users"
 
     id = Column(Integer, primary_key=True, index=True)
-
     username = Column(String(50), unique=True, nullable=False)
     email = Column(String(255), unique=True, nullable=False)
     password = Column(String(255), nullable=False)
     created_at = Column(DateTime, server_default=func.now())
-    studies = relationship("Study", back_populates="user")
+
+    # Update relationship to reference StudyMetadata instead of Study
+    studies = relationship("StudyMetadata", back_populates="user")
     profile = relationship("UserProfile", back_populates="user", uselist=False)
+
 
 class UserProfile(Base):
     __tablename__ = "user_profiles"
@@ -27,52 +29,38 @@ class UserProfile(Base):
     user = relationship("User", back_populates="profile")
 
 
-class FormShape(Base):
-    __tablename__ = "form_shapes"
+class StudyMetadata(Base):
+    __tablename__ = "study_metadata"
+
     id = Column(Integer, primary_key=True, index=True)
-    name = Column(String, unique=True, index=True)  # Form name
-    description = Column(Text, nullable=True)  # Optional form description
-    shape = Column(JSON, nullable=False)
+    # Make created_by a ForeignKey referencing users.id
+    created_by = Column(Integer, ForeignKey("users.id"), nullable=False)
+    study_name = Column(String(255), nullable=False)
+    study_description = Column(Text)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
-
-class Study(Base):
-    __tablename__ = "studies"
-    id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)  # Link to creator
-    name = Column(String, index=True, nullable=False)
-    description = Column(Text, nullable=True)
-    number_of_subjects = Column(Integer, nullable=True)
-    number_of_visits = Column(Integer, nullable=True)
-    meta_info = Column(JSON, nullable=True)
-
-    # One study has many forms and many files.
-    forms = relationship("Form", back_populates="study", cascade="all, delete")
-    files = relationship("StudyFile", back_populates="study", cascade="all, delete")
-
+    # Relationship back to User
     user = relationship("User", back_populates="studies")
+    # One-to-one relationship with StudyContent
+    content = relationship("StudyContent", uselist=False, back_populates="study_metadata", cascade="all, delete")
 
 
-class Form(Base):
-    __tablename__ = "forms"
+class StudyContent(Base):
+    __tablename__ = "study_content"
     id = Column(Integer, primary_key=True, index=True)
-    study_id = Column(Integer, ForeignKey("studies.id"), nullable=False)
-    form_name = Column(String, nullable=False)
-    sections = Column(JSON, nullable=True)  # Nested sections and fields as JSON
+    study_id = Column(Integer, ForeignKey("study_metadata.id", ondelete="CASCADE"), unique=True, nullable=False)
+    study_data = Column(JSON)  # JSON structure that contains metaInfo and forms
 
-    # Each form belongs to one study.
-    study = relationship("Study", back_populates="forms")
+    study_metadata = relationship("StudyMetadata", back_populates="content")
 
 
-class StudyFile(Base):
-    __tablename__ = "study_files"
+class File(Base):
+    __tablename__ = "files"
     id = Column(Integer, primary_key=True, index=True)
-    study_id = Column(Integer, ForeignKey("studies.id"), nullable=False)
-    file_name = Column(String, nullable=False)
-    file_data = Column(LargeBinary, nullable=True)  # Used if file is stored in DB
-    file_path = Column(String, nullable=True)  # Used if file is stored on local disk
-    content_type = Column(String, nullable=True)  # MIME type (optional)
-    storage_type = Column(String, default="db")  # "db" or "local"
-    description = Column(Text, nullable=True)
-
-    # Each file belongs to one study.
-    study = relationship("Study", back_populates="files")
+    study_id = Column(Integer, ForeignKey("study_metadata.id", ondelete="CASCADE"), nullable=False)
+    file_name = Column(String(255), nullable=False)
+    file_path = Column(String(500), nullable=False)  # e.g. URL or file system path
+    description = Column(Text)
+    storage_option = Column(String(50))  # e.g., 'local' or 'db'
+    created_at = Column(DateTime(timezone=True), server_default=func.now())

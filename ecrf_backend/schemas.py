@@ -1,17 +1,21 @@
+from datetime import datetime
 from pydantic import BaseModel, EmailStr, constr
-from typing import Dict, Any, Optional, List
+from typing import Any, Optional
 
 
 class UserBase(BaseModel):
     username: constr(min_length=3, max_length=50)
     email: EmailStr
 
+
 class UserProfileBase(BaseModel):
     first_name: constr(min_length=1, max_length=50)
     last_name: constr(min_length=1, max_length=50)
 
+
 class UserCreate(UserBase, UserProfileBase):
     password: constr(min_length=8)
+
 
 class UserResponse(UserBase):
     id: int
@@ -26,79 +30,76 @@ class LoginRequest(BaseModel):
     password: str
 
 
-# NO Longer required
-class FormShapeCreate(BaseModel):
-    name: str
-    description: Optional[str]
-    shape: Dict[str, Any]  # SHACL Shape
+# Study Metadata Schemas
+class StudyMetadataBase(BaseModel):
+    study_name: str
+    study_description: Optional[str] = None
 
-class FormShapeResponse(FormShapeCreate):
+
+class StudyMetadataCreate(StudyMetadataBase):
+    created_by: int
+
+
+class StudyMetadataUpdate(StudyMetadataBase):
+    pass
+
+
+class StudyMetadataOut(StudyMetadataBase):
     id: int
+    created_by: int
+    created_at: datetime
+    updated_at: datetime
 
     class Config:
         from_attributes = True
 
 
-class FormSaveSchema(BaseModel):
-    form_name: str
-    form_structure: Any
+# Study Content Schemas
+class StudyContentBase(BaseModel):
+    study_data: Optional[Any] = None  # dynamic JSON structure
+
+
+class StudyContentCreate(StudyContentBase):
+    pass
+
+
+class StudyContentUpdate(StudyContentBase):
+    pass
+
+
+class StudyContentOut(StudyContentBase):
+    id: int
+    study_id: int
 
     class Config:
         from_attributes = True
 
 
-class FormSchema(BaseModel):
-    id: int
-    user_id: int
-    form_name: str
-    form_structure: Any
+# Combined Study Schema
+class StudyFull(BaseModel):
+    metadata: StudyMetadataOut
+    content: StudyContentOut
 
     class Config:
         from_attributes = True
 
 
-class FormBase(BaseModel):
-    form_name: str
-    sections: Optional[Any] = None
-
-
-class Form(FormBase):
-    id: int
-
-    class Config:
-        from_attributes = True
-
-
-class StudyFile(BaseModel):
-    id: int
+# File Schemas
+class FileBase(BaseModel):
     file_name: str
-    content_type: Optional[str] = None
-    storage_type: str
-    file_path: Optional[str] = None
+    file_path: str
     description: Optional[str] = None
-
-    class Config:
-        from_attributes = True
+    storage_option: Optional[str] = None
 
 
-class StudyCreate(BaseModel):
-    name: str
-    description: Optional[str] = None
-    number_of_subjects: Optional[int] = None
-    number_of_visits: Optional[int] = None
-    meta_info: Optional[dict] = None
-    forms: List[FormBase]
+class FileCreate(FileBase):
+    study_id: int
 
 
-class Study(BaseModel):
+class FileOut(FileBase):
     id: int
-    name: str
-    description: Optional[str]
-    number_of_subjects: Optional[int]
-    number_of_visits: Optional[int]
-    meta_info: Optional[dict]
-    forms: List[Form]
-    files: List[StudyFile] = []
+    study_id: int
+    created_at: datetime
 
     class Config:
         from_attributes = True

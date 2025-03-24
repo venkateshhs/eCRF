@@ -441,6 +441,7 @@ export default {
         name: "",
         description: "",
         numberOfForms: null,
+        studyType: "",
         numberOfSubjects: null,
         numberOfVisits: null,
         studyMetaDescription: ""
@@ -544,9 +545,11 @@ export default {
       this.currentFormIndex = 0;
       this.activeSection = 0;
     },
+    // Modified open study method: Navigate to the studies page
     navigateToSavedForms() {
       this.$router.push("/saved-forms");
     },
+    // Modified save study method: Send JSON payload to create a study
     async saveForm() {
       if (!this.token) {
         this.openGenericDialog("Authentication error: No token found. Please log in again.", () => {
@@ -554,53 +557,39 @@ export default {
         });
         return;
       }
-      const studyData = {
-        name: this.studyDetails.name || "Untitled Study",
-        description: this.studyDetails.description || "",
-        meta_info: JSON.stringify(this.metaInfo),
-        forms: JSON.stringify(this.normalizeForms(this.forms)),
-        storage_option: this.storageOption,
+      // Construct payload: study_metadata holds audit data; study_content holds complete study details.
+      const payload = {
+        study_metadata: {
+          created_by: this.$store.state.user ? this.$store.state.user.id : 0,
+          study_name: this.studyDetails.name || "Untitled Study",
+          study_description: this.studyDetails.description || ""
+        },
+        study_content: {
+          study_data: {
+            // All study details from the Vuex store are placed inside meta_info.
+            meta_info: {
+              name: this.studyDetails.name || "",
+              description: this.studyDetails.description || "",
+              numberOfForms: this.studyDetails.numberOfForms || 1,
+              numberOfSubjects: this.studyDetails.metaInfo?.numberOfSubjects,
+              studyType: this.studyDetails.metaInfo?.studyType,
+              numberOfVisits: this.studyDetails.metaInfo?.numberOfVisits,
+              studyMetaDescription: this.studyDetails.metaInfo?.studyMetaDescription || "",
+              customFields: this.studyDetails.customFields || [],
+              metaCustomFields: this.studyDetails.metaCustomFields || []
+            },
+            forms: this.normalizeForms(this.forms)
+          }
+        }
       };
-      if (this.metaInfo.numberOfSubjects !== undefined) {
-        studyData.number_of_subjects = this.metaInfo.numberOfSubjects;
-      }
-      if (this.metaInfo.numberOfVisits !== undefined) {
-        studyData.number_of_visits = this.metaInfo.numberOfVisits;
-      }
-      const formData = new FormData();
-      for (const key in studyData) {
-        formData.append(key, studyData[key]);
-      }
-      if (this.$refs.studyMetaInfo) {
-        const metaComp = this.$refs.studyMetaInfo;
-        if (metaComp.metaFiles && metaComp.metaFiles.length > 0) {
-          metaComp.metaFiles.forEach(fileObj => {
-            formData.append("meta_files", fileObj.file);
-            formData.append("meta_file_descriptions", fileObj.description || "");
-          });
-          formData.append("meta_storage_option", metaComp.metaStorageOption);
-        }
-      }
-      if (this.selectedFiles && this.selectedFiles.length > 0) {
-        Array.from(this.selectedFiles).forEach(file => {
-          formData.append("files", file);
-        });
-      }
-      for (let [key, value] of formData.entries()) {
-        if (value instanceof File) {
-          console.log(`${key}: ${value.name} (${value.type})`);
-        } else {
-          console.log(`${key}:`, value);
-        }
-      }
       try {
-        const response = await axios.post("http://127.0.0.1:8000/forms/save-study", formData, {
+        const response = await axios.post("http://127.0.0.1:8000/forms/studies/", payload, {
           headers: {
-            "Content-Type": "multipart/form-data",
+            "Content-Type": "application/json",
             Authorization: `Bearer ${this.token}`,
           },
         });
-        this.openSaveDialog(`Study "${response.data.name}" saved successfully!`);
+        this.openSaveDialog(`Study "${response.data.metadata.study_name}" saved successfully!`);
       } catch (error) {
         console.error("Error saving study:", error.response?.data || error.message);
         this.openGenericDialog("Failed to save study. Please try again.");
@@ -888,48 +877,46 @@ export default {
       this.showUploadDialog = false;
     },
     handleFileChange(e) {
-  const file = e.target.files[0];
-  if (!file) return;
-  const reader = new FileReader();
-  reader.onload = (evt) => {
-    const fileContent = evt.target.result;
-    let parsedData;
-    const trimmedContent = fileContent.trim();
-    try {
-      parsedData = JSON.parse(trimmedContent);
-    } catch (jsonErr) {
-      try {
-        parsedData = yaml.load(trimmedContent);
-      } catch (yamlErr) {
-        this.openGenericDialog("Failed to parse file. Please ensure it's valid JSON or YAML.");
-        return;
-      }
-    }
-    if (parsedData.studyDetails) {
-      // Update local state
-      this.studyDetails = parsedData.studyDetails;
-      // Update Vuex store so that computed getters in StudyMetaInfo reflect the new details
-      this.$store.commit("setStudyDetails", parsedData.studyDetails);
-    }
-    if (parsedData.metaInfo) {
-      // Optionally update local metaInfo (if used elsewhere)
-      this.metaInfo = parsedData.metaInfo;
-    }
-    if (parsedData.forms) {
-      this.forms = parsedData.forms;
-      this.totalForms = parsedData.forms.length;
-      this.currentFormIndex = 0;
-      this.activeSection =
-        (this.forms[0] && this.forms[0].sections && this.forms[0].sections.length > 0)
-          ? 0
-          : null;
-    } else {
-      this.openGenericDialog("Uploaded file does not contain valid form data.");
-    }
-  };
-  reader.readAsText(file);
-  this.closeUploadDialog();
-},
+      const file = e.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = (evt) => {
+        const fileContent = evt.target.result;
+        let parsedData;
+        const trimmedContent = fileContent.trim();
+        try {
+          parsedData = JSON.parse(trimmedContent);
+        } catch (jsonErr) {
+          try {
+            parsedData = yaml.load(trimmedContent);
+          } catch (yamlErr) {
+            this.openGenericDialog("Failed to parse file. Please ensure it's valid JSON or YAML.");
+            return;
+          }
+        }
+        if (parsedData.studyDetails) {
+          // Update local state and Vuex store with study details
+          this.studyDetails = parsedData.studyDetails;
+          this.$store.commit("setStudyDetails", parsedData.studyDetails);
+        }
+        if (parsedData.metaInfo) {
+          this.metaInfo = parsedData.metaInfo;
+        }
+        if (parsedData.forms) {
+          this.forms = parsedData.forms;
+          this.totalForms = parsedData.forms.length;
+          this.currentFormIndex = 0;
+          this.activeSection =
+            (this.forms[0] && this.forms[0].sections && this.forms[0].sections.length > 0)
+              ? 0
+              : null;
+        } else {
+          this.openGenericDialog("Uploaded file does not contain valid form data.");
+        }
+      };
+      reader.readAsText(file);
+      this.closeUploadDialog();
+    },
     // Preview Methods
     openPreviewDialog() {
       this.previewFormIndex = this.currentFormIndex;

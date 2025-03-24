@@ -1,5 +1,4 @@
 import os
-
 from sqlalchemy.orm import Session
 
 import schemas, models
@@ -31,67 +30,84 @@ def create_user(db: Session, user_data, hashed_password: str):
 
     return user
 
-
-def create_study(db: Session, study: schemas.StudyCreate, user_id: int):
-    db_study = models.Study(
-        user_id=user_id,
-        name=study.name,
-        description=study.description,
-        number_of_subjects=study.number_of_subjects,
-        number_of_visits=study.number_of_visits,
-        meta_info=study.meta_info,
-    )
-    db.add(db_study)
-    db.commit()
-    db.refresh(db_study)
-    for form in study.forms:
-         db_form = models.Form(
-             study_id=db_study.id,
-             form_name=form.form_name,  # Use dot notation
-             sections=form.sections
-         )
-         db.add(db_form)
-    db.commit()
-    db.refresh(db_study)
-    return db_study
-
-
-
-def create_study_file(db: Session, study_id: int, file_name: str, file_data: bytes, content_type: str,
-                      storage_option: str = "db", description: str = None):
-    if storage_option == "db":
-        db_file = models.StudyFile(
-            study_id=study_id,
-            file_name=file_name,
-            file_data=file_data,
-            file_path=None,
-            content_type=content_type,
-            storage_type="db",
-            description=description,
+def create_study(db: Session, metadata: schemas.StudyMetadataCreate, content: schemas.StudyContentCreate):
+    try:
+        db_metadata = models.StudyMetadata(
+            created_by=metadata.created_by,
+            study_name=metadata.study_name,
+            study_description=metadata.study_description
         )
-    elif storage_option == "local":
-        upload_dir = "uploads"
-        os.makedirs(upload_dir, exist_ok=True)
-        file_location = os.path.join(upload_dir, file_name)
-        with open(file_location, "wb") as f:
-            f.write(file_data)
-        db_file = models.StudyFile(
-            study_id=study_id,
-            file_name=file_name,
-            file_data=None,
-            file_path=file_location,
-            content_type=content_type,
-            storage_type="local",
-            description=description,
-        )
-    else:
-        raise ValueError("Invalid storage option provided. Use 'db' or 'local'.")
+        db.add(db_metadata)
+        db.commit()
+        db.refresh(db_metadata)
+    except Exception as e:
+        db.rollback()
+        raise Exception(f"Error creating study metadata: {e}")
 
-    db.add(db_file)
-    db.commit()
-    db.refresh(db_file)
+    try:
+        db_content = models.StudyContent(
+            study_id=db_metadata.id,
+            study_data=content.study_data
+        )
+        db.add(db_content)
+        db.commit()
+        db.refresh(db_content)
+    except Exception as e:
+        db.rollback()
+        db.delete(db_metadata)
+        db.commit()
+        raise Exception(f"Error creating study content: {e}")
+
+    return db_metadata, db_content
+
+def get_study_full(db: Session, study_id: int):
+    metadata = db.query(models.StudyMetadata).filter(models.StudyMetadata.id == study_id).first()
+    if not metadata:
+        return None
+    content = db.query(models.StudyContent).filter(models.StudyContent.study_id == study_id).first()
+    return metadata, content
+
+def update_study(db: Session, study_id: int, metadata_update: schemas.StudyMetadataUpdate, content_update: schemas.StudyContentUpdate):
+    db_metadata = db.query(models.StudyMetadata).filter(models.StudyMetadata.id == study_id).first()
+    if not db_metadata:
+        return None
+    try:
+        for key, value in metadata_update.dict(exclude_unset=True).items():
+            setattr(db_metadata, key, value)
+        db.commit()
+        db.refresh(db_metadata)
+    except Exception as e:
+        db.rollback()
+        raise Exception(f"Error updating study metadata: {e}")
+
+    db_content = db.query(models.StudyContent).filter(models.StudyContent.study_id == study_id).first()
+    if db_content and content_update.study_data is not None:
+        try:
+            setattr(db_content, "study_data", content_update.study_data)
+            db.commit()
+            db.refresh(db_content)
+        except Exception as e:
+            db.rollback()
+            raise Exception(f"Error updating study content: {e}")
+
+    return db_metadata, db_content
+
+def create_file(db: Session, file_data: schemas.FileCreate):
+    try:
+        db_file = models.File(
+            study_id=file_data.study_id,
+            file_name=file_data.file_name,
+            file_path=file_data.file_path,
+            description=file_data.description,
+            storage_option=file_data.storage_option
+        )
+        db.add(db_file)
+        db.commit()
+        db.refresh(db_file)
+    except Exception as e:
+        db.rollback()
+        raise Exception(f"Error creating file record: {e}")
     return db_file
 
-
-def get_study(db: Session, study_id: int):
-    return db.query(models.Study).filter(models.Study.id == study_id).first()
+def get_files_for_study(db: Session, study_id: int):
+    return db.query(models.File).filter(models.File.study_id == study_id).all()

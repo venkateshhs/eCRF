@@ -39,16 +39,37 @@
           <button @click="navigate('/dashboard/create-study')" class="btn-option">Create Study</button>
           <button @click="toggleStudyOptions" class="btn-option">Open Study</button>
         </div>
-
-        <!-- New Buttons After Clicking "Open Study" -->
-        <div v-if="showStudyOptions" class="button-container">
-          <button class="btn-option">Edit Existing Study</button>
-          <button class="btn-option">Add Data</button>
-        </div>
-        <div v-if="showStudyOptions" class="back-button-container">
+        <!-- Study Dashboard Table -->
+        <div v-if="showStudyOptions" class="study-dashboard">
+          <h2>Existing Studies</h2>
+          <table class="study-table">
+            <thead>
+              <tr>
+                <th>Study Name</th>
+                <th>Description</th>
+                <th>Created At</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="study in studies" :key="study.id">
+                <td>{{ study.study_name }}</td>
+                <td>{{ study.study_description }}</td>
+                <td>{{ formatDate(study.created_at) }}</td>
+                <td>
+                  <div class="action-buttons">
+                    <button @click="editStudy(study)" class="btn-option">Edit Study</button>
+                    <button @click="addData(study)" class="btn-option">Add Data</button>
+                  </div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+          <div class="back-button-container">
             <button @click="toggleStudyOptions" class="btn-back">
-                <i :class="icons.arrowLeft"></i>
+              <i :class="icons.arrowLeft"></i> Back
             </button>
+          </div>
         </div>
       </div>
       <router-view v-else></router-view>
@@ -57,6 +78,7 @@
 </template>
 
 <script>
+import axios from "axios";
 import icons from "@/assets/styles/icons";
 
 export default {
@@ -65,7 +87,8 @@ export default {
     return {
       sidebarCollapsed: false,
       activeSection: "study-management",
-      showStudyOptions: false, // Tracks whether to show new buttons
+      showStudyOptions: false, // Whether to show the study dashboard
+      studies: [], // Array to hold fetched studies
       icons,
     };
   },
@@ -76,12 +99,72 @@ export default {
     },
     setActiveSection(section) {
       this.activeSection = section;
-      this.showStudyOptions = false; // Reset buttons when changing sections
+      this.showStudyOptions = false; // Reset dashboard when switching sections
       console.log("Active section set to:", section);
     },
     toggleStudyOptions() {
       this.showStudyOptions = !this.showStudyOptions;
       console.log("Study options toggled:", this.showStudyOptions);
+      if (this.showStudyOptions) {
+        this.loadStudies();
+      }
+    },
+    async loadStudies() {
+      const token = this.$store.state.token;
+      if (!token) {
+        alert("Authentication error. Please log in again.");
+        this.$router.push("/login");
+        return;
+      }
+      try {
+        const response = await axios.get("http://127.0.0.1:8000/forms/studies", {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        this.studies = response.data;
+        console.log("Loaded studies:", this.studies);
+      } catch (error) {
+        console.error("Error loading studies:", error.response?.data || error.message);
+        if (error.response && error.response.status === 401) {
+          alert("Session expired. Please log in again.");
+          this.$router.push("/login");
+        } else {
+          alert("Failed to load studies.");
+        }
+      }
+    },
+    formatDate(dateString) {
+      const date = new Date(dateString);
+      return date.toLocaleDateString("en-GB", { year: "numeric", month: "short", day: "numeric" });
+    },
+    async editStudy(study) {
+      // Clear old study data to ensure a fresh start
+      localStorage.removeItem("studyDetails");
+      localStorage.removeItem("scratchForms");
+
+      const token = this.$store.state.token;
+      if (!token) {
+        alert("Authentication error. Please log in again.");
+        this.$router.push("/login");
+        return;
+      }
+      try {
+        // Fetch the full study details (metadata and form data)
+        const response = await axios.get(`http://127.0.0.1:8000/forms/studies/${study.id}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        // Commit the full study details to Vuex
+        this.$store.commit("setStudyDetails", response.data);
+        console.log("Editing study:", study.id, "with full data", response.data);
+        // Navigate to the ScratchFormComponent (edit mode)
+        this.$router.push({ name: "CreateFormScratch", params: { id: study.id } });
+      } catch (error) {
+        console.error("Error retrieving full study data:", error.response?.data || error.message);
+        alert("Failed to load full study data. Please try again.");
+      }
+    },
+    addData(study) {
+      console.log("Adding data to study:", study.id);
+      this.$router.push({ name: "StudyDetail", params: { id: study.id } });
     },
     navigate(route) {
       this.activeSection = "";
@@ -214,6 +297,68 @@ export default {
   margin-left: -150px;
 }
 
+/* Study Dashboard Styles */
+.study-dashboard {
+  margin-top: 20px;
+}
+
+.study-dashboard h2 {
+  margin-bottom: 15px;
+}
+
+.study-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 15px;
+}
+
+.study-table th,
+.study-table td {
+  padding: 12px;
+  text-align: left;
+  border-bottom: 1px solid #eaeaea;
+}
+
+.study-table th {
+  background: #f5f5f5;
+  font-weight: 600;
+  color: #444;
+}
+
+.study-table tr:hover {
+  background-color: #f9f9f9;
+}
+
+/* Action Buttons Container for gap */
+.action-buttons {
+  display: flex;
+  gap: 10px;
+}
+
+.back-button-container {
+  display: flex;
+  justify-content: flex-start;
+  margin-top: 10px;
+}
+
+.btn-back {
+  padding: 8px 12px;
+  background: #f0f0f0;
+  border: 1px solid #bbb;
+  font-size: 14px;
+  color: #555;
+  cursor: pointer;
+  transition: background 0.3s ease, color 0.3s ease;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.btn-back:hover {
+  background: #e0e0e0;
+  color: #333;
+}
+
 /* Horizontal Button Layout */
 .button-container {
   display: flex;
@@ -238,39 +383,15 @@ export default {
   background: #e0e0e0;
   color: #000;
 }
-.back-button-container {
-  display: flex;
-  justify-content: flex-start; /* Align to the left */
-  margin-top: 10px;
-}
 
-.btn-back {
-  padding: 8px 12px;
-  background: #f0f0f0;
-  border: 1px solid #bbb;
-  font-size: 14px;
-  color: #555;
-  cursor: pointer;
-  transition: background 0.3s ease, color 0.3s ease;
-  display: flex;
-  align-items: center;
-  gap: 5px;
-}
-
-.btn-back:hover {
-  background: #e0e0e0;
-  color: #333;
-}
 /* Responsive Design */
 @media (max-width: 768px) {
   .dashboard-layout {
     grid-template-columns: 70px 1fr;
   }
-
   .dashboard-sidebar {
     width: 70px;
   }
-
   .dashboard-main {
     padding: 20px;
   }

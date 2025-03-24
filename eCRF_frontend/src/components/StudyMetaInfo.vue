@@ -18,6 +18,7 @@
     <div v-if="!metaInfoCollapsed">
       <p v-if="studyDetails.id"><strong>Study ID:</strong> {{ studyDetails.id }}</p>
       <p v-if="studyDetails.name"><strong>Study Name:</strong> {{ studyDetails.name }}</p>
+      <p v-if="studyDetails.studyType"><strong>Study Type:</strong> {{ studyDetails.studyType }}</p>
       <p v-if="studyDetails.description"><strong>Description:</strong> {{ studyDetails.description }}</p>
       <p v-if="studyDetails.numberOfForms"><strong>Number of Forms:</strong> {{ studyDetails.numberOfForms }}</p>
       <p v-if="studyDetails.metaInfo && studyDetails.metaInfo.numberOfSubjects">
@@ -85,6 +86,10 @@
       <div class="meta-edit-field">
         <label>Description:</label>
         <textarea v-model="metaEditForm.description" placeholder="Enter study description"></textarea>
+      </div>
+      <div class="meta-edit-field">
+        <label>Study Type:</label>
+        <input type="text" v-model="metaEditForm.studyType" placeholder="Enter study type" />
       </div>
       <div class="meta-edit-field">
         <label>Number of Forms:</label>
@@ -194,6 +199,7 @@ export default {
       metaEditForm: {
         name: "",
         description: "",
+        studyType: "",
         numberOfForms: null,
         numberOfSubjects: null,
         numberOfVisits: null,
@@ -217,6 +223,7 @@ export default {
       this.metaEditForm = {
         name: this.getStudyDetails.name || "",
         description: this.getStudyDetails.description || "",
+        studyType: this.getStudyDetails.studyType || "custom",
         numberOfForms: this.getStudyDetails.numberOfForms || 1,
         numberOfSubjects: this.getStudyDetails.metaInfo?.numberOfSubjects,
         numberOfVisits: this.getStudyDetails.metaInfo?.numberOfVisits,
@@ -276,6 +283,7 @@ export default {
       this.metaEditForm = {
         name: this.getStudyDetails.name || "",
         description: this.getStudyDetails.description || "",
+        studyType: this.getStudyDetails.studyType || "custom",
         numberOfForms: this.getStudyDetails.numberOfForms || 1,
         numberOfSubjects: this.getStudyDetails.metaInfo?.numberOfSubjects,
         numberOfVisits: this.getStudyDetails.metaInfo?.numberOfVisits,
@@ -304,6 +312,7 @@ export default {
         numberOfVisits: this.metaEditForm.numberOfVisits,
         studyMetaDescription: this.metaEditForm.studyMetaDescription,
       };
+      updatedDetails.studyType = this.metaEditForm.studyType;
       updatedDetails.customFields = this.metaEditForm.customFields;
       updatedDetails.metaCustomFields = this.metaEditForm.metaCustomFields;
       this.$store.commit("setStudyDetails", updatedDetails);
@@ -323,6 +332,8 @@ export default {
     validateAndProceed() {
       this.showErrors = true;
       if (!this.customStudy.name || !this.customStudy.description) return;
+      localStorage.removeItem("studyDetails");
+      localStorage.removeItem("scratchForms");
       const studyDetails = {
         name: this.customStudy.name,
         description: this.customStudy.description,
@@ -330,6 +341,7 @@ export default {
         metaInfo: { ...this.metaInfo },
         customFields: this.customFields,
         metaCustomFields: this.metaCustomFields,
+        studyType: this.selectedCaseStudyName || "custom",
       };
       this.$store.commit("setStudyDetails", studyDetails);
       this.$router.push({ name: "CreateFormScratch" });
