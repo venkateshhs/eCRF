@@ -1,29 +1,29 @@
 <template>
   <div class="saved-forms-container">
-    <h1>Saved Forms</h1>
+    <h1>Saved Studies</h1>
 
     <div v-if="savedForms.length > 0">
       <table>
         <thead>
           <tr>
-            <th>Form Name</th>
+            <th>Study Name</th>
             <th>Date Created</th>
             <th>Action</th>
           </tr>
         </thead>
         <tbody>
-          <tr v-for="form in savedForms" :key="form.id">
-            <td>{{ form.form_name }}</td>
-            <td>{{ formatDate(form.created_at) }}</td>
+          <tr v-for="study in savedForms" :key="study.id">
+            <td>{{ study.study_name }}</td>
+            <td>{{ formatDate(study.created_at) }}</td>
             <td>
-              <button @click="viewForm(form)" class="btn-option">View</button>
+              <button @click="viewStudy(study)" class="btn-option">View</button>
             </td>
           </tr>
         </tbody>
       </table>
     </div>
 
-    <p v-else class="no-forms">No saved forms found.</p>
+    <p v-else class="no-forms">No saved studies found.</p>
   </div>
 </template>
 
@@ -34,7 +34,7 @@ export default {
   name: "SavedFormsViewComponent",
   data() {
     return {
-      savedForms: [], // Stores fetched forms
+      savedForms: [], // Array to hold the saved studies
     };
   },
   computed: {
@@ -43,29 +43,31 @@ export default {
     },
   },
   async created() {
-    await this.loadSavedForms();
+    await this.loadSavedStudies();
   },
   methods: {
-    async loadSavedForms() {
+    async loadSavedStudies() {
       try {
-        const response = await axios.get("http://127.0.0.1:8000/forms/saved-forms", {
+        // Update the endpoint to match your backend route for listing studies
+        const response = await axios.get("http://127.0.0.1:8000/forms/studies", {
           headers: {
             Authorization: `Bearer ${this.token}`,
           },
         });
         this.savedForms = response.data;
       } catch (error) {
-        console.error("Error loading saved forms:", error.response?.data || error.message);
+        console.error("Error loading saved studies:", error.response?.data || error.message);
         if (error.response?.status === 401) {
           alert("Authentication error. Please log in again.");
           this.$router.push("/login");
         } else {
-          alert("Failed to load saved forms.");
+          alert("Failed to load saved studies.");
         }
       }
     },
-    viewForm(form) {
-      this.$router.push({ name: "FormDetail", params: { id: form.id } });
+    viewStudy(study) {
+      // Navigate to a study detail view; adjust the route name/params as needed
+      this.$router.push({ name: "StudyDetail", params: { id: study.id } });
     },
     formatDate(dateString) {
       const date = new Date(dateString);

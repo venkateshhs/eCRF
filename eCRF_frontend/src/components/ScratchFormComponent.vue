@@ -544,67 +544,45 @@ export default {
       this.currentFormIndex = 0;
       this.activeSection = 0;
     },
+    // Modified open study method: Navigate to the studies page
     navigateToSavedForms() {
       this.$router.push("/saved-forms");
     },
+    // Modified save study method: Send JSON payload to create a study
     async saveForm() {
-      if (!this.token) {
-        this.openGenericDialog("Authentication error: No token found. Please log in again.", () => {
-          this.$router.push("/login");
-        });
-        return;
+    if (!this.token) {
+    this.openGenericDialog("Authentication error: No token found. Please log in again.", () => {
+      this.$router.push("/login");
+    });
+    return;
+  }
+  // Construct payload with study_metadata and study_content
+  const payload = {
+    study_metadata: {
+      created_by: this.$store.state.user ? this.$store.state.user.id : 0,
+      study_name: this.studyDetails.name || "Untitled Study",
+      study_description: this.studyDetails.description || ""
+    },
+    study_content: {
+      study_data: {
+        forms: this.normalizeForms(this.forms),
+        meta_info: this.metaInfo
       }
-      const studyData = {
-        name: this.studyDetails.name || "Untitled Study",
-        description: this.studyDetails.description || "",
-        meta_info: JSON.stringify(this.metaInfo),
-        forms: JSON.stringify(this.normalizeForms(this.forms)),
-        storage_option: this.storageOption,
-      };
-      if (this.metaInfo.numberOfSubjects !== undefined) {
-        studyData.number_of_subjects = this.metaInfo.numberOfSubjects;
-      }
-      if (this.metaInfo.numberOfVisits !== undefined) {
-        studyData.number_of_visits = this.metaInfo.numberOfVisits;
-      }
-      const formData = new FormData();
-      for (const key in studyData) {
-        formData.append(key, studyData[key]);
-      }
-      if (this.$refs.studyMetaInfo) {
-        const metaComp = this.$refs.studyMetaInfo;
-        if (metaComp.metaFiles && metaComp.metaFiles.length > 0) {
-          metaComp.metaFiles.forEach(fileObj => {
-            formData.append("meta_files", fileObj.file);
-            formData.append("meta_file_descriptions", fileObj.description || "");
-          });
-          formData.append("meta_storage_option", metaComp.metaStorageOption);
-        }
-      }
-      if (this.selectedFiles && this.selectedFiles.length > 0) {
-        Array.from(this.selectedFiles).forEach(file => {
-          formData.append("files", file);
-        });
-      }
-      for (let [key, value] of formData.entries()) {
-        if (value instanceof File) {
-          console.log(`${key}: ${value.name} (${value.type})`);
-        } else {
-          console.log(`${key}:`, value);
-        }
-      }
-      try {
-        const response = await axios.post("http://127.0.0.1:8000/forms/save-study", formData, {
-          headers: {
-            "Content-Type": "multipart/form-data",
-            Authorization: `Bearer ${this.token}`,
-          },
-        });
-        this.openSaveDialog(`Study "${response.data.name}" saved successfully!`);
-      } catch (error) {
-        console.error("Error saving study:", error.response?.data || error.message);
-        this.openGenericDialog("Failed to save study. Please try again.");
-      }
+    }
+  };
+  try {
+    // Updated URL to include the "/forms" prefix
+    const response = await axios.post("http://127.0.0.1:8000/forms/studies/", payload, {
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${this.token}`,
+      },
+    });
+    this.openSaveDialog(`Study "${response.data.metadata.study_name}" saved successfully!`);
+  } catch (error) {
+    console.error("Error saving study:", error.response?.data || error.message);
+    this.openGenericDialog("Failed to save study. Please try again.");
+  }
     },
     openSaveDialog(message) {
       this.saveDialogMessage = message;

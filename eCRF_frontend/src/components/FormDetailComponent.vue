@@ -1,105 +1,123 @@
 <template>
   <div class="form-detail-container">
-    <h1>View Saved Form</h1>
-    <div v-if="form">
-      <h2>{{ form.form_name }}</h2>
-      <div v-for="(section, sectionIndex) in form.form_structure" :key="sectionIndex" class="form-section">
-        <h3>{{ section.title }}</h3>
-        <div v-for="(field, fieldIndex) in section.fields" :key="fieldIndex" class="form-group">
-          <label :for="field.name">{{ field.label }}</label>
-          <div class="field-box">
-            <!-- Render fields dynamically -->
-            <input
-              v-if="field.type === 'text'"
-              type="text"
-              :id="field.name"
-              v-model="field.value"
-              :placeholder="field.placeholder"
-            />
-            <textarea
-              v-if="field.type === 'textarea'"
-              :id="field.name"
-              v-model="field.value"
-              :placeholder="field.placeholder"
-              :rows="field.rows"
-            ></textarea>
-            <input
-              v-if="field.type === 'number'"
-              type="number"
-              :id="field.name"
-              v-model="field.value"
-              :placeholder="field.placeholder"
-            />
-            <input
-              v-if="field.type === 'date'"
-              type="date"
-              :id="field.name"
-              v-model="field.value"
-            />
-            <select v-if="field.type === 'select'" :id="field.name" v-model="field.value">
-              <option v-for="option in field.options" :key="option" :value="option">
-                {{ option }}
-              </option>
-            </select>
-            <div v-if="field.type === 'checkbox'" class="checkbox-group">
-              <label v-for="(option, i) in field.options" :key="i">
-                <input type="checkbox" v-model="field.value" :value="option" /> {{ option }}
-              </label>
+    <h1>View Saved Study</h1>
+    <div v-if="study">
+      <!-- Study Metadata Header -->
+      <div class="study-meta">
+        <h2>{{ study.metadata.study_name }}</h2>
+        <p>{{ study.metadata.study_description }}</p>
+        <!-- Display additional meta info if available -->
+        <div v-if="study.content.study_data.meta_info">
+          <p><strong>Number of Forms:</strong> {{ study.content.study_data.meta_info.numberOfForms }}</p>
+          <p><strong>Number of Subjects:</strong> {{ study.content.study_data.meta_info.numberOfSubjects }}</p>
+          <p><strong>Number of Visits:</strong> {{ study.content.study_data.meta_info.numberOfVisits }}</p>
+        </div>
+      </div>
+      <!-- Render Forms -->
+      <div v-for="(form, formIndex) in study.content.study_data.forms" :key="formIndex" class="form">
+        <h3>{{ form.form_name }}</h3>
+        <div v-for="(section, sectionIndex) in form.sections" :key="sectionIndex" class="form-section">
+          <h4>{{ section.title }}</h4>
+          <div v-for="(field, fieldIndex) in section.fields" :key="fieldIndex" class="form-group">
+            <label :for="field.name">{{ field.label }}</label>
+            <div class="field-box">
+              <!-- Render fields dynamically -->
+              <input
+                v-if="field.type === 'text'"
+                type="text"
+                :id="field.name"
+                v-model="field.value"
+                :placeholder="field.placeholder"
+              />
+              <textarea
+                v-if="field.type === 'textarea'"
+                :id="field.name"
+                v-model="field.value"
+                :placeholder="field.placeholder"
+                :rows="field.rows"
+              ></textarea>
+              <input
+                v-if="field.type === 'number'"
+                type="number"
+                :id="field.name"
+                v-model="field.value"
+                :placeholder="field.placeholder"
+              />
+              <input
+                v-if="field.type === 'date'"
+                type="date"
+                :id="field.name"
+                v-model="field.value"
+              />
+              <select v-if="field.type === 'select'" :id="field.name" v-model="field.value">
+                <option v-for="option in field.options" :key="option" :value="option">
+                  {{ option }}
+                </option>
+              </select>
+              <div v-if="field.type === 'checkbox'" class="checkbox-group">
+                <label v-for="(option, i) in field.options" :key="i">
+                  <input type="checkbox" v-model="field.value" :value="option" /> {{ option }}
+                </label>
+              </div>
+              <div v-if="field.type === 'radio'" class="radio-group">
+                <label v-for="option in field.options" :key="option">
+                  <input type="radio" :name="field.name" v-model="field.value" :value="option" />
+                  {{ option }}
+                </label>
+              </div>
+              <p v-if="field.type === 'paragraph'">{{ field.content }}</p>
             </div>
-            <div v-if="field.type === 'radio'" class="radio-group">
-              <label v-for="option in field.options" :key="option">
-                <input type="radio" :name="field.name" v-model="field.value" :value="option" />
-                {{ option }}
-              </label>
-            </div>
-            <p v-if="field.type === 'paragraph'">{{ field.content }}</p>
           </div>
         </div>
       </div>
     </div>
-    <p v-else>Loading form...</p>
+    <p v-else>Loading study...</p>
     <button @click="goBack" class="btn-back">Back</button>
   </div>
 </template>
+
 <script>
 import axios from "axios";
 
 export default {
-  name: "FormDetailComponent",
+  name: "StudyDetailComponent",
   data() {
     return {
-      form: null, // The loaded form
+      study: null, // Will hold the loaded study (StudyFull)
     };
   },
   computed: {
     token() {
-      return this.$store.state.token; // Retrieve the token from Vuex
+      return this.$store.state.token; // Retrieve token from Vuex
     },
   },
   async created() {
-    const formId = this.$route.params.id; // Get the form ID from route params
-    await this.loadForm(formId);
+    const studyId = this.$route.params.id; // Get the study ID from route params
+    await this.loadStudy(studyId);
   },
   methods: {
-    async loadForm(formId) {
+    async loadStudy(studyId) {
       try {
-        const response = await axios.get(`http://127.0.0.1:8000/forms/${formId}`, {
+        // Adjust the URL to match your backend endpoint
+        const response = await axios.get(`http://127.0.0.1:8000/forms/studies/${studyId}`, {
           headers: {
             Authorization: `Bearer ${this.token}`,
           },
         });
-        this.form = response.data;
+        this.study = response.data;
       } catch (error) {
-        console.error("Error loading form:", error.response?.data || error.message);
-        alert("Failed to load the form.");
+        console.error("Error loading study:", error.response?.data || error.message);
+        alert("Failed to load the study.");
       }
     },
     goBack() {
-      this.$router.push("/saved-forms"); // Navigate back to saved forms
+      // Navigate back to the studies list view
+      this.$router.push("/studies");
     },
   },
 };
 </script>
+
 <style scoped>
 .form-detail-container {
   max-width: 800px;
@@ -111,9 +129,18 @@ export default {
   box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
 }
 
-h1, h2, h3 {
+h1, h2, h3, h4 {
   text-align: center;
   color: #333;
+}
+
+.study-meta {
+  margin-bottom: 20px;
+  text-align: center;
+}
+
+.form {
+  margin-bottom: 30px;
 }
 
 .form-section {
