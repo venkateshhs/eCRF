@@ -263,8 +263,12 @@ def get_form_by_id(
 def create_study(
     study_metadata: schemas.StudyMetadataCreate,
     study_content: schemas.StudyContentCreate,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    user = Depends(get_current_user)
 ):
+    # Ensure the study is created only for the logged-in user.
+    if study_metadata.created_by != user.id:
+        raise HTTPException(status_code=403, detail="Not authorized to create study for this user")
     try:
         metadata, content = crud.create_study(db, study_metadata, study_content)
     except Exception as e:
@@ -275,17 +279,24 @@ def create_study(
 @router.get("/studies", response_model=List[schemas.StudyMetadataOut])
 def list_studies(
     db: Session = Depends(get_db),
-    user: dict = Depends(get_current_user)
+    user = Depends(get_current_user)
 ):
-    studies = db.query(models.StudyMetadata).all()
+    # Only return studies created by the current user.
+    studies = db.query(models.StudyMetadata).filter(models.StudyMetadata.created_by == user.id).all()
     return studies
 
 @router.get("/studies/{study_id}", response_model=schemas.StudyFull)
-def read_study(study_id: int, db: Session = Depends(get_db)):
+def read_study(
+    study_id: int,
+    db: Session = Depends(get_db),
+    user = Depends(get_current_user)
+):
     result = crud.get_study_full(db, study_id)
     if result is None:
         raise HTTPException(status_code=404, detail="Study not found")
     metadata, content = result
+    if metadata.created_by != user.id:
+        raise HTTPException(status_code=403, detail="Not authorized to view this study")
     return {"metadata": metadata, "content": content}
 
 @router.put("/studies/{study_id}", response_model=schemas.StudyFull)
@@ -293,20 +304,33 @@ def update_study(
     study_id: int,
     metadata_update: schemas.StudyMetadataUpdate,
     content_update: schemas.StudyContentUpdate,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    user = Depends(get_current_user)
 ):
+    # Retrieve the study first and check ownership.
+    existing = crud.get_study_full(db, study_id)
+    if existing is None:
+        raise HTTPException(status_code=404, detail="Study not found")
+    metadata, content = existing
+    if metadata.created_by != user.id:
+        raise HTTPException(status_code=403, detail="Not authorized to update this study")
     try:
         result = crud.update_study(db, study_id, metadata_update, content_update)
     except Exception as e:
         logger.error("Error updating study: %s", e)
         raise HTTPException(status_code=500, detail=str(e))
-    if result is None:
-        raise HTTPException(status_code=404, detail="Study not found")
     metadata, content = result
     return {"metadata": metadata, "content": content}
 
 @router.get("/studies/{study_id}/files", response_model=List[schemas.FileOut])
-def read_files_for_study(study_id: int, db: Session = Depends(get_db)):
+def read_files_for_study(
+    study_id: int,
+    db: Session = Depends(get_db),
+    user = Depends(get_current_user)
+):
+    study = db.query(models.StudyMetadata).filter(models.StudyMetadata.id == study_id).first()
+    if not study or study.created_by != user.id:
+        raise HTTPException(status_code=403, detail="Not authorized to access files for this study")
     files = crud.get_files_for_study(db, study_id)
     return files
 
@@ -316,8 +340,13 @@ def upload_file(
     uploaded_file: UploadFile = File(...),
     description: str = Form(""),
     storage_option: str = Form("local"),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    user = Depends(get_current_user)
 ):
+    # Verify that the study belongs to the current user.
+    study = db.query(models.StudyMetadata).filter(models.StudyMetadata.id == study_id).first()
+    if not study or study.created_by != user.id:
+        raise HTTPException(status_code=403, detail="Not authorized to upload file for this study")
     try:
         upload_dir = "uploads"
         os.makedirs(upload_dir, exist_ok=True)
