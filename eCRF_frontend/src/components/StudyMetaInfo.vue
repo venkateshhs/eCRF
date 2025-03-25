@@ -332,7 +332,7 @@ export default {
     validateAndProceed() {
       this.showErrors = true;
       if (!this.customStudy.name || !this.customStudy.description) return;
-      localStorage.removeItem("studyDetails");
+      localStorage.removeItem("setStudyDetails");
       localStorage.removeItem("scratchForms");
       const studyDetails = {
         name: this.customStudy.name,
