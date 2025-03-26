@@ -36,8 +36,12 @@
       <div v-if="activeSection === 'study-management'">
         <h1>Study Management</h1>
         <div class="button-container" v-if="!showStudyOptions">
-          <button @click="navigate('/dashboard/create-study')" class="btn-option">Create Study</button>
-          <button @click="toggleStudyOptions" class="btn-option">Open Study</button>
+          <button @click="navigate('/dashboard/create-study')" class="btn-option">
+            Create Study
+          </button>
+          <button @click="toggleStudyOptions" class="btn-option">
+            Open Study
+          </button>
         </div>
         <!-- Study Dashboard Table -->
         <div v-if="showStudyOptions" class="study-dashboard">
@@ -48,6 +52,7 @@
                 <th>Study Name</th>
                 <th>Description</th>
                 <th>Created At</th>
+                <th>Updated At</th>
                 <th>Actions</th>
               </tr>
             </thead>
@@ -55,7 +60,8 @@
               <tr v-for="study in studies" :key="study.id">
                 <td>{{ study.study_name }}</td>
                 <td>{{ study.study_description }}</td>
-                <td>{{ formatDate(study.created_at) }}</td>
+                <td>{{ formatDateTime(study.created_at) }}</td>
+                <td>{{ formatDateTime(study.updated_at) }}</td>
                 <td>
                   <div class="action-buttons">
                     <button @click="editStudy(study)" class="btn-option">Edit Study</button>
@@ -87,8 +93,8 @@ export default {
     return {
       sidebarCollapsed: false,
       activeSection: "study-management",
-      showStudyOptions: false, // Whether to show the study dashboard
-      studies: [], // Array to hold fetched studies
+      showStudyOptions: false,
+      studies: [],
       icons,
     };
   },
@@ -99,7 +105,7 @@ export default {
     },
     setActiveSection(section) {
       this.activeSection = section;
-      this.showStudyOptions = false; // Reset dashboard when switching sections
+      this.showStudyOptions = false;
       console.log("Active section set to:", section);
     },
     toggleStudyOptions() {
@@ -132,13 +138,20 @@ export default {
         }
       }
     },
-    formatDate(dateString) {
+    formatDateTime(dateString) {
       const date = new Date(dateString);
-      return date.toLocaleDateString("en-GB", { year: "numeric", month: "short", day: "numeric" });
+      return date.toLocaleString("en-GB", {
+        year: "numeric",
+        month: "short",
+        day: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+      });
     },
     async editStudy(study) {
-      // Clear old study data to ensure a fresh start
-      localStorage.removeItem("studyDetails");
+      // Clear any stored study data.
+      localStorage.removeItem("setStudyDetails");
       localStorage.removeItem("scratchForms");
 
       const token = this.$store.state.token;
@@ -147,19 +160,66 @@ export default {
         this.$router.push("/login");
         return;
       }
+
       try {
-        // Fetch the full study details (metadata and form data)
+        console.log("Fetching full study data for study ID:", study.id);
         const response = await axios.get(`http://127.0.0.1:8000/forms/studies/${study.id}`, {
           headers: { Authorization: `Bearer ${token}` },
         });
-        // Commit the full study details to Vuex
-        this.$store.commit("setStudyDetails", response.data);
-        console.log("Editing study:", study.id, "with full data", response.data);
-        // Navigate to the ScratchFormComponent (edit mode)
+        console.log("Full study response:", response.data);
+
+        // Extract dynamic study data from the API response.
+        const studyData = response.data.content && response.data.content.study_data;
+        if (!studyData) {
+          console.error("Study content is empty.");
+          this.openGenericDialog("Study content is empty.");
+          return;
+        }
+
+        // Extract and flatten meta_info.
+        const meta = studyData.meta_info || {};
+        const dynamicStudy = {
+          id: study.id,
+          name: meta.name,
+          description: meta.description,
+          studyType: meta.studyType || "Custom",
+          numberOfForms: meta.numberOfForms || (studyData.forms ? studyData.forms.length : 0),
+          metaInfo: {
+            numberOfSubjects: meta.numberOfSubjects,
+            numberOfVisits: meta.numberOfVisits,
+            studyMetaDescription: meta.studyMetaDescription,
+          },
+          customFields: meta.customFields || [],
+          metaCustomFields: meta.metaCustomFields || [],
+          forms: studyData.forms
+            ? studyData.forms.map(form => ({
+                formName: form.form_name ? form.form_name : (form.formName || "Untitled Form"),
+                sections: form.sections,
+              }))
+            : [],
+        };
+
+        // Update local state
+        this.metaInfo = dynamicStudy.metaInfo;
+        this.forms = dynamicStudy.forms;
+        this.totalForms = dynamicStudy.numberOfForms;
+        this.currentFormIndex = 0;
+        this.activeSection =
+          (this.forms[0] && this.forms[0].sections && this.forms[0].sections.length > 0) ? 0 : null;
+        console.log("Loaded dynamic study data:", dynamicStudy);
+
+        // Commit the dynamic study data to Vuex.
+        this.$store.commit("setStudyDetails", dynamicStudy);
+        console.log("Committed dynamic study data to Vuex:", dynamicStudy);
+
+        // Store forms in localStorage for ScratchFormComponent.
+        localStorage.setItem("scratchForms", JSON.stringify(dynamicStudy.forms));
+
+        console.log("Navigating to edit study view for study ID:", study.id);
         this.$router.push({ name: "CreateFormScratch", params: { id: study.id } });
       } catch (error) {
         console.error("Error retrieving full study data:", error.response?.data || error.message);
-        alert("Failed to load full study data. Please try again.");
+        alert("Failed to load study data. Please try again.");
       }
     },
     addData(study) {
@@ -175,6 +235,10 @@ export default {
       this.$store.commit("setUser", null);
       console.log("User logged out.");
       this.$router.push("/");
+    },
+    openGenericDialog(message, callback = null) {
+      alert(message);
+      if (callback) callback();
     },
   },
   mounted() {

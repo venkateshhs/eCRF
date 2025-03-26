@@ -429,7 +429,6 @@ export default {
       inputDialogValue: "",
       inputDialogCallback: null,
       defaultFormStructure: [{ title: "Default Section", fields: [], collapsed: false }],
-      studyDetails: {},
       metaInfo: {
         numberOfSubjects: null,
         numberOfVisits: null,
@@ -475,6 +474,9 @@ export default {
   computed: {
     token() {
       return this.$store.state.token;
+    },
+    studyDetails() {
+      return this.$store.state.studyDetails;
     },
     currentForm() {
       return this.forms[this.currentFormIndex] || { formName: "", sections: [] };
@@ -572,7 +574,7 @@ export default {
               description: this.studyDetails.description || "",
               numberOfForms: this.studyDetails.numberOfForms || 1,
               numberOfSubjects: this.studyDetails.metaInfo?.numberOfSubjects,
-              studyType: this.studyDetails.metaInfo?.studyType,
+              studyType: this.studyDetails.studyType,
               numberOfVisits: this.studyDetails.metaInfo?.numberOfVisits,
               studyMetaDescription: this.studyDetails.metaInfo?.studyMetaDescription || "",
               customFields: this.studyDetails.customFields || [],
@@ -582,18 +584,39 @@ export default {
           }
         }
       };
-      try {
-        const response = await axios.post("http://127.0.0.1:8000/forms/studies/", payload, {
+   try {
+    let response;
+    if (this.studyDetails.id) {
+      // If a study ID exists, then update the record.
+      response = await axios.put(
+        `http://127.0.0.1:8000/forms/studies/${this.studyDetails.id}`,
+        payload,
+        {
           headers: {
             "Content-Type": "application/json",
             Authorization: `Bearer ${this.token}`,
           },
-        });
-        this.openSaveDialog(`Study "${response.data.metadata.study_name}" saved successfully!`);
-      } catch (error) {
-        console.error("Error saving study:", error.response?.data || error.message);
-        this.openGenericDialog("Failed to save study. Please try again.");
-      }
+        }
+      );
+      this.openSaveDialog(`Study "${response.data.metadata.study_name}" updated successfully!`);
+    } else {
+      // Otherwise, create a new study record.
+      response = await axios.post(
+        "http://127.0.0.1:8000/forms/studies/",
+        payload,
+        {
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${this.token}`,
+          },
+        }
+      );
+      this.openSaveDialog(`Study "${response.data.metadata.study_name}" saved successfully!`);
+    }
+  } catch (error) {
+    console.error("Error saving study:", error.response?.data || error.message);
+    this.openGenericDialog("Failed to save study. Please try again.");
+  }
     },
     openSaveDialog(message) {
       this.saveDialogMessage = message;

@@ -2,7 +2,7 @@ import os
 import shutil
 from typing import List, Dict
 
-from fastapi import APIRouter, HTTPException, Depends, Query, UploadFile, File, Form
+from fastapi import APIRouter, HTTPException, Depends, Query, UploadFile, File, Form, Body
 from pathlib import Path
 import json
 import yaml
@@ -302,8 +302,8 @@ def read_study(
 @router.put("/studies/{study_id}", response_model=schemas.StudyFull)
 def update_study(
     study_id: int,
-    metadata_update: schemas.StudyMetadataUpdate,
-    content_update: schemas.StudyContentUpdate,
+    study_metadata: schemas.StudyMetadataUpdate = Body(..., embed=True),
+    study_content: schemas.StudyContentUpdate = Body(..., embed=True),
     db: Session = Depends(get_db),
     user = Depends(get_current_user)
 ):
@@ -314,8 +314,12 @@ def update_study(
     metadata, content = existing
     if metadata.created_by != user.id:
         raise HTTPException(status_code=403, detail="Not authorized to update this study")
+    # Ensure the study id is present in the dynamic content data and update modification time.
+    if not study_content.study_data.get("id"):
+        study_content.study_data["id"] = study_id
+    # Optionally, update modification timestamp here if your schema supports it.
     try:
-        result = crud.update_study(db, study_id, metadata_update, content_update)
+        result = crud.update_study(db, study_id, study_metadata, study_content)
     except Exception as e:
         logger.error("Error updating study: %s", e)
         raise HTTPException(status_code=500, detail=str(e))
