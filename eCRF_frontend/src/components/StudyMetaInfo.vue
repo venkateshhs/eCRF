@@ -312,6 +312,9 @@ export default {
         numberOfVisits: this.metaEditForm.numberOfVisits,
         studyMetaDescription: this.metaEditForm.studyMetaDescription,
       };
+      updatedDetails.description = this.metaEditForm.description;
+      updatedDetails.name = this.metaEditForm.name;
+      updatedDetails.numberOfForms = this.metaEditForm.numberOfForms;
       updatedDetails.studyType = this.metaEditForm.studyType;
       updatedDetails.customFields = this.metaEditForm.customFields;
       updatedDetails.metaCustomFields = this.metaEditForm.metaCustomFields;
