@@ -52,6 +52,7 @@
                 <th>Study Name</th>
                 <th>Description</th>
                 <th>Created At</th>
+                <th>Updated At</th>
                 <th>Actions</th>
               </tr>
             </thead>
@@ -59,15 +60,12 @@
               <tr v-for="study in studies" :key="study.id">
                 <td>{{ study.study_name }}</td>
                 <td>{{ study.study_description }}</td>
-                <td>{{ formatDate(study.created_at) }}</td>
+                <td>{{ formatDateTime(study.created_at) }}</td>
+                <td>{{ formatDateTime(study.updated_at) }}</td>
                 <td>
                   <div class="action-buttons">
-                    <button @click="editStudy(study)" class="btn-option">
-                      Edit Study
-                    </button>
-                    <button @click="addData(study)" class="btn-option">
-                      Add Data
-                    </button>
+                    <button @click="editStudy(study)" class="btn-option">Edit Study</button>
+                    <button @click="addData(study)" class="btn-option">Add Data</button>
                   </div>
                 </td>
               </tr>
@@ -140,9 +138,16 @@ export default {
         }
       }
     },
-    formatDate(dateString) {
+    formatDateTime(dateString) {
       const date = new Date(dateString);
-      return date.toLocaleDateString("en-GB", { year: "numeric", month: "short", day: "numeric" });
+      return date.toLocaleString("en-GB", {
+        year: "numeric",
+        month: "short",
+        day: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+      });
     },
     async editStudy(study) {
       // Clear any stored study data.

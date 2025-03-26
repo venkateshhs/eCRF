@@ -1,9 +1,10 @@
 import os
 from sqlalchemy.orm import Session
-
+from datetime import datetime
 import schemas, models
 from models import User
 from logger import logger
+from zoneinfo import ZoneInfo
 
 def get_user_by_username(db: Session, username: str):
     logger.debug(f"Fetching user by username: {username}")
@@ -74,6 +75,7 @@ def update_study(db: Session, study_id: int, metadata_update: schemas.StudyMetad
     try:
         for key, value in metadata_update.dict(exclude_unset=True).items():
             setattr(db_metadata, key, value)
+        db_metadata.updated_at = datetime.now(ZoneInfo("Europe/Paris"))
         db.commit()
         db.refresh(db_metadata)
     except Exception as e:
