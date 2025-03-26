@@ -174,6 +174,7 @@ export default {
         // Extract and flatten meta_info.
         const meta = studyData.meta_info || {};
         const dynamicStudy = {
+          id: study.id,
           name: meta.name,
           description: meta.description,
           studyType: meta.studyType || "Custom",
