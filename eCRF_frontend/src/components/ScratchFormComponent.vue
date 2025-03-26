@@ -429,7 +429,6 @@ export default {
       inputDialogValue: "",
       inputDialogCallback: null,
       defaultFormStructure: [{ title: "Default Section", fields: [], collapsed: false }],
-      studyDetails: {},
       metaInfo: {
         numberOfSubjects: null,
         numberOfVisits: null,
@@ -475,6 +474,9 @@ export default {
   computed: {
     token() {
       return this.$store.state.token;
+    },
+    studyDetails() {
+      return this.$store.state.studyDetails;
     },
     currentForm() {
       return this.forms[this.currentFormIndex] || { formName: "", sections: [] };
