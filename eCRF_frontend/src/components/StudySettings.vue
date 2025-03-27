@@ -9,7 +9,7 @@
           <select v-model="settings.weightFormat" id="weightFormat">
             <option value="kg">Kilograms (kg)</option>
             <option value="lbs">Pounds (lbs)</option>
-            <option value="lbs">Ounce (oz)</option>
+            <option value="oz">Ounce (oz)</option>
           </select>
         </div>
         <div class="form-group">
@@ -25,10 +25,10 @@
           <select v-model="settings.temperatureFormat" id="temperatureFormat">
             <option value="celsius">Celsius (°C)</option>
             <option value="fahrenheit">Fahrenheit (°F)</option>
-            <option value="Kelvin (K)">Kelvin (°K)</option>
+            <option value="kelvin">Kelvin (K)</option>
           </select>
         </div>
-        <!-- New field for Distance Unit -->
+        <!-- Distance Unit -->
         <div class="form-group">
           <label for="distanceUnit">Distance Unit</label>
           <select v-model="settings.distanceUnit" id="distanceUnit">
@@ -36,7 +36,7 @@
             <option value="miles">Miles</option>
           </select>
         </div>
-        <!-- New field for Liquid Unit -->
+        <!-- Liquid Unit -->
         <div class="form-group">
           <label for="liquidUnit">Liquid Unit</label>
           <select v-model="settings.liquidUnit" id="liquidUnit">
@@ -121,6 +121,7 @@
 
       <div class="form-actions">
         <button type="submit" class="btn-save-settings">Save Settings</button>
+        <button type="button" class="btn-restore" @click="restoreDefaults">Restore Defaults</button>
         <button type="button" class="btn-cancel" @click="cancelSettings">Cancel</button>
       </div>
     </form>
@@ -133,38 +134,57 @@
 export default {
   name: "StudySettings",
   data() {
-    return {
-      settings: {
-        weightFormat: "kg",
-        heightFormat: "cm",
-        temperatureFormat: "celsius",
-        distanceUnit: "km",
-        liquidUnit: "litres",
-        dateFormat: "YYYY-MM-DD",
-        timezone: "UTC",
-        locale: "en-US",
-        autoSaveInterval: 5,
-        notifications: {
-          email: false,
-          sms: false,
-          push: false,
-        },
-        uiTheme: "light",
+    const defaultSettings = {
+      weightFormat: "kg",
+      heightFormat: "cm",
+      temperatureFormat: "celsius",
+      distanceUnit: "km",
+      liquidUnit: "litres",
+      dateFormat: "YYYY-MM-DD",
+      timezone: "UTC",
+      locale: "en-US",
+      autoSaveInterval: 5,
+      notifications: {
+        email: false,
+        sms: false,
+        push: false,
       },
+      uiTheme: "light",
+    };
+
+    return {
+      settings: { ...defaultSettings },
+      defaultSettings,
       timezones: [],
       saveMessage: null,
       saveError: null,
     };
   },
+  computed: {
+    // Retrieve the user ID from Vuex store
+    userId() {
+      return this.$store.state.user.id;
+    },
+  },
   created() {
     this.fetchTimezones();
-    // Optionally, load existing settings from Vuex or an API endpoint
-    // this.settings = { ...this.$store.state.studySettings }
+    // If userId isn't available immediately, watch for changes.
+    if (this.userId) {
+      this.fetchUserSettings();
+    } else {
+      this.$watch(
+        () => this.userId,
+        (newVal) => {
+          if (newVal) {
+            this.fetchUserSettings();
+          }
+        }
+      );
+    }
   },
   methods: {
     async fetchTimezones() {
       try {
-        // Replace <your_host> with your backend host address
         const response = await fetch("http://127.0.0.1:8000/api/timezones");
         const data = await response.json();
         this.timezones = data;
@@ -173,19 +193,44 @@ export default {
         this.timezones = ["UTC"];
       }
     },
+    async fetchUserSettings() {
+      try {
+        const response = await fetch(`http://127.0.0.1:8000/api/settings/${this.userId}`);
+        if (response.ok) {
+          const data = await response.json();
+          this.settings = data;
+        } else if (response.status === 404) {
+          console.log("No settings found, loading defaults.");
+        } else {
+          console.error("Error fetching settings:", response.statusText);
+        }
+      } catch (error) {
+        console.error("Error fetching user settings:", error);
+      }
+    },
     async saveSettings() {
       this.saveMessage = null;
       this.saveError = null;
       try {
-        // Dispatch an action or call an API endpoint to save the settings
-        // For example:
-        // await this.$store.dispatch('saveStudySettings', this.settings);
-        // or use axios.post(...) to persist in the database.
-        this.saveMessage = "Settings saved successfully.";
+        const response = await fetch(`http://127.0.0.1:8000/api/settings/${this.userId}`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(this.settings),
+        });
+        if (response.ok) {
+          this.saveMessage = "Settings saved successfully.";
+        } else {
+          this.saveError = "Failed to save settings. Please try again.";
+        }
       } catch (error) {
         console.error(error);
         this.saveError = "Failed to save settings. Please try again.";
       }
+    },
+    restoreDefaults() {
+      this.settings = { ...this.defaultSettings };
     },
     cancelSettings() {
       this.$router.push("/profile");
@@ -238,6 +283,7 @@ h1 {
   margin-top: 20px;
 }
 .btn-save-settings,
+.btn-restore,
 .btn-cancel {
   padding: 10px 20px;
   font-size: 16px;
@@ -251,6 +297,13 @@ h1 {
 }
 .btn-save-settings:hover {
   background-color: #0056b3;
+}
+.btn-restore {
+  background-color: #28a745;
+  color: #fff;
+}
+.btn-restore:hover {
+  background-color: #218838;
 }
 .btn-cancel {
   background-color: #6c757d;

@@ -1,3 +1,5 @@
+import datetime
+
 from sqlalchemy import Column, Integer, String, ForeignKey, DateTime, func, JSON, Text
 from sqlalchemy.orm import relationship
 from database import Base
@@ -64,3 +66,12 @@ class File(Base):
     description = Column(Text)
     storage_option = Column(String(50))  # e.g., 'local' or 'db'
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+"""
+Table for user settings/configuration
+"""
+class UserSettings(Base):
+    __tablename__ = "user_settings"
+    user_id = Column(Integer, primary_key=True, index=True)
+    settings = Column(JSON, nullable=False)
+    updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)

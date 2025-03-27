@@ -103,3 +103,8 @@ class FileOut(FileBase):
 
     class Config:
         from_attributes = True
+
+
+# Pydantic model that accepts arbitrary fields
+class SettingsModel(BaseModel):
+    model_config = {"extra": "allow"}
