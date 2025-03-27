@@ -34,7 +34,19 @@
 
       <!-- Number of Forms -->
       <label for="numForms">Number of Forms:</label>
-      <input id="numForms" type="number" v-model.number="numberOfForms" placeholder="Enter number of forms" />
+      <input
+        id="numForms"
+        type="number"
+        v-model.number="numberOfForms"
+        placeholder="Enter number of forms"
+        min="1"
+        max="1000"
+        step="1"
+        :class="{ 'error-input': showErrors && (!Number.isInteger(numberOfForms) || numberOfForms < 1 || numberOfForms > 1000) }"
+      />
+      <small v-if="showErrors && (!Number.isInteger(numberOfForms) || numberOfForms < 1 || numberOfForms > 1000)" class="error-text">
+        Number of forms must be a whole number between 1 and 1000.
+      </small>
       <small class="hint">Different forms per visit per condition</small>
 
       <!-- Study Custom Fields Container (appears immediately after number of forms) -->
@@ -211,6 +223,8 @@ export default {
     validateAndProceed() {
       this.showErrors = true;
       if (!this.customStudy.name || !this.customStudy.description) return;
+      // Validate that numberOfForms is a whole number and between 1 and 1000.
+      if (!Number.isInteger(this.numberOfForms) || this.numberOfForms < 1 || this.numberOfForms > 1000) return;
       localStorage.removeItem("studyDetails");
       localStorage.removeItem("scratchForms");
       const studyDetails = {
@@ -452,5 +466,10 @@ textarea {
   font-size: 12px;
   margin-top: 3px;
   display: block;
+}
+
+/* Error input styling */
+.error-input {
+  border-color: red;
 }
 </style>
