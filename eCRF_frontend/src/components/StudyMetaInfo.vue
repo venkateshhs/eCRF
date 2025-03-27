@@ -81,11 +81,22 @@
       <h3>Edit Meta Information</h3>
       <div class="meta-edit-field">
         <label>Study Name:</label>
-        <input type="text" v-model="metaEditForm.name" placeholder="Enter study name" />
+        <input
+          type="text"
+          v-model="metaEditForm.name"
+          placeholder="Enter study name"
+          :class="{ 'error-input': metaEditErrors.name }"
+        />
+        <small v-if="metaEditErrors.name" class="error-text">{{ metaEditErrors.name }}</small>
       </div>
       <div class="meta-edit-field">
         <label>Description:</label>
-        <textarea v-model="metaEditForm.description" placeholder="Enter study description"></textarea>
+        <textarea
+          v-model="metaEditForm.description"
+          placeholder="Enter study description"
+          :class="{ 'error-input': metaEditErrors.description }"
+        ></textarea>
+        <small v-if="metaEditErrors.description" class="error-text">{{ metaEditErrors.description }}</small>
       </div>
       <div class="meta-edit-field">
         <label>Study Type:</label>
@@ -93,7 +104,16 @@
       </div>
       <div class="meta-edit-field">
         <label>Number of Forms:</label>
-        <input type="number" v-model.number="metaEditForm.numberOfForms" placeholder="Enter number of forms" />
+        <input
+          type="number"
+          min="1"
+          max="1000"
+          step="1"
+          v-model.number="metaEditForm.numberOfForms"
+          placeholder="Enter number of forms"
+          :class="{ 'error-input': metaEditErrors.numberOfForms }"
+        />
+        <small v-if="metaEditErrors.numberOfForms" class="error-text">{{ metaEditErrors.numberOfForms }}</small>
       </div>
       <div class="meta-edit-field">
         <label>Number of Subjects:</label>
@@ -207,6 +227,11 @@ export default {
         customFields: [],
         metaCustomFields: [],
       },
+      metaEditErrors: {
+        name: "",
+        description: "",
+        numberOfForms: "",
+      },
     };
   },
   computed: {
@@ -280,6 +305,9 @@ export default {
       this.$emit("toggle-meta-info", this.metaInfoCollapsed);
     },
     openMetaEditDialog() {
+      this.metaEditErrors.name = "";
+      this.metaEditErrors.description = "";
+      this.metaEditErrors.numberOfForms = "";
       this.metaEditForm = {
         name: this.getStudyDetails.name || "",
         description: this.getStudyDetails.description || "",
@@ -297,6 +325,34 @@ export default {
       this.showMetaEditDialog = false;
     },
     saveMetaEditDialog() {
+      // Reset errors
+      this.metaEditErrors.name = "";
+      this.metaEditErrors.description = "";
+      this.metaEditErrors.numberOfForms = "";
+      let valid = true;
+      // Validate number of forms (must be an integer between 1 and 1000)
+      if (
+        !this.metaEditForm.numberOfForms ||
+        this.metaEditForm.numberOfForms < 1 ||
+        this.metaEditForm.numberOfForms > 1000 ||
+        !Number.isInteger(this.metaEditForm.numberOfForms)
+      ) {
+        this.metaEditErrors.numberOfForms = "Number of forms must be a whole number between 1 and 1000.";
+        valid = false;
+      }
+      // Validate study name is provided (non-empty after trimming)
+      if (!this.metaEditForm.name || this.metaEditForm.name.trim() === "") {
+        this.metaEditErrors.name = "Study name is required.";
+        valid = false;
+      }
+      // Validate study description is provided (non-empty after trimming)
+      if (!this.metaEditForm.description || this.metaEditForm.description.trim() === "") {
+        this.metaEditErrors.description = "Study description is required.";
+        valid = false;
+      }
+      if (!valid) {
+        return;
+      }
       if (this.getStudyDetails.numberOfForms !== this.metaEditForm.numberOfForms) {
         this.pendingMetaEdit = { ...this.metaEditForm };
         this.showMetaEditDialog = false;
@@ -335,6 +391,7 @@ export default {
     validateAndProceed() {
       this.showErrors = true;
       if (!this.customStudy.name || !this.customStudy.description) return;
+      if (!Number.isInteger(this.numberOfForms) || this.numberOfForms < 1 || this.numberOfForms > 1000) return;
       localStorage.removeItem("setStudyDetails");
       localStorage.removeItem("scratchForms");
       const studyDetails = {
@@ -493,6 +550,13 @@ export default {
   border: 1px solid #ccc;
   border-radius: 5px;
   box-sizing: border-box;
+}
+.error-input {
+  border-color: red;
+}
+.error-text {
+  color: red;
+  font-size: 12px;
 }
 .meta-edit-actions {
   display: flex;
