@@ -10,7 +10,7 @@ import SavedFormsComponent from "../components/SavedFormsComponent.vue";
 import FormDetailComponent from "../components/FormDetailComponent.vue";
 import StudyCreationComponent from "../components/StudyCreationComponent.vue";
 //import YamlViewerComponent from "../components/YamlViewerComponent.vue";
-
+import StudySettings from "../components/StudySettings.vue";
 const routes = [
   { path: "/", redirect: "/login" },
   { path: "/login", name: "Login", component: LoginComponent },
@@ -48,6 +48,11 @@ const routes = [
     name: "StudyDetail",
     component: FormDetailComponent,
   },
+  {
+      path: "/settings",
+      name: "StudySettings",
+      component: StudySettings,
+    },
 ];
 
 const router = createRouter({
