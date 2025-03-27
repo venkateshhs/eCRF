@@ -8,7 +8,9 @@
       <p><strong>Last Name:</strong> {{ user?.profile?.last_name }}</p>
       <p><strong>Email:</strong> {{ user?.email }}</p>
     </div>
-
+    <div class="settings-button">
+      <button @click="goToSettings" class="btn-settings">Study Settings</button>
+    </div>
     <div class="change-password">
       <h2>Change Password</h2>
       <form @submit.prevent="handleChangePassword">
@@ -48,25 +50,21 @@ export default {
   name: "UserInfoComponent",
   data() {
     return {
-      user: null, // Store user details here
+      user: null,
       newPassword: "",
       confirmPassword: "",
-      showPassword: false, // Toggle for viewing password
+      showPassword: false,
       passwordMessage: null,
       passwordError: null,
     };
   },
   computed: {
-    // Get user details from the Vuex store
     userFromStore() {
       return this.$store.getters.getUser;
     },
   },
   created() {
-    // Fetch user details after component is created
     this.user = this.userFromStore;
-
-    // Check if user is not populated; fetch from Vuex if needed
     if (!this.user) {
       console.warn("User not found in Vuex store. Fetching from backend...");
       this.$store.dispatch("fetchUserData").then(() => {
@@ -75,6 +73,9 @@ export default {
     }
   },
   methods: {
+    goToSettings() {
+      this.$router.push("/settings");
+    },
     validatePassword(password) {
       const passwordRegex = /^(?=.*[0-9])(?=.*[!@#$%^&*])[A-Za-z\d!@#$%^&*]{8,}$/;
       return passwordRegex.test(password);
@@ -82,27 +83,23 @@ export default {
     async handleChangePassword() {
       this.passwordMessage = null;
       this.passwordError = null;
-
       if (!this.newPassword || !this.confirmPassword) {
         this.passwordError = "All fields are required.";
         return;
       }
-
       if (!this.validatePassword(this.newPassword)) {
-        this.passwordError = "Password must be at least 8 characters, include a number, and a special character.";
+        this.passwordError =
+          "Password must be at least 8 characters, include a number, and a special character.";
         return;
       }
-
       if (this.newPassword !== this.confirmPassword) {
         this.passwordError = "Passwords do not match.";
         return;
       }
-
       try {
         const success = await this.$store.dispatch("changePassword", {
           newPassword: this.newPassword,
         });
-
         if (success) {
           this.passwordMessage = "Password changed successfully.";
           this.newPassword = "";
@@ -121,6 +118,25 @@ export default {
   },
 };
 </script>
+
+<style scoped>
+/* ... existing styles ... */
+.settings-button {
+  text-align: center;
+  margin: 20px 0;
+}
+.btn-settings {
+  padding: 10px 20px;
+  font-size: 16px;
+  background-color: #28a745;
+  border: none;
+  color: #fff;
+  border-radius: 5px;
+  cursor: pointer;
+}
+.btn-settings:hover {
+  background-color: #218838;
+}
 
 <style scoped>
 .user-info-container {
