@@ -43,100 +43,151 @@
                 <label :for="'input-' + dIndex + '-' + gIndex + '-' + pIndex">
                   {{ prop.name }}
                 </label>
-                <!-- Render input based on datatype -->
-                <template v-if="prop.datatype === 'string'">
-                  <input
-                    type="text"
-                    :id="'input-' + dIndex + '-' + gIndex + '-' + pIndex"
-                    v-model="prop.value"
-                    placeholder="Enter text"
-                  />
-                </template>
-                <template v-else-if="prop.datatype === 'number'">
-                  <input
-                    type="number"
-                    :id="'input-' + dIndex + '-' + gIndex + '-' + pIndex"
-                    v-model="prop.value"
-                    placeholder="Enter number"
-                  />
-                </template>
-                <template v-else-if="prop.datatype === 'date'">
-                  <input
-                    type="date"
-                    :id="'input-' + dIndex + '-' + gIndex + '-' + pIndex"
-                    v-model="prop.value"
-                  />
-                </template>
-                <template v-else-if="prop.datatype === 'select'">
-                  <select
-                    :id="'input-' + dIndex + '-' + gIndex + '-' + pIndex"
-                    v-model="prop.value"
-                  >
-                    <option
-                      v-for="option in prop.options"
-                      :key="option"
-                      :value="option"
-                    >
-                      {{ option }}
-                    </option>
-                  </select>
-                </template>
-                <template v-else-if="prop.datatype === 'uri'">
-                  <input
-                    type="url"
-                    :id="'input-' + dIndex + '-' + gIndex + '-' + pIndex"
-                    v-model="prop.value"
-                    placeholder="Enter URL"
-                  />
-                </template>
-                <!-- For reference fields, render a button to open a new dialog -->
-                <template v-else-if="prop.datatype === 'reference'">
-                  <button
-                    @click.prevent="editReferenceField(gIndex, pIndex)"
-                    class="btn minimal-btn"
-                  >
-                    Edit Reference
-                  </button>
-                </template>
-                <!-- Default: treat unknown as string -->
-                <template v-else>
-                  <input
-                    type="text"
-                    :id="'input-' + dIndex + '-' + gIndex + '-' + pIndex"
-                    v-model="prop.value"
-                    placeholder="Enter text"
-                  />
-                </template>
-                <!-- Action buttons for non-reference fields -->
-                <div
-                  class="action-buttons"
-                  v-if="prop.datatype !== 'reference'"
-                >
-                  <button
-                    @click.prevent="editField(gIndex, pIndex)"
-                    class="btn minimal-btn"
-                  >
-                    Edit
-                  </button>
-                  <button
-                    @click.prevent="deleteField(gIndex, pIndex)"
-                    class="btn minimal-btn btn-delete"
-                  >
-                    Delete
-                  </button>
+                <div class="field-container">
+                  <!-- For non-reference fields, render the input -->
+                  <template v-if="prop.datatype !== 'reference'">
+                    <template v-if="prop.datatype === 'string'">
+                      <input
+                        type="text"
+                        :id="'input-' + dIndex + '-' + gIndex + '-' + pIndex"
+                        v-model="prop.value"
+                        placeholder="Enter text"
+                      />
+                    </template>
+                    <template v-else-if="prop.datatype === 'number'">
+                      <input
+                        type="number"
+                        :id="'input-' + dIndex + '-' + gIndex + '-' + pIndex"
+                        v-model="prop.value"
+                        placeholder="Enter number"
+                      />
+                    </template>
+                    <template v-else-if="prop.datatype === 'date'">
+                      <input
+                        type="date"
+                        :id="'input-' + dIndex + '-' + gIndex + '-' + pIndex"
+                        v-model="prop.value"
+                      />
+                    </template>
+                    <!-- Updated branch: For datetime, use calendar (input type date) only -->
+                    <template v-else-if="prop.datatype === 'datetime'">
+                      <input
+                        type="date"
+                        :id="'input-' + dIndex + '-' + gIndex + '-' + pIndex"
+                        v-model="prop.value"
+                        placeholder="Select date"
+                      />
+                    </template>
+                    <template v-else-if="prop.datatype === 'select'">
+                      <select
+                        :id="'input-' + dIndex + '-' + gIndex + '-' + pIndex"
+                        v-model="prop.value"
+                      >
+                        <option
+                          v-for="option in prop.options"
+                          :key="option"
+                          :value="option"
+                        >
+                          {{ option }}
+                        </option>
+                      </select>
+                    </template>
+                    <template v-else-if="prop.datatype === 'uri'">
+                      <input
+                        type="url"
+                        :id="'input-' + dIndex + '-' + gIndex + '-' + pIndex"
+                        v-model="prop.value"
+                        placeholder="Enter URL"
+                      />
+                    </template>
+                    <template v-else>
+                      <input
+                        type="text"
+                        :id="'input-' + dIndex + '-' + gIndex + '-' + pIndex"
+                        v-model="prop.value"
+                        placeholder="Enter text"
+                      />
+                    </template>
+                  </template>
+                  <!-- For reference fields, no input is rendered -->
+                  <template v-else>
+                    <!-- (No input for reference fields) -->
+                  </template>
+                  <!-- Action buttons appear inline next to the field -->
+                  <div class="action-buttons">
+                    <template v-if="prop.datatype === 'reference'">
+                      <button
+                        @click.prevent="editReferenceField(gIndex, pIndex)"
+                        class="btn"
+                      >
+                        View Class: {{ getClassName(prop.classRef) }}
+                      </button>
+                      <button
+                        @click.prevent="openDeleteDialog(gIndex, pIndex)"
+                        class="btn"
+                      >
+                        Delete
+                      </button>
+                    </template>
+                    <template v-else>
+                      <button
+                        @click.prevent="openEditFieldDialog(gIndex, pIndex)"
+                        class="btn"
+                      >
+                        Edit
+                      </button>
+                      <button
+                        @click.prevent="openDeleteDialog(gIndex, pIndex)"
+                        class="btn"
+                      >
+                        Delete
+                      </button>
+                    </template>
+                  </div>
                 </div>
               </div>
             </div>
           </form>
         </div>
         <div class="dialog-buttons">
-          <!-- For reference dialogs (not the main one), show a Save button -->
-          <button v-if="dIndex > 0" @click="saveReference" class="btn minimal-btn">
+          <button v-if="dIndex > 0" @click="saveReference" class="btn">
             Save
           </button>
-          <button @click="cancelDialog" class="btn minimal-btn">
+          <button @click="cancelDialog" class="btn">
             Close
           </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Edit Field Name Modal -->
+    <div
+      v-if="editFieldDialog"
+      class="edit-dialog-overlay"
+      @click.self="cancelEditFieldDialog"
+    >
+      <div class="edit-dialog" @click.stop>
+        <h3>Edit Field Name</h3>
+        <input type="text" v-model="editFieldDialog.newName" />
+        <div class="dialog-buttons">
+          <button @click="saveEditedFieldName" class="btn">Save</button>
+          <button @click="cancelEditFieldDialog" class="btn">Cancel</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Delete Confirmation Modal -->
+    <div
+      v-if="deleteFieldDialog"
+      class="delete-dialog-overlay"
+      @click.self="cancelDeleteDialog"
+    >
+      <div class="delete-dialog" @click.stop>
+        <h3>Confirm Deletion</h3>
+        <p>Are you sure you want to delete "{{ deleteFieldDialog.fieldName }}"?</p>
+        <div class="dialog-buttons">
+          <button @click="confirmDelete" class="btn">Yes</button>
+          <button @click="cancelDeleteDialog" class="btn">No</button>
         </div>
       </div>
     </div>
@@ -153,22 +204,20 @@ export default {
   setup() {
     const loading = ref(true);
     const error = ref(null);
-    // Maintain a stack of dialogs; the main dialog is pushed first.
     const dialogStack = ref([]);
     const nodeShapes = ref({});
     const nodeShapeIRIs = ref([]);
+    const editFieldDialog = ref(null);
+    const deleteFieldDialog = ref(null);
 
     const config = { showOnlyClassesWithId: true };
 
-    // Helper: Derive a class name from an IRI.
     function getClassName(uri) {
       const name = uri.split("/").pop();
       console.log(`Transforming IRI: ${uri} --> Class Name: ${name}`);
       return name;
     }
 
-    // Helper: Extract the last segment from a URL.
-    // If the segment contains "22-rdf-syntax-ns#", return only what follows.
     function extractLastSegment(url) {
       const lastSegment = url.split("/").pop();
       if (lastSegment.includes("22-rdf-syntax-ns#")) {
@@ -180,8 +229,6 @@ export default {
       return lastSegment;
     }
 
-    // Helper: Get the order for a property.
-    // If missing or empty, return Infinity so that it sorts at the end.
     function getOrder(prop) {
       const order = prop["http://www.w3.org/ns/shacl#order"];
       if (
@@ -195,8 +242,6 @@ export default {
       return isNaN(n) ? Infinity : n;
     }
 
-    // Helper: Format the group name.
-    // If the group is "Ungrouped", return "Default Properties". Otherwise, extract the last segment.
     function formatGroupName(groupValue) {
       return groupValue === "Ungrouped"
         ? "Default Properties"
@@ -248,6 +293,7 @@ export default {
       "http://www.w3.org/2001/XMLSchema#boolean": "boolean",
       "http://www.w3.org/2001/XMLSchema#date": "date",
       "http://www.w3.org/2001/XMLSchema#anyURI": "uri",
+      "https://www.w3.org/TR/NOTE-datetime": "datetime"
     };
 
     onMounted(() => {
@@ -270,15 +316,11 @@ export default {
       });
     });
 
-    // Open a dialog for the given IRI.
-    // Optional parameter parentInfo is used for reference dialogs.
     function openDialog(iri, parentInfo = null) {
       console.log("Opening dialog for IRI:", iri);
       const record = nodeShapes.value[iri];
       if (record) {
         console.log(`Processing shape record for IRI: ${iri}`);
-        // Group properties by "http://www.w3.org/ns/shacl#group"
-        // Default to "Ungrouped" if missing.
         const groupsObj = {};
         record.properties.forEach((prop) => {
           let groupVal = prop["http://www.w3.org/ns/shacl#group"];
@@ -290,14 +332,12 @@ export default {
           }
           groupsObj[groupVal].push(prop);
         });
-        // Sort group keys so that "Ungrouped" is always last.
         let groupKeys = Object.keys(groupsObj);
         groupKeys.sort((a, b) => {
           if (a === "Ungrouped" && b !== "Ungrouped") return 1;
           if (b === "Ungrouped" && a !== "Ungrouped") return -1;
           return a.localeCompare(b);
         });
-        // Convert groups object to an array with sorted properties (by order).
         const groupsArray = groupKeys.map((key) => {
           const sortedProps = groupsObj[key]
             .slice()
@@ -358,7 +398,7 @@ export default {
         const dialogData = {
           iri,
           groups: groupsArray,
-          parentInfo, // null for main dialogs; for references, contains parentDialogIndex and fieldLocation
+          parentInfo,
         };
         console.log("Final dialog data JSON:", JSON.stringify(dialogData, null, 2));
         dialogStack.value.push(dialogData);
@@ -367,8 +407,32 @@ export default {
       }
     }
 
-    // Edit a field in the current (top) dialog.
-    // Accepts groupIndex and property index.
+    function openEditFieldDialog(groupIndex, propertyIndex) {
+      const currentDialog = dialogStack.value[dialogStack.value.length - 1];
+      const field = currentDialog.groups[groupIndex].properties[propertyIndex];
+      editFieldDialog.value = { groupIndex, propertyIndex, newName: field.name };
+    }
+
+    function saveEditedFieldName() {
+      if (editFieldDialog.value) {
+        const { groupIndex, propertyIndex, newName } = editFieldDialog.value;
+        const currentDialog = dialogStack.value[dialogStack.value.length - 1];
+        console.log(
+          `Updating field name at group ${groupIndex}, index ${propertyIndex} to "${newName}"`
+        );
+        currentDialog.groups[groupIndex].properties[propertyIndex].name = newName;
+        editFieldDialog.value = null;
+      }
+    }
+
+    function cancelEditFieldDialog() {
+      editFieldDialog.value = null;
+    }
+
+    function editReferenceField(groupIndex, propertyIndex) {
+      editField(groupIndex, propertyIndex);
+    }
+
     function editField(groupIndex, propertyIndex) {
       const currentDialog = dialogStack.value[dialogStack.value.length - 1];
       const field = currentDialog.groups[groupIndex].properties[propertyIndex];
@@ -382,33 +446,34 @@ export default {
           fieldLocation: { groupIndex, propertyIndex },
         });
       } else {
-        const newValue = prompt(`Edit field "${field.name}"`, field.value);
-        if (newValue !== null) {
-          console.log(
-            `Field "${field.name}" updated from "${field.value}" to "${newValue}"`
-          );
-          currentDialog.groups[groupIndex].properties[propertyIndex].value = newValue;
-        }
+        openEditFieldDialog(groupIndex, propertyIndex);
       }
     }
 
-    // Dedicated function for reference fields.
-    function editReferenceField(groupIndex, propertyIndex) {
-      editField(groupIndex, propertyIndex);
+    function openDeleteDialog(groupIndex, propertyIndex) {
+      const currentDialog = dialogStack.value[dialogStack.value.length - 1];
+      const field = currentDialog.groups[groupIndex].properties[propertyIndex];
+      deleteFieldDialog.value = { groupIndex, propertyIndex, fieldName: field.name };
+    }
+
+    function confirmDelete() {
+      const { groupIndex, propertyIndex } = deleteFieldDialog.value;
+      const currentDialog = dialogStack.value[dialogStack.value.length - 1];
+      console.log(
+        `Deleting field at group ${groupIndex}, index ${propertyIndex}`
+      );
+      currentDialog.groups[groupIndex].properties.splice(propertyIndex, 1);
+      deleteFieldDialog.value = null;
+    }
+
+    function cancelDeleteDialog() {
+      deleteFieldDialog.value = null;
     }
 
     function deleteField(groupIndex, propertyIndex) {
-      const currentDialog = dialogStack.value[dialogStack.value.length - 1];
-      const field = currentDialog.groups[groupIndex].properties[propertyIndex];
-      if (confirm(`Are you sure you want to delete "${field.name}"?`)) {
-        console.log(
-          `Deleting field "${field.name}" at group ${groupIndex} index ${propertyIndex}`
-        );
-        currentDialog.groups[groupIndex].properties.splice(propertyIndex, 1);
-      }
+      openDeleteDialog(groupIndex, propertyIndex);
     }
 
-    // Save the currently open reference dialog into its parent.
     function saveReference() {
       const childDialog = dialogStack.value.pop();
       if (childDialog.parentInfo) {
@@ -422,12 +487,10 @@ export default {
       }
     }
 
-    // Cancel (close) the current dialog.
     function cancelDialog() {
       dialogStack.value.pop();
     }
 
-    // Close the main dialog (clears the entire stack).
     function closeDialog() {
       dialogStack.value = [];
     }
@@ -443,10 +506,17 @@ export default {
       editField,
       editReferenceField,
       deleteField,
-      addField: () => {}, // addField removed as not required
       saveReference,
       cancelDialog,
       formatGroupName,
+      editFieldDialog,
+      openEditFieldDialog,
+      saveEditedFieldName,
+      cancelEditFieldDialog,
+      deleteFieldDialog,
+      openDeleteDialog,
+      confirmDelete,
+      cancelDeleteDialog,
     };
   },
 };
@@ -507,18 +577,22 @@ export default {
 }
 .form-group {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
+  flex-direction: column;
   margin-bottom: 10px;
 }
 label {
-  flex: 1;
   font-weight: 500;
+  margin-bottom: 4px;
 }
-input,
-select {
-  flex: 2;
+.field-container {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+}
+.field-container input,
+.field-container select {
+  flex: 1;
   padding: 6px;
   border: 1px solid #ccc;
   border-radius: 4px;
@@ -530,21 +604,14 @@ select {
 .btn {
   padding: 4px 8px;
   border: 1px solid #ccc;
-  background: none;
+  background-color: #f5f5f5;
   cursor: pointer;
   border-radius: 4px;
   font-size: 0.9em;
   color: #333;
 }
-.minimal-btn:hover {
-  background: #f0f0f0;
-}
-.btn-delete {
-  border-color: #e57373;
-  color: #e57373;
-}
-.btn-delete:hover {
-  background: #fce4e4;
+.btn:hover {
+  background-color: #e0e0e0;
 }
 .dialog-buttons {
   margin-top: 10px;
@@ -560,5 +627,47 @@ select {
   border: none;
   cursor: pointer;
   border-radius: 5px;
+}
+.edit-dialog-overlay,
+.delete-dialog-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2000;
+}
+.edit-dialog,
+.delete-dialog {
+  background: #fff;
+  padding: 30px;
+  border-radius: 8px;
+  max-width: 400px;
+  width: 90%;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
+}
+.edit-dialog h3,
+.delete-dialog h3 {
+  margin-top: 0;
+  font-size: 1.2em;
+  margin-bottom: 20px;
+}
+.edit-dialog input {
+  width: 100%;
+  padding: 10px;
+  font-size: 1em;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  margin-bottom: 20px;
+}
+.edit-dialog .dialog-buttons,
+.delete-dialog .dialog-buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
 }
 </style>
