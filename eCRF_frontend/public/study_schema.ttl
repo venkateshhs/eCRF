@@ -29,7 +29,7 @@ dlschemas:StudyShape a sh:NodeShape ;
         sh:description "Persistent identifier (PID) for the study."
     ] ;
 
-    # Optional additional identifiers (as blank nodes or IRIs conforming to an Identifier shape)
+    # Optional additional identifiers
     sh:property [
         sh:path dlschemas:identifiers ;
         sh:nodeKind sh:BlankNodeOrIRI ;
@@ -37,7 +37,7 @@ dlschemas:StudyShape a sh:NodeShape ;
         sh:description "Optional additional identifiers for the study."
     ] ;
 
-    # Study title (mapped to dcterms:title)
+    # Study title
     sh:property [
         sh:path dcterms:title ;
         sh:datatype xsd:string ;
@@ -61,23 +61,34 @@ dlschemas:StudyShape a sh:NodeShape ;
         sh:description "A description or abstract of the study."
     ] ;
 
-    # Study type
+    # Study type (enum)
     sh:property [
         sh:path dcterms:type ;
         sh:datatype xsd:string ;
         sh:minCount 0 ;
-        sh:description "Type or category of the study (e.g. interventional, observational)."
+        sh:description "Type or category of the study." ;
+        sh:in (
+          "Case Report"
+          "Cross Sectional Study"
+          "Longitudinal Study"
+          "Meta Analysis"
+          "Phase Clinical Trials"
+          "Pragmatic Clinical Trial"
+          "Registry Study"
+          "Systematic Review"
+        )
     ] ;
 
-    # Status (e.g. planning, ongoing, completed)
+    # Status (enum)
     sh:property [
         sh:path ex:status ;
         sh:datatype xsd:string ;
         sh:minCount 0 ;
-        sh:description "Current status of the study."
+        sh:description "Current status of the study." ;
+        sh:in ( "Planning" "Ongoing" "Completed" "Terminated" "Other" )
     ] ;
 
-    # Principal Investigator (using dcterms:creator)
+    # Principal Investigator
     sh:property [
         sh:path dcterms:creator ;
         sh:datatype xsd:string ;
@@ -85,7 +96,7 @@ dlschemas:StudyShape a sh:NodeShape ;
         sh:description "Principal investigator (PI) of the study."
     ] ;
 
-    # Sponsor (using dcterms:publisher as a proxy)
+    # Sponsor
     sh:property [
         sh:path dcterms:publisher ;
         sh:datatype xsd:string ;
@@ -109,7 +120,7 @@ dlschemas:StudyShape a sh:NodeShape ;
         sh:description "End date/time of the study."
     ] ;
 
-    # Keywords (using dcat:keyword; multivalued)
+    # Keywords (multivalued)
     sh:property [
         sh:path dcat:keyword ;
         sh:datatype xsd:string ;
@@ -117,7 +128,7 @@ dlschemas:StudyShape a sh:NodeShape ;
         sh:description "Keywords associated with the study."
     ] ;
 
-    # Locations (using dcterms:spatial)
+    # Locations
     sh:property [
         sh:path dcterms:spatial ;
         sh:datatype xsd:string ;
@@ -125,7 +136,7 @@ dlschemas:StudyShape a sh:NodeShape ;
         sh:description "Geographic or site locations relevant to the study."
     ] ;
 
-    # Participants relation (references to Participant resources)
+    # Participants relation
     sh:property [
         sh:path dlschemas:participants ;
         sh:nodeKind sh:IRI ;
@@ -167,15 +178,16 @@ dlschemas:ParticipantShape a sh:NodeShape ;
         sh:description "Reference to the study the participant is enrolled in."
     ] ;
 
-    # Sex of the participant
+    # Sex (enum)
     sh:property [
         sh:path ex:sex ;
         sh:datatype xsd:string ;
         sh:minCount 0 ;
-        sh:description "Sex or gender of the participant."
+        sh:description "Sex or gender of the participant." ;
+        sh:in ( "Male" "Female" "Other" "Unknown" )
     ] ;
 
-    # Age of the participant
+    # Age
     sh:property [
         sh:path ex:age ;
         sh:datatype xsd:integer ;
@@ -183,15 +195,16 @@ dlschemas:ParticipantShape a sh:NodeShape ;
         sh:description "Age of the participant."
     ] ;
 
-    # Ethnicity of the participant
+    # Ethnicity (enum)
     sh:property [
         sh:path ex:ethnicity ;
         sh:datatype xsd:string ;
         sh:minCount 0 ;
-        sh:description "Ethnicity or race of the participant."
+        sh:description "Ethnicity or race of the participant." ;
+        sh:in ( "Hispanic" "Non-Hispanic" "Other" )
     ] ;
 
-    # Enrollment date (using dcterms:date as a generic date property)
+    # Enrollment date
     sh:property [
         sh:path dcterms:date ;
         sh:datatype xsd:date ;
@@ -215,20 +228,22 @@ dlschemas:ParticipantShape a sh:NodeShape ;
         sh:description "Date when the participant provided consent."
     ] ;
 
-    # Participant status (e.g. enrolled, withdrawn)
+    # Participant status (enum)
     sh:property [
         sh:path ex:participantStatus ;
         sh:datatype xsd:string ;
         sh:minCount 0 ;
-        sh:description "Current status of the participant."
+        sh:description "Current status of the participant." ;
+        sh:in ( "Enrolled" "Withdrawn" "Completed" "Lost" "Other" )
     ] ;
 
-    # Assigned study arm or group
+    # Assigned study arm or group (enum)
     sh:property [
         sh:path ex:assignedArm ;
         sh:datatype xsd:string ;
         sh:minCount 0 ;
-        sh:description "Study arm or group assignment of the participant."
+        sh:description "Study arm or group assignment of the participant." ;
+        sh:in ( "Treatment" "Control" "Other" )
     ] ;
 
     # Enrollment site

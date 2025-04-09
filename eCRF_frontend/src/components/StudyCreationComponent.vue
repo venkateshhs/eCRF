@@ -1,9 +1,10 @@
 <template>
   <div class="study-creation-container">
     <h1>Study Management</h1>
-    <div class="new-study-form">
+    <!-- Study creation form visible when mapping screen is not active -->
+    <div v-if="!showMappingScreen" class="new-study-form">
       <h2>Create a New Study</h2>
-      <!-- Render fields parsed from the TTL StudyShape -->
+      <!-- Render fields from the TTL StudyShape -->
       <div
         v-for="(field, index) in studySchemaProperties"
         :key="index"
@@ -12,7 +13,7 @@
         <label :for="field.field">
           {{ field.label }}<span v-if="field.required" class="required">*</span>
         </label>
-        <!-- Render textarea if type is 'textarea' -->
+        <!-- Render textarea -->
         <template v-if="field.type === 'textarea'">
           <textarea
             :id="field.field"
@@ -21,7 +22,7 @@
             :required="field.required"
           ></textarea>
         </template>
-        <!-- Render select if type is 'select' -->
+        <!-- Render select (dropdown) -->
         <template v-else-if="field.type === 'select'">
           <select
             :id="field.field"
@@ -38,7 +39,7 @@
             </option>
           </select>
         </template>
-        <!-- Render date input if type is 'date' -->
+        <!-- Render date input -->
         <template v-else-if="field.type === 'date'">
           <input
             type="date"
@@ -97,7 +98,7 @@
         </div>
       </div>
 
-      <!-- Unified Custom Field Editor -->
+      <!-- Custom Field Editor Toggle -->
       <div class="meta-toggle-container">
         <label class="switch">
           <input type="checkbox" v-model="showCustomFieldEditor" />
@@ -158,18 +159,66 @@
         </button>
       </div>
     </div>
+
+    <!-- Mapping Screen -->
+    <div v-if="showMappingScreen" class="mapping-screen">
+      <h2>Mapping Data Models to Visits</h2>
+      <table class="mapping-table">
+        <thead>
+          <tr>
+            <th>Data Model / Visit</th>
+            <th
+              v-for="(label, index) in visitLabels"
+              :key="index"
+            >
+              <!-- Editable visit label input -->
+              <input
+                type="text"
+                v-model="visitLabels[index]"
+                class="visit-label-input"
+              />
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="(dataModel, rowIndex) in dataModels" :key="dataModel">
+            <td>{{ dataModel }}</td>
+            <td
+              v-for="n in numberOfVisits"
+              :key="n"
+              class="cell"
+              @click="toggleMapping(rowIndex, n - 1)"
+            >
+              <span v-if="mappingSelection[rowIndex][n - 1]" class="tick-mark">✓</span>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+      <button @click="finalizeMapping" class="btn-option">Finalize</button>
+    </div>
+
+    <!-- Modal Dialog for Number of Visits -->
+    <div v-if="showVisitDialog" class="modal-overlay">
+      <div class="modal-dialog">
+        <h3>How many visits are planned?</h3>
+        <input type="number" v-model.number="numberOfVisitsInput" min="1" />
+        <div class="modal-actions">
+          <button @click="submitNumberOfVisits">Submit</button>
+          <button @click="cancelVisitDialog">Cancel</button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
 <script>
-// eslint-disable-next-line no-unused-vars
 import { ref, onMounted } from "vue";
-// eslint-disable-next-line no-unused-vars
 import * as $rdf from "rdflib";
 
 export default {
   name: "StudyCreationComponent",
   setup() {
+    // States for study form
     const studySchemaProperties = ref([]);
     const customStudy = ref({});
     const customFields = ref([]);
@@ -177,18 +226,39 @@ export default {
     const showCustomFieldEditor = ref(false);
     const showErrors = ref(false);
 
-    // eslint-disable-next-line no-unused-vars
-    const SH = $rdf.Namespace("http://www.w3.org/ns/shacl#");
-    // eslint-disable-next-line no-unused-vars
-    const DCTERMS = $rdf.Namespace("http://purl.org/dc/terms/");
-    // eslint-disable-next-line no-unused-vars
-    const EX = $rdf.Namespace("http://example.org/");
-    // eslint-disable-next-line no-unused-vars
-    const DLTHINGS = $rdf.Namespace("https://concepts.datalad.org/s/things/unreleased/");
-    const DLSCHEMAS = $rdf.Namespace("https://concepts.datalad.org/s/");
+    // States for visit dialog and mapping
+    const showVisitDialog = ref(false);
+    const numberOfVisitsInput = ref(1);
+    const numberOfVisits = ref(0);
+    const showMappingScreen = ref(false);
+    const dataModels = ref(["Data Model 1", "Data Model 2", "Data Model 3"]);
+    const mappingSelection = ref([]);
+    // New array to hold visit labels that users can rename
+    const visitLabels = ref([]);
 
+    // RDF Namespaces and StudyShape IRI
+    const SH = $rdf.Namespace("http://www.w3.org/ns/shacl#");
+    const DLSCHEMAS = $rdf.Namespace("https://concepts.datalad.org/s/");
     const studyShapeIRI = $rdf.sym(DLSCHEMAS("StudyShape").value);
 
+    // Helper: Traverse an RDF list using rdf:first and rdf:rest
+    function getCollectionElements(head, store) {
+      const RDF = $rdf.Namespace("http://www.w3.org/1999/02/22-rdf-syntax-ns#");
+      let elements = [];
+      let current = head;
+      while (current && current.value !== RDF("nil").value) {
+        const first = store.any(current, RDF("first"));
+        if (first) {
+          elements.push(first.value);
+        } else {
+          break;
+        }
+        current = store.any(current, RDF("rest"));
+      }
+      return elements;
+    }
+
+    // Parse TTL file content into an RDF store.
     function parseTTL(ttlText) {
       return new Promise((resolve, reject) => {
         const store = $rdf.graph();
@@ -202,6 +272,7 @@ export default {
       });
     }
 
+    // Load the study schema from a TTL file.
     async function loadStudySchema() {
       try {
         console.log("Fetching TTL file from /study_schema.ttl");
@@ -223,41 +294,35 @@ export default {
             return;
           }
           let field = pathTerm.value;
-          console.log(`Property ${index} original sh:path: ${field}`);
-          // Normalize: take substring after the last "/"
+          // Normalize field name: substring after last "/"
           field = field.substring(field.lastIndexOf("/") + 1);
-          console.log(`Property ${index} normalized field name: ${field}`);
-
           const descriptionTerm = store.any(propNode, SH("description"));
           const placeholder = descriptionTerm ? descriptionTerm.value : field;
-          console.log(`Property ${index} placeholder: ${placeholder}`);
-
-          // Use normalized field name as label.
           const label = field;
-          console.log(`Property ${index} label: ${label}`);
-
           const datatypeTerm = store.any(propNode, SH("datatype"));
           let type = "text";
           if (datatypeTerm) {
             const dt = datatypeTerm.value;
-            console.log(`Property ${index} sh:datatype: ${dt}`);
             if (dt.indexOf("dateTime") !== -1 || dt.indexOf("date") !== -1) {
               type = "date";
             } else if (dt.indexOf("integer") !== -1 || dt.indexOf("number") !== -1) {
               type = "number";
             }
           }
-          const inTerms = store.each(propNode, SH("in"));
           let options = [];
-          if (inTerms.length > 0) {
-            options = inTerms.map(term => term.value.replace(/["']/g, "").trim());
+          // Process sh:in constraint
+          const inConstraint = store.any(propNode, SH("in"));
+          if (inConstraint) {
+            const RDF = $rdf.Namespace("http://www.w3.org/1999/02/22-rdf-syntax-ns#");
+            if (store.holds(inConstraint, RDF("first"))) {
+              options = getCollectionElements(inConstraint, store);
+            } else {
+              options = [inConstraint.value];
+            }
             type = "select";
-            console.log(`Property ${index} sh:in options:`, options);
           }
           const minCountTerm = store.any(propNode, SH("minCount"));
           const required = minCountTerm && parseInt(minCountTerm.value) > 0;
-          console.log(`Property ${index} required: ${required}`);
-
           properties.push({ field, label, placeholder, type, required, options });
         });
         console.log("TTL parsing complete. Extracted properties:", properties);
@@ -268,6 +333,7 @@ export default {
       }
     }
 
+    // Initialize the customStudy object with empty values.
     function initializeCustomStudy() {
       console.log("Initializing customStudy object with extracted fields.");
       studySchemaProperties.value.forEach((prop) => {
@@ -286,6 +352,7 @@ export default {
       customFields.value.splice(index, 1);
     }
 
+    // When Proceed is clicked, validate required fields and show the visit dialog.
     function validateAndProceed() {
       showErrors.value = true;
       const missingRequired = studySchemaProperties.value.some(
@@ -295,16 +362,43 @@ export default {
         console.log("Validation failed. Missing required fields:", customStudy.value);
         return;
       }
-      const studyDetails = {
-        ...customStudy.value,
-        customFields: customFields.value
-      };
-      console.log("Study details validated. Committing to store:", studyDetails);
-      // Commit to Vuex store and navigate as needed.
-      // this.$store.commit("setStudyDetails", studyDetails);
-      // this.$router.push({ name: "CreateFormScratch" });
+      showVisitDialog.value = true;
     }
 
+    // Modal dialog submission: validate number of visits, initialize mappings and visit labels.
+    function submitNumberOfVisits() {
+      if (numberOfVisitsInput.value < 1) return;
+      numberOfVisits.value = numberOfVisitsInput.value;
+      // Initialize visit labels with default names that the user can later change.
+      visitLabels.value = [];
+      for (let i = 1; i <= numberOfVisits.value; i++) {
+        visitLabels.value.push(`Visit ${i}`);
+      }
+      // Initialize the mappingSelection 2D array for each data model (rows) and visit (columns).
+      mappingSelection.value = dataModels.value.map(() => {
+        return Array(numberOfVisits.value).fill(false);
+      });
+      showVisitDialog.value = false;
+      showMappingScreen.value = true;
+    }
+
+    function cancelVisitDialog() {
+      showVisitDialog.value = false;
+    }
+
+    // Toggle the selection status in the mapping table cell.
+    function toggleMapping(rowIndex, colIndex) {
+      mappingSelection.value[rowIndex][colIndex] = !mappingSelection.value[rowIndex][colIndex];
+    }
+
+    // Finalize the mapping process (for now, simply log the selection mapping)
+    function finalizeMapping() {
+      console.log("Mapping finalized:", mappingSelection.value);
+      // You may commit the mapping or navigate to another view as needed.
+      showMappingScreen.value = false;
+    }
+
+    // Reset the study form
     function resetForm() {
       studySchemaProperties.value.forEach((prop) => {
         customStudy.value[prop.field] = "";
@@ -319,6 +413,7 @@ export default {
     onMounted(loadStudySchema);
 
     return {
+      // Study form states and methods
       studySchemaProperties,
       customStudy,
       customFields,
@@ -328,9 +423,22 @@ export default {
       addField,
       removeField,
       validateAndProceed,
-      resetForm
+      resetForm,
+      // Visit mapping states and methods
+      showVisitDialog,
+      numberOfVisitsInput,
+      submitNumberOfVisits,
+      cancelVisitDialog,
+      showMappingScreen,
+      numberOfVisits,
+      dataModels,
+      mappingSelection,
+      toggleMapping,
+      finalizeMapping,
+      // Visit label state (for renaming visits)
+      visitLabels,
     };
-  }
+  },
 };
 </script>
 
@@ -340,20 +448,24 @@ export default {
   margin: 0 auto;
   font-family: Arial, sans-serif;
 }
+
 .new-study-form {
   padding: 20px;
   background-color: #f9f9f9;
   border-radius: 8px;
   margin-bottom: 20px;
 }
+
 label {
   font-weight: bold;
   display: block;
   margin-top: 10px;
 }
+
 .required {
   color: red;
 }
+
 select,
 input,
 textarea {
@@ -365,20 +477,24 @@ textarea {
   margin-top: 5px;
   box-sizing: border-box;
 }
+
 .error-text {
   color: red;
   font-size: 12px;
   margin-top: 3px;
   display: block;
 }
+
 .schema-field-row {
   margin-bottom: 15px;
 }
+
 .meta-toggle-container {
   margin-top: 15px;
   display: flex;
   align-items: center;
 }
+
 .switch {
   position: relative;
   display: inline-block;
@@ -386,11 +502,13 @@ textarea {
   height: 24px;
   margin-right: 10px;
 }
+
 .switch input {
   opacity: 0;
   width: 0;
   height: 0;
 }
+
 .slider {
   position: absolute;
   cursor: pointer;
@@ -402,6 +520,7 @@ textarea {
   transition: 0.4s;
   border-radius: 24px;
 }
+
 .slider:before {
   position: absolute;
   content: "";
@@ -413,16 +532,20 @@ textarea {
   transition: 0.4s;
   border-radius: 50%;
 }
+
 .switch input:checked + .slider {
   background-color: #2196F3;
 }
+
 .switch input:checked + .slider:before {
   transform: translateX(26px);
 }
+
 .toggle-label {
   font-size: 14px;
   color: #333;
 }
+
 .new-field-section {
   margin-top: 20px;
   padding: 10px;
@@ -430,17 +553,20 @@ textarea {
   border-radius: 5px;
   background-color: #fff;
 }
+
 .custom-field-inputs {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
   align-items: center;
 }
+
 .field-type,
 .field-name,
 .field-value {
   flex: 1 1 150px;
 }
+
 .add-btn {
   background-color: #ccc;
   border: 1px solid #bbb;
@@ -448,19 +574,23 @@ textarea {
   border-radius: 3px;
   cursor: pointer;
 }
+
 .add-btn:hover {
   background-color: #bbb;
 }
+
 .custom-fields-section {
   border: 1px dashed #ccc;
   padding: 10px;
   margin-top: 10px;
   border-radius: 5px;
 }
+
 .custom-fields-section h3 {
   margin-top: 0;
   margin-bottom: 10px;
 }
+
 .custom-field-row {
   display: flex;
   justify-content: space-between;
@@ -469,16 +599,19 @@ textarea {
   border-bottom: 1px solid #eee;
   padding-bottom: 10px;
 }
+
 .custom-field-display {
   flex: 1;
   display: flex;
   flex-direction: column;
 }
+
 .added-field-label {
   font-weight: bold;
   font-size: 16px;
   margin-bottom: 5px;
 }
+
 .added-field-value input,
 .added-field-value textarea {
   width: 100%;
@@ -488,6 +621,7 @@ textarea {
   border-radius: 5px;
   box-sizing: border-box;
 }
+
 .remove-btn {
   align-self: flex-end;
   margin-left: 10px;
@@ -497,12 +631,15 @@ textarea {
   border-radius: 3px;
   cursor: pointer;
 }
+
 .remove-btn:hover {
   background-color: #bbb;
 }
+
 .form-actions {
   margin-top: 20px;
 }
+
 .btn-option {
   display: block;
   width: 100%;
@@ -513,5 +650,70 @@ textarea {
   border-radius: 5px;
   cursor: pointer;
   text-align: center;
+}
+
+/* Modal styles */
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(0, 0, 0, 0.5);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.modal-dialog {
+  background-color: #fff;
+  padding: 20px;
+  border-radius: 8px;
+  width: 300px;
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 10px;
+}
+
+/* Mapping Screen table styles */
+.mapping-screen {
+  padding: 20px;
+  background-color: #f9f9f9;
+  border-radius: 8px;
+}
+
+.mapping-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 15px;
+}
+
+.mapping-table th,
+.mapping-table td {
+  border: 1px solid #ccc;
+  padding: 8px;
+  text-align: center;
+}
+
+.cell {
+  cursor: pointer;
+  height: 40px;
+}
+
+.tick-mark {
+  color: green;
+  font-size: 20px;
+}
+
+/* Visit label input styling */
+.visit-label-input {
+  width: 100%;
+  border: none;
+  background: transparent;
+  text-align: center;
+  font-size: 14px;
 }
 </style>
