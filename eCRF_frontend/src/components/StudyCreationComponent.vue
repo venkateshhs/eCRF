@@ -163,37 +163,39 @@
     <!-- Mapping Screen -->
     <div v-if="showMappingScreen" class="mapping-screen">
       <h2>Mapping Data Models to Visits</h2>
-      <table class="mapping-table">
-        <thead>
-          <tr>
-            <th>Data Model / Visit</th>
-            <th
-              v-for="(label, index) in visitLabels"
-              :key="index"
-            >
-              <!-- Editable visit label input -->
-              <input
-                type="text"
-                v-model="visitLabels[index]"
-                class="visit-label-input"
-              />
-            </th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="(dataModel, rowIndex) in dataModels" :key="dataModel">
-            <td>{{ dataModel }}</td>
-            <td
-              v-for="n in numberOfVisits"
-              :key="n"
-              class="cell"
-              @click="toggleMapping(rowIndex, n - 1)"
-            >
-              <span v-if="mappingSelection[rowIndex][n - 1]" class="tick-mark">✓</span>
-            </td>
-          </tr>
-        </tbody>
-      </table>
+      <!-- Container with fixed dimensions and scroll for both axes -->
+      <div class="table-container">
+        <table class="mapping-table">
+          <thead>
+            <tr>
+              <th>Data Model / Visit</th>
+              <th v-for="(label, index) in visitLabels" :key="index">
+                <!-- Editable visit label input -->
+                <input
+                  type="text"
+                  v-model="visitLabels[index]"
+                  class="visit-label-input"
+                />
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="(dataModel, rowIndex) in dataModels" :key="dataModel">
+              <td class="sticky-col">{{ dataModel }}</td>
+              <td
+                v-for="n in numberOfVisits"
+                :key="n"
+                class="cell"
+                @click="toggleMapping(rowIndex, n - 1)"
+              >
+                <span v-if="mappingSelection[rowIndex][n - 1]" class="tick-mark">
+                  ✓
+                </span>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
       <button @click="finalizeMapping" class="btn-option">Finalize</button>
     </div>
 
@@ -213,12 +215,14 @@
 
 <script>
 import { ref, onMounted } from "vue";
+import { useRouter } from "vue-router";
 import * as $rdf from "rdflib";
 
 export default {
   name: "StudyCreationComponent",
   setup() {
-    // States for study form
+    const router = useRouter();
+    // Study form states
     const studySchemaProperties = ref([]);
     const customStudy = ref({});
     const customFields = ref([]);
@@ -226,14 +230,13 @@ export default {
     const showCustomFieldEditor = ref(false);
     const showErrors = ref(false);
 
-    // States for visit dialog and mapping
+    // Visit dialog and mapping states
     const showVisitDialog = ref(false);
     const numberOfVisitsInput = ref(1);
     const numberOfVisits = ref(0);
     const showMappingScreen = ref(false);
     const dataModels = ref(["Data Model 1", "Data Model 2", "Data Model 3"]);
     const mappingSelection = ref([]);
-    // New array to hold visit labels that users can rename
     const visitLabels = ref([]);
 
     // RDF Namespaces and StudyShape IRI
@@ -258,7 +261,6 @@ export default {
       return elements;
     }
 
-    // Parse TTL file content into an RDF store.
     function parseTTL(ttlText) {
       return new Promise((resolve, reject) => {
         const store = $rdf.graph();
@@ -272,20 +274,16 @@ export default {
       });
     }
 
-    // Load the study schema from a TTL file.
     async function loadStudySchema() {
       try {
         console.log("Fetching TTL file from /study_schema.ttl");
         const response = await fetch("/study_schema.ttl");
         const ttlText = await response.text();
         console.log("TTL file loaded. Content:\n", ttlText);
-
         const store = await parseTTL(ttlText);
         console.log("RDF store created. Total triples:", store.length);
-
         const propertyNodes = store.each(studyShapeIRI, SH("property"));
         console.log("Found", propertyNodes.length, "property nodes for StudyShape.");
-
         const properties = [];
         propertyNodes.forEach((propNode, index) => {
           const pathTerm = store.any(propNode, SH("path"));
@@ -310,7 +308,6 @@ export default {
             }
           }
           let options = [];
-          // Process sh:in constraint
           const inConstraint = store.any(propNode, SH("in"));
           if (inConstraint) {
             const RDF = $rdf.Namespace("http://www.w3.org/1999/02/22-rdf-syntax-ns#");
@@ -333,7 +330,6 @@ export default {
       }
     }
 
-    // Initialize the customStudy object with empty values.
     function initializeCustomStudy() {
       console.log("Initializing customStudy object with extracted fields.");
       studySchemaProperties.value.forEach((prop) => {
@@ -352,7 +348,7 @@ export default {
       customFields.value.splice(index, 1);
     }
 
-    // When Proceed is clicked, validate required fields and show the visit dialog.
+    // Validate required fields and open the visit dialog.
     function validateAndProceed() {
       showErrors.value = true;
       const missingRequired = studySchemaProperties.value.some(
@@ -365,16 +361,15 @@ export default {
       showVisitDialog.value = true;
     }
 
-    // Modal dialog submission: validate number of visits, initialize mappings and visit labels.
     function submitNumberOfVisits() {
       if (numberOfVisitsInput.value < 1) return;
       numberOfVisits.value = numberOfVisitsInput.value;
-      // Initialize visit labels with default names that the user can later change.
+      // Initialize default visit labels (editable) e.g., "Visit 1", "Visit 2", etc.
       visitLabels.value = [];
       for (let i = 1; i <= numberOfVisits.value; i++) {
         visitLabels.value.push(`Visit ${i}`);
       }
-      // Initialize the mappingSelection 2D array for each data model (rows) and visit (columns).
+      // Initialize mapping selection 2D array for each data model (rows) and visit (columns)
       mappingSelection.value = dataModels.value.map(() => {
         return Array(numberOfVisits.value).fill(false);
       });
@@ -386,19 +381,16 @@ export default {
       showVisitDialog.value = false;
     }
 
-    // Toggle the selection status in the mapping table cell.
     function toggleMapping(rowIndex, colIndex) {
       mappingSelection.value[rowIndex][colIndex] = !mappingSelection.value[rowIndex][colIndex];
     }
 
-    // Finalize the mapping process (for now, simply log the selection mapping)
+    // Finalize mapping and navigate to the specified route.
     function finalizeMapping() {
       console.log("Mapping finalized:", mappingSelection.value);
-      // You may commit the mapping or navigate to another view as needed.
-      showMappingScreen.value = false;
+      router.push({ name: "CreateFormScratch" });
     }
 
-    // Reset the study form
     function resetForm() {
       studySchemaProperties.value.forEach((prop) => {
         customStudy.value[prop.field] = "";
@@ -413,7 +405,6 @@ export default {
     onMounted(loadStudySchema);
 
     return {
-      // Study form states and methods
       studySchemaProperties,
       customStudy,
       customFields,
@@ -424,7 +415,6 @@ export default {
       removeField,
       validateAndProceed,
       resetForm,
-      // Visit mapping states and methods
       showVisitDialog,
       numberOfVisitsInput,
       submitNumberOfVisits,
@@ -435,7 +425,6 @@ export default {
       mappingSelection,
       toggleMapping,
       finalizeMapping,
-      // Visit label state (for renaming visits)
       visitLabels,
     };
   },
@@ -443,12 +432,14 @@ export default {
 </script>
 
 <style scoped>
+/* Container styling */
 .study-creation-container {
   max-width: 1200px;
   margin: 0 auto;
   font-family: Arial, sans-serif;
 }
 
+/* Study form styling */
 .new-study-form {
   padding: 20px;
   background-color: #f9f9f9;
@@ -678,42 +669,80 @@ textarea {
   margin-top: 10px;
 }
 
-/* Mapping Screen table styles */
+/* Mapping Screen styles */
 .mapping-screen {
   padding: 20px;
   background-color: #f9f9f9;
   border-radius: 8px;
 }
 
-.mapping-table {
+/* Table container with fixed dimensions and scrollbars */
+.table-container {
+  max-height: 400px;
   width: 100%;
-  border-collapse: collapse;
+  overflow: auto;
+  border: 1px solid #ddd;
   margin-bottom: 15px;
 }
 
-.mapping-table th,
-.mapping-table td {
-  border: 1px solid #ccc;
-  padding: 8px;
-  text-align: center;
+/* Fixed layout for the table so each column has a set width */
+.mapping-table {
+  table-layout: fixed;
+  border-collapse: collapse;
+  /* Set overall min-width so columns do not shrink */
+  min-width: 100%;
 }
 
+/* Fixed width for each header and cell (except the first column) */
+.mapping-table th,
+.mapping-table td {
+  width: 150px;
+  min-width: 150px;
+  text-align: center;
+  white-space: nowrap;
+  border: 1px solid #ccc;
+  padding: 8px;
+}
+
+/* Make the first column sticky with a wider fixed width */
+.sticky-col {
+  position: sticky;
+  left: 0;
+  background: #fff;
+  z-index: 2;
+  width: 200px;
+  min-width: 200px;
+}
+
+/* Sticky header for visit labels */
+.mapping-table thead th {
+  position: sticky;
+  top: 0;
+  background: #fff;
+  z-index: 3;
+}
+
+/* Styling for table cells */
 .cell {
   cursor: pointer;
   height: 40px;
 }
 
+/* Green tick mark */
 .tick-mark {
   color: green;
   font-size: 20px;
 }
 
-/* Visit label input styling */
+/* Visit label input styling with fixed width */
 .visit-label-input {
-  width: 100%;
+  width: 140px;
+  min-width: 140px;
   border: none;
   background: transparent;
   text-align: center;
   font-size: 14px;
+  padding: 4px;
+  box-sizing: border-box;
 }
 </style>
