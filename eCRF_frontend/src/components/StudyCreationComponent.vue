@@ -2,58 +2,52 @@
   <div class="study-creation-container">
     <h1>Study Management</h1>
 
-    <!-- STEP 1: STUDY -->
+    <!-- STEP 1: Study -->
     <div v-if="step === 1" class="new-study-form">
       <h2>Step 1: Create a New Study</h2>
       <div
-        v-for="(field, idx) in studySchema"
-        :key="idx"
+        v-for="(f, i) in studySchema"
+        :key="i"
         class="schema-field-row"
       >
-        <label :for="field.field">
-          {{ field.label }}
-          <span v-if="field.required" class="required">*</span>
+        <label :for="f.field">
+          {{ f.label }}<span v-if="f.required" class="required">*</span>
         </label>
 
         <!-- textarea -->
-        <template v-if="field.type === 'textarea'">
-          <textarea
-            :id="field.field"
-            v-model="studyData[field.field]"
-            :placeholder="field.placeholder"
-          ></textarea>
-        </template>
+        <textarea
+          v-if="f.type==='textarea'"
+          :id="f.field"
+          v-model="studyData[f.field]"
+          :placeholder="f.placeholder"
+        />
 
         <!-- select -->
-        <template v-else-if="field.type === 'select'">
-          <select
-            :id="field.field"
-            v-model="studyData[field.field]"
-          >
-            <option value="">{{ field.placeholder }}</option>
-            <option
-              v-for="opt in field.options"
-              :key="opt"
-              :value="opt"
-            >{{ opt }}</option>
-          </select>
-        </template>
+        <select
+          v-else-if="f.type==='select'"
+          :id="f.field"
+          v-model="studyData[f.field]"
+        >
+          <option value="">{{ f.placeholder }}</option>
+          <option v-for="opt in f.options" :key="opt" :value="opt">
+            {{ opt }}
+          </option>
+        </select>
 
-        <!-- date or number or text -->
-        <template v-else>
-          <input
-            :type="field.type"
-            :id="field.field"
-            v-model="studyData[field.field]"
-            :placeholder="field.placeholder"
-          />
-        </template>
+        <!-- date/number/text -->
+        <input
+          v-else
+          :type="f.type"
+          :id="f.field"
+          v-model="studyData[f.field]"
+          :placeholder="f.placeholder"
+        />
 
         <small
-          v-if="showStudyErrors && field.required && !studyData[field.field]"
+          v-if="showStudyErrors && f.required && !studyData[f.field]"
           class="error-text"
         >
-          {{ field.placeholder }} is required.
+          {{ f.placeholder }} is required.
         </small>
       </div>
 
@@ -64,14 +58,13 @@
       </div>
     </div>
 
-    <!-- STEP 2: VISITS -->
+    <!-- STEP 2: Visits -->
     <div v-if="step === 2" class="new-study-form">
       <h2>Step 2: Define Visits</h2>
 
       <div class="schema-field-row">
         <label for="numVisits">
-          Number of Visits
-          <span class="required">*</span>
+          Number of Visits<span class="required">*</span>
         </label>
         <input
           id="numVisits"
@@ -81,59 +74,63 @@
         />
       </div>
 
-      <div
-        v-for="(visit, vi) in visitData"
-        :key="vi"
-        class="visit-block"
-      >
-        <h3>Visit {{ vi + 1 }}</h3>
-        <div
-          v-for="(field, fi) in visitSchema"
-          :key="fi"
-          class="schema-field-row"
-        >
-          <label :for="`visit-${vi}-${field.field}`">
-            {{ field.label }}
-            <span v-if="field.required" class="required">*</span>
-          </label>
+      <!-- only show nav + form if we have a valid array entry -->
+      <div v-if="visitData[visitIndex]">
+        <div class="navigation">
+          <button @click="prevVisit" :disabled="visitIndex === 0">←</button>
+          <span>{{ visitIndex + 1 }} / {{ numberOfVisits }}</span>
+          <button
+            @click="nextVisit"
+            :disabled="visitIndex === numberOfVisits - 1"
+          >→</button>
+        </div>
 
-          <template v-if="field.type === 'textarea'">
-            <textarea
-              :id="`visit-${vi}-${field.field}`"
-              v-model="visit[field.field]"
-              :placeholder="field.placeholder"
-            ></textarea>
-          </template>
-
-          <template v-else-if="field.type === 'select'">
-            <select
-              :id="`visit-${vi}-${field.field}`"
-              v-model="visit[field.field]"
-            >
-              <option value="">{{ field.placeholder }}</option>
-              <option
-                v-for="opt in field.options"
-                :key="opt"
-                :value="opt"
-              >{{ opt }}</option>
-            </select>
-          </template>
-
-          <template v-else>
-            <input
-              :type="field.type"
-              :id="`visit-${vi}-${field.field}`"
-              v-model="visit[field.field]"
-              :placeholder="field.placeholder"
-            />
-          </template>
-
-          <small
-            v-if="showVisitErrors && field.required && !visit[field.field]"
-            class="error-text"
+        <div class="visit-block">
+          <h3>Visit {{ visitIndex + 1 }}</h3>
+          <div
+            v-for="(f, j) in visitSchema"
+            :key="j"
+            class="schema-field-row"
           >
-            {{ field.placeholder }} is required.
-          </small>
+            <label :for="`visit-${visitIndex}-${f.field}`">
+              {{ f.label }}<span v-if="f.required" class="required">*</span>
+            </label>
+
+            <textarea
+              v-if="f.type==='textarea'"
+              :id="`visit-${visitIndex}-${f.field}`"
+              v-model="visitData[visitIndex][f.field]"
+              :placeholder="f.placeholder"
+            />
+
+            <select
+              v-else-if="f.type==='select'"
+              :id="`visit-${visitIndex}-${f.field}`"
+              v-model="visitData[visitIndex][f.field]"
+            >
+              <option value="">{{ f.placeholder }}</option>
+              <option v-for="opt in f.options" :key="opt" :value="opt">
+                {{ opt }}
+              </option>
+            </select>
+
+            <input
+              v-else
+              :type="f.type"
+              :id="`visit-${visitIndex}-${f.field}`"
+              v-model="visitData[visitIndex][f.field]"
+              :placeholder="f.placeholder"
+            />
+
+            <small
+              v-if="showVisitErrors
+                && f.required
+                && !visitData[visitIndex][f.field]"
+              class="error-text"
+            >
+              {{ f.placeholder }} is required.
+            </small>
+          </div>
         </div>
       </div>
 
@@ -145,14 +142,13 @@
       </div>
     </div>
 
-    <!-- STEP 3: GROUPS -->
+    <!-- STEP 3: Groups -->
     <div v-if="step === 3" class="new-study-form">
       <h2>Step 3: Define Groups/Cohorts</h2>
 
       <div class="schema-field-row">
         <label for="numGroups">
-          Number of Groups
-          <span class="required">*</span>
+          Number of Groups<span class="required">*</span>
         </label>
         <input
           id="numGroups"
@@ -162,59 +158,62 @@
         />
       </div>
 
-      <div
-        v-for="(group, gi) in groupData"
-        :key="gi"
-        class="visit-block"
-      >
-        <h3>Group {{ gi + 1 }}</h3>
-        <div
-          v-for="(field, fi) in groupSchema"
-          :key="fi"
-          class="schema-field-row"
-        >
-          <label :for="`group-${gi}-${field.field}`">
-            {{ field.label }}
-            <span v-if="field.required" class="required">*</span>
-          </label>
+      <div v-if="groupData[groupIndex]">
+        <div class="navigation">
+          <button @click="prevGroup" :disabled="groupIndex === 0">←</button>
+          <span>{{ groupIndex + 1 }} / {{ numberOfGroups }}</span>
+          <button
+            @click="nextGroup"
+            :disabled="groupIndex === numberOfGroups - 1"
+          >→</button>
+        </div>
 
-          <template v-if="field.type === 'textarea'">
-            <textarea
-              :id="`group-${gi}-${field.field}`"
-              v-model="group[field.field]"
-              :placeholder="field.placeholder"
-            ></textarea>
-          </template>
-
-          <template v-else-if="field.type === 'select'">
-            <select
-              :id="`group-${gi}-${field.field}`"
-              v-model="group[field.field]"
-            >
-              <option value="">{{ field.placeholder }}</option>
-              <option
-                v-for="opt in field.options"
-                :key="opt"
-                :value="opt"
-              >{{ opt }}</option>
-            </select>
-          </template>
-
-          <template v-else>
-            <input
-              :type="field.type"
-              :id="`group-${gi}-${field.field}`"
-              v-model="group[field.field]"
-              :placeholder="field.placeholder"
-            />
-          </template>
-
-          <small
-            v-if="showGroupErrors && field.required && !group[field.field]"
-            class="error-text"
+        <div class="visit-block">
+          <h3>Group {{ groupIndex + 1 }}</h3>
+          <div
+            v-for="(f, k) in groupSchema"
+            :key="k"
+            class="schema-field-row"
           >
-            {{ field.placeholder }} is required.
-          </small>
+            <label :for="`group-${groupIndex}-${f.field}`">
+              {{ f.label }}<span v-if="f.required" class="required">*</span>
+            </label>
+
+            <textarea
+              v-if="f.type==='textarea'"
+              :id="`group-${groupIndex}-${f.field}`"
+              v-model="groupData[groupIndex][f.field]"
+              :placeholder="f.placeholder"
+            />
+
+            <select
+              v-else-if="f.type==='select'"
+              :id="`group-${groupIndex}-${f.field}`"
+              v-model="groupData[groupIndex][f.field]"
+            >
+              <option value="">{{ f.placeholder }}</option>
+              <option v-for="opt in f.options" :key="opt" :value="opt">
+                {{ opt }}
+              </option>
+            </select>
+
+            <input
+              v-else
+              :type="f.type"
+              :id="`group-${groupIndex}-${f.field}`"
+              v-model="groupData[groupIndex][f.field]"
+              :placeholder="f.placeholder"
+            />
+
+            <small
+              v-if="showGroupErrors
+                && f.required
+                && !groupData[groupIndex][f.field]"
+              class="error-text"
+            >
+              {{ f.placeholder }} is required.
+            </small>
+          </div>
         </div>
       </div>
 
@@ -237,103 +236,126 @@ export default {
     const router = useRouter();
     const step = ref(1);
 
-    // schema definitions
+    // schemas
     const studySchema = ref([]);
     const visitSchema = ref([]);
     const groupSchema = ref([]);
 
-    // form data
+    // data
     const studyData = ref({});
     const numberOfVisits = ref(1);
     const visitData = ref([]);
+    const visitIndex = ref(0);
+
     const numberOfGroups = ref(1);
     const groupData = ref([]);
+    const groupIndex = ref(0);
 
-    // error flags
+    // errors
     const showStudyErrors = ref(false);
     const showVisitErrors = ref(false);
     const showGroupErrors = ref(false);
 
-    // load a single-class YAML into schemaRef
+    // load YAML into schemaRef
     async function loadYaml(path, schemaRef) {
       const res = await fetch(path);
       const doc = yaml.load(await res.text());
       const cls = Object.keys(doc.classes)[0];
       const attrs = doc.classes[cls].attributes;
-      schemaRef.value = Object.entries(attrs).map(([name, def]) => {
+      schemaRef.value = Object.entries(attrs).map(([n, d]) => {
         let type = "text";
-        const r = (def.range || "").toLowerCase();
+        const r = (d.range || "").toLowerCase();
         if (r === "date" || r === "datetime") type = "date";
         if (r === "integer" || r === "decimal") type = "number";
-        if (def.enum) type = "select";
+        if (d.enum) type = "select";
         return {
-          field: name,
-          label: name,
-          placeholder: def.description || name,
+          field: n,
+          label: n,
+          placeholder: d.description || n,
           type,
-          required: !!def.required,
-          options: def.enum || [],
+          required: !!d.required,
+          options: d.enum || [],
         };
       });
     }
 
-    // whenever numberOfVisits changes, reinitialize visitData
-    watch(
-      numberOfVisits,
-      (n) => {
+    // init studyData after schema loads
+    watch(studySchema, (s) => {
+      s.forEach((f) => (studyData.value[f.field] = ""));
+    });
+
+    // init visitData when count or schema changes—and only if count >= 1
+    watch([numberOfVisits, visitSchema], ([n]) => {
+      if (n >= 1 && visitSchema.value.length) {
+        visitIndex.value = 0;
         visitData.value = Array.from({ length: n }, () => {
-          const obj = {};
-          visitSchema.value.forEach((f) => (obj[f.field] = ""));
-          return obj;
+          const o = {};
+          visitSchema.value.forEach((f) => (o[f.field] = ""));
+          return o;
         });
-      },
-      { immediate: true }
-    );
+      } else {
+        visitData.value = [];
+      }
+    }, { immediate: true });
 
-    // whenever numberOfGroups changes, reinitialize groupData
-    watch(
-      numberOfGroups,
-      (n) => {
+    // init groupData when count or schema changes—and only if count >= 1
+    watch([numberOfGroups, groupSchema], ([n]) => {
+      if (n >= 1 && groupSchema.value.length) {
+        groupIndex.value = 0;
         groupData.value = Array.from({ length: n }, () => {
-          const obj = {};
-          groupSchema.value.forEach((f) => (obj[f.field] = ""));
-          return obj;
+          const o = {};
+          groupSchema.value.forEach((f) => (o[f.field] = ""));
+          return o;
         });
-      },
-      { immediate: true }
-    );
+      } else {
+        groupData.value = [];
+      }
+    }, { immediate: true });
 
+    // validation/navigation
     function validateStudy() {
       showStudyErrors.value = true;
-      const missing = studySchema.value.some(
-        (f) => f.required && !studyData.value[f.field]
-      );
-      if (!missing) {
+      if (!studySchema.value.some(f => f.required && !studyData.value[f.field])) {
         showStudyErrors.value = false;
         step.value = 2;
       }
     }
 
+    function prevVisit() {
+      if (visitIndex.value > 0) visitIndex.value--;
+    }
+    function nextVisit() {
+      if (visitIndex.value < numberOfVisits.value - 1) visitIndex.value++;
+    }
     function validateVisits() {
       showVisitErrors.value = true;
-      const missing = visitData.value.some((visit) =>
-        visitSchema.value.some((f) => f.required && !visit[f.field])
-      );
-      if (!missing) {
+      if (!visitData.value.some(v =>
+        visitSchema.value.some(f => f.required && !v[f.field])
+      )) {
         showVisitErrors.value = false;
         step.value = 3;
       }
     }
 
+    function prevGroup() {
+      if (groupIndex.value > 0) groupIndex.value--;
+    }
+    function nextGroup() {
+      if (groupIndex.value < numberOfGroups.value - 1) groupIndex.value++;
+    }
     function validateGroups() {
       showGroupErrors.value = true;
-      const missing = groupData.value.some((grp) =>
-        groupSchema.value.some((f) => f.required && !grp[f.field])
-      );
-      if (!missing) {
+      if (!groupData.value.some(g =>
+        groupSchema.value.some(f => f.required && !g[f.field])
+      )) {
         showGroupErrors.value = false;
-        // here you can assemble your payload:
-        // { study: studyData.value, visits: visitData.value, groups: groupData.value }
+        // final payload:
+        const payload = {
+          study: studyData.value,
+          visits: visitData.value,
+          groups: groupData.value,
+        };
+        console.log("Final payload:", payload);
         router.push({ name: "CreateFormScratch" });
       }
     }
@@ -342,28 +364,31 @@ export default {
       await loadYaml("/study_schema.yaml", studySchema);
       await loadYaml("/visit_schema.yaml", visitSchema);
       await loadYaml("/group_schema.yaml", groupSchema);
-
-      // init studyData keys
-      studySchema.value.forEach((f) => {
-        studyData.value[f.field] = "";
-      });
     });
 
     return {
       step,
       studySchema,
       studyData,
-      visitSchema,
-      numberOfVisits,
-      visitData,
-      groupSchema,
-      numberOfGroups,
-      groupData,
       showStudyErrors,
-      showVisitErrors,
-      showGroupErrors,
       validateStudy,
+
+      numberOfVisits,
+      visitSchema,
+      visitData,
+      visitIndex,
+      showVisitErrors,
+      prevVisit,
+      nextVisit,
       validateVisits,
+
+      numberOfGroups,
+      groupSchema,
+      groupData,
+      groupIndex,
+      showGroupErrors,
+      prevGroup,
+      nextGroup,
       validateGroups,
     };
   },
@@ -384,6 +409,16 @@ export default {
 }
 .schema-field-row {
   margin-bottom: 1rem;
+}
+.navigation {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 1rem;
+  margin: 1rem 0;
+}
+.navigation button {
+  padding: 6px 12px;
 }
 .visit-block {
   padding: 10px 0;
@@ -416,14 +451,13 @@ select {
   margin-top: 1.5rem;
   display: flex;
   gap: 10px;
+  justify-content: flex-end;
 }
 .btn-option {
-  flex: 1;
-  padding: 10px;
+  padding: 10px 20px;
   background: #eee;
   border: 1px solid #ccc;
   border-radius: 4px;
   cursor: pointer;
-  text-align: center;
 }
 </style>

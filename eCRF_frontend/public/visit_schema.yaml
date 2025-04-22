@@ -8,7 +8,7 @@ classes:
       name:
         range: string
         description: Visit name (e.g. Baseline)
-        required: true
+        required: false
       scheduledDate:
         range: date
         description: Scheduled calendar date
