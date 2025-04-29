@@ -30,10 +30,7 @@ classes:
         range: anyURI
         required: false
         description: "Persistent identifier (PID) for the study."
-      identifiers:
-        range: string
-        multivalued: true
-        description: "Optional additional identifiers for the study."
+
       title:
         range: string
         description: "Title of the study."
@@ -77,17 +74,10 @@ classes:
       endedAtTime:
         range: dateTime
         description: "End date/time of the study."
-      keyword:
-        range: string
-        multivalued: true
-        description: "Keywords associated with the study."
-      spatial:
+      Location:
         range: string
         description: "Geographic or site locations relevant to the study."
-      participants:
-        range: Participant
-        multivalued: true
-        description: "References to participant entities in the study."
+
 
   Participant:
     description: "A participant (subject) in a study with a persistent identifier and optional metadata."
@@ -177,6 +167,10 @@ classes:
         minimum: 0
         maximum: 150
         description: "Age of the person in years."
+      ethnicity:
+        range: string
+        description: "the quality or fact of belonging to a population group or subgroup made up of people who share a common cultural background or descent"
+
 
   ContactInfo:
     description: "Contact information for a person."
@@ -211,7 +205,7 @@ classes:
       country:
         range: string
         pattern: "^[A-Z]{2}$"
-        description: "Country code (ISO 3166-1 alpha-2)."
+        description: "Country code."
 
   MedicalMeasurements:
     description: "Physical measurements of a person."

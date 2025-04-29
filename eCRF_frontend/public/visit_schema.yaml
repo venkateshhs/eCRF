@@ -1,19 +1,12 @@
 classes:
   Visit:
     attributes:
-      id:
-        range: string
-        description: unique identifier
-        required: false
       name:
         range: string
         description: Visit name (e.g. Baseline)
-        required: false
+        required: true
       scheduledDate:
         range: date
         description: Scheduled calendar date
         required: false
-      windowDays:
-        range: integer
-        description: +/- window in days
-        required: false
+

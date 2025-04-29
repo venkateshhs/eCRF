@@ -74,7 +74,6 @@
         />
       </div>
 
-      <!-- only show nav + form if we have a valid array entry -->
       <div v-if="visitData[visitIndex]">
         <div class="navigation">
           <button @click="prevVisit" :disabled="visitIndex === 0">←</button>
@@ -228,12 +227,14 @@
 <script>
 import { ref, watch, onMounted } from "vue";
 import { useRouter } from "vue-router";
+import { useStore } from "vuex";
 import yaml from "js-yaml";
 
 export default {
   name: "StudyCreationComponent",
   setup() {
     const router = useRouter();
+    const store = useStore();
     const step = ref(1);
 
     // schemas
@@ -349,13 +350,20 @@ export default {
         groupSchema.value.some(f => f.required && !g[f.field])
       )) {
         showGroupErrors.value = false;
-        // final payload:
+
+        // assemble payload
         const payload = {
-          study: studyData.value,
-          visits: visitData.value,
-          groups: groupData.value,
+          study:   studyData.value,
+          visits:  visitData.value,
+          groups:  groupData.value
         };
-        console.log("Final payload:", payload);
+
+        // persist to Vuex so ScratchFormComponent can read it
+        store.commit("setStudyDetails", payload);
+        console.log("Final payload stored in Vuex:", payload);
+        console.log("Final payload JSON:", JSON.stringify(payload, null, 2));
+
+        // navigate to ScratchFormComponent
         router.push({ name: "CreateFormScratch" });
       }
     }
@@ -417,47 +425,23 @@ export default {
   gap: 1rem;
   margin: 1rem 0;
 }
-.navigation button {
-  padding: 6px 12px;
-}
 .visit-block {
   padding: 10px 0;
   border-top: 1px solid #ddd;
 }
-label {
-  display: block;
-  font-weight: bold;
-}
-.required {
-  color: red;
-  margin-left: 4px;
-}
-input,
-textarea,
-select {
-  width: 100%;
-  padding: 8px;
-  margin-top: 4px;
-  border: 1px solid #ccc;
-  border-radius: 4px;
+label { display: block; font-weight: bold; }
+.required { color: red; margin-left: 4px; }
+input, textarea, select {
+  width: 100%; padding: 8px; margin-top: 4px;
+  border: 1px solid #ccc; border-radius: 4px;
   box-sizing: border-box;
 }
-.error-text {
-  color: red;
-  font-size: 0.85rem;
-  margin-top: 2px;
-}
+.error-text { color: red; font-size: 0.85rem; margin-top: 2px; }
 .form-actions {
-  margin-top: 1.5rem;
-  display: flex;
-  gap: 10px;
-  justify-content: flex-end;
+  margin-top: 1.5rem; display: flex; gap: 10px; justify-content: flex-end;
 }
 .btn-option {
-  padding: 10px 20px;
-  background: #eee;
-  border: 1px solid #ccc;
-  border-radius: 4px;
-  cursor: pointer;
+  padding: 10px 20px; background: #eee; border: 1px solid #ccc;
+  border-radius: 4px; cursor: pointer;
 }
 </style>

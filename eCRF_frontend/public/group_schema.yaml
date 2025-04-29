@@ -1,14 +1,10 @@
 classes:
   Group:
     attributes:
-      id:
-        range: string
-        description: unique identifier
-        required: false
       name:
         range: string
         description: Cohort name
-        required: false
+        required: true
       description:
         range: string
         description: Cohort description
