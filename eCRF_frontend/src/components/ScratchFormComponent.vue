@@ -64,191 +64,208 @@
 
       <!-- Form Area -->
       <div class="form-area">
-        <!-- Sections -->
-        <div
-          v-for="(section, si) in currentForm.sections"
-          :key="si"
-          class="form-section"
-          :class="{ active: activeSection === si }"
-          @click.self="setActiveSection(si)"
-          tabindex="0"
-        >
-          <div class="section-header">
-            <h3>{{ section.title }}</h3>
-            <div class="field-actions">
-              <button
-                class="icon-button"
-                title="Edit Section Title"
-                @click.prevent="openInputDialog(
-                  'Enter a new title for this section:',
-                  section.title,
-                  val => editSection(si, val)
-                )"
-              ><i :class="icons.edit"></i></button>
-              <button
-                class="icon-button"
-                title="Add New Section Below"
-                @click.prevent="addNewSectionBelow(si)"
-              ><i :class="icons.add"></i></button>
-              <button
-                class="icon-button"
-                title="Delete Section"
-                @click.prevent="confirmDeleteSection(si)"
-              ><i :class="icons.delete"></i></button>
-              <button
-                class="icon-button"
-                :title="section.collapsed ? 'Expand Section' : 'Collapse Section'"
-                @click.prevent="toggleSection(si)"
-              ><i :class="section.collapsed ? icons.toggleDown : icons.toggleUp"></i></button>
-            </div>
-          </div>
-
-          <div v-if="!section.collapsed" class="section-content">
+        <div class="sections-container">
+          <!-- Sections or Protocol Matrix -->
+          <div v-if="!showMatrix">
+            <!-- Sections -->
             <div
-              v-for="(field, fi) in section.fields"
-              :key="fi"
-              class="form-group"
+              v-for="(section, si) in currentForm.sections"
+              :key="si"
+              class="form-section"
+              :class="{ active: activeSection === si }"
+              @click.self="setActiveSection(si)"
+              tabindex="0"
             >
-              <div class="field-header">
-                <label v-if="field.type !== 'button'" :for="field.name">
-                  {{ field.label }}
-                </label>
+              <div class="section-header">
+                <h3>{{ section.title }}</h3>
                 <div class="field-actions">
                   <button
                     class="icon-button"
-                    title="Edit Field Label"
+                    title="Edit Section Title"
                     @click.prevent="openInputDialog(
-                      'Enter new label for the field:',
-                      field.label,
-                      val => editField(si, fi, val)
+                      'Enter a new title for this section:',
+                      section.title,
+                      val => editSection(si, val)
                     )"
                   ><i :class="icons.edit"></i></button>
                   <button
                     class="icon-button"
-                    title="Add Similar Field"
-                    @click.prevent="addSimilarField(si, fi)"
+                    title="Add New Section Below"
+                    @click.prevent="addNewSectionBelow(si)"
                   ><i :class="icons.add"></i></button>
                   <button
                     class="icon-button"
-                    title="Delete Field"
-                    @click.prevent="removeField(si, fi)"
+                    title="Delete Section"
+                    @click.prevent="confirmDeleteSection(si)"
                   ><i :class="icons.delete"></i></button>
                   <button
                     class="icon-button"
-                    title="Edit Field Constraints"
-                    @click.prevent="openConstraintsDialog(si, fi)"
-                  ><i :class="icons.cog"></i></button>
+                    :title="section.collapsed ? 'Expand Section' : 'Collapse Section'"
+                    @click.prevent="toggleSection(si)"
+                  ><i :class="section.collapsed ? icons.toggleDown : icons.toggleUp"></i></button>
                 </div>
               </div>
-              <div class="field-box">
-                <input
-                  v-if="field.type === 'text'"
-                  type="text"
-                  :id="field.name"
-                  v-model="field.value"
-                  :placeholder="field.constraints?.placeholder || field.placeholder"
-                  :required="field.constraints?.required"
-                  :readonly="field.constraints?.readonly"
-                  :minlength="field.constraints?.minLength"
-                  :maxlength="field.constraints?.maxLength"
-                  :pattern="field.constraints?.pattern"
-                />
-                <textarea
-                  v-else-if="field.type === 'textarea'"
-                  :id="field.name"
-                  v-model="field.value"
-                  :placeholder="field.constraints?.placeholder || field.placeholder"
-                  :required="field.constraints?.required"
-                  :readonly="field.constraints?.readonly"
-                  :minlength="field.constraints?.minLength"
-                  :maxlength="field.constraints?.maxLength"
-                  :pattern="field.constraints?.pattern"
-                  :rows="field.rows"
-                ></textarea>
-                <input
-                  v-else-if="field.type === 'number'"
-                  type="number"
-                  :id="field.name"
-                  v-model="field.value"
-                  :placeholder="field.constraints?.placeholder || field.placeholder"
-                  :required="field.constraints?.required"
-                  :readonly="field.constraints?.readonly"
-                  :min="field.constraints?.min"
-                  :max="field.constraints?.max"
-                  :step="field.constraints?.step"
-                />
-                <input
-                  v-else-if="field.type === 'date'"
-                  type="date"
-                  :id="field.name"
-                  v-model="field.value"
-                  :placeholder="field.constraints?.placeholder || field.placeholder"
-                  :required="field.constraints?.required"
-                  :readonly="field.constraints?.readonly"
-                  :min="field.constraints?.minDate"
-                  :max="field.constraints?.maxDate"
-                />
-                <select
-                  v-else-if="field.type === 'select'"
-                  :id="field.name"
-                  v-model="field.value"
-                  :required="field.constraints?.required"
-                >
-                  <option
-                    v-for="opt in field.options"
-                    :key="opt"
-                    :value="opt"
-                  >{{ opt }}</option>
-                </select>
+
+              <div v-if="!section.collapsed" class="section-content">
                 <div
-                  v-else-if="field.type === 'checkbox'"
-                  class="checkbox-group"
+                  v-for="(field, fi) in section.fields"
+                  :key="fi"
+                  class="form-group"
                 >
-                  <label v-for="(opt, i) in field.options" :key="i">
+                  <div class="field-header">
+                    <label v-if="field.type !== 'button'" :for="field.name">
+                      {{ field.label }}
+                    </label>
+                    <div class="field-actions">
+                      <button
+                        class="icon-button"
+                        title="Edit Field Label"
+                        @click.prevent="openInputDialog(
+                          'Enter new label for the field:',
+                          field.label,
+                          val => editField(si, fi, val)
+                        )"
+                      ><i :class="icons.edit"></i></button>
+                      <button
+                        class="icon-button"
+                        title="Add Similar Field"
+                        @click.prevent="addSimilarField(si, fi)"
+                      ><i :class="icons.add"></i></button>
+                      <button
+                        class="icon-button"
+                        title="Delete Field"
+                        @click.prevent="removeField(si, fi)"
+                      ><i :class="icons.delete"></i></button>
+                      <button
+                        class="icon-button"
+                        title="Edit Field Constraints"
+                        @click.prevent="openConstraintsDialog(si, fi)"
+                      ><i :class="icons.cog"></i></button>
+                    </div>
+                  </div>
+                  <div class="field-box">
                     <input
-                      type="checkbox"
+                      v-if="field.type === 'text'"
+                      type="text"
+                      :id="field.name"
                       v-model="field.value"
-                      :value="opt"
+                      :placeholder="field.constraints?.placeholder || field.placeholder"
                       :required="field.constraints?.required"
                       :readonly="field.constraints?.readonly"
-                    /> {{ opt }}
-                  </label>
-                </div>
-                <div
-                  v-else-if="field.type === 'radio'"
-                  class="radio-group"
-                >
-                  <label v-for="opt in field.options" :key="opt">
-                    <input
-                      type="radio"
-                      :name="field.name"
+                      :minlength="field.constraints?.minLength"
+                      :maxlength="field.constraints?.maxLength"
+                      :pattern="field.constraints?.pattern"
+                    />
+                    <textarea
+                      v-else-if="field.type === 'textarea'"
+                      :id="field.name"
                       v-model="field.value"
-                      :value="opt"
+                      :placeholder="field.constraints?.placeholder || field.placeholder"
                       :required="field.constraints?.required"
-                    /> {{ opt }}
-                  </label>
+                      :readonly="field.constraints?.readonly"
+                      :minlength="field.constraints?.minLength"
+                      :maxlength="field.constraints?.maxLength"
+                      :pattern="field.constraints?.pattern"
+                      :rows="field.rows"
+                    ></textarea>
+                    <input
+                      v-else-if="field.type === 'number'"
+                      type="number"
+                      :id="field.name"
+                      v-model="field.value"
+                      :placeholder="field.constraints?.placeholder || field.placeholder"
+                      :required="field.constraints?.required"
+                      :readonly="field.constraints?.readonly"
+                      :min="field.constraints?.min"
+                      :max="field.constraints?.max"
+                      :step="field.constraints?.step"
+                    />
+                    <input
+                      v-else-if="field.type === 'date'"
+                      type="date"
+                      :id="field.name"
+                      v-model="field.value"
+                      :placeholder="field.constraints?.placeholder || field.placeholder"
+                      :required="field.constraints?.required"
+                      :readonly="field.constraints?.readonly"
+                      :min="field.constraints?.minDate"
+                      :max="field.constraints?.maxDate"
+                    />
+                    <select
+                      v-else-if="field.type === 'select'"
+                      :id="field.name"
+                      v-model="field.value"
+                      :required="field.constraints?.required"
+                    >
+                      <option
+                        v-for="opt in field.options"
+                        :key="opt"
+                        :value="opt"
+                      >{{ opt }}</option>
+                    </select>
+                    <div
+                      v-else-if="field.type === 'checkbox'"
+                      class="checkbox-group"
+                    >
+                      <label v-for="(opt, i) in field.options" :key="i">
+                        <input
+                          type="checkbox"
+                          v-model="field.value"
+                          :value="opt"
+                          :required="field.constraints?.required"
+                          :readonly="field.constraints?.readonly"
+                        /> {{ opt }}
+                      </label>
+                    </div>
+                    <div
+                      v-else-if="field.type === 'radio'"
+                      class="radio-group"
+                    >
+                      <label v-for="opt in field.options" :key="opt">
+                        <input
+                          type="radio"
+                          :name="field.name"
+                          v-model="field.value"
+                          :value="opt"
+                          :required="field.constraints?.required"
+                        /> {{ opt }}
+                      </label>
+                    </div>
+                    <button
+                      v-else-if="field.type === 'button'"
+                      type="button"
+                      class="form-button"
+                    >
+                      {{ field.label }}
+                    </button>
+                    <small
+                      v-if="field.constraints?.helpText"
+                      class="help-text"
+                    >{{ field.constraints.helpText }}</small>
+                  </div>
                 </div>
-                <button
-                  v-else-if="field.type === 'button'"
-                  type="button"
-                  class="form-button"
-                >
-                  {{ field.label }}
-                </button>
-                <small
-                  v-if="field.constraints?.helpText"
-                  class="help-text"
-                >{{ field.constraints.helpText }}</small>
               </div>
+            </div>
+          </div>
+
+          <!-- Protocol Matrix -->
+          <div v-else>
+            <ProtocolMatrix
+              :visits="visits"
+              :groups="groups"
+              :selectedModels="selectedModels"
+              :assignments="assignments"
+              @assignment-updated="onAssignmentUpdated"
+            />
+            <div class="matrix-actions">
+              <button @click="editTemplate" class="btn-option">Edit Template</button>
+              <button @click="saveMatrix" class="btn-primary">Save</button>
             </div>
           </div>
         </div>
 
         <!-- Form Actions -->
-        <div class="form-actions">
-          <button @click.prevent="handleProtocolClick" class="btn-option">
-            {{ showMatrix ? 'Hide Protocol Matrix' : 'Show Protocol Matrix' }}
-          </button>
+        <div class="form-actions" v-show="!showMatrix">
           <button @click.prevent="addNewSection" class="btn-option">
             + Add Section
           </button>
@@ -270,57 +287,12 @@
           <button @click="openPreviewDialog" class="btn-option">
             Preview Template
           </button>
-        </div>
-
-        <!-- Protocol Assignment Matrix -->
-        <div v-if="showMatrix" class="protocol-matrix">
-          <h3>Protocol Assignment</h3>
-          <table class="protocol-table">
-            <thead>
-              <tr>
-                <th>Data Model</th>
-                <th
-                  v-for="(visit, vIdx) in visits"
-                  :key="'visit-header-'+vIdx"
-                  :colspan="groups.length"
-                >
-                  {{ visit.name }}
-                </th>
-              </tr>
-              <tr>
-                <th></th>
-                <template v-for="(visit, vIdx) in visits">
-                  <th
-                    v-for="(group, gIdx) in groups"
-                    :key="'group-header-'+vIdx+'-'+gIdx"
-                  >
-                    {{ group.name }}
-                  </th>
-                </template>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="(model, mIdx) in selectedModels" :key="model.title">
-                <td>{{ model.title }}</td>
-                <template v-for="(visit, vIdx) in visits">
-                  <td
-                    v-for="(group, gIdx) in groups"
-                    :key="'cell-'+mIdx+'-'+vIdx+'-'+gIdx"
-                  >
-                    <input
-                      type="checkbox"
-                      v-model="assignments[mIdx][vIdx][gIdx]"
-                    />
-                  </td>
-                </template>
-              </tr>
-            </tbody>
-          </table>
-          <div class="modal-actions">
-            <button @click="saveProtocol" class="btn-primary">
-              Save Protocol
-            </button>
-          </div>
+          <button
+            @click.prevent="handleProtocolClick"
+            class="btn-option protocol-btn"
+          >
+            Protocol Matrix
+          </button>
         </div>
       </div>
     </div>
@@ -453,6 +425,7 @@ import icons from "@/assets/styles/icons";
 import ShaclComponents from "./ShaclComponents.vue";
 import FieldConstraintsDialog from "./FieldConstraintsDialog.vue";
 import FormPreview from "./FormPreview.vue";
+import ProtocolMatrix from "./ProtocolMatrix.vue";
 
 export default {
   name: "ScratchFormComponent",
@@ -460,6 +433,7 @@ export default {
     ShaclComponents,
     FieldConstraintsDialog,
     FormPreview,
+    ProtocolMatrix
   },
   data() {
     return {
@@ -511,9 +485,8 @@ export default {
     token() { return this.$store.state.token; },
     currentForm() { return this.forms[this.currentFormIndex] || { sections: [] }; },
     selectedModels() {
-      return this.dataModels.filter(m =>
-        this.currentForm.sections.some(sec => sec.title === m.title)
-      );
+      // include every section as a "model" in the matrix
+      return this.currentForm.sections.map(sec => ({ title: sec.title }));
     }
   },
   watch: {
@@ -526,19 +499,14 @@ export default {
     const details = this.$store.state.studyDetails || {};
     this.studyDetails = details;
 
-    // 2) DEFAULTS FOR PROTOCOL MATRIX
-    if (Array.isArray(details.visits) && details.visits.length) {
-      this.visits = details.visits;
-    } else {
-      this.visits = [{ name: "Visit 1" }];
-    }
-    if (Array.isArray(details.groups) && details.groups.length) {
-      this.groups = details.groups;
-    } else {
-      this.groups = [{ name: "Group 1" }];
-    }
+    // visits/groups defaults
+    this.visits = Array.isArray(details.visits) && details.visits.length
+      ? details.visits
+      : [{ name: "Visit 1" }];
+    this.groups = Array.isArray(details.groups) && details.groups.length
+      ? details.groups
+      : [{ name: "Group 1" }];
 
-    // 1) NO DEFAULT SECTION on load
     this.totalForms = details.numberOfForms || 1;
     const stored = localStorage.getItem("scratchForms");
     if (stored) {
@@ -546,10 +514,7 @@ export default {
       this.totalForms = this.forms.length;
     } else {
       for (let i = 0; i < this.totalForms; i++) {
-        this.forms.push({
-          formName: `Form${i + 1}`,
-          sections: []  // empty initially
-        });
+        this.forms.push({ formName: `Form${i+1}`, sections: [] });
       }
     }
 
@@ -566,11 +531,8 @@ export default {
     goBack() { this.$router.back(); },
     navigateToSavedForms() { this.$router.push("/saved-forms"); },
 
-    /* Keep assignments in sync */
     initAssignments() {
-      const m = this.selectedModels.length;
-      const v = this.visits.length;
-      const g = this.groups.length;
+      const m = this.selectedModels.length, v = this.visits.length, g = this.groups.length;
       this.assignments = Array.from({ length: m }, () =>
         Array.from({ length: v }, () =>
           Array.from({ length: g }, () => false)
@@ -578,16 +540,13 @@ export default {
       );
     },
 
-    /* Protocol Matrix */
-    handleProtocolClick() {
-      this.showMatrix = !this.showMatrix;
+    handleProtocolClick() { this.showMatrix = true; },
+    editTemplate()       { this.showMatrix = false; },
+    saveMatrix()         { console.log("Save Matrix clicked"); },
+    // called when ProtocolMatrix emits assignment-updated
+    onAssignmentUpdated({ mIdx, vIdx, gIdx, checked }) {
+      this.assignments[mIdx][vIdx][gIdx] = checked;
     },
-    saveProtocol() {
-      console.log("Protocol saved:", this.assignments);
-      this.openGenericDialog("Protocol saved successfully!");
-    },
-
-    /* Section & Field */
     addNewSection() {
       this.currentForm.sections.push({
         title: `Section ${this.currentForm.sections.length + 1}`,
@@ -597,17 +556,17 @@ export default {
       this.toggleSection(this.currentForm.sections.length - 1);
     },
     addNewSectionBelow(i) {
-      this.currentForm.sections.splice(i + 1, 0, {
-        title: `Section ${i + 2}`,
+      this.currentForm.sections.splice(i+1, 0, {
+        title: `Section ${i+2}`,
         fields: [],
         collapsed: false
       });
-      this.toggleSection(i + 1);
+      this.toggleSection(i+1);
     },
     confirmDeleteSection(i) {
       this.openConfirmDialog("Delete this section?", () => {
-        this.currentForm.sections.splice(i, 1);
-        this.activeSection = Math.max(0, this.activeSection - 1);
+        this.currentForm.sections.splice(i,1);
+        this.activeSection = Math.max(0, this.activeSection-1);
       });
     },
     confirmClearForm() {
@@ -617,19 +576,19 @@ export default {
       });
     },
     toggleSection(i) {
-      this.currentForm.sections.forEach((s, idx) => {
-        s.collapsed = idx !== i ? true : !s.collapsed;
+      this.currentForm.sections.forEach((s,idx) => {
+        s.collapsed = idx!==i ? true : !s.collapsed;
         if (!s.collapsed) this.activeSection = i;
       });
     },
     setActiveSection(i) { this.activeSection = i; },
-    editSection(i, v) { if (v) this.currentForm.sections[i].title = v; },
+    editSection(i,v)     { if(v) this.currentForm.sections[i].title = v; },
 
     openInputDialog(msg, def, cb) {
       this.inputDialogMessage = msg;
-      this.inputDialogValue = def;
-      this.inputDialogCallback = cb;
-      this.showInputDialog = true;
+      this.inputDialogValue   = def;
+      this.inputDialogCallback= cb;
+      this.showInputDialog    = true;
     },
     confirmInputDialog() {
       if (this.inputDialogCallback) this.inputDialogCallback(this.inputDialogValue);
@@ -644,19 +603,18 @@ export default {
       if (sec.collapsed) this.toggleSection(this.activeSection);
       sec.fields.push({ ...field });
     },
-    editField(si, fi, v) {
+    editField(si,fi,v) {
       if (v) this.currentForm.sections[si].fields[fi].label = v;
     },
-    addSimilarField(si, fi) {
+    addSimilarField(si,fi) {
       const f = this.currentForm.sections[si].fields[fi];
       const clone = { ...f, name: `${f.name}_${Date.now()}` };
-      this.currentForm.sections[si].fields.splice(fi + 1, 0, clone);
+      this.currentForm.sections[si].fields.splice(fi+1,0,clone);
     },
-    removeField(si, fi) {
-      this.currentForm.sections[si].fields.splice(fi, 1);
+    removeField(si,fi) {
+      this.currentForm.sections[si].fields.splice(fi,1);
     },
 
-    /* Save */
     async saveForm() {
       if (!this.token) {
         this.openGenericDialog("No token: please log in.", () => this.$router.push("/login"));
@@ -686,16 +644,9 @@ export default {
       };
       try {
         const base = "http://127.0.0.1:8000/forms/studies";
-        let res;
-        if (this.studyDetails.id) {
-          res = await axios.put(`${base}/${this.studyDetails.id}`, payload, {
-            headers: { Authorization: `Bearer ${this.token}` }
-          });
-        } else {
-          res = await axios.post(base, payload, {
-            headers: { Authorization: `Bearer ${this.token}` }
-          });
-        }
+        let res = this.studyDetails.id
+          ? await axios.put(`${base}/${this.studyDetails.id}`, payload, { headers:{ Authorization:`Bearer ${this.token}` } })
+          : await axios.post(base, payload, { headers:{ Authorization:`Bearer ${this.token}` } });
         this.openGenericDialog(`Study "${res.data.metadata.study_name}" saved!`);
       } catch (err) {
         console.error("Error saving:", err.response || err);
@@ -703,11 +654,10 @@ export default {
       }
     },
 
-    /* Dialog helpers */
     openConfirmDialog(msg, cb) {
       this.confirmDialogMessage = msg;
       this.confirmDialogCallback = cb;
-      this.showConfirmDialog = true;
+      this.showConfirmDialog    = true;
     },
     confirmDialogYes() {
       if (this.confirmDialogCallback) this.confirmDialogCallback();
@@ -717,10 +667,10 @@ export default {
       this.showConfirmDialog = false;
     },
 
-    openGenericDialog(msg, cb = null) {
+    openGenericDialog(msg, cb=null) {
       this.genericDialogMessage = msg;
-      this.genericDialogCallback = cb;
-      this.showGenericDialog = true;
+      this.genericDialogCallback= cb;
+      this.showGenericDialog    = true;
     },
     closeGenericDialog() {
       this.showGenericDialog = false;
@@ -730,12 +680,11 @@ export default {
       }
     },
 
-    /* Constraints */
     openConstraintsDialog(si, fi) {
       const f = this.currentForm.sections[si].fields[fi];
       this.currentFieldIndices = { sectionIndex: si, fieldIndex: fi };
-      this.currentFieldType = f.type;
-      this.constraintsForm = f.constraints ? { ...f.constraints } : {};
+      this.currentFieldType    = f.type;
+      this.constraintsForm     = f.constraints ? { ...f.constraints } : {};
       this.showConstraintsDialog = true;
     },
     confirmConstraintsDialog(c) {
@@ -748,33 +697,31 @@ export default {
       this.showConstraintsDialog = false;
     },
 
-    /* Models */
     async loadDataModels() {
       try {
         const res = await fetch("/study_schema.yaml");
         const doc = yaml.load(await res.text());
         this.dataModels = Object.entries(doc.classes)
-          .filter(([n]) => n !== "Study")
-          .map(([n, cls]) => ({
+          .filter(([n]) => n!=="Study")
+          .map(([n,cls]) => ({
             title: n,
-            fields: Object.entries(cls.attributes).map(([attr, def]) => {
-              let type = "text",
-                r = (def.range || "").toLowerCase();
-              if (r === "date" || r === "datetime") type = "date";
-              else if (["integer", "decimal"].includes(r)) type = "number";
-              if (def.enum) type = "select";
+            fields: Object.entries(cls.attributes).map(([attr,def]) => {
+              let type="text", r=(def.range||"").toLowerCase();
+              if(r==="date"||r==="datetime") type="date";
+              else if(["integer","decimal"].includes(r)) type="number";
+              if(def.enum) type="select";
               return {
                 name: `${attr}_${Date.now()}`,
                 label: attr,
                 type,
-                options: def.enum || [],
-                placeholder: def.description || "",
+                options: def.enum||[],
+                placeholder: def.description||"",
                 value: "",
                 constraints: { required: !!def.required }
               };
             })
           }));
-      } catch (err) {
+      } catch(err) {
         console.error("Failed to load data models:", err);
       }
     },
@@ -785,19 +732,18 @@ export default {
     },
     takeoverModel() {
       const chosen = this.currentModel.fields
-        .filter((_, i) => this.selectedProps[i])
+        .filter((_,i) => this.selectedProps[i])
         .map(f => ({ ...f }));
       const newSection = {
         title: this.currentModel.title,
         collapsed: false,
         fields: chosen
       };
-      this.currentForm.sections.splice(this.activeSection + 1, 0, newSection);
+      this.currentForm.sections.splice(this.activeSection+1, 0, newSection);
       this.activeSection++;
       this.showModelDialog = false;
     },
 
-    /* Download/Upload/Preview */
     openDownloadDialog() {
       this.showDownloadDialog = true;
     },
@@ -805,27 +751,24 @@ export default {
       this.showDownloadDialog = false;
     },
     downloadFormData(format) {
-      const data = { studyDetails: this.studyDetails, forms: this.forms };
+      const data = { studyDetails:this.studyDetails, forms:this.forms };
       let str, name;
-      const pref = this.studyDetails.name?.trim().replace(/\s+/g, "_") || "formData";
-      if (format === "json") {
-        str = JSON.stringify(data, null, 2);
+      const pref = this.studyDetails.name?.trim().replace(/\s+/g,"_")||"formData";
+      if(format==="json") {
+        str = JSON.stringify(data,null,2);
         name = `${pref}.json`;
       } else {
         try {
           str = yaml.dump(data);
           name = `${pref}.yaml`;
         } catch {
-          str = "Error";
-          name = "formData.txt";
+          str="Error"; name="formData.txt";
         }
       }
-      const blob = new Blob([str], { type: "text/plain" });
+      const blob = new Blob([str],{type:"text/plain"});
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
-      a.href = url;
-      a.download = name;
-      a.click();
+      a.href = url; a.download = name; a.click();
       URL.revokeObjectURL(url);
       this.showDownloadDialog = false;
     },
@@ -837,24 +780,20 @@ export default {
     },
     handleFileChange(e) {
       const f = e.target.files[0];
-      if (!f) return;
+      if(!f) return;
       const r = new FileReader();
       r.onload = evt => {
-        let pd, ct = evt.target.result.trim();
-        try {
-          pd = JSON.parse(ct);
-        } catch {
-          try {
-            pd = yaml.load(ct);
-          } catch {
-            return this.openGenericDialog("Invalid file.");
-          }
+        let pd, ct=evt.target.result.trim();
+        try { pd=JSON.parse(ct); }
+        catch {
+          try { pd=yaml.load(ct); }
+          catch { return this.openGenericDialog("Invalid file."); }
         }
-        if (pd.studyDetails) {
+        if(pd.studyDetails) {
           this.studyDetails = pd.studyDetails;
-          this.$store.commit("setStudyDetails", pd.studyDetails);
+          this.$store.commit("setStudyDetails",pd.studyDetails);
         }
-        if (pd.forms) {
+        if(pd.forms) {
           this.forms = pd.forms;
           this.totalForms = pd.forms.length;
           this.currentFormIndex = 0;
@@ -872,10 +811,10 @@ export default {
       this.showPreviewDialog = false;
     },
     prevPreview() {
-      if (this.previewFormIndex > 0) this.previewFormIndex--;
+      if(this.previewFormIndex>0) this.previewFormIndex--;
     },
     nextPreview() {
-      if (this.previewFormIndex < this.forms.length - 1) this.previewFormIndex++;
+      if(this.previewFormIndex<this.forms.length-1) this.previewFormIndex++;
     }
   }
 };
@@ -984,12 +923,22 @@ export default {
 
 /* FORM AREA */
 .form-area {
+  display: flex;
+  flex-direction: column;
   flex: 1;
   background: white;
   padding: 20px;
   border: 1px solid $border-color;
   border-radius: 8px;
   min-width: 600px;
+  height: calc(100vh - 60px);
+}
+
+.sections-container {
+  flex: 1;
+  overflow-y: auto;
+  padding-right: 10px;
+  position: relative;
 }
 
 .form-section {
@@ -1027,11 +976,26 @@ select {
   margin-top: 5px;
 }
 
+/* MATRIX ACTIONS */
+.matrix-actions {
+  position: absolute;
+  bottom: 20px;
+  right: 20px;
+  display: flex;
+  gap: 10px;
+}
+
+/* FORM ACTIONS */
 .form-actions {
+  position: sticky;
+  bottom: 0;
+  background: white;
+  padding: 15px 0;
+  border-top: 1px solid $border-color;
   display: flex;
   justify-content: center;
   gap: 15px;
-  margin-top: 20px;
+  z-index: 10;
 }
 
 .btn-option {
@@ -1043,6 +1007,10 @@ select {
   flex: 1;
 }
 
+.protocol-btn::after {
+  content: ' →';
+}
+
 .btn-primary {
   background: $primary-color;
   color: white;
@@ -1050,28 +1018,6 @@ select {
   border-radius: $button-border-radius;
   cursor: pointer;
   flex: 1;
-}
-
-/* PROTOCOL MATRIX */
-.protocol-matrix {
-  background: #fafafa;
-  border: 1px solid $border-color;
-  border-radius: 5px;
-  padding: 15px;
-  margin-top: 20px;
-}
-
-.protocol-table {
-  width: 100%;
-  border-collapse: collapse;
-  margin-bottom: 10px;
-}
-
-.protocol-table th,
-.protocol-table td {
-  border: 1px solid $border-color;
-  padding: 8px;
-  text-align: center;
 }
 
 /* MODALS */
