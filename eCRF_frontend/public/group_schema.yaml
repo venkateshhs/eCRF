@@ -9,3 +9,4 @@ classes:
         range: string
         description: Cohort description
         required: false
+        widget: textarea

@@ -29,7 +29,10 @@ classes:
       id:
         range: anyURI
         required: false
+        disabled: true
+        display: false
         description: "Persistent identifier (PID) for the study."
+
 
       title:
         range: string
@@ -40,6 +43,7 @@ classes:
       description:
         range: string
         description: "A description or abstract of the study."
+        widget: textarea
       type:
         range: string
         description: "Type or category of the study."
@@ -68,10 +72,10 @@ classes:
       publisher:
         range: string
         description: "Sponsoring or funding organization of the study."
-      startedAtTime:
+      start time:
         range: dateTime
         description: "Start date/time of the study."
-      endedAtTime:
+      End time:
         range: dateTime
         description: "End date/time of the study."
       Location:

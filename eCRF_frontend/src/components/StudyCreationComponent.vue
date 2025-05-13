@@ -7,7 +7,7 @@
       <h2>Step 1: Create a New Study</h2>
 
       <div
-        v-for="(f, i) in studySchema"
+        v-for="(f, i) in studySchema.filter(f => f.display)"
         :key="i"
         class="schema-field-row"
       >
@@ -19,6 +19,7 @@
           :label="f.label"
           :placeholder="f.placeholder"
           :required="f.required"
+          :disabled="f.disabled"
           :error="fieldError(f, studyData[f.field])"
         />
 
@@ -31,6 +32,7 @@
           :options="f.options"
           :placeholder="f.placeholder"
           :required="f.required"
+          :disabled="f.disabled"
           :error="fieldError(f, studyData[f.field])"
         />
 
@@ -42,6 +44,7 @@
           :label="f.label"
           :placeholder="f.placeholder"
           :required="f.required"
+          :disabled="f.disabled"
           :error="fieldError(f, studyData[f.field])"
         />
 
@@ -52,6 +55,7 @@
           :id="f.field"
           :label="f.label"
           :required="f.required"
+          :disabled="f.disabled"
           :error="fieldError(f, studyData[f.field])"
           :min="f.min"
           :max="f.max"
@@ -65,114 +69,21 @@
           :label="f.label"
           :placeholder="f.placeholder"
           :required="f.required"
+          :disabled="f.disabled"
           :error="fieldError(f, studyData[f.field])"
         />
       </div>
 
       <div class="form-actions">
         <button @click="validateStudy" class="btn-option">
-          Next → Visits
+          Next →
         </button>
       </div>
     </div>
 
-    <!-- STEP 2: Visits -->
+    <!-- STEP 2: Groups/Cohorts -->
     <div v-if="step === 2" class="new-study-form">
-      <h2>Step 2: Define Visits</h2>
-
-      <!-- number of visits -->
-      <BaseNumberField
-        v-model="numberOfVisits"
-        id="numVisits"
-        label="Number of Visits"
-        placeholder="Enter number of visits"
-        :required="true"
-        :error="showVisitErrors && !numberOfVisits ? 'Number of Visits is required.' : ''"
-        :min="1"
-      />
-
-      <div v-if="visitData[visitIndex]">
-        <div class="navigation">
-          <button @click="prevVisit" :disabled="visitIndex === 0">←</button>
-          <span>{{ visitIndex + 1 }} / {{ numberOfVisits }}</span>
-          <button
-            @click="nextVisit"
-            :disabled="visitIndex === numberOfVisits - 1"
-          >→</button>
-        </div>
-
-        <div class="visit-block">
-          <h3>Visit {{ visitIndex + 1 }}</h3>
-
-          <div
-            v-for="(f, j) in visitSchema"
-            :key="j"
-            class="schema-field-row"
-          >
-            <BaseTextarea
-              v-if="f.type === 'textarea'"
-              v-model="visitData[visitIndex][f.field]"
-              :id="`visit-${visitIndex}-${f.field}`"
-              :label="f.label"
-              :placeholder="f.placeholder"
-              :required="f.required"
-              :error="fieldError(f, visitData[visitIndex][f.field])"
-            />
-
-            <BaseSelectField
-              v-else-if="f.type === 'select'"
-              v-model="visitData[visitIndex][f.field]"
-              :id="`visit-${visitIndex}-${f.field}`"
-              :label="f.label"
-              :options="f.options"
-              :placeholder="f.placeholder"
-              :required="f.required"
-              :error="fieldError(f, visitData[visitIndex][f.field])"
-            />
-
-            <BaseNumberField
-              v-else-if="f.type === 'number'"
-              v-model="visitData[visitIndex][f.field]"
-              :id="`visit-${visitIndex}-${f.field}`"
-              :label="f.label"
-              :placeholder="f.placeholder"
-              :required="f.required"
-              :error="fieldError(f, visitData[visitIndex][f.field])"
-            />
-
-            <BaseDateField
-              v-else-if="f.type === 'date'"
-              v-model="visitData[visitIndex][f.field]"
-              :id="`visit-${visitIndex}-${f.field}`"
-              :label="f.label"
-              :required="f.required"
-              :error="fieldError(f, visitData[visitIndex][f.field])"
-            />
-
-            <BaseTextField
-              v-else
-              v-model="visitData[visitIndex][f.field]"
-              :id="`visit-${visitIndex}-${f.field}`"
-              :label="f.label"
-              :placeholder="f.placeholder"
-              :required="f.required"
-              :error="fieldError(f, visitData[visitIndex][f.field])"
-            />
-          </div>
-        </div>
-      </div>
-
-      <div class="form-actions">
-        <button @click="step = 1" class="btn-option">← Back</button>
-        <button @click="validateVisits" class="btn-option">
-          Next → Groups
-        </button>
-      </div>
-    </div>
-
-    <!-- STEP 3: Groups -->
-    <div v-if="step === 3" class="new-study-form">
-      <h2>Step 3: Define Groups/Cohorts</h2>
+      <h2>Step 2: Define Groups/Cohorts</h2>
 
       <!-- number of groups -->
       <BaseNumberField
@@ -199,7 +110,7 @@
           <h3>Group {{ groupIndex + 1 }}</h3>
 
           <div
-            v-for="(f, k) in groupSchema"
+            v-for="(f, k) in groupSchema.filter(f => f.display)"
             :key="k"
             class="schema-field-row"
           >
@@ -257,8 +168,104 @@
       </div>
 
       <div class="form-actions">
+        <button @click="step = 1" class="btn-option">← Back</button>
+        <button @click="validateGroups" class="btn-option">
+          Next →
+        </button>
+      </div>
+    </div>
+
+    <!-- STEP 3: Visits -->
+    <div v-if="step === 3" class="new-study-form">
+      <h2>Step 3: Define Visits</h2>
+
+      <!-- number of visits -->
+      <BaseNumberField
+        v-model="numberOfVisits"
+        id="numVisits"
+        label="Number of Visits"
+        placeholder="Enter number of visits"
+        :required="true"
+        :error="showVisitErrors && !numberOfVisits ? 'Number of Visits is required.' : ''"
+        :min="1"
+      />
+
+      <div v-if="visitData[visitIndex]">
+        <div class="navigation">
+          <button @click="prevVisit" :disabled="visitIndex === 0">←</button>
+          <span>{{ visitIndex + 1 }} / {{ numberOfVisits }}</span>
+          <button
+            @click="nextVisit"
+            :disabled="visitIndex === numberOfVisits - 1"
+          >→</button>
+        </div>
+
+        <div class="visit-block">
+          <h3>Visit {{ visitIndex + 1 }}</h3>
+
+          <div
+            v-for="(f, j) in visitSchema.filter(f => f.display)"
+            :key="j"
+            class="schema-field-row"
+          >
+            <BaseTextarea
+              v-if="f.type === 'textarea'"
+              v-model="visitData[visitIndex][f.field]"
+              :id="`visit-${visitIndex}-${f.field}`"
+              :label="f.label"
+              :placeholder="f.placeholder"
+              :required="f.required"
+              :error="fieldError(f, visitData[visitIndex][f.field])"
+            />
+
+            <BaseSelectField
+              v-else-if="f.type === 'select'"
+              v-model="visitData[visitIndex][f.field]"
+              :id="`visit-${visitIndex}-${f.field}`"
+              :label="f.label"
+              :options="f.options"
+              :placeholder="f.placeholder"
+              :required="f.required"
+              :error="fieldError(f, visitData[visitIndex][f.field])"
+            />
+
+            <BaseNumberField
+              v-else-if="f.type === 'number'"
+              v-model="visitData[visitIndex][f.field]"
+              :id="`visit-${visitIndex}-${f.field}`"
+              :label="f.label"
+              :placeholder="f.placeholder"
+              :required="f.required"
+              :error="fieldError(f, visitData[visitIndex][f.field])"
+            />
+
+            <BaseDateField
+              v-else-if="f.type === 'date'"
+              v-model="visitData[visitIndex][f.field]"
+              :id="`visit-${visitIndex}-${f.field}`"
+              :label="f.label"
+              :required="f.required"
+              :error="fieldError(f, visitData[visitIndex][f.field])"
+            />
+
+            <BaseTextField
+              v-else
+              v-model="visitData[visitIndex][f.field]"
+              :id="`visit-${visitIndex}-${f.field}`"
+              :label="f.label"
+              :placeholder="f.placeholder"
+              :required="f.required"
+              :error="fieldError(f, visitData[visitIndex][f.field])"
+            />
+          </div>
+        </div>
+      </div>
+
+      <div class="form-actions">
         <button @click="step = 2" class="btn-option">← Back</button>
-        <button @click="validateGroups" class="btn-option">Finish</button>
+        <button @click="validateVisits" class="btn-option">
+          Finish
+        </button>
       </div>
     </div>
   </div>
@@ -320,7 +327,10 @@ export default {
       const cls = Object.keys(doc.classes)[0];
       const attrs = doc.classes[cls].attributes;
       schemaRef.value = Object.entries(attrs).map(([n, d]) => {
-        let type = "text";
+        let type = d.widget === 'textarea'
+      ? 'textarea'
+      : 'text';
+
         const r = (d.range || "").toLowerCase();
         if (r === "date" || r === "datetime") type = "date";
         if (r === "integer" || r === "decimal") type = "number";
@@ -331,6 +341,8 @@ export default {
           placeholder: d.description || formatLabel(n),
           type,
           required:    !!d.required,
+          disabled:    !!d.disabled,
+          display:     d.display !== false,
           options:     d.enum || []
         };
       });
@@ -357,26 +369,38 @@ export default {
         step.value = 2;
       }
     }
+
     function prevVisit()  { if (visitIndex.value > 0) visitIndex.value--; }
     function nextVisit()  { if (visitIndex.value < numberOfVisits.value - 1) visitIndex.value++; }
-    function validateVisits() {
-      showVisitErrors.value = true;
-      if (!visitData.value.some(v =>
-        visitSchema.value.some(f => f.required && !v[f.field])
-      )) {
-        showVisitErrors.value = false;
-        step.value = 3;
-      }
-    }
-    function prevGroup()  { if (groupIndex.value > 0) groupIndex.value--; }
-    function nextGroup()  { if (groupIndex.value < numberOfGroups.value - 1) groupIndex.value++; }
+
     function validateGroups() {
       showGroupErrors.value = true;
       if (!groupData.value.some(g =>
         groupSchema.value.some(f => f.required && !g[f.field])
       )) {
         showGroupErrors.value = false;
-        const payload = { study: studyData.value, visits: visitData.value, groups: groupData.value };
+        // store study + groups, then advance to Visits
+        const payload = { study: studyData.value, visits: [], groups: groupData.value };
+        store.commit("setStudyDetails", payload);
+        step.value = 3;
+      }
+    }
+
+    function prevGroup()  { if (groupIndex.value > 0) groupIndex.value--; }
+    function nextGroup()  { if (groupIndex.value < numberOfGroups.value - 1) groupIndex.value++; }
+
+    function validateVisits() {
+      showVisitErrors.value = true;
+      if (!visitData.value.some(v =>
+        visitSchema.value.some(f => f.required && !v[f.field])
+      )) {
+        showVisitErrors.value = false;
+        // finally store visits and navigate on
+        const payload = {
+          study: studyData.value,
+          visits: visitData.value,
+          groups: groupData.value
+        };
         store.commit("setStudyDetails", payload);
         router.push({ name: "CreateFormScratch" });
       }
