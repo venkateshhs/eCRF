@@ -9,7 +9,7 @@
 
     <div class="scratch-form-content">
       <!-- Available Fields -->
-      <div class="available-fields">
+      <div v-if="!showMatrix" class="available-fields">
         <h2>Available Fields</h2>
         <div class="tabs">
           <button
