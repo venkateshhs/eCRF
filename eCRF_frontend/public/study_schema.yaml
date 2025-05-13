@@ -57,6 +57,9 @@ classes:
           - "Registry Study"
           - "Systematic Review"
           - "Custom"
+        skip:
+          "Meta Analysis": [ "groups", "visits" ]
+          "Systematic Review": [ "groups", "visits" ]
       status:
         range: string
         description: "Current status of the study."
