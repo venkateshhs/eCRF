@@ -343,7 +343,8 @@ export default {
           required:    !!d.required,
           disabled:    !!d.disabled,
           display:     d.display !== false,
-          options:     d.enum || []
+          options:     d.enum || [],
+          skip:    d.skip || {}
         };
       });
     }
@@ -363,12 +364,39 @@ export default {
     }, { immediate: true });
 
     function validateStudy() {
-      showStudyErrors.value = true;
-      if (!studySchema.value.some(f => f.required && !studyData.value[f.field])) {
-        showStudyErrors.value = false;
-        step.value = 2;
-      }
+  // show validation errors if any required study fields are empty
+  showStudyErrors.value = true;
+  const hasMissing = studySchema.value.some(f =>
+    f.required && !studyData.value[f.field]
+  );
+
+  if (!hasMissing) {
+    showStudyErrors.value = false;
+
+    // pull the skip-map off the "type" field
+    const typeField  = studySchema.value.find(f => f.field === 'type');
+    const skipConfig = typeField?.skip || {};               // e.g. { "Meta Analysis": ["groups","visits"], … }
+    const selected   = studyData.value.type;                // e.g. "Meta Analysis"
+    const skips      = skipConfig[selected] || [];
+    console.log(skips)
+    // if both groups & visits are to be skipped, commit & go straight to the scratch form
+    if (skips.includes('groups') && skips.includes('visits')) {
+      const payload = {
+        study:  studyData.value,
+        groups: [],
+        visits: []
+      };
+      store.commit('setStudyDetails', payload);
+      router.push({ name: 'CreateFormScratch' });
     }
+    else {
+      // otherwise advance to Groups (step 2)
+      step.value = 2;
+    }
+  }
+}
+
+
 
     function prevVisit()  { if (visitIndex.value > 0) visitIndex.value--; }
     function nextVisit()  { if (visitIndex.value < numberOfVisits.value - 1) visitIndex.value++; }
