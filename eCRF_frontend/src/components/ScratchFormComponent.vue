@@ -330,15 +330,6 @@
     <!-- Preview Dialog -->
     <div v-if="showPreviewDialog" class="modal-overlay">
       <div class="modal preview-modal">
-        <div class="preview-header">
-          <button @click="prevPreview" :disabled="previewFormIndex === 0">
-            <i :class="icons.prev"></i>
-          </button>
-          <span>Form {{ previewFormIndex + 1 }} of {{ forms.length }}</span>
-          <button @click="nextPreview" :disabled="previewFormIndex === forms.length - 1">
-            <i :class="icons.next"></i>
-          </button>
-        </div>
         <div class="preview-content">
           <FormPreview :form="forms[previewFormIndex]" />
         </div>
@@ -486,7 +477,9 @@ export default {
     currentForm() { return this.forms[this.currentFormIndex] || { sections: [] }; },
     selectedModels() {
       // include every section as a "model" in the matrix
-      return this.currentForm.sections.map(sec => ({ title: sec.title }));
+      return this.currentForm.sections.map(sec => ({
+       title: sec.title   ,
+       fields: sec.fields}));
     }
   },
   watch: {
