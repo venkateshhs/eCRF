@@ -11,6 +11,7 @@ import FormDetailComponent from "../components/FormDetailComponent.vue";
 import StudyCreationComponent from "../components/StudyCreationComponent.vue";
 //import YamlViewerComponent from "../components/YamlViewerComponent.vue";
 import StudySettings from "../components/StudySettings.vue";
+import SavedStudyView         from '../components/SavedStudyView.vue'
 const routes = [
   { path: "/", redirect: "/login" },
   { path: "/login", name: "Login", component: LoginComponent },
@@ -47,6 +48,11 @@ const routes = [
     path: "/studies/:id",
     name: "StudyDetail",
     component: FormDetailComponent,
+  },
+  {
+    path: '/saved-study',
+    name: 'SavedStudyView',
+    component: SavedStudyView
   },
   {
       path: "/settings",

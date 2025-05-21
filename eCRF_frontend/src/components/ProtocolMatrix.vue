@@ -1,58 +1,48 @@
 <template>
   <div class="protocol-matrix-container">
-    <!-- 1. Visit Name at Top (paginated only) -->
-    <div v-if="showPaginateVisits" class="visit-header">
-      {{ visits[currentVisitIndex].name }}
+    <!-- 1. Visit Navigator (when >3 visits) -->
+    <div v-if="visitList.length > 3" class="visit-nav">
+      <button @click="prevVisit" :disabled="currentVisitIndex === 0" class="nav-btn">&lt;</button>
+      <span class="visit-counter">
+        Visit {{ currentVisitIndex + 1 }} / {{ visitList.length }}
+      </span>
+      <button @click="nextVisit" :disabled="currentVisitIndex === visitList.length - 1" class="nav-btn">&gt;</button>
     </div>
 
-    <!-- 2. Matrix with horizontal scroll for groups -->
+    <!-- 2. Protocol Matrix -->
     <div class="table-container">
       <table class="protocol-table">
-        <!-- Full matrix when visits ≤ 3 -->
-        <thead v-if="showFullMatrix">
+        <!-- Full matrix if ≤3 visits -->
+        <thead v-if="visitList.length <= 3">
           <tr>
             <th rowspan="2">Section</th>
-            <th
-              v-for="(visit, vIdx) in visits"
-              :key="`visit-head-${vIdx}`"
-              :colspan="groups.length"
-            >
+            <th v-for="(visit, vIdx) in visitList" :key="vIdx" :colspan="groupList.length">
               {{ visit.name }}
             </th>
           </tr>
           <tr>
-            <template v-for="(visit, vIdx) in visits" :key="`groups-for-${vIdx}`">
-              <th
-                v-for="(group, gIdx) in groups"
-                :key="`group-head-${vIdx}-${gIdx}`"
-              >
-                {{ group.name }}
-              </th>
+            <template v-for="(_, vIdx) in visitList" :key="vIdx">
+              <th v-for="(group, gIdx) in groupList" :key="gIdx">{{ group.name }}</th>
             </template>
           </tr>
         </thead>
 
-        <!-- Single-visit matrix when visits > 3 -->
+        <!-- Single-visit view if >3 visits -->
         <thead v-else>
           <tr>
             <th>Section</th>
-            <th v-for="(group, gIdx) in groups" :key="gIdx">
-              {{ group.name }}
-            </th>
+            <th v-for="(group, gIdx) in groupList" :key="gIdx">{{ group.name }}</th>
           </tr>
         </thead>
 
         <tbody>
-          <tr v-for="(model, mIdx) in selectedModels" :key="model.title">
+          <tr v-for="(model, mIdx) in selectedModels" :key="mIdx">
             <td>{{ model.title }}</td>
 
             <!-- Full-matrix cells -->
-            <template v-if="showFullMatrix">
-              <template v-for="(visit, vIdx) in visits" :key="`row-${mIdx}-${vIdx}`">
-                <td
-                  v-for="(group, gIdx) in groups"
-                  :key="`cell-${mIdx}-${vIdx}-${gIdx}`"
-                >
+            <template v-if="visitList.length <= 3">
+              <template v-for="(_, vIdx) in visitList" :key="vIdx">
+                <td v-for="(_, gIdx) in groupList" :key="gIdx">
                   <input
                     type="checkbox"
                     :checked="assignments[mIdx][vIdx][gIdx]"
@@ -64,7 +54,7 @@
 
             <!-- Single-visit cells -->
             <template v-else>
-              <td v-for="(group, gIdx) in groups" :key="gIdx">
+              <td v-for="(_, gIdx) in groupList" :key="gIdx">
                 <input
                   type="checkbox"
                   :checked="assignments[mIdx][currentVisitIndex][gIdx]"
@@ -77,116 +67,214 @@
       </table>
     </div>
 
-    <!-- 3. Visit Navigator at Bottom -->
-    <div v-if="showPaginateVisits" class="visit-nav">
-      <button class="nav-btn" @click="prevVisit" :disabled="currentVisitIndex === 0">&lt;</button>
-      <span class="visit-counter">{{ currentVisitIndex + 1 }} / {{ visits.length }}</span>
-      <button class="nav-btn" @click="nextVisit" :disabled="currentVisitIndex === visits.length - 1">&gt;</button>
-    </div>
-
-    <!-- Matrix Actions -->
-    <div class="matrix-actions">
-      <button @click="openPreview" class="btn-option">Preview Form</button>
-    </div>
-
-    <!-- Preview Form Modal -->
+    <!-- 3. Preview Modal -->
     <div v-if="showPreviewModal" class="modal-overlay">
       <div class="modal protocol-preview-modal">
         <div class="preview-header">
-          <button @click="prevPreviewVisit" :disabled="previewVisitIndex === 0">&lt;</button>
-          <span>{{ visits[previewVisitIndex].name }}</span>
-          <button @click="nextPreviewVisit" :disabled="previewVisitIndex === visits.length - 1">&gt;</button>
-          <span> / </span>
-          <button @click="prevPreviewGroup" :disabled="previewGroupIndex === 0">&lt;</button>
-          <span>{{ groups[previewGroupIndex].name }}</span>
-          <button @click="nextPreviewGroup" :disabled="previewGroupIndex === groups.length - 1">&gt;</button>
+          <!-- Visit nav -->
+          <button @click="prevPreviewVisit" :disabled="previewVisitIndex === 0" class="nav-btn">&lt;</button>
+          <span>Visit: {{ visitList[previewVisitIndex].name }}</span>
+          <button @click="nextPreviewVisit" :disabled="previewVisitIndex === visitList.length - 1" class="nav-btn">&gt;</button>
+
+          &nbsp;&nbsp;
+
+          <!-- Group nav -->
+          <button @click="prevPreviewGroup" :disabled="previewGroupPos === 0" class="nav-btn">&lt;</button>
+          <span>Group: {{ groupList[assignedGroups[previewGroupPos]].name }}</span>
+          <button
+            @click="nextPreviewGroup"
+            :disabled="previewGroupPos === assignedGroups.length - 1"
+            class="nav-btn"
+          >&gt;</button>
         </div>
+
         <div class="preview-content">
           <FormPreview :form="previewForm" />
         </div>
         <div class="modal-actions">
-          <button @click="closePreview" class="btn-primary">Close Preview</button>
+          <button @click="closePreview" class="btn-action">Close</button>
         </div>
       </div>
+    </div>
+
+    <!-- 4. Footer Actions -->
+    <div class="matrix-actions">
+      <button @click="$emit('edit-template')" class="btn-action">Edit Template</button>
+      <button @click="saveStudy" class="btn-action">Save</button>
+      <button
+        @click="openPreview"
+        :disabled="!hasAssignment(currentVisitIndex)"
+        class="btn-action"
+      >
+        Preview
+      </button>
+      <button @click="goToSaved" class="btn-action">View Saved Study</button>
     </div>
   </div>
 </template>
 
 <script>
+import { ref, computed } from "vue";
+import { useRouter } from "vue-router";
 import FormPreview from "@/components/FormPreview.vue";
 
 export default {
   name: "ProtocolMatrix",
   components: { FormPreview },
   props: {
-    visits:          { type: Array, required: true },
-    groups:          { type: Array, required: true },
-    selectedModels:  { type: Array, required: true },
-    assignments:     { type: Array, required: true }
+    visits:         { type: Array, required: true },
+    groups:         { type: Array, required: true },
+    selectedModels: { type: Array, required: true },
+    assignments:    { type: Array, required: true }
   },
-  emits: ["assignment-updated"],
-  data() {
-    return {
-      currentVisitIndex: 0,
-      showPreviewModal:  false,
-      previewVisitIndex: 0,
-      previewGroupIndex: 0
-    };
-  },
-  computed: {
-    showPaginateVisits() {
-      return this.visits.length > 3;
-    },
-    showFullMatrix() {
-      return !this.showPaginateVisits;
-    },
-    previewForm() {
-      const visit = this.visits[this.previewVisitIndex];
-      const group = this.groups[this.previewGroupIndex];
-      const sections = this.selectedModels
+  emits: ["assignment-updated", "edit-template"],
+  setup(props, { emit }) {
+    const router = useRouter();
+
+    // Matrix indices
+    const currentVisitIndex = ref(0);
+
+    // Preview indices + modal control
+    const showPreviewModal  = ref(false);
+    const previewVisitIndex = ref(0);
+    const previewGroupIndex = ref(0);
+
+    // Lists with fallback
+    const visitList = computed(() => props.visits.length ? props.visits : [{ name: "All Visits" }]);
+    const groupList = computed(() => props.groups.length ? props.groups : [{ name: "All Groups" }]);
+
+    // Toggles
+    function onToggle(mIdx, vIdx, gIdx, checked) {
+      emit("assignment-updated", { mIdx, vIdx, gIdx, checked });
+    }
+
+    // Matrix nav
+    function prevVisit() {
+      if (currentVisitIndex.value > 0) currentVisitIndex.value--;
+    }
+    function nextVisit() {
+      if (currentVisitIndex.value < visitList.value.length - 1)
+        currentVisitIndex.value++;
+    }
+
+    // Determine which groups are assigned in a given visit
+    function groupsForVisit(vIdx) {
+      return groupList.value
+        .map((_, idx) => idx)
+        .filter(gIdx =>
+          props.selectedModels.some((_, mIdx) =>
+            props.assignments[mIdx][vIdx]?.[gIdx]
+          )
+        );
+    }
+    const assignedGroups = computed(() => groupsForVisit(previewVisitIndex.value));
+    const previewGroupPos = computed(() =>
+      assignedGroups.value.indexOf(previewGroupIndex.value)
+    );
+
+    function setFirstGroup(vIdx) {
+      const arr = groupsForVisit(vIdx);
+      previewGroupIndex.value = arr[0] ?? 0;
+    }
+
+    // Preview nav
+    function prevPreviewVisit() {
+      if (previewVisitIndex.value > 0) {
+        previewVisitIndex.value--;
+        setFirstGroup(previewVisitIndex.value);
+      }
+    }
+    function nextPreviewVisit() {
+      if (previewVisitIndex.value < visitList.value.length - 1) {
+        previewVisitIndex.value++;
+        setFirstGroup(previewVisitIndex.value);
+      }
+    }
+    function prevPreviewGroup() {
+      if (previewGroupPos.value > 0) {
+        previewGroupIndex.value = assignedGroups.value[previewGroupPos.value - 1];
+      }
+    }
+    function nextPreviewGroup() {
+      if (previewGroupPos.value < assignedGroups.value.length - 1) {
+        previewGroupIndex.value = assignedGroups.value[previewGroupPos.value + 1];
+      }
+    }
+
+    // Build preview form for current visit & group
+    const previewForm = computed(() => {
+      const visitName = visitList.value[previewVisitIndex.value].name;
+      const groupName = groupList.value[previewGroupIndex.value].name;
+      const sections = props.selectedModels
         .filter((_, mIdx) =>
-          this.assignments[mIdx][this.previewVisitIndex][this.previewGroupIndex]
+          props.assignments[mIdx][previewVisitIndex.value]?.[previewGroupIndex.value]
         )
-        .map(model => ({
-          title:  model.title,
-          fields: model.fields
-        }));
-      return {
-        formName: `Preview: ${visit.name} / ${group.name}`,
-        sections
-      };
+        .map(m => ({ title: m.title, fields: m.fields }));
+      return { formName: `Preview: ${visitName} / ${groupName}`, sections };
+    });
+
+    // Only open preview if the current visit has at least one assignment
+    function hasAssignment(vIdx) {
+      return groupList.value.some((_, gIdx) =>
+        props.selectedModels.some((_, mIdx) =>
+          props.assignments[mIdx][vIdx]?.[gIdx]
+        )
+      );
     }
-  },
-  methods: {
-    prevVisit() {
-      if (this.currentVisitIndex > 0) this.currentVisitIndex--;
-    },
-    nextVisit() {
-      if (this.currentVisitIndex < this.visits.length - 1) this.currentVisitIndex++;
-    },
-    onToggle(mIdx, vIdx, gIdx, checked) {
-      this.$emit("assignment-updated", { mIdx, vIdx, gIdx, checked });
-    },
-    openPreview() {
-      this.previewVisitIndex = this.currentVisitIndex;
-      this.previewGroupIndex = 0;
-      this.showPreviewModal  = true;
-    },
-    closePreview() {
-      this.showPreviewModal = false;
-    },
-    prevPreviewVisit() {
-      if (this.previewVisitIndex > 0) this.previewVisitIndex--;
-    },
-    nextPreviewVisit() {
-      if (this.previewVisitIndex < this.visits.length - 1) this.previewVisitIndex++;
-    },
-    prevPreviewGroup() {
-      if (this.previewGroupIndex > 0) this.previewGroupIndex--;
-    },
-    nextPreviewGroup() {
-      if (this.previewGroupIndex < this.groups.length - 1) this.previewGroupIndex++;
+    function openPreview() {
+      if (!hasAssignment(currentVisitIndex.value)) return;
+      previewVisitIndex.value = currentVisitIndex.value;
+      setFirstGroup(currentVisitIndex.value);
+      showPreviewModal.value = true;
     }
+    function closePreview() {
+      showPreviewModal.value = false;
+    }
+
+    // Footer actions
+    function saveStudy() {
+      localStorage.setItem(
+        "protocolStudy",
+        JSON.stringify({
+          visits: props.visits,
+          groups: props.groups,
+          selectedModels: props.selectedModels,
+          assignments: props.assignments
+        })
+      );
+      alert("Study saved!");
+    }
+    function goToSaved() {
+      router.push("/saved-study");
+    }
+
+    return {
+      // matrix
+      visitList,
+      groupList,
+      currentVisitIndex,
+      prevVisit,
+      nextVisit,
+      // preview
+      showPreviewModal,
+      previewVisitIndex,
+      previewGroupIndex,
+      assignedGroups,
+      previewGroupPos,
+      prevPreviewVisit,
+      nextPreviewVisit,
+      prevPreviewGroup,
+      nextPreviewGroup,
+      openPreview,
+      closePreview,
+      previewForm,
+      // toggles
+      onToggle,
+      hasAssignment,
+      // footer
+      saveStudy,
+      goToSaved
+    };
   }
 };
 </script>
@@ -195,54 +283,44 @@ export default {
 @import "@/assets/styles/_base.scss";
 
 .protocol-matrix-container {
+  padding: 16px;
   background: #fafafa;
   border: 1px solid $border-color;
-  border-radius: 5px;
-  padding: 15px;
+  border-radius: 6px;
 }
 
-.visit-header {
-  text-align: center;
-  font-size: 1.3em;
-  font-weight: bold;
-  margin-bottom: 10px;
-}
-
-.table-container {
-  overflow-x: auto;
-}
-
+/* Visit Pagination */
 .visit-nav {
   display: flex;
   justify-content: center;
   align-items: center;
-  gap: 10px;
-  margin-top: 10px;
+  margin-bottom: 12px;
 }
-
 .nav-btn {
+  @include button-reset;
   background: $secondary-color;
-  border: 1px solid $border-color;
   padding: $button-padding;
   border-radius: $button-border-radius;
   cursor: pointer;
-  font-size: 1.2em;
-  line-height: 1;
 }
 .nav-btn:disabled {
-  opacity: 0.5;
+  opacity: 0.4;
   cursor: not-allowed;
 }
-
 .visit-counter {
-  font-size: 1.1em;
+  margin: 0 8px;
+  font-weight: bold;
 }
 
+/* Matrix */
+.table-container {
+  overflow-x: auto;
+  margin-bottom: 16px;
+}
 .protocol-table {
   width: 100%;
   border-collapse: collapse;
 }
-
 .protocol-table th,
 .protocol-table td {
   border: 1px solid $border-color;
@@ -250,71 +328,59 @@ export default {
   text-align: center;
 }
 
-.matrix-actions {
-  margin-top: 10px;
-  text-align: right;
-}
-
-.btn-option {
-  @include button-reset;
-  background: $secondary-color;
-  padding: $button-padding;
-  border-radius: $button-border-radius;
-  cursor: pointer;
-  margin-left: 10px;
-}
-
-.btn-primary {
-  @include button-reset;
-  background: $primary-color;
-  color: white;
-  padding: $button-padding;
-  border-radius: $button-border-radius;
-  cursor: pointer;
-  margin-left: 10px;
-}
-
 /* Preview Modal */
 .modal-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0,0,0,0.5);
+  background: rgba(0, 0, 0, 0.4);
   display: flex;
-  align-items: center;
   justify-content: center;
+  align-items: center;
   z-index: 1000;
 }
 .protocol-preview-modal {
-  background: white;
-  padding: 20px;
-  border-radius: 8px;
+  background: #fff;
+  border-radius: 6px;
   width: 80%;
   max-width: 800px;
-  max-height: 90vh;
-  overflow-y: auto;
+  padding: 16px;
 }
 .preview-header {
   display: flex;
   align-items: center;
   gap: 8px;
   margin-bottom: 12px;
-  font-weight: bold;
+  font-size: 1.1em;
 }
 .preview-content {
   background: #f9f9f9;
-  padding: 10px;
+  padding: 12px;
   border-radius: 4px;
+  max-height: 60vh;
+  overflow-y: auto;
 }
 .modal-actions {
-  margin-top: 10px;
   text-align: right;
-  button {
-    @include button-reset;
-    background: $primary-color;
-    color: white;
-    padding: $button-padding;
-    border-radius: $button-border-radius;
-    cursor: pointer;
-  }
+  margin-top: 12px;
+}
+
+/* Footer */
+.matrix-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-top: 16px;
+}
+.btn-action {
+  @include button-reset;
+  background: $primary-color;
+  color: #fff;
+  padding: $button-padding;
+  border-radius: $button-border-radius;
+  cursor: pointer;
+}
+.btn-action:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 </style>

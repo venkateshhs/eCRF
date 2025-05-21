@@ -256,11 +256,8 @@
               :selectedModels="selectedModels"
               :assignments="assignments"
               @assignment-updated="onAssignmentUpdated"
+              @edit-template="editTemplate"
             />
-            <div class="matrix-actions">
-              <button @click="editTemplate" class="btn-option">Edit Template</button>
-              <button @click="saveMatrix" class="btn-primary">Save</button>
-            </div>
           </div>
         </div>
 
@@ -535,7 +532,7 @@ export default {
 
     handleProtocolClick() { this.showMatrix = true; },
     editTemplate()       { this.showMatrix = false; },
-    saveMatrix()         { console.log("Save Matrix clicked"); },
+
     // called when ProtocolMatrix emits assignment-updated
     onAssignmentUpdated({ mIdx, vIdx, gIdx, checked }) {
       this.assignments[mIdx][vIdx][gIdx] = checked;
