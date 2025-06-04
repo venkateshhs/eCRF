@@ -116,6 +116,8 @@
 <script>
 import { ref, computed } from "vue";
 import { useRouter } from "vue-router";
+import { useStore } from "vuex";
+import axios from "axios";
 import FormPreview from "@/components/FormPreview.vue";
 
 export default {
@@ -130,6 +132,7 @@ export default {
   emits: ["assignment-updated", "edit-template"],
   setup(props, { emit }) {
     const router = useRouter();
+    const store = useStore();
 
     // Matrix indices
     const currentVisitIndex = ref(0);
@@ -143,61 +146,72 @@ export default {
     const visitList = computed(() => props.visits.length ? props.visits : [{ name: "All Visits" }]);
     const groupList = computed(() => props.groups.length ? props.groups : [{ name: "All Groups" }]);
 
-    // Toggles
+    // Toggle a checkbox
     function onToggle(mIdx, vIdx, gIdx, checked) {
+      console.log("onToggle called:", { mIdx, vIdx, gIdx, checked });
       emit("assignment-updated", { mIdx, vIdx, gIdx, checked });
     }
 
     // Matrix nav
     function prevVisit() {
-      if (currentVisitIndex.value > 0) currentVisitIndex.value--;
+      if (currentVisitIndex.value > 0) {
+        currentVisitIndex.value--;
+        console.log("Switched to matrix visit index:", currentVisitIndex.value);
+      }
     }
     function nextVisit() {
-      if (currentVisitIndex.value < visitList.value.length - 1)
+      if (currentVisitIndex.value < visitList.value.length - 1) {
         currentVisitIndex.value++;
+        console.log("Switched to matrix visit index:", currentVisitIndex.value);
+      }
     }
 
     // Determine which groups are assigned in a given visit
     function groupsForVisit(vIdx) {
-      return groupList.value
+      const arr = groupList.value
         .map((_, idx) => idx)
         .filter(gIdx =>
           props.selectedModels.some((_, mIdx) =>
             props.assignments[mIdx][vIdx]?.[gIdx]
           )
         );
+      console.log(`groupsForVisit(${vIdx}) =>`, arr);
+      return arr;
     }
     const assignedGroups = computed(() => groupsForVisit(previewVisitIndex.value));
-    const previewGroupPos = computed(() =>
-      assignedGroups.value.indexOf(previewGroupIndex.value)
-    );
+    const previewGroupPos = computed(() => assignedGroups.value.indexOf(previewGroupIndex.value));
 
     function setFirstGroup(vIdx) {
       const arr = groupsForVisit(vIdx);
-      previewGroupIndex.value = arr[0] ?? 0;
+      previewGroupIndex.value = arr.length ? arr[0] : 0;
+      console.log("setFirstGroup(): previewGroupIndex set to", previewGroupIndex.value);
     }
 
     // Preview nav
     function prevPreviewVisit() {
       if (previewVisitIndex.value > 0) {
         previewVisitIndex.value--;
+        console.log("Preview visit changed to:", previewVisitIndex.value);
         setFirstGroup(previewVisitIndex.value);
       }
     }
     function nextPreviewVisit() {
       if (previewVisitIndex.value < visitList.value.length - 1) {
         previewVisitIndex.value++;
+        console.log("Preview visit changed to:", previewVisitIndex.value);
         setFirstGroup(previewVisitIndex.value);
       }
     }
     function prevPreviewGroup() {
       if (previewGroupPos.value > 0) {
         previewGroupIndex.value = assignedGroups.value[previewGroupPos.value - 1];
+        console.log("Preview group changed to:", previewGroupIndex.value);
       }
     }
     function nextPreviewGroup() {
       if (previewGroupPos.value < assignedGroups.value.length - 1) {
         previewGroupIndex.value = assignedGroups.value[previewGroupPos.value + 1];
+        console.log("Preview group changed to:", previewGroupIndex.value);
       }
     }
 
@@ -210,41 +224,95 @@ export default {
           props.assignments[mIdx][previewVisitIndex.value]?.[previewGroupIndex.value]
         )
         .map(m => ({ title: m.title, fields: m.fields }));
+      console.log("Building previewForm with:", { visitName, groupName, sections });
       return { formName: `Preview: ${visitName} / ${groupName}`, sections };
     });
 
     // Only open preview if the current visit has at least one assignment
     function hasAssignment(vIdx) {
-      return groupList.value.some((_, gIdx) =>
+      const result = groupList.value.some((_, gIdx) =>
         props.selectedModels.some((_, mIdx) =>
           props.assignments[mIdx][vIdx]?.[gIdx]
         )
       );
+      console.log(`hasAssignment(${vIdx}) =>`, result);
+      return result;
     }
     function openPreview() {
-      if (!hasAssignment(currentVisitIndex.value)) return;
+      console.log("openPreview() called for visit:", currentVisitIndex.value);
+      if (!hasAssignment(currentVisitIndex.value)) {
+        console.log("openPreview aborted: no assignments in visit", currentVisitIndex.value);
+        return;
+      }
       previewVisitIndex.value = currentVisitIndex.value;
       setFirstGroup(currentVisitIndex.value);
       showPreviewModal.value = true;
+      console.log("Preview modal opened at:", { previewVisitIndex: previewVisitIndex.value, previewGroupIndex: previewGroupIndex.value });
     }
     function closePreview() {
       showPreviewModal.value = false;
+      console.log("Preview modal closed");
     }
 
-    // Footer actions
-    function saveStudy() {
-      localStorage.setItem(
-        "protocolStudy",
-        JSON.stringify({
-          visits: props.visits,
-          groups: props.groups,
-          selectedModels: props.selectedModels,
-          assignments: props.assignments
-        })
-      );
-      alert("Study saved!");
+    // Save the entire study into the database using POST /studies/
+    async function saveStudy() {
+      console.log("saveStudy() called");
+      const studyDetails = store.state.studyDetails || {};
+      const userId = store.state.user?.id;
+      console.log("Retrieved userId from store:", userId);
+
+      if (!userId) {
+        console.error("saveStudy aborted: no authenticated user found in store");
+        return;
+      }
+
+      // Build metadata
+      const metadata = {
+        created_by: userId,
+        study_name: studyDetails.name || "",
+        study_description: studyDetails.description || ""
+      };
+      console.log("Built metadata:", metadata);
+
+      // Combine everything into a single JSON object for study_data
+      const studyData = {
+        ...studyDetails,
+        visits: props.visits,
+        groups: props.groups,
+        selectedModels: props.selectedModels,
+        assignments: props.assignments
+      };
+      console.log("Built studyData (full JSON):", studyData);
+
+      // Final payload
+      const payload = {
+        study_metadata: metadata,
+        study_content: { study_data: studyData }
+      };
+      console.log("Final payload to send:", payload);
+
+      // Send request to POST /studies/
+      try {
+        console.log("Sending axios POST to /studies/ …");
+        const response = await axios.post(
+          "http://localhost:8000/forms/studies/",
+          payload,
+          {
+            headers: {
+              Authorization: `Bearer ${store.state.token}`
+            }
+          }
+        );
+        console.log("API response received:", response.data);
+        alert("Study successfully saved to database!");
+      } catch (error) {
+        console.error("Error saving study to database:", error);
+        alert("Failed to save study. Check console for details.");
+      }
     }
+
     function goToSaved() {
+      console.log("goToSaved(): navigating to /saved-study");
       router.push("/saved-study");
     }
 
@@ -271,7 +339,7 @@ export default {
       // toggles
       onToggle,
       hasAssignment,
-      // footer
+      // save
       saveStudy,
       goToSaved
     };

@@ -469,43 +469,86 @@ export default {
     };
   },
   computed: {
-    icons() { return icons; },
-    token() { return this.$store.state.token; },
-    currentForm() { return this.forms[this.currentFormIndex] || { sections: [] }; },
+    icons() {
+      return icons;
+    },
+    token() {
+      return this.$store.state.token;
+    },
+    currentForm() {
+      return this.forms[this.currentFormIndex] || { sections: [] };
+    },
     selectedModels() {
-      // include every section as a "model" in the matrix
       return this.currentForm.sections.map(sec => ({
-       title: sec.title   ,
-       fields: sec.fields}));
+        title: sec.title,
+        fields: sec.fields
+      }));
     }
   },
   watch: {
-    visits:         { handler: "initAssignments", immediate: true },
-    groups:         { handler: "initAssignments", immediate: true },
+    visits: { handler: "initAssignments", immediate: true },
+    groups: { handler: "initAssignments", immediate: true },
     selectedModels: { handler: "initAssignments", immediate: true },
-    forms:          { handler(f) { localStorage.setItem("scratchForms", JSON.stringify(f)); }, deep: true }
+    forms: {
+      handler(f) {
+        localStorage.setItem("scratchForms", JSON.stringify(f));
+      },
+      deep: true
+    }
   },
   async mounted() {
     const details = this.$store.state.studyDetails || {};
     this.studyDetails = details;
 
     // visits/groups defaults
-    this.visits = Array.isArray(details.visits) && details.visits.length
-      ? details.visits
-      : [{ name: "Visit 1" }];
-    this.groups = Array.isArray(details.groups) && details.groups.length
-      ? details.groups
-      : [{ name: "Group 1" }];
+    this.visits =
+      Array.isArray(details.visits) && details.visits.length
+        ? details.visits
+        : [{ name: "Visit 1" }];
+    this.groups =
+      Array.isArray(details.groups) && details.groups.length
+        ? details.groups
+        : [{ name: "Group 1" }];
 
     this.totalForms = details.numberOfForms || 1;
     const stored = localStorage.getItem("scratchForms");
     if (stored) {
-      this.forms = JSON.parse(stored);
-      this.totalForms = this.forms.length;
-    } else {
-      for (let i = 0; i < this.totalForms; i++) {
-        this.forms.push({ formName: `Form${i+1}`, sections: [] });
+      try {
+        this.forms = JSON.parse(stored);
+        this.totalForms = this.forms.length;
+      } catch {
+        this.forms = [];
       }
+
+      // Normalize every saved section to have a boolean `collapsed`, and clear any default flags
+      this.forms.forEach(form => {
+        form.sections = Array.isArray(form.sections) ? form.sections : [];
+        form.sections.forEach(sec => {
+          if (typeof sec.collapsed !== "boolean") {
+            sec.collapsed = true;
+          }
+          // If a section was previously marked default, remove that marker
+          if (sec.isDefault) {
+            delete sec.isDefault;
+          }
+        });
+      });
+    } else {
+      // If no stored data, create one empty form
+      for (let i = 0; i < this.totalForms; i++) {
+        this.forms.push({ formName: `Form${i + 1}`, sections: [] });
+      }
+    }
+
+    // If the current form has no sections, insert a default placeholder section
+    if (this.currentForm.sections.length === 0) {
+      this.currentForm.sections.push({
+        title: "Section 1",
+        fields: [],
+        collapsed: false,
+        isDefault: true
+      });
+      this.activeSection = 0;
     }
 
     try {
@@ -518,11 +561,17 @@ export default {
     await this.loadDataModels();
   },
   methods: {
-    goBack() { this.$router.back(); },
-    navigateToSavedForms() { this.$router.push("/saved-forms"); },
+    goBack() {
+      this.$router.back();
+    },
+    navigateToSavedForms() {
+      this.$router.push("/saved-forms");
+    },
 
     initAssignments() {
-      const m = this.selectedModels.length, v = this.visits.length, g = this.groups.length;
+      const m = this.selectedModels.length,
+        v = this.visits.length,
+        g = this.groups.length;
       this.assignments = Array.from({ length: m }, () =>
         Array.from({ length: v }, () =>
           Array.from({ length: g }, () => false)
@@ -530,55 +579,243 @@ export default {
       );
     },
 
-    handleProtocolClick() { this.showMatrix = true; },
-    editTemplate()       { this.showMatrix = false; },
+    handleProtocolClick() {
+      this.showMatrix = true;
+    },
+    editTemplate() {
+      this.showMatrix = false;
+    },
 
-    // called when ProtocolMatrix emits assignment-updated
-    onAssignmentUpdated({ mIdx, vIdx, gIdx, checked }) {
-      this.assignments[mIdx][vIdx][gIdx] = checked;
-    },
+    // ============================
+    // SECTION ADD / TOGGLE LOGIC
+    // ============================
+
+    /**
+     * Add a brand-new section at the end and show it immediately.
+     * If a default placeholder exists, replace it instead.
+     */
     addNewSection() {
-      this.currentForm.sections.push({
-        title: `Section ${this.currentForm.sections.length + 1}`,
+      console.log(
+        "addNewSection(): BEFORE change, sections.length =",
+        this.currentForm.sections.length
+      );
+
+      const sections = this.currentForm.sections;
+
+      // If the only section is a default placeholder (no fields & isDefault),
+      // remove it and insert the real first section in its place.
+      if (
+        sections.length === 1 &&
+        sections[0].isDefault &&
+        sections[0].fields.length === 0
+      ) {
+        console.log("  → removing default placeholder");
+        sections.splice(0, 1);
+        sections.splice(0, 0, {
+          title: "Section 1",
+          fields: [],
+          collapsed: false
+        });
+        this.activeSection = 0;
+        console.log(
+          "  → after replacement, sections:",
+          sections.map((s, idx) => ({
+            idx,
+            title: s.title,
+            collapsed: s.collapsed,
+            isDefault: !!s.isDefault
+          })),
+          "; activeSection =",
+          this.activeSection
+        );
+        return;
+      }
+
+      // Otherwise, collapse every existing section
+      sections.forEach(sec => {
+        sec.collapsed = true;
+      });
+
+      // Compute new index at the end
+      const newIndex = sections.length;
+
+      // Insert a new section (collapsed: false = visible immediately)
+      sections.splice(newIndex, 0, {
+        title: `Section ${newIndex + 1}`,
         fields: [],
         collapsed: false
       });
-      this.toggleSection(this.currentForm.sections.length - 1);
+
+      // Update activeSection
+      this.activeSection = newIndex;
+
+      console.log(
+        "  → after insertion, sections:",
+        sections.map((s, idx) => ({
+          idx,
+          title: s.title,
+          collapsed: s.collapsed,
+          isDefault: !!s.isDefault
+        })),
+        "; activeSection =",
+        this.activeSection
+      );
     },
+
+    /**
+     * Add a brand-new section directly below index i and show it immediately.
+     * If a default placeholder exists (as the only section), treat as addNewSection().
+     */
     addNewSectionBelow(i) {
-      this.currentForm.sections.splice(i+1, 0, {
-        title: `Section ${i+2}`,
+      console.log(
+        "addNewSectionBelow(): BEFORE change, sections.length =",
+        this.currentForm.sections.length,
+        " insertion index =",
+        i + 1
+      );
+
+      const sections = this.currentForm.sections;
+
+      // If the only section is the default placeholder, just call addNewSection()
+      if (
+        sections.length === 1 &&
+        sections[0].isDefault &&
+        sections[0].fields.length === 0
+      ) {
+        this.addNewSection();
+        return;
+      }
+
+      // Otherwise, collapse existing sections
+      sections.forEach(sec => {
+        sec.collapsed = true;
+      });
+
+      // Compute the insertion index
+      const insertIndex = i + 1;
+
+      // Splice in a new section (collapsed: false)
+      sections.splice(insertIndex, 0, {
+        title: `Section ${insertIndex + 1}`,
         fields: [],
         collapsed: false
       });
-      this.toggleSection(i+1);
+
+      // Update activeSection
+      this.activeSection = insertIndex;
+
+      console.log(
+        "  → after insertion, sections:",
+        sections.map((s, idx) => ({
+          idx,
+          title: s.title,
+          collapsed: s.collapsed,
+          isDefault: !!s.isDefault
+        })),
+        "; activeSection =",
+        this.activeSection
+      );
     },
+
+    /**
+     * Toggle collapse/expand for section i. All other sections collapse.
+     *
+     * If the clicked‐on section is already expanded (collapsed=false),
+     * this will flip it to collapsed=true and also clear activeSection.
+     * If it was collapsed, it will expand and set activeSection = i.
+     */
+    toggleSection(i) {
+      console.log(
+        "toggleSection(",
+        i,
+        ") called; before toggle =",
+        this.currentForm.sections.map((s, idx) => ({
+          idx,
+          collapsed: s.collapsed,
+          isDefault: !!s.isDefault
+        }))
+      );
+
+      this.currentForm.sections.forEach((s, idx) => {
+        if (idx !== i) {
+          // every other section must be collapsed
+          s.collapsed = true;
+        } else {
+          // flip only the clicked one
+          s.collapsed = !s.collapsed;
+          if (s.collapsed) {
+            // if we just collapsed it, clear activeSection
+            this.activeSection = -1;
+          } else {
+            // if we just expanded it, make it active
+            this.activeSection = i;
+          }
+        }
+      });
+
+      console.log(
+        "  → after toggle =",
+        this.currentForm.sections.map((s, idx) => ({
+          idx,
+          collapsed: s.collapsed,
+          isDefault: !!s.isDefault
+        })),
+        "; activeSection =",
+        this.activeSection
+      );
+    },
+
+    setActiveSection(i) {
+      this.activeSection = i;
+    },
+    editSection(i, v) {
+      if (v) this.currentForm.sections[i].title = v;
+    },
+
+    // ============================
+    // SECTION DELETE / CLEAR LOGIC
+    // ============================
+
     confirmDeleteSection(i) {
       this.openConfirmDialog("Delete this section?", () => {
-        this.currentForm.sections.splice(i,1);
-        this.activeSection = Math.max(0, this.activeSection-1);
+        this.currentForm.sections.splice(i, 1);
+        this.activeSection = Math.max(0, this.activeSection - 1);
+
+        // If all real sections are gone, re-insert a default placeholder
+        if (this.currentForm.sections.length === 0) {
+          this.currentForm.sections.push({
+            title: "Section 1",
+            fields: [],
+            collapsed: false,
+            isDefault: true
+          });
+          this.activeSection = 0;
+        }
       });
     },
     confirmClearForm() {
       this.openConfirmDialog("Clear all sections?", () => {
         this.currentForm.sections = [];
         this.activeSection = 0;
+        // After clearing, insert default placeholder
+        this.currentForm.sections.push({
+          title: "Section 1",
+          fields: [],
+          collapsed: false,
+          isDefault: true
+        });
       });
     },
-    toggleSection(i) {
-      this.currentForm.sections.forEach((s,idx) => {
-        s.collapsed = idx!==i ? true : !s.collapsed;
-        if (!s.collapsed) this.activeSection = i;
-      });
-    },
-    setActiveSection(i) { this.activeSection = i; },
-    editSection(i,v)     { if(v) this.currentForm.sections[i].title = v; },
+
+    // ============================
+    // FIELD MANAGEMENT LOGIC
+    // ============================
 
     openInputDialog(msg, def, cb) {
       this.inputDialogMessage = msg;
-      this.inputDialogValue   = def;
-      this.inputDialogCallback= cb;
-      this.showInputDialog    = true;
+      this.inputDialogValue = def;
+      this.inputDialogCallback = cb;
+      this.showInputDialog = true;
     },
     confirmInputDialog() {
       if (this.inputDialogCallback) this.inputDialogCallback(this.inputDialogValue);
@@ -590,24 +827,86 @@ export default {
 
     addFieldToActiveSection(field) {
       const sec = this.currentForm.sections[this.activeSection];
-      if (sec.collapsed) this.toggleSection(this.activeSection);
-      sec.fields.push({ ...field });
+      // If this is the default placeholder (no real intent), remove it first
+      if (sec.isDefault && sec.fields.length === 0) {
+        this.currentForm.sections.splice(this.activeSection, 1);
+        this.currentForm.sections.splice(this.activeSection, 0, {
+          title: `Section ${this.activeSection + 1}`,
+          fields: [],
+          collapsed: false
+        });
+      }
+      const updatedSec = this.currentForm.sections[this.activeSection];
+      if (updatedSec.collapsed) this.toggleSection(this.activeSection);
+      updatedSec.fields.push({ ...field });
     },
-    editField(si,fi,v) {
+    editField(si, fi, v) {
       if (v) this.currentForm.sections[si].fields[fi].label = v;
     },
-    addSimilarField(si,fi) {
+    addSimilarField(si, fi) {
       const f = this.currentForm.sections[si].fields[fi];
       const clone = { ...f, name: `${f.name}_${Date.now()}` };
-      this.currentForm.sections[si].fields.splice(fi+1,0,clone);
+      this.currentForm.sections[si].fields.splice(fi + 1, 0, clone);
     },
-    removeField(si,fi) {
-      this.currentForm.sections[si].fields.splice(fi,1);
+    removeField(si, fi) {
+      this.currentForm.sections[si].fields.splice(fi, 1);
     },
+
+    // ============================
+    // MODEL TAKEOVER LOGIC
+    // ============================
+
+    openModelDialog(model) {
+      this.currentModel = model;
+      this.selectedProps = model.fields.map(() => false);
+      this.showModelDialog = true;
+    },
+    takeoverModel() {
+      const chosen = this.currentModel.fields
+        .filter((_, i) => this.selectedProps[i])
+        .map(f => ({ ...f }));
+
+      // If only placeholder exists, replace it. Otherwise, insert below activeSection.
+      const sections = this.currentForm.sections;
+      if (
+        sections.length === 1 &&
+        sections[0].isDefault &&
+        sections[0].fields.length === 0
+      ) {
+        // Replace placeholder with a real section
+        sections.splice(0, 1, {
+          title: this.currentModel.title,
+          fields: chosen,
+          collapsed: false
+        });
+        this.activeSection = 0;
+      } else {
+        // Collapse existing
+        sections.forEach(sec => {
+          sec.collapsed = true;
+        });
+        // Insert new section below activeSection
+        const insertIndex = this.activeSection + 1;
+        sections.splice(insertIndex, 0, {
+          title: this.currentModel.title,
+          fields: chosen,
+          collapsed: false
+        });
+        this.activeSection = insertIndex;
+      }
+
+      this.showModelDialog = false;
+    },
+
+    // ============================
+    // SAVE / UPLOAD / DOWNLOAD LOGIC
+    // ============================
 
     async saveForm() {
       if (!this.token) {
-        this.openGenericDialog("No token: please log in.", () => this.$router.push("/login"));
+        this.openGenericDialog("No token: please log in.", () =>
+          this.$router.push("/login")
+        );
         return;
       }
       const payload = {
@@ -635,8 +934,8 @@ export default {
       try {
         const base = "http://127.0.0.1:8000/forms/studies";
         let res = this.studyDetails.id
-          ? await axios.put(`${base}/${this.studyDetails.id}`, payload, { headers:{ Authorization:`Bearer ${this.token}` } })
-          : await axios.post(base, payload, { headers:{ Authorization:`Bearer ${this.token}` } });
+          ? await axios.put(`${base}/${this.studyDetails.id}`, payload, { headers: { Authorization: `Bearer ${this.token}` } })
+          : await axios.post(base, payload, { headers: { Authorization: `Bearer ${this.token}` } });
         this.openGenericDialog(`Study "${res.data.metadata.study_name}" saved!`);
       } catch (err) {
         console.error("Error saving:", err.response || err);
@@ -647,7 +946,7 @@ export default {
     openConfirmDialog(msg, cb) {
       this.confirmDialogMessage = msg;
       this.confirmDialogCallback = cb;
-      this.showConfirmDialog    = true;
+      this.showConfirmDialog = true;
     },
     confirmDialogYes() {
       if (this.confirmDialogCallback) this.confirmDialogCallback();
@@ -657,10 +956,10 @@ export default {
       this.showConfirmDialog = false;
     },
 
-    openGenericDialog(msg, cb=null) {
+    openGenericDialog(msg, cb = null) {
       this.genericDialogMessage = msg;
-      this.genericDialogCallback= cb;
-      this.showGenericDialog    = true;
+      this.genericDialogCallback = cb;
+      this.showGenericDialog = true;
     },
     closeGenericDialog() {
       this.showGenericDialog = false;
@@ -673,8 +972,8 @@ export default {
     openConstraintsDialog(si, fi) {
       const f = this.currentForm.sections[si].fields[fi];
       this.currentFieldIndices = { sectionIndex: si, fieldIndex: fi };
-      this.currentFieldType    = f.type;
-      this.constraintsForm     = f.constraints ? { ...f.constraints } : {};
+      this.currentFieldType = f.type;
+      this.constraintsForm = f.constraints ? { ...f.constraints } : {};
       this.showConstraintsDialog = true;
     },
     confirmConstraintsDialog(c) {
@@ -692,46 +991,29 @@ export default {
         const res = await fetch("/study_schema.yaml");
         const doc = yaml.load(await res.text());
         this.dataModels = Object.entries(doc.classes)
-          .filter(([n]) => n!=="Study")
-          .map(([n,cls]) => ({
+          .filter(([n]) => n !== "Study")
+          .map(([n, cls]) => ({
             title: n,
-            fields: Object.entries(cls.attributes).map(([attr,def]) => {
-              let type="text", r=(def.range||"").toLowerCase();
-              if(r==="date"||r==="datetime") type="date";
-              else if(["integer","decimal"].includes(r)) type="number";
-              if(def.enum) type="select";
+            fields: Object.entries(cls.attributes).map(([attr, def]) => {
+              let type = "text",
+                r = (def.range || "").toLowerCase();
+              if (r === "date" || r === "datetime") type = "date";
+              else if (["integer", "decimal"].includes(r)) type = "number";
+              if (def.enum) type = "select";
               return {
                 name: `${attr}_${Date.now()}`,
                 label: attr,
                 type,
-                options: def.enum||[],
-                placeholder: def.description||"",
+                options: def.enum || [],
+                placeholder: def.description || "",
                 value: "",
                 constraints: { required: !!def.required }
               };
             })
           }));
-      } catch(err) {
+      } catch (err) {
         console.error("Failed to load data models:", err);
       }
-    },
-    openModelDialog(model) {
-      this.currentModel = model;
-      this.selectedProps = model.fields.map(() => false);
-      this.showModelDialog = true;
-    },
-    takeoverModel() {
-      const chosen = this.currentModel.fields
-        .filter((_,i) => this.selectedProps[i])
-        .map(f => ({ ...f }));
-      const newSection = {
-        title: this.currentModel.title,
-        collapsed: false,
-        fields: chosen
-      };
-      this.currentForm.sections.splice(this.activeSection+1, 0, newSection);
-      this.activeSection++;
-      this.showModelDialog = false;
     },
 
     openDownloadDialog() {
@@ -741,21 +1023,21 @@ export default {
       this.showDownloadDialog = false;
     },
     downloadFormData(format) {
-      const data = { studyDetails:this.studyDetails, forms:this.forms };
+      const data = { studyDetails: this.studyDetails, forms: this.forms };
       let str, name;
-      const pref = this.studyDetails.name?.trim().replace(/\s+/g,"_")||"formData";
-      if(format==="json") {
-        str = JSON.stringify(data,null,2);
+      const pref = this.studyDetails.name?.trim().replace(/\s+/g, "_") || "formData";
+      if (format === "json") {
+        str = JSON.stringify(data, null, 2);
         name = `${pref}.json`;
       } else {
         try {
           str = yaml.dump(data);
           name = `${pref}.yaml`;
         } catch {
-          str="Error"; name="formData.txt";
+          str = "Error"; name = "formData.txt";
         }
       }
-      const blob = new Blob([str],{type:"text/plain"});
+      const blob = new Blob([str], { type: "text/plain" });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url; a.download = name; a.click();
@@ -770,24 +1052,51 @@ export default {
     },
     handleFileChange(e) {
       const f = e.target.files[0];
-      if(!f) return;
+      if (!f) return;
       const r = new FileReader();
       r.onload = evt => {
-        let pd, ct=evt.target.result.trim();
-        try { pd=JSON.parse(ct); }
-        catch {
-          try { pd=yaml.load(ct); }
-          catch { return this.openGenericDialog("Invalid file."); }
+        let pd, ct = evt.target.result.trim();
+        try {
+          pd = JSON.parse(ct);
+        } catch {
+          try {
+            pd = yaml.load(ct);
+          } catch {
+            return this.openGenericDialog("Invalid file.");
+          }
         }
-        if(pd.studyDetails) {
+        if (pd.studyDetails) {
           this.studyDetails = pd.studyDetails;
-          this.$store.commit("setStudyDetails",pd.studyDetails);
+          this.$store.commit("setStudyDetails", pd.studyDetails);
         }
-        if(pd.forms) {
+        if (pd.forms) {
           this.forms = pd.forms;
           this.totalForms = pd.forms.length;
           this.currentFormIndex = 0;
           this.activeSection = 0;
+
+          // Normalize collapsed flags and remove isDefault on upload
+          this.forms.forEach(form =>
+            form.sections.forEach(sec => {
+              if (typeof sec.collapsed !== "boolean") {
+                sec.collapsed = true;
+              }
+              if (sec.isDefault) {
+                delete sec.isDefault;
+              }
+            })
+          );
+
+          // If the uploaded form has zero sections, insert default
+          if (this.currentForm.sections.length === 0) {
+            this.currentForm.sections.push({
+              title: "Section 1",
+              fields: [],
+              collapsed: false,
+              isDefault: true
+            });
+            this.activeSection = 0;
+          }
         }
       };
       r.readAsText(f);
@@ -801,10 +1110,10 @@ export default {
       this.showPreviewDialog = false;
     },
     prevPreview() {
-      if(this.previewFormIndex>0) this.previewFormIndex--;
+      if (this.previewFormIndex > 0) this.previewFormIndex--;
     },
     nextPreview() {
-      if(this.previewFormIndex<this.forms.length-1) this.previewFormIndex++;
+      if (this.previewFormIndex < this.forms.length - 1) this.previewFormIndex++;
     }
   }
 };
