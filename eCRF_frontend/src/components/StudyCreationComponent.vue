@@ -256,7 +256,7 @@ function checkSubjectsSetup() {
   }
 
   const subjects = [];
-  const prefix = (studyData.value.name || "STDY").replace(/[^A-Za-z]/g, "").toUpperCase().substring(0, 3);
+  const prefix = (studyData.value.title || "ST").replace(/[^A-Za-z\s]/g, "").trim().split(/\s+/).map(word => word[0]?.toUpperCase() || "").join("") || "ST";
   const groupNames = groupData.value.map(g => g.name || g.label || "Unnamed");
   console.log("subjectCount.value", subjectCount.value)
   for (let i = 1; i <= subjectCount.value; i++) {
