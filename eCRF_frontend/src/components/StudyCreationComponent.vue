@@ -2,10 +2,9 @@
   <div class="study-creation-container">
     <h1>Study Management</h1>
 
-    <!-- STEP 1: Study -->
+    <!-- STEP 1 -->
     <div v-if="step === 1" class="new-study-form">
       <h2>Step 1: Create a New Study</h2>
-
       <div
         v-for="(f, i) in studySchema.filter(f => f.display)"
         :key="i"
@@ -21,7 +20,6 @@
           :disabled="f.disabled"
           :error="fieldError(f, studyData[f.field])"
         />
-
         <BaseSelectField
           v-else-if="f.type === 'select'"
           v-model="studyData[f.field]"
@@ -33,7 +31,6 @@
           :disabled="f.disabled"
           :error="fieldError(f, studyData[f.field])"
         />
-
         <BaseNumberField
           v-else-if="f.type === 'number'"
           v-model="studyData[f.field]"
@@ -44,7 +41,6 @@
           :disabled="f.disabled"
           :error="fieldError(f, studyData[f.field])"
         />
-
         <BaseDateField
           v-else-if="f.type === 'date'"
           v-model="studyData[f.field]"
@@ -56,7 +52,6 @@
           :min="f.min"
           :max="f.max"
         />
-
         <BaseTextField
           v-else
           v-model="studyData[f.field]"
@@ -68,7 +63,6 @@
           :error="fieldError(f, studyData[f.field])"
         />
       </div>
-
       <div class="form-actions">
         <button
           type="button"
@@ -80,56 +74,55 @@
       </div>
     </div>
 
-    <!-- STEP 2: Groups/Cohorts -->
+    <!-- STEP 2 -->
     <div v-if="step === 2" class="new-study-form">
-      <GroupForm
-        :schema="groupSchema"
-        v-model="groupData"
-        @validate="checkGroups"
-      />
+      <GroupForm :schema="groupSchema" v-model="groupData" />
       <div class="form-actions">
-        <button
-          type="button"
-          @click="step = 1"
-          class="btn-option"
-        >
-          ← Back
-        </button>
-        <button
-          type="button"
-          @click="checkGroups"
-          class="btn-option"
-        >
-          Next →
-        </button>
+        <button @click="step = 1" class="btn-option">← Back</button>
+        <button @click="checkGroups" class="btn-option">Next →</button>
       </div>
     </div>
 
-    <!-- STEP 3: Visits -->
+    <!-- STEP 3 -->
     <div v-if="step === 3" class="new-study-form">
-      <VisitForm
-        :schema="visitSchema"
-        v-model="visitData"
-        @validate="checkVisits"
+      <SubjectForm
+        v-model:subjectCount="subjectCount"
+  v-model:assignmentMethod="assignmentMethod"
       />
       <div class="form-actions">
-        <button
-          type="button"
-          @click="step = 2"
-          class="btn-option"
-        >
-          ← Back
-        </button>
-        <button
-          type="button"
-          @click="checkVisits"
-          class="btn-option"
-        >
-          Finish
-        </button>
+        <button @click="step = 2" class="btn-option">← Back</button>
+        <button @click="checkSubjectsSetup" class="btn-option">Next →</button>
+      </div>
+    </div>
+
+    <!-- STEP 4 -->
+    <div v-if="step === 4" class="new-study-form">
+      <SubjectAssignmentForm
+        :subjects="subjectData"
+        :groupData="groupData"
+        v-model:subjects="subjectData"
+      />
+      <div class="form-actions">
+        <button @click="step = 3" class="btn-option">← Back</button>
+        <button @click="checkSubjectsAssigned" class="btn-option">Next →</button>
+      </div>
+    </div>
+
+    <!-- STEP 5 -->
+    <div v-if="step === 5" class="new-study-form">
+      <VisitForm :schema="visitSchema" v-model="visitData" />
+      <div class="form-actions">
+        <button @click="step = 4" class="btn-option">← Back</button>
+        <button @click="checkVisits" class="btn-option">Finish</button>
       </div>
     </div>
   </div>
+  <div v-if="showDialog" class="dialog-backdrop">
+  <div class="dialog-box">
+    <p>{{ dialogMessage }}</p>
+    <button @click="showDialog = false" class="btn-option">OK</button>
+  </div>
+</div>
 </template>
 
 <script>
@@ -138,14 +131,16 @@ import { useRouter } from "vue-router";
 import { useStore } from "vuex";
 import yaml from "js-yaml";
 
-import BaseTextField   from "@/components/forms/BaseTextField.vue";
-import BaseTextarea    from "@/components/forms/BaseTextarea.vue";
+import BaseTextField from "@/components/forms/BaseTextField.vue";
+import BaseTextarea from "@/components/forms/BaseTextarea.vue";
 import BaseNumberField from "@/components/forms/BaseNumberField.vue";
-import BaseDateField   from "@/components/forms/BaseDateField.vue";
+import BaseDateField from "@/components/forms/BaseDateField.vue";
 import BaseSelectField from "@/components/forms/BaseSelectField.vue";
 
 import GroupForm from "./GroupForm.vue";
 import VisitForm from "./VisitForm.vue";
+import SubjectForm from "./SubjectForm.vue";
+import SubjectAssignmentForm from "./SubjectAssignmentForm.vue";
 
 export default {
   name: "StudyCreationComponent",
@@ -157,22 +152,30 @@ export default {
     BaseSelectField,
     GroupForm,
     VisitForm,
+    SubjectForm,
+    SubjectAssignmentForm,
   },
   setup() {
     const router = useRouter();
     const store = useStore();
     const formatLabel = inject("formatLabel");
     const step = ref(1);
+    const studyData = ref({});
+    const groupData = ref([]);
+    const subjectData = ref([]);
+    const visitData = ref([]);
+    const subjectCount = ref(1);
+    const assignmentMethod = ref("random");
 
-    const studySchema   = ref([]);
-    const visitSchema   = ref([]);
-    const groupSchema   = ref([]);
-
-    const studyData     = ref({});
-    const visitData     = ref([]);
-    const groupData     = ref([]);
+    const studySchema = ref([]);
+    const groupSchema = ref([]);
+    const visitSchema = ref([]);
 
     const showStudyErrors = ref(false);
+    const showDialog = ref(false);
+    const dialogMessage = ref("");
+
+
 
     function fieldError(f, value) {
       return f.required && showStudyErrors.value && !value
@@ -192,14 +195,14 @@ export default {
         if (r === "integer" || r === "decimal") type = "number";
         if (d.enum) type = "select";
         return {
-          field:       n,
-          label:       formatLabel(n),
+        field: n,
+        label: formatLabel(n),
           placeholder: d.description || formatLabel(n),
           type,
-          required:    !!d.required,
+        required: !!d.required,
           disabled:    !!d.disabled,
-          display:     d.display !== false,
-          options:     d.enum || [],
+        display: d.display !== false,
+        options: d.enum || [],
           skip:        d.skip || {}
         };
       });
@@ -228,7 +231,7 @@ export default {
           router.push({ name: 'CreateFormScratch' });
         } else {
           store.commit('setStudyDetails', payload);
-          step.value = 2;
+      step.value = 2;
         }
       }
     }
@@ -245,6 +248,43 @@ export default {
       });
       step.value = 3;
     }
+
+function checkSubjectsSetup() {
+  if (!subjectCount.value || !assignmentMethod.value) {
+    console.warn("Provide subject count and assignment method.");
+    return;
+  }
+
+  const subjects = [];
+  const prefix = (studyData.value.name || "STDY").replace(/[^A-Za-z]/g, "").toUpperCase().substring(0, 3);
+  const groupNames = groupData.value.map(g => g.name || g.label || "Unnamed");
+  console.log("subjectCount.value", subjectCount.value)
+  for (let i = 1; i <= subjectCount.value; i++) {
+    const id = `SUBJ-${prefix}-${String(i).padStart(3, "0")}`;
+    let group = "";
+
+    if (assignmentMethod.value === "random" && groupNames.length > 0) {
+      group = groupNames[Math.floor(Math.random() * groupNames.length)];
+    }
+
+    subjects.push({ id, group });
+  }
+
+  subjectData.value = subjects;
+  console.log("subjects", subjects)
+  step.value = 4;
+}
+
+
+
+    function checkSubjectsAssigned() {
+      if (subjectData.value.some((s) => !s.group)) {
+        dialogMessage.value = "All subjects must have a group.";
+        showDialog.value = true;
+        return;
+      }
+      step.value = 5;
+}
 
     function checkVisits() {
       const hasErrors = visitData.value.some(v =>
@@ -271,11 +311,25 @@ export default {
 
     return {
       step,
-      studySchema, studyData, showStudyErrors, validateStudy, fieldError,
-      groupSchema, groupData, checkGroups,
-      visitSchema, visitData, checkVisits,
+      fieldError,
+      studyData,
+      groupData,
+      subjectData,
+      visitData,
+      subjectCount,
+      assignmentMethod,
+      studySchema,
+      groupSchema,
+      visitSchema,
+      validateStudy,
+      checkGroups,
+      checkSubjectsSetup,
+      checkSubjectsAssigned,
+      checkVisits,
+      showDialog,
+      dialogMessage,
     };
-  }
+  },
 };
 </script>
 
@@ -307,4 +361,25 @@ export default {
   border-radius: 4px;
   cursor: pointer;
 }
+.dialog-backdrop {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 1000;
+}
+
+.dialog-box {
+  background: white;
+  padding: 20px 30px;
+  border-radius: 8px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.25);
+  text-align: center;
+}
+
 </style>
