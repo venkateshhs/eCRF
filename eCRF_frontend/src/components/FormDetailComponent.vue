@@ -262,6 +262,15 @@
     </p>
   </div>
 </div>
+ <div v-if="permissionError" class="dialog-overlay">
+    <div class="dialog">
+      <h3>Permission Denied</h3>
+      <p>You do not have permission to create a share link. Please contact your administrator.</p>
+      <div class="dialog-actions">
+        <button @click="permissionError = false">Close</button>
+      </div>
+    </div>
+  </div>
 
 </template>
 
@@ -288,6 +297,7 @@ export default {
       shareParams: { subjectIndex: null, visitIndex: null },
       shareConfig: { permission: 'view', maxUses: 1, expiresInDays: 7 },
       generatedLink: '',
+      permissionError: false,
     };
   },
 
@@ -552,6 +562,13 @@ export default {
   } catch (err) {
     console.error(err);
     this.generatedLink = null;
+     if (err.response?.status === 403) {
+       // no permission
+       this.permissionError = true;
+     } else {
+       this.error = err.response?.data?.detail || err.message;
+     }
+
     this.error = err.response?.data?.detail || err.message;
   }
 },
