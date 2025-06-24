@@ -1,181 +1,299 @@
 <template>
   <div class="study-data-container" v-if="study">
-    <!-- Study Header -->
-    <h1 class="study-name">{{ study.metadata.study_name }}</h1>
-
-    <!-- Navigation Bars: Subject, Visit, Group -->
-    <div class="navigation-bars">
-      <!-- Subject Nav -->
-      <div class="nav-item">
-        <button @click="prevSubject" :disabled="currentSubjectIndex === 0" class="nav-btn">&lt;</button>
-        <span class="nav-label">Subject {{ currentSubjectIndex + 1 }} / {{ numberOfSubjects }}</span>
-        <button @click="nextSubject" :disabled="currentSubjectIndex === numberOfSubjects - 1" class="nav-btn">&gt;</button>
-      </div>
-      <!-- Visit Nav -->
-      <div class="nav-item" v-if="visitList.length > 1">
-        <button @click="prevVisit" :disabled="currentVisitIndex === 0" class="nav-btn">&lt;</button>
-        <span class="nav-label">Visit: {{ visitList[currentVisitIndex].name }}</span>
-        <button @click="nextVisit" :disabled="currentVisitIndex === visitList.length - 1" class="nav-btn">&gt;</button>
-      </div>
-      <!-- Group Nav -->
-      <div class="nav-item" v-if="groupList.length > 1">
-        <button @click="prevGroup" :disabled="currentGroupIndex === 0" class="nav-btn">&lt;</button>
-        <span class="nav-label">Group: {{ groupList[currentGroupIndex].name }}</span>
-        <button @click="nextGroup" :disabled="currentGroupIndex === groupList.length - 1" class="nav-btn">&gt;</button>
-      </div>
+    <!-- ─────────────────────────────────────────────────── -->
+    <!-- 1. STUDY DETAILS (Always Visible at the Top)       -->
+    <!-- ─────────────────────────────────────────────────── -->
+    <div class="study-header">
+      <h1 class="study-name">{{ study.metadata.study_name }}</h1>
+      <p class="study-description">{{ study.metadata.study_description }}</p>
+      <p class="study-meta">
+        Subjects: {{ NUMBER_OF_SUBJECTS }}|
+        Visits: {{ visitList.length }}|
+        Groups: {{ groupList.length }}
+      </p>
+      <hr />
     </div>
 
-    <!-- Editable Form for Assigned Sections -->
-    <div class="entry-form-section">
-      <h2>Enter Data for Subject {{ currentSubjectIndex + 1 }}, Visit “{{ visitList[currentVisitIndex].name }}”, Group “{{ groupList[currentGroupIndex].name }}”</h2>
+    <!-- ─────────────────────────────────────────────── -->
+    <!-- 2. SELECTION MATRIX: Subject × (Visit)    -->
+    <!-- ─────────────────────────────────────────────── -->
+    <div v-if="showSelection">
+      <h2>Select Subject × Visit </h2>
+      <table class="selection-matrix">
+        <thead>
+          <tr>
+            <th>Subject / Visit</th>
+            <th v-for="(combo, cIdx) in visitCombos" :key="cIdx">
+              Visit {{ visitList[combo.visitIndex].name }}
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="sIdx in subjectIndices" :key="sIdx">
+            <td class="subject-cell">Subject {{ sIdx + 1 }}</td>
+            <td v-for="(combo, cIdx) in visitCombos" :key="cIdx">
+              <button
+                class="select-btn"
+                @click="selectCell(sIdx, combo.visitIndex, combo.groupIndex)"
+              >
+                Select
+              </button>
+              <button class="share-icon" title="Share this form link" @click="openShareDialog(sIdx, combo.visitIndex)"><i :class="icons.share"></i></button>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
 
-      <div v-if="assignedModelIndices.length">
-        <div
-          v-for="mIdx in assignedModelIndices"
-          :key="mIdx"
-          class="section-block"
-        >
-          <h3>{{ selectedModels[mIdx].title }}</h3>
+    <!-- ─────────────────────────────────────────────────── -->
+    <!-- 3. DATA‐ENTRY FORM: Shown Once a Cell Is Chosen    -->
+    <!-- ─────────────────────────────────────────────────── -->
+    <div v-else class="entry-form-wrapper">
+      <!-- ─────────────────────────────────────────────── -->
+      <!-- 3.a COLLAPSIBLE PANEL FOR “Study / Visit” INFO -->
+      <!-- ─────────────────────────────────────────────── -->
+      <div class="details-panel">
+        <button @click="toggleDetails" class="details-toggle-btn">
+          {{ showDetails ? 'Hide Details ▲' : 'Show Details ▼' }}
+        </button>
+        <button class="share-icon" title="Share this form link" @click="openShareDialog(currentSubjectIndex, currentVisitIndex)"><i :class="icons.share"></i></button>
+        <div v-if="showDetails" class="details-content">
+          <!-- ─────────────────────────────────────────── -->
+          <!-- 3.a.i STUDY INFO                             -->
+          <!-- ─────────────────────────────────────────── -->
+          <div class="details-block">
+            <strong>Study Info:</strong>
+            <ul>
+              <li
+                v-for="[key, val] in Object.entries(study.content.study_data.study)"
+                :key="key"
+              >
+                {{ key }}: {{ val }}
+              </li>
+            </ul>
+          </div>
+
+          <!-- ─────────────────────────────────────────── -->
+          <!-- 3.a.ii VISIT INFO                             -->
+          <!-- ─────────────────────────────────────────── -->
+          <div class="details-block">
+            <strong>Visit Info:</strong>
+            <ul>
+              <li
+                v-for="[key, val] in Object.entries(visitList[currentVisitIndex])"
+                :key="key"
+              >
+                {{ key }}: {{ val }}
+              </li>
+            </ul>
+          </div>
+        </div>
+      </div>
+
+      <!-- ─────────────────────────────────────────────── -->
+      <!-- 3.b BREADCRUMB (Exact Subject/Visit/Group)      -->
+      <!-- ─────────────────────────────────────────────── -->
+      <div class="bread-crumb">
+        <strong>Study:</strong> {{ study.metadata.study_name }} &nbsp;|&nbsp;
+        <strong>Subject:</strong> {{ currentSubjectIndex + 1 }} &nbsp;|&nbsp;
+        <strong>Visit:</strong> {{ visitList[currentVisitIndex].name }}
+
+      </div>
+
+      <!-- ─────────────────────────────────────────────────── -->
+      <!-- 3.c ENTRY FORM FIELDS                              -->
+      <!-- ─────────────────────────────────────────────────── -->
+      <div class="entry-form-section">
+        <h2>
+          Enter Data for Subject {{ currentSubjectIndex + 1 }},
+          Visit: “{{ visitList[currentVisitIndex].name }}”
+
+        </h2>
+
+        <div v-if="assignedModelIndices.length">
           <div
-            v-for="(field, fIdx) in selectedModels[mIdx].fields"
-            :key="fIdx"
-            class="form-field"
+            v-for="mIdx in assignedModelIndices"
+            :key="mIdx"
+            class="section-block"
           >
-            <label :for="fieldId(mIdx, fIdx)">
-              {{ field.label }}
-              <span v-if="field.constraints?.required" class="required">*</span>
-            </label>
-
-            <!-- TEXT INPUT -->
-            <input
-              v-if="field.type === 'text'"
-              :id="fieldId(mIdx, fIdx)"
-              type="text"
-              v-model="entryData[currentSubjectIndex][currentVisitIndex][currentGroupIndex][mIdx][fIdx]"
-              :placeholder="field.placeholder"
-              :required="field.constraints?.required || false"
-              :readonly="field.constraints?.readonly || false"
-              :minlength="field.constraints?.minLength"
-              :maxlength="field.constraints?.maxLength"
-              :pattern="field.constraints?.pattern"
-            />
-
-            <!-- TEXTAREA -->
-            <textarea
-              v-else-if="field.type === 'textarea'"
-              :id="fieldId(mIdx, fIdx)"
-              v-model="entryData[currentSubjectIndex][currentVisitIndex][currentGroupIndex][mIdx][fIdx]"
-              :placeholder="field.placeholder"
-              :required="field.constraints?.required || false"
-              :readonly="field.constraints?.readonly || false"
-              :minlength="field.constraints?.minLength"
-              :maxlength="field.constraints?.maxLength"
-              :pattern="field.constraints?.pattern"
-              rows="4"
-            ></textarea>
-
-            <!-- NUMBER -->
-            <input
-              v-else-if="field.type === 'number'"
-              :id="fieldId(mIdx, fIdx)"
-              type="number"
-              v-model.number="entryData[currentSubjectIndex][currentVisitIndex][currentGroupIndex][mIdx][fIdx]"
-              :placeholder="field.placeholder"
-              :required="field.constraints?.required || false"
-              :readonly="field.constraints?.readonly || false"
-              :min="field.constraints?.min"
-              :max="field.constraints?.max"
-              :step="field.constraints?.step"
-            />
-
-            <!-- DATE -->
-            <input
-              v-else-if="field.type === 'date'"
-              :id="fieldId(mIdx, fIdx)"
-              type="date"
-              v-model="entryData[currentSubjectIndex][currentVisitIndex][currentGroupIndex][mIdx][fIdx]"
-              :placeholder="field.placeholder"
-              :required="field.constraints?.required || false"
-              :readonly="field.constraints?.readonly || false"
-              :min="field.constraints?.minDate"
-              :max="field.constraints?.maxDate"
-            />
-
-            <!-- SELECT -->
-            <select
-              v-else-if="field.type === 'select'"
-              :id="fieldId(mIdx, fIdx)"
-              v-model="entryData[currentSubjectIndex][currentVisitIndex][currentGroupIndex][mIdx][fIdx]"
-              :required="field.constraints?.required || false"
-            >
-              <option value="" disabled>Select...</option>
-              <option v-for="opt in field.options" :key="opt" :value="opt">{{ opt }}</option>
-            </select>
-
-            <!-- Unknown Type Fallback -->
-            <input
-              v-else
-              :id="fieldId(mIdx, fIdx)"
-              type="text"
-              v-model="entryData[currentSubjectIndex][currentVisitIndex][currentGroupIndex][mIdx][fIdx]"
-              :placeholder="field.placeholder"
-              :required="field.constraints?.required || false"
-              :readonly="field.constraints?.readonly || false"
-            />
-
-            <!-- Validation Error Message -->
+            <h3>{{ selectedModels[mIdx].title }}</h3>
             <div
-              v-if="fieldErrors(mIdx, fIdx)"
-              class="error-message"
+              v-for="(field, fIdx) in selectedModels[mIdx].fields"
+              :key="fIdx"
+              class="form-field"
             >
-              {{ fieldErrors(mIdx, fIdx) }}
+              <label :for="fieldId(mIdx, fIdx)">
+                {{ field.label }}
+                <span v-if="field.constraints?.required" class="required">*</span>
+              </label>
+
+              <!-- TEXT INPUT -->
+              <input
+                v-if="field.type === 'text'"
+                :id="fieldId(mIdx, fIdx)"
+                type="text"
+                v-model="entryData[currentSubjectIndex][currentVisitIndex][currentGroupIndex][mIdx][fIdx]"
+                :placeholder="field.placeholder"
+                :required="field.constraints?.required || false"
+                :readonly="field.constraints?.readonly || false"
+                :minlength="field.constraints?.minLength"
+                :maxlength="field.constraints?.maxLength"
+                :pattern="field.constraints?.pattern"
+              />
+
+              <!-- TEXTAREA -->
+              <textarea
+                v-else-if="field.type === 'textarea'"
+                :id="fieldId(mIdx, fIdx)"
+                v-model="entryData[currentSubjectIndex][currentVisitIndex][currentGroupIndex][mIdx][fIdx]"
+                :placeholder="field.placeholder"
+                :required="field.constraints?.required || false"
+                :readonly="field.constraints?.readonly || false"
+                :minlength="field.constraints?.minLength"
+                :maxlength="field.constraints?.maxLength"
+                :pattern="field.constraints?.pattern"
+                rows="4"
+              ></textarea>
+
+              <!-- NUMBER INPUT -->
+              <input
+                v-else-if="field.type === 'number'"
+                :id="fieldId(mIdx, fIdx)"
+                type="number"
+                v-model.number="entryData[currentSubjectIndex][currentVisitIndex][currentGroupIndex][mIdx][fIdx]"
+                :placeholder="field.placeholder"
+                :required="field.constraints?.required || false"
+                :readonly="field.constraints?.readonly || false"
+                :min="field.constraints?.min"
+                :max="field.constraints?.max"
+                :step="field.constraints?.step"
+              />
+
+              <!-- DATE INPUT -->
+              <input
+                v-else-if="field.type === 'date'"
+                :id="fieldId(mIdx, fIdx)"
+                type="date"
+                v-model="entryData[currentSubjectIndex][currentVisitIndex][currentGroupIndex][mIdx][fIdx]"
+                :placeholder="field.placeholder"
+                :required="field.constraints?.required || false"
+                :readonly="field.constraints?.readonly || false"
+                :min="field.constraints?.minDate"
+                :max="field.constraints?.maxDate"
+              />
+
+              <!-- SELECT -->
+              <select
+                v-else-if="field.type === 'select'"
+                :id="fieldId(mIdx, fIdx)"
+                v-model="entryData[currentSubjectIndex][currentVisitIndex][currentGroupIndex][mIdx][fIdx]"
+                :required="field.constraints?.required || false"
+              >
+                <option value="" disabled>Select…</option>
+                <option v-for="opt in field.options" :key="opt" :value="opt">{{ opt }}</option>
+              </select>
+
+              <!-- FALLBACK TEXT -->
+              <input
+                v-else
+                :id="fieldId(mIdx, fIdx)"
+                type="text"
+                v-model="entryData[currentSubjectIndex][currentVisitIndex][currentGroupIndex][mIdx][fIdx]"
+                :placeholder="field.placeholder"
+                :required="field.constraints?.required || false"
+                :readonly="field.constraints?.readonly || false"
+              />
+
+              <!-- ERROR MESSAGE -->
+              <div v-if="fieldErrors(mIdx, fIdx)" class="error-message">
+                {{ fieldErrors(mIdx, fIdx) }}
+              </div>
             </div>
+          </div>
+
+          <!-- Save Data Button -->
+          <div class="form-actions">
+            <button @click="submitData" class="btn-save">Save Data</button>
           </div>
         </div>
 
-        <!-- Save Data Button -->
-        <div class="form-actions">
-          <button @click="submitData" class="btn-save">Save Data</button>
+        <div v-else class="no-assigned">
+          <p>No sections are assigned to this Visit/Group.</p>
         </div>
       </div>
 
-      <div v-else>
-        <p>No sections assigned to this Visit/Group.</p>
+      <!-- ─────────────────────────────────────────────────── -->
+      <!-- 3.d “Back to Selection” Button                      -->
+      <!-- ─────────────────────────────────────────────────── -->
+      <div class="back-button-container">
+        <button @click="backToSelection" class="btn-back">← Back to Selection</button>
       </div>
     </div>
-
-    <!-- Back Button -->
-    <button @click="goBack" class="btn-back">Back to List</button>
   </div>
 
   <div v-else class="loading">
     <p>Loading study details…</p>
   </div>
+  <!-- Share-link modal -->
+<div v-if="showShareDialog" class="dialog-overlay">
+  <div class="dialog">
+    <h3>Generate Share Link</h3>
+    <label>
+      Permission:
+      <select v-model="shareConfig.permission">
+        <option value="view">View Only</option>
+        <option value="add">Allow Add</option>
+      </select>
+    </label>
+    <label>
+      Max Uses:
+      <input type="number" v-model.number="shareConfig.maxUses" min="1" />
+    </label>
+    <label>
+      Expires in (days):
+      <input type="number" v-model.number="shareConfig.expiresInDays" min="1" />
+    </label>
+    <div class="dialog-actions">
+      <button @click="createShareLink">Generate</button>
+      <button @click="showShareDialog = false">Cancel</button>
+    </div>
+    <p v-if="generatedLink">
+      Link: <a :href="generatedLink" target="_blank">{{ generatedLink }}</a>
+    </p>
+  </div>
+</div>
+
 </template>
 
 <script>
 import axios from "axios";
+import icons from "@/assets/styles/icons"
 
 export default {
   name: "StudyDataEntryComponent",
+
   data() {
     return {
       study: null,
-      detailsCollapsed: false,
-      currentSubjectIndex: 0,
-      currentVisitIndex: 0,
-      currentGroupIndex: 0,
-      entryData: [], // Nested structure for subject→visit→group→section→field
-      validationErrors: {}, // Will hold error messages per cell
+      showSelection: true,
+      showDetails: false,               // Controls “Study/Visit/Group” toggle
+      currentSubjectIndex: null,
+      currentVisitIndex: null,
+      currentGroupIndex: null,
+      entryData: [],
+      validationErrors: {},
+      NUMBER_OF_SUBJECTS: 3,
+      icons,
+      showShareDialog: false,
+      shareParams: { subjectIndex: null, visitIndex: null },
+      shareConfig: { permission: 'view', maxUses: 1, expiresInDays: 7 },
+      generatedLink: '',
     };
   },
+
   computed: {
     token() {
       return this.$store.state.token;
-    },
-    numberOfSubjects() {
-      // If study.metadata.numberOfSubjects exists, use it; otherwise default to 1
-      return this.study?.metadata?.numberOfSubjects || 1;
     },
     visitList() {
       return this.study?.content?.study_data?.visits || [];
@@ -189,20 +307,43 @@ export default {
     assignments() {
       return this.study?.content?.study_data?.assignments || [];
     },
-    // Indices of models (sections) assigned at the current visit & group
+    // Flatten (visit × group) combos into a single array
+    visitCombos() {
+      return this.visitList.map((visit, index) => ({
+        visitIndex: index,
+        groupIndex: 0,
+        label: `Visit: ${visit.name}`,
+      }));
+    },
+    // [0, 1, 2]
+    subjectIndices() {
+      return Array.from({ length: this.NUMBER_OF_SUBJECTS }, (_, i) => i);
+    },
+    // Which sections (models) are assigned under (visit, group)?
     assignedModelIndices() {
-      const vIdx = this.currentVisitIndex;
-      const gIdx = this.currentGroupIndex;
+      if (
+        this.currentVisitIndex === null ||
+        this.currentGroupIndex === null
+      ) {
+        return [];
+      }
       return this.selectedModels
         .map((_, mIdx) => mIdx)
-        .filter((mIdx) => this.assignments[mIdx]?.[vIdx]?.[gIdx]);
+        .filter((mIdx) =>
+          this.assignments[mIdx]?.[this.currentVisitIndex]?.[this.currentGroupIndex]
+        );
     },
   },
+
   async created() {
     const studyId = this.$route.params.id;
     await this.loadStudy(studyId);
   },
+
   methods: {
+    // ───────────────────────────────────────────────
+    // Load the full study object
+    // ───────────────────────────────────────────────
     async loadStudy(studyId) {
       try {
         console.log("Loading study ID:", studyId);
@@ -216,36 +357,66 @@ export default {
         console.log("Study loaded:", this.study);
         this.initializeEntryData();
       } catch (err) {
-        console.error("Error loading study:", err.response?.data || err.message);
+        console.error(
+          "Error loading study:",
+          err.response?.data || err.message
+        );
         alert("Failed to load study details.");
       }
     },
+
+    // ───────────────────────────────────────────────
+    // Initialize entryData as blanks for [subj][visit][group][section][field]
+    // ───────────────────────────────────────────────
     initializeEntryData() {
-      const nSubj = this.numberOfSubjects;
+      const nSubj = this.NUMBER_OF_SUBJECTS;
       const nVisits = this.visitList.length;
       const nGroups = this.groupList.length;
-      const nSections = this.selectedModels.length;
-      // Build 5‐dimensional array: [subjects][visits][groups][sections][fields]
       this.entryData = Array.from({ length: nSubj }, () =>
         Array.from({ length: nVisits }, () =>
           Array.from({ length: nGroups }, () =>
-            // For each section, build an array of field‐values
             this.selectedModels.map((sect) =>
-              sect.fields.map(() => "") // initialize each field to empty string
+              sect.fields.map(() => "")
             )
           )
         )
       );
-      console.log("Initialized entryData structure:", this.entryData);
+      console.log("Initialized entryData:", this.entryData);
     },
+
+    // ───────────────────────────────────────────────
+    // Selection-matrix click
+    // ───────────────────────────────────────────────
+    selectCell(sIdx, vIdx, gIdx) {
+      this.currentSubjectIndex = sIdx;
+      this.currentVisitIndex = vIdx;
+      this.currentGroupIndex = 0;
+      this.showSelection = false;
+      console.log(
+        `Selected Subject ${sIdx + 1}, Visit idx ${vIdx}, Group idx ${gIdx}`
+      );
+    },
+    backToSelection() {
+      this.showSelection = true;
+      this.showDetails = false;        // Collapse toggle when going back
+      this.currentSubjectIndex = null;
+      this.currentVisitIndex = null;
+      this.currentGroupIndex = null;
+      this.validationErrors = {};
+    },
+
+    // ───────────────────────────────────────────────
+    // Toggle “Show Details” (Study / Visit / Group)
+    // ───────────────────────────────────────────────
+    toggleDetails() {
+      this.showDetails = !this.showDetails;
+    },
+
+    // ───────────────────────────────────────────────
+    // Helpers: field ID & error key
+    // ───────────────────────────────────────────────
     fieldId(mIdx, fIdx) {
-      // Unique ID for each input
       return `s${this.currentSubjectIndex}_v${this.currentVisitIndex}_g${this.currentGroupIndex}_m${mIdx}_f${fIdx}`;
-    },
-    // Return validation message for a given section/field, or empty string
-    fieldErrors(mIdx, fIdx) {
-      const key = this.errorKey(mIdx, fIdx);
-      return this.validationErrors[key] || "";
     },
     errorKey(mIdx, fIdx) {
       return [
@@ -256,6 +427,14 @@ export default {
         fIdx,
       ].join("-");
     },
+    fieldErrors(mIdx, fIdx) {
+      const key = this.errorKey(mIdx, fIdx);
+      return this.validationErrors[key] || "";
+    },
+
+    // ───────────────────────────────────────────────
+    // Validate a single field; returns true if valid
+    // ───────────────────────────────────────────────
     validateField(mIdx, fIdx) {
       const fieldDef = this.selectedModels[mIdx].fields[fIdx];
       const value =
@@ -265,9 +444,9 @@ export default {
       const constraints = fieldDef.constraints || {};
       const key = this.errorKey(mIdx, fIdx);
 
-      // Reset previous error
       this.$delete(this.validationErrors, key);
 
+      // Required
       if (constraints.required && (value === "" || value === null)) {
         this.$set(
           this.validationErrors,
@@ -276,6 +455,8 @@ export default {
         );
         return false;
       }
+
+      // Number checks
       if (fieldDef.type === "number") {
         const numeric = Number(value);
         if (isNaN(numeric)) {
@@ -303,7 +484,12 @@ export default {
           return false;
         }
       }
-      if (fieldDef.type === "text" || fieldDef.type === "textarea") {
+
+      // Text/textarea length & pattern
+      if (
+        fieldDef.type === "text" ||
+        fieldDef.type === "textarea"
+      ) {
         const str = String(value || "");
         if (
           constraints.minLength != null &&
@@ -339,34 +525,67 @@ export default {
           }
         }
       }
-      // No error
+
       return true;
     },
+    openShareDialog(sIdx, vIdx) {
+      this.shareParams = { subjectIndex: sIdx, visitIndex: vIdx };
+      this.generatedLink = "";
+      this.showShareDialog = true;
+    },
+
+    async createShareLink() {
+  const { subjectIndex, visitIndex } = this.shareParams;
+  const payload = {
+    study_id:       this.study.metadata.id,
+    subject_index:  subjectIndex,
+    visit_index:    visitIndex,
+    permission:     this.shareConfig.permission,
+    max_uses:       this.shareConfig.maxUses,
+    expires_in_days:this.shareConfig.expiresInDays,
+  };
+  try {
+    const resp = await axios.post("http://localhost:8000/forms/share-link/", payload, {
+      headers: { Authorization: `Bearer ${this.token}` }
+    });
+    this.generatedLink = resp.data.link;
+  } catch (err) {
+    console.error(err);
+    this.generatedLink = null;
+    this.error = err.response?.data?.detail || err.message;
+  }
+},
+
+    // ───────────────────────────────────────────────
+    // Validate ALL fields in current S/V/G
+    // ───────────────────────────────────────────────
     validateCurrentSection() {
       let allValid = true;
       this.assignedModelIndices.forEach((mIdx) => {
         this.selectedModels[mIdx].fields.forEach((_, fIdx) => {
-          const valid = this.validateField(mIdx, fIdx);
-          if (!valid) allValid = false;
+          const ok = this.validateField(mIdx, fIdx);
+          if (!ok) allValid = false;
         });
       });
       return allValid;
     },
+
+    // ───────────────────────────────────────────────
+    // Submit data for this Subject/Visit/Group
+    // ───────────────────────────────────────────────
     async submitData() {
       console.log(
-        "submitData() called for S/V/G:",
+        "submitData() for S/V/G:",
         this.currentSubjectIndex,
         this.currentVisitIndex,
         this.currentGroupIndex
       );
-      // Validate all fields in this section
       const valid = this.validateCurrentSection();
       if (!valid) {
         alert("Please fix validation errors before saving.");
         return;
       }
 
-      // Prepare payload
       const payload = {
         study_id: this.study.metadata.id,
         subject_index: this.currentSubjectIndex,
@@ -378,60 +597,22 @@ export default {
       };
 
       console.log("Payload to submit:", payload);
-      // Assume endpoint: POST /forms/studies/{id}/data
+
       try {
         const resp = await axios.post(
           `http://127.0.0.1:8000/forms/studies/${this.study.metadata.id}/data`,
           payload,
-          {
-            headers: { Authorization: `Bearer ${this.token}` },
-          }
+          { headers: { Authorization: `Bearer ${this.token}` } }
         );
         console.log("Data saved response:", resp.data);
         alert("Data saved successfully for this Subject/Visit/Group.");
       } catch (err) {
-        console.error("Error saving data:", err.response?.data || err.message);
+        console.error(
+          "Error saving data:",
+          err.response?.data || err.message
+        );
         alert("Failed to save data. Check console for details.");
       }
-    },
-    prevSubject() {
-      if (this.currentSubjectIndex > 0) {
-        this.currentSubjectIndex--;
-        console.log("Switched to subject:", this.currentSubjectIndex);
-      }
-    },
-    nextSubject() {
-      if (this.currentSubjectIndex < this.numberOfSubjects - 1) {
-        this.currentSubjectIndex++;
-        console.log("Switched to subject:", this.currentSubjectIndex);
-      }
-    },
-    prevVisit() {
-      if (this.currentVisitIndex > 0) {
-        this.currentVisitIndex--;
-        console.log("Switched to visit:", this.currentVisitIndex);
-      }
-    },
-    nextVisit() {
-      if (this.currentVisitIndex < this.visitList.length - 1) {
-        this.currentVisitIndex++;
-        console.log("Switched to visit:", this.currentVisitIndex);
-      }
-    },
-    prevGroup() {
-      if (this.currentGroupIndex > 0) {
-        this.currentGroupIndex--;
-        console.log("Switched to group:", this.currentGroupIndex);
-      }
-    },
-    nextGroup() {
-      if (this.currentGroupIndex < this.groupList.length - 1) {
-        this.currentGroupIndex++;
-        console.log("Switched to group:", this.currentGroupIndex);
-      }
-    },
-    goBack() {
-      this.$router.push("/saved-forms");
     },
   },
 };
@@ -439,7 +620,7 @@ export default {
 
 <style scoped>
 .study-data-container {
-  max-width: 900px;
+  max-width: 960px;
   margin: 20px auto;
   padding: 20px;
   background: #ffffff;
@@ -447,96 +628,123 @@ export default {
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
   font-family: Arial, sans-serif;
 }
-.study-name {
+
+/* ─────────────────────────────────────────────────── */
+/* 1. STUDY DETAILS (Always Visible at Top) */
+/* ─────────────────────────────────────────────────── */
+.study-header {
   text-align: center;
-  margin-bottom: 20px;
+  margin-bottom: 24px;
+}
+.study-name {
   font-size: 28px;
   color: #333333;
+  margin-bottom: 8px;
+}
+.study-description {
+  font-size: 16px;
+  color: #555555;
+  margin-bottom: 4px;
+}
+.study-meta {
+  font-size: 14px;
+  color: #777777;
+}
+hr {
+  margin-top: 16px;
+  margin-bottom: 24px;
+  border: 0;
+  border-top: 1px solid #e0e0e0;
 }
 
-/* Navigation Bars */
-.navigation-bars {
-  display: flex;
-  justify-content: space-between;
-  margin-bottom: 20px;
-  gap: 16px;
+/* ─────────────────────────────────────────────────── */
+/* 2. SELECTION MATRIX */
+/* ─────────────────────────────────────────────────── */
+.selection-matrix {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 32px;
 }
-.nav-item {
-  display: flex;
-  align-items: center;
+.selection-matrix th,
+.selection-matrix td {
+  border: 1px solid #cccccc;
+  padding: 8px;
+  text-align: center;
 }
-.nav-btn {
+.selection-matrix th {
+  background: #f2f2f2;
+  font-weight: 600;
+  color: #333;
+}
+.subject-cell {
+  background: #fafafa;
+  font-weight: bold;
+}
+.select-btn {
   background: #007bff;
-  color: #ffffff;
+  color: #fff;
   border: none;
-  padding: 6px 10px;
+  padding: 6px 12px;
   border-radius: 4px;
-  font-size: 14px;
   cursor: pointer;
 }
-.nav-btn:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
-.nav-label {
-  margin: 0 8px;
-  font-weight: bold;
-  color: #333333;
+.select-btn:hover {
+  background: #0056b3;
 }
 
-/* Collapsible Metadata */
-.details-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  background: #f7f7f7;
-  padding: 10px 15px;
-  border: 1px solid #dddddd;
-  border-radius: 4px;
-  margin-bottom: 0;
+/* ─────────────────────────────────────────────────── */
+/* 3. DATA-ENTRY SECTION */
+/* ─────────────────────────────────────────────────── */
+
+/* 3.a Collapsible “Study / Visit / Group” info */
+.details-panel {
+  margin-bottom: 16px;
 }
-.header-text {
-  font-size: 16px;
-  font-weight: bold;
-  color: #333333;
-}
-.toggle-btn {
+.details-toggle-btn {
   background: none;
   border: none;
-  font-size: 18px;
-  cursor: pointer;
   color: #007bff;
+  font-size: 16px;
+  cursor: pointer;
+  margin-bottom: 8px;
 }
-.details-section {
-  background: #fafafa;
-  padding: 15px;
+.details-content {
+  background: #f7f7f7;
   border: 1px solid #dddddd;
   border-radius: 4px;
-  margin-bottom: 20px;
+  padding: 12px;
 }
-.details-section p {
-  margin: 6px 0;
-  color: #555555;
+.details-block {
+  margin-bottom: 12px;
+}
+.details-block strong {
+  display: block;
+  margin-bottom: 4px;
+}
+.details-block ul {
+  margin: 0 0 12px 16px;
+  padding: 0;
+}
+.details-block li {
   font-size: 14px;
-}
-.details-section ul {
-  list-style: disc inside;
-  margin: 8px 0;
-  padding-left: 20px;
-}
-.details-section li {
-  margin: 4px 0;
-  font-size: 14px;
-  color: #555555;
+  color: #333333;
 }
 
-/* Entry Form Section */
-.entry-form-section {
-  margin-bottom: 30px;
+/* 3.b Breadcrumb */
+.bread-crumb {
+  background: #f7f7f7;
+  padding: 10px 16px;
+  border: 1px solid #e0e0e0;
+  border-radius: 4px;
+  margin-bottom: 24px;
+  font-size: 14px;
+  color: #333333;
 }
+
+/* 3.c Form fields */
 .entry-form-section h2 {
-  margin-bottom: 12px;
   font-size: 20px;
+  margin-bottom: 16px;
   color: #333333;
 }
 .section-block {
@@ -580,10 +788,14 @@ select {
   font-size: 12px;
   margin-top: 4px;
 }
-
-/* Form Actions */
+.no-assigned {
+  font-style: italic;
+  color: #666666;
+  margin-top: 12px;
+}
 .form-actions {
   text-align: right;
+  margin-top: 16px;
 }
 .btn-save {
   background: #28a745;
@@ -598,14 +810,16 @@ select {
   background: #218838;
 }
 
-/* Back Button */
+/* 3.d Back button */
+.back-button-container {
+  text-align: center;
+  margin-top: 24px;
+}
 .btn-back {
-  display: block;
-  margin: 0 auto 20px;
-  padding: 10px 20px;
   background: #007bff;
   color: #ffffff;
   border: none;
+  padding: 10px 20px;
   border-radius: 4px;
   cursor: pointer;
   font-size: 14px;
@@ -614,10 +828,98 @@ select {
   background: #0056b3;
 }
 
+/* ─────────────────────────────────────────────────── */
+/* Loading State */
+/* ─────────────────────────────────────────────────── */
 .loading {
   text-align: center;
   padding: 50px;
   font-size: 16px;
   color: #666666;
 }
+/* overlay dims the rest of the page */
+.dialog-overlay {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0,0,0,0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+/* the white “modal” box */
+.dialog {
+  background: #fff;
+  padding: 1.5rem;
+  border-radius: 0.5rem;
+  width: 320px;
+  max-width: 90%;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+  position: relative;
+}
+
+/* Title spacing */
+.dialog h3 {
+  margin-top: 0;
+  margin-bottom: 1rem;
+  font-size: 1.25rem;
+}
+
+/* Form fields within modal */
+.dialog label {
+  display: block;
+  margin-bottom: 0.75rem;
+  font-size: 0.9rem;
+}
+
+.dialog label select,
+.dialog label input {
+  width: 100%;
+  margin-top: 0.25rem;
+  padding: 0.4rem 0.6rem;
+  border: 1px solid #ccc;
+  border-radius: 0.25rem;
+  font-size: 0.9rem;
+  box-sizing: border-box;
+}
+
+/* Button row */
+.dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  margin-top: 1rem;
+}
+
+/* Primary “Generate” button */
+.dialog-actions button:first-child {
+  background: #4f46e5;
+  color: #fff;
+}
+
+/* Secondary “Cancel” button */
+.dialog-actions button:last-child {
+  background: #e5e7eb;
+  color: #333;
+}
+
+/* Modal buttons shared styles */
+.dialog-actions button {
+  padding: 0.5rem 1rem;
+  border: none;
+  border-radius: 0.25rem;
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+
+/* Generated link display */
+.dialog p a {
+  display: block;
+  word-break: break-all;
+  margin-top: 1rem;
+  color: #007bff;
+  text-decoration: underline;
+}
+
 </style>

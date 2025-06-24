@@ -1,5 +1,5 @@
 from datetime import datetime
-from pydantic import BaseModel, EmailStr, constr
+from pydantic import BaseModel, EmailStr, constr, Field
 from typing import Any, Optional
 
 
@@ -108,3 +108,25 @@ class FileOut(FileBase):
 # Pydantic model that accepts arbitrary fields
 class SettingsModel(BaseModel):
     model_config = {"extra": "allow"}
+
+
+class ShareLinkCreate(BaseModel):
+    study_id:       int
+    subject_index:  int
+    visit_index:    int
+    permission:     str = Field("view", patternx="^(view|add)$")
+    max_uses:       int = Field(1, gt=0)
+    expires_in_days:int = Field(7, gt=0)
+
+
+
+
+class SharedFormAccessOut(BaseModel):
+    study_id:      int
+    subject_index: int
+    visit_index:   int
+    permission:    str
+    study_data:    Any   # or a more precise type
+
+    class Config:
+        orm_mode = True

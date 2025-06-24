@@ -12,6 +12,8 @@ import StudyCreationComponent from "../components/StudyCreationComponent.vue";
 //import YamlViewerComponent from "../components/YamlViewerComponent.vue";
 import StudySettings from "../components/StudySettings.vue";
 import SavedStudyView         from '../components/SavedStudyView.vue'
+import SharedFormComponent from '../components/SharedFormComponent.vue'
+import StudyDataEntryComponent from '../components/DataEntryComponent.vue'
 const routes = [
   { path: "/", redirect: "/login" },
   { path: "/login", name: "Login", component: LoginComponent },
@@ -59,6 +61,17 @@ const routes = [
       name: "StudySettings",
       component: StudySettings,
     },
+    {
+    path: "/forms/shared/:token",
+    name: "SharedForm",
+    component: SharedFormComponent,
+  },
+  {
+    path: "/studies/:id",
+    name: "StudyDataEntry",
+    component: StudyDataEntryComponent,
+    props: route => ({ id: Number(route.params.id) })
+  },
 ];
 
 const router = createRouter({
