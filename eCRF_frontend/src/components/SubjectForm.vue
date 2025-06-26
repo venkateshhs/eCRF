@@ -13,7 +13,7 @@
   @update:modelValue="updateMethod"
   id="assignment-method"
   label="Assignment Method"
-  :options="['random', 'manual']"
+  :options="['Random', 'Manual', 'Skip']"
   placeholder="Select assignment method"
   :required="true"
 />

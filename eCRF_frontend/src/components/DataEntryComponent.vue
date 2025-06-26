@@ -1,61 +1,106 @@
 <template>
   <div class="data-entry-form">
-    <h3>
+    <h3 class="form-title">
       Enter Data for Subject {{ subjectIndex + 1 }}, Visit:
       "{{ visitList[visitIndex]?.name }}"
     </h3>
 
-    <div v-if="!assignedModels.length">
-      <p>No sections assigned for this visit.</p>
-    </div>
+    <!-- No sections assigned -->
+    <p v-if="!assignedModels.length" class="no-sections">
+      No sections assigned for this visit.
+    </p>
 
-    <div v-else>
-      <div v-for="(mIdx, secIdx) in assignedModels" :key="mIdx" class="section-block">
-        <h4>{{ selectedModels[mIdx].title }}</h4>
-        <div v-for="(field, fIdx) in selectedModels[mIdx].fields" :key="fIdx" class="form-field">
+    <!-- Collapsible sections -->
+    <div
+      v-for="(mIdx, secIdx) in assignedModels"
+      :key="mIdx"
+      class="section-block"
+    >
+      <div class="section-header" @click="toggleSection(mIdx)">
+        <i :class="collapsed[mIdx] ? icons.chevronRight : icons.chevronDown" />
+        <span>{{ selectedModels[mIdx].title }}</span>
+      </div>
+
+      <div v-show="!collapsed[mIdx]" class="section-content">
+        <div
+          v-for="(field, fIdx) in selectedModels[mIdx].fields"
+          :key="fIdx"
+          class="form-field"
+        >
           <label :for="fieldId(mIdx, fIdx)">
             {{ field.label }}
-            <span v-if="field.constraints?.required" class="required">*</span>
+            <span v-show="field.constraints?.required" class="required">*</span>
           </label>
+
+          <!-- Dynamic input component -->
           <component
             :is="fieldComponent(field.type)"
             :id="fieldId(mIdx, fIdx)"
             v-model="entryData[secIdx][fIdx]"
             v-bind="fieldProps(field)"
-            :readonly="permission === 'view'"
-          ></component>
-          <div v-if="errors[fieldKey(mIdx,fIdx)]" class="error-message">
-            {{ errors[fieldKey(mIdx,fIdx)] }}
+            :disabled="isViewOnly"
+            :class="{ 'view-only': isViewOnly }"
+          >
+            <!-- for <select> -->
+            <template v-if="field.type === 'select'">
+            <option value="" disabled>Select…</option>
+                <option
+                  v-for="opt in field.options"
+                  :key="opt"
+                  :value="opt"
+                >{{ opt }}</option>
+            </template>
+          </component>
+
+          <div v-if="errors[fieldKey(mIdx, fIdx)]" class="error-message">
+            {{ errors[fieldKey(mIdx, fIdx)] }}
           </div>
         </div>
       </div>
-      <div class="form-actions" v-if="permission === 'add'">
-        <button @click="submitData" class="btn-save">Save</button>
-      </div>
+    </div>
+
+    <!-- Save button -->
+    <div class="form-actions">
+      <button
+        v-if="permission === 'add'"
+        @click="submitData"
+        class="btn-save"
+      >
+        Save
+      </button>
     </div>
   </div>
 </template>
 
 <script>
-import axios from 'axios';
+import axios from "axios";
+import icons from "@/assets/styles/icons";
 
 export default {
   name: "DataEntryForm",
   props: {
-    study:        { type: Object, required: true },
-    subjectIndex: { type: Number, required: true },
-    visitIndex:   { type: Number, required: true },
-    permission:   { type: String, default: "view" },
+    study:         { type: Object, required: true },
+    subjectIndex:  { type: Number, required: true },
+    visitIndex:    { type: Number, required: true },
+    permission:    { type: String, default: "view" },
   },
   data() {
     return {
-      entryData: [],   // [ sectionIdx ][ fieldIdx ]
-      errors:    {}
+      entryData: [],     // [secIdx][fieldIdx]
+      errors: {},
+      collapsed: {},     // collapsed state per section mIdx
+      icons,
     };
   },
   computed: {
+    isViewOnly() {
+      return this.permission !== "add";
+    },
     visitList() {
       return this.study.content.study_data.visits || [];
+    },
+    groupIndex() {
+      return 0; // blinded single‐group
     },
     selectedModels() {
       return this.study.content.study_data.selectedModels || [];
@@ -63,19 +108,20 @@ export default {
     assignments() {
       return this.study.content.study_data.assignments || [];
     },
-    // find which sections apply for this visit
     assignedModels() {
-      const gIdx = 0; // always group 0 in shared
       return this.selectedModels
-        .map((_, idx) => idx)
-        .filter(idx => this.assignments[idx]?.[this.visitIndex]?.[gIdx]);
-    }
+        .map((_, i) => i)
+        .filter(i => this.assignments[i]?.[this.visitIndex]?.[this.groupIndex]);
+    },
   },
   created() {
-    // initialize entryData for each assigned section
-    this.entryData = this.assignedModels.map(
-      mIdx => this.selectedModels[mIdx].fields.map(() => "")
+    // init data + collapsed flags
+    this.entryData = this.assignedModels.map(mIdx =>
+      this.selectedModels[mIdx].fields.map(() => "")
     );
+    this.assignedModels.forEach(mIdx => {
+      this.collapsed[mIdx] = false
+    });
   },
   methods: {
     fieldId(mIdx, fIdx) {
@@ -86,91 +132,162 @@ export default {
     },
     fieldComponent(type) {
       if (type === "textarea") return "textarea";
+      if (type === "select")   return "select";
       if (type === "number")   return "input";
       if (type === "date")     return "input";
-      if (type === "select")   return "select";
-      return "input";
+      return "input"; // default text
     },
     fieldProps(field) {
       const p = {};
-      if (field.type === "number") p.type = "number";
-      if (field.type === "date")   p.type = "date";
-      if (field.type === "select") p.options = field.options;
-      if (field.placeholder)       p.placeholder = field.placeholder;
-      if (field.constraints?.required) p.required = true;
-      if (field.constraints?.min != null) p.min = field.constraints.min;
-      if (field.constraints?.max != null) p.max = field.constraints.max;
+      if (field.placeholder) p.placeholder = field.placeholder;
+      if (field.constraints) {
+        if (field.constraints.required) p.required = true;
+        if (field.constraints.min      != null) p.min = field.constraints.min;
+        if (field.constraints.max      != null) p.max = field.constraints.max;
+        if (field.type === "number")   p.step = field.constraints.step || "any";
+        if (field.type === "date")     p.type = "date";
+      }
       return p;
+    },
+    toggleSection(mIdx) {
+      this.collapsed[mIdx] = !this.collapsed[mIdx];
     },
     async submitData() {
       this.errors = {};
-      // simple required‐field validation
-      let ok = true;
+      let valid = true;
+
+      // validate required
       this.assignedModels.forEach((mIdx, secIdx) => {
         this.selectedModels[mIdx].fields.forEach((f, fIdx) => {
-          if (f.constraints?.required && !this.entryData[secIdx][fIdx]) {
-            this.$set(this.errors, this.fieldKey(mIdx,fIdx), `${f.label} is required`);
-            ok = false;
+          const val = this.entryData[secIdx][fIdx];
+          if (f.constraints?.required && !val) {
+           this.errors[this.fieldKey(mIdx, fIdx)] = `${f.label} is required`
+
+            valid = false;
           }
         });
       });
-      if (!ok) return;
+      if (!valid) return;
 
+      // post
       try {
         await axios.post(
-          `http://localhost:8000/forms/studies/${this.study.metadata.id}/data`,
+          `http://localhost:8000/api/forms/studies/${this.study.metadata.id}/data`,
           {
             study_id:      this.study.metadata.id,
             subject_index: this.subjectIndex,
             visit_index:   this.visitIndex,
-            group_index:   0,
+            group_index:   this.groupIndex,
             data:          this.entryData,
-          },
-          { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } }
+          }
         );
-        alert("Saved successfully.");
+        this.$emit("saved");
+        alert("Data saved successfully.");
       } catch (err) {
         console.error(err);
-        alert("Save failed.");
+        alert("Failed to save data.");
       }
-    }
-  }
+    },
+  },
 };
 </script>
 
-
-
 <style scoped>
 .data-entry-form {
-  margin-top: 20px;
+  max-width: 800px;
+  margin: 1rem auto;
+  font-family: Arial, sans-serif;
 }
+
+.form-title {
+  margin-bottom: 1rem;
+  font-size: 1.2rem;
+}
+
+.no-sections {
+  font-style: italic;
+  color: #666;
+}
+
 .section-block {
-  padding: 12px;
   border: 1px solid #ddd;
-  margin-bottom: 16px;
+  border-radius: 4px;
+  margin-bottom: 1rem;
   background: #fafafa;
 }
+
+.section-header {
+  display: flex;
+  align-items: center;
+  padding: 0.5rem;
+  cursor: pointer;
+  background: #eee;
+}
+.section-header i {
+  margin-right: 0.5rem;
+}
+.section-header span {
+  font-weight: bold;
+}
+
+.section-content {
+  padding: 0.75rem;
+}
+
 .form-field {
-  margin-bottom: 12px;
+  margin-bottom: 0.75rem;
+}
+.form-field label {
+  display: block;
+  margin-bottom: 0.25rem;
+  font-weight: 500;
+}
+.form-field input,
+.form-field textarea,
+.form-field select {
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  box-sizing: border-box;
+  font-size: 0.95rem;
+}
+.form-field textarea {
+  resize: vertical;
+}
+.form-field input.view-only,
+.form-field textarea.view-only,
+.form-field select.view-only {
+  background: #f5f5f5;
+  cursor: default;
+  pointer-events: none;
 }
 .required {
-  color: red;
+  color: #d00;
   margin-left: 4px;
+  font-size: 0.9rem;
 }
+
 .error-message {
-  color: red;
-  font-size: 12px;
+  color: #d00;
+  font-size: 0.85rem;
+  margin-top: 0.25rem;
+}
+
+.form-actions {
+  text-align: right;
+  margin-top: 1rem;
 }
 .btn-save {
   background: #28a745;
-  color: white;
-  padding: 8px 16px;
+  color: #fff;
   border: none;
+  padding: 0.6rem 1.2rem;
   border-radius: 4px;
+  font-size: 0.95rem;
   cursor: pointer;
 }
-.btn-save:disabled {
-  background: #ccc;
-  cursor: not-allowed;
+.btn-save:hover {
+  background: #218838;
 }
 </style>

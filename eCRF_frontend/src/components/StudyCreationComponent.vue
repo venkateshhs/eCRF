@@ -96,7 +96,7 @@
     </div>
 
     <!-- STEP 4 -->
-    <div v-if="step === 4" class="new-study-form">
+    <div v-if="step === 4 && assignmentMethod !== 'Skip'" class="new-study-form">
       <SubjectAssignmentForm
         :subjects="subjectData"
         :groupData="groupData"
@@ -112,7 +112,7 @@
     <div v-if="step === 5" class="new-study-form">
       <VisitForm :schema="visitSchema" v-model="visitData" />
       <div class="form-actions">
-        <button @click="step = 4" class="btn-option">← Back</button>
+        <button @click="step = (assignmentMethod === 'Skip' ? 3 : 4)" class="btn-option">← Back</button>
         <button @click="checkVisits" class="btn-option">Finish</button>
       </div>
     </div>
@@ -165,7 +165,7 @@ export default {
     const subjectData = ref([]);
     const visitData = ref([]);
     const subjectCount = ref(1);
-    const assignmentMethod = ref("random");
+    const assignmentMethod = ref("Random");
 
     const studySchema = ref([]);
     const groupSchema = ref([]);
@@ -263,7 +263,7 @@ function checkSubjectsSetup() {
     const id = `SUBJ-${prefix}-${String(i).padStart(3, "0")}`;
     let group = "";
 
-    if (assignmentMethod.value === "random" && groupNames.length > 0) {
+    if (assignmentMethod.value === "Random" && groupNames.length > 0) {
       group = groupNames[Math.floor(Math.random() * groupNames.length)];
     }
 
@@ -272,7 +272,11 @@ function checkSubjectsSetup() {
 
   subjectData.value = subjects;
   console.log("subjects", subjects)
-  step.value = 4;
+  if (assignmentMethod.value === "Skip") {
+    step.value = 5;
+  } else {
+    step.value = 4;
+  }
 }
 
 
