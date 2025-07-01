@@ -1,6 +1,11 @@
 from datetime import datetime
-from fastapi import APIRouter, Depends, HTTPException, Header   
+from typing import List
+
+from fastapi import APIRouter, Depends, HTTPException, Header
 from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session
+from fastapi import status
+import schemas, models
 from schemas import UserCreate, LoginRequest, UserResponse
 from crud import get_user_by_username, create_user
 from auth import hash_password, verify_password, create_access_token
@@ -11,6 +16,7 @@ import jwt
 import re
 from fastapi.security import OAuth2PasswordBearer
 from jwt import decode, ExpiredSignatureError, InvalidTokenError
+
 SECRET_KEY = "your-very-secure-secret-key"
 ALGORITHM = "HS256"
 
@@ -153,6 +159,60 @@ def get_current_user(authorization: str = Header(None), db: Session = Depends(ge
         raise HTTPException(status_code=401, detail="Token expired")
     except InvalidTokenError:
         raise HTTPException(status_code=401, detail="Invalid token")
+
+
+
+
+@router.get(
+    "/admin/users",
+    response_model=List[schemas.UserResponse],
+    dependencies=[Depends(get_current_user)]
+)
+def list_all_users(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    if current_user.profile.role != "Administrator":
+        raise HTTPException(status_code=403, detail="Not allowed")
+    users = db.query(User).all()
+    return users
+
+@router.post(
+    "/admin/users",
+    response_model=schemas.UserResponse,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(get_current_user)]
+)
+def admin_create_user(
+    new: schemas.AdminUserCreate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    if current_user.profile.role != "Administrator":
+        raise HTTPException(status_code=403, detail="Not allowed")
+
+    # 1) create User
+    user = User(
+        username=new.username,
+        email=new.email,
+        password=hash_password(new.password)
+    )
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+
+    # 2) create Profile with provided role
+    profile = models.UserProfile(
+        user_id   = user.id,
+        first_name=new.first_name,
+        last_name = new.last_name,
+        role      = new.role
+    )
+    db.add(profile)
+    db.commit()
+    db.refresh(profile)
+
+    return user
 
 
 

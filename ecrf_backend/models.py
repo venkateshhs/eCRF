@@ -27,7 +27,7 @@ class UserProfile(Base):
     first_name = Column(String(50), nullable=False)
     last_name = Column(String(50), nullable=False)
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
-    role = Column(String(20), nullable=False, server_default="viewer")
+    role = Column(String(20), nullable=False, server_default="Investigator")
 
     user = relationship("User", back_populates="profile")
 

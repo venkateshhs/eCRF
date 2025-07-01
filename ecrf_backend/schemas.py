@@ -11,6 +11,7 @@ class UserBase(BaseModel):
 class UserProfileBase(BaseModel):
     first_name: constr(min_length=1, max_length=50)
     last_name: constr(min_length=1, max_length=50)
+    role: constr(min_length=1, max_length=20)
 
 
 class UserCreate(UserBase, UserProfileBase):
@@ -127,6 +128,19 @@ class SharedFormAccessOut(BaseModel):
     visit_index:   int
     permission:    str
     study_data:    Any   # or a more precise type
+
+    class Config:
+        orm_mode = True
+
+
+class AdminUserCreate(BaseModel):
+    username:    constr(min_length=3, max_length=50)
+    email:       EmailStr
+    password:    constr(min_length=8)
+    first_name:  constr(min_length=1, max_length=50)
+    last_name:   constr(min_length=1, max_length=50)
+    role:        constr(min_length=1, max_length=20)
+
 
     class Config:
         orm_mode = True
