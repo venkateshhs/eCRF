@@ -19,11 +19,21 @@
       </button>
       <nav>
         <ul>
-          <li @click="setActiveSection('study-management')" class="nav-item">
+          <!-- Study Management: hidden from Patients -->
+          <li
+            v-if="role !== 'Patient'"
+            @click="setActiveSection('study-management')"
+            class="nav-item"
+          >
             <i :class="icons.book" v-if="sidebarCollapsed"></i>
             <span v-if="!sidebarCollapsed">Study Management</span>
           </li>
-          <li @click="navigate('/dashboard/user-info')" class="nav-item">
+          <!-- User Management: only for Admin -->
+          <li
+            v-if="isAdmin"
+            @click="navigate('/dashboard/user-info')"
+            class="nav-item"
+          >
             <i :class="icons.user" v-if="sidebarCollapsed"></i>
             <span v-if="!sidebarCollapsed">User Management</span>
           </li>
@@ -36,13 +46,24 @@
       <div v-if="activeSection === 'study-management'">
         <h1>Study Management</h1>
         <div class="button-container" v-if="!showStudyOptions">
-          <button @click="navigate('/dashboard/create-study')" class="btn-option">
+          <!-- Create Study: only Admin or PI -->
+          <button
+            v-if="isAdmin || isPI"
+            @click="navigate('/dashboard/create-study')"
+            class="btn-option"
+          >
             Create Study
           </button>
-          <button @click="toggleStudyOptions" class="btn-option">
+          <!-- Open Study: Admin, PI, Investigator -->
+          <button
+            v-if="isAdmin || isPI || isInvestigator"
+            @click="toggleStudyOptions"
+            class="btn-option"
+          >
             Open Study
           </button>
         </div>
+
         <!-- Study Dashboard Table -->
         <div v-if="showStudyOptions" class="study-dashboard">
           <h2>Existing Studies</h2>
@@ -64,8 +85,22 @@
                 <td>{{ formatDateTime(study.updated_at) }}</td>
                 <td>
                   <div class="action-buttons">
-                    <button @click="editStudy(study)" class="btn-option">Edit Study</button>
-                    <button @click="addData(study)" class="btn-option">Add Data</button>
+                    <!-- Edit Study: only Admin or PI -->
+                    <button
+                      v-if="isAdmin || isPI"
+                      @click="editStudy(study)"
+                      class="btn-option"
+                    >
+                      Edit Study
+                    </button>
+                    <!-- Add Data: all except Patient -->
+                    <button
+                      v-if="role !== 'Patient'"
+                      @click="addData(study)"
+                      class="btn-option"
+                    >
+                      Add Data
+                    </button>
                   </div>
                 </td>
               </tr>
@@ -97,6 +132,23 @@ export default {
       studies: [],
       icons,
     };
+  },
+  computed: {
+    currentUser() {
+      return this.$store.getters.getUser || {};
+    },
+    role() {
+      return this.currentUser.profile?.role || "";
+    },
+    isAdmin() {
+      return this.role === "Administrator";
+    },
+    isPI() {
+      return this.role === "Principal Investigator";
+    },
+    isInvestigator() {
+      return this.role === "Investigator";
+    },
   },
   methods: {
     toggleSidebar() {
@@ -139,6 +191,7 @@ export default {
       }
     },
     formatDateTime(dateString) {
+      if (!dateString) return "";
       const date = new Date(dateString);
       return date.toLocaleString("en-GB", {
         year: "numeric",
@@ -163,8 +216,10 @@ export default {
 
       try {
         console.log("Fetching full study data for study ID:", study.id);
-        const response = await axios.get(`http://127.0.0.1:8000/forms/studies/${study.id}`, {
-          headers: { Authorization: `Bearer ${token}` },
+        const response = await axios.get(
+          `http://127.0.0.1:8000/forms/studies/${study.id}`,
+          {
+            headers: { Authorization: `Bearer ${token}` },
         });
         console.log("Full study response:", response.data);
 
