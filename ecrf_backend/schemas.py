@@ -11,7 +11,7 @@ class UserBase(BaseModel):
 class UserProfileBase(BaseModel):
     first_name: constr(min_length=1, max_length=50)
     last_name: constr(min_length=1, max_length=50)
-    role: constr(min_length=1, max_length=20)
+    role: constr(min_length=1, max_length=30)
 
 
 class UserCreate(UserBase, UserProfileBase):
@@ -139,8 +139,11 @@ class AdminUserCreate(BaseModel):
     password:    constr(min_length=8)
     first_name:  constr(min_length=1, max_length=50)
     last_name:   constr(min_length=1, max_length=50)
-    role:        constr(min_length=1, max_length=20)
+    role:        constr(min_length=1, max_length=50)
 
 
     class Config:
         orm_mode = True
+
+class RoleUpdate(BaseModel):
+    role: constr(min_length=1, max_length=50)

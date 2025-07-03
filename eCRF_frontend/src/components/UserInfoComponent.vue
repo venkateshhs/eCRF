@@ -78,6 +78,7 @@
         class="management-section"
       >
         <h2>Manage Users</h2>
+
         <!-- Create New User Form -->
         <form @submit.prevent="handleCreateUser" class="create-user-form">
           <h3>Create New User</h3>
@@ -118,10 +119,7 @@
         <table class="user-table">
           <thead>
             <tr>
-              <th>Username</th>
-              <th>Email</th>
-              <th>Name</th>
-              <th>Role</th>
+              <th>Username</th><th>Email</th><th>Name</th><th>Role</th>
             </tr>
           </thead>
           <tbody>
@@ -129,11 +127,32 @@
               <td>{{ u.username }}</td>
               <td>{{ u.email }}</td>
               <td>{{ u.profile.first_name }} {{ u.profile.last_name }}</td>
-              <td>{{ u.profile.role }}</td>
+              <td>
+                <select
+                  :value="u.profile.role"
+                  @change="onInitiateRoleChange(u, $event.target.value)"
+                >
+                  <option v-for="r in roles" :key="r" :value="r">{{ r }}</option>
+                </select>
+              </td>
             </tr>
           </tbody>
         </table>
       </section>
+    </div>
+
+    <!-- Custom Confirm Dialog for Role Change -->
+    <div v-if="showRoleDialog" class="dialog-overlay">
+      <div class="dialog-box">
+        <p>
+          Change <strong>{{ pendingUser.username }}</strong>'s role to
+          <strong>{{ pendingRole }}</strong>?
+        </p>
+        <div class="dialog-actions">
+          <button @click="confirmRoleChange" class="btn-confirm">Yes</button>
+          <button @click="cancelRoleChange" class="btn-cancel">No</button>
+        </div>
+      </div>
     </div>
   </div>
 </template>
@@ -149,26 +168,35 @@ export default {
     return {
       currentTab: "profile",
       user: null,
-      // change password
+      // Change Password
       newPassword: "",
       confirmPassword: "",
       showPassword: false,
       passwordMessage: null,
       passwordError: null,
-      // admin user mgmt
-      roles: ["Administrator", "Investigator", "Principal Investigator", "Patient"],
+      // Admin User Management
+      roles: [
+        "Administrator",
+        "Investigator",
+        "Principal Investigator",
+        "No Access"
+      ],
       newUser: {
         username: "",
         email: "",
-        password: "",
-        confirmPassword: "",
         first_name: "",
         last_name: "",
+        password: "",
+        confirmPassword: "",
         role: "Investigator",
       },
       users: [],
       userMgmtError: null,
       userMgmtMessage: null,
+      // Role‐change dialog
+      showRoleDialog: false,
+      pendingUser: null,
+      pendingRole: null,
     };
   },
   computed: {
@@ -191,16 +219,19 @@ export default {
     },
   },
   async created() {
+    // load current user
     this.user = this.userFromStore;
     if (!this.user) {
       await this.$store.dispatch("fetchUserData");
       this.user = this.$store.getters.getUser;
     }
+    // if admin, load all users
     if (this.isAdmin) {
       this.fetchUsers();
     }
   },
   methods: {
+    /* ─── Change Password ───────────────────────── */
     togglePasswordVisibility() {
       this.showPassword = !this.showPassword;
     },
@@ -231,15 +262,14 @@ export default {
         this.passwordError = "Error updating password.";
       }
     },
-    // ── Admin methods ─────────────────────────────────────
+
+    /* ─── Admin: Fetch & Create Users ─────────── */
     async fetchUsers() {
       this.userMgmtError = null;
       try {
         const resp = await axios.get(
           "http://localhost:8000/users/admin/users",
-          {
-            headers: { Authorization: `Bearer ${this.$store.state.token}` },
-          }
+          { headers: { Authorization: `Bearer ${this.$store.state.token}` } }
         );
         this.users = resp.data;
       } catch (err) {
@@ -270,29 +300,53 @@ export default {
           {
             username: u.username,
             email: u.email,
-            password: u.password,
             first_name: u.first_name,
             last_name: u.last_name,
+            password: u.password,
             role: u.role,
           },
-          {
-            headers: { Authorization: `Bearer ${this.$store.state.token}` },
-          }
+          { headers: { Authorization: `Bearer ${this.$store.state.token}` } }
         );
         this.userMgmtMessage = "User created successfully.";
         this.newUser = {
           username: "",
           email: "",
-          password: "",
-          confirmPassword: "",
           first_name: "",
           last_name: "",
+          password: "",
+          confirmPassword: "",
           role: "Investigator",
         };
         this.fetchUsers();
       } catch (err) {
         this.userMgmtError = err.response?.data?.detail || err.message;
       }
+    },
+
+    /* ─── Admin: Change Role with Custom Dialog ── */
+    onInitiateRoleChange(user, newRole) {
+      this.pendingUser = user;
+      this.pendingRole = newRole;
+      this.showRoleDialog = true;
+    },
+    async confirmRoleChange() {
+      try {
+        await axios.patch(
+          `http://localhost:8000/users/admin/users/${this.pendingUser.id}/role`,
+          { role: this.pendingRole },
+          { headers: { Authorization: `Bearer ${this.$store.state.token}` } }
+        );
+        this.pendingUser.profile.role = this.pendingRole;
+      } catch (err) {
+        alert("Failed to update role: " + (err.response?.data?.detail || err.message));
+      } finally {
+        this.showRoleDialog = false;
+        this.pendingUser = this.pendingRole = null;
+      }
+    },
+    cancelRoleChange() {
+      this.showRoleDialog = false;
+      this.pendingUser = this.pendingRole = null;
     },
   },
 };
@@ -308,8 +362,7 @@ export default {
   font-family: Arial, sans-serif;
   overflow: hidden;
 }
-
-/* ─── Tabs ─────────────────────────────────────────── */
+/* ─── Tabs ───────────────────────────────────────── */
 .tabs {
   display: flex;
   background: #f7f7f7;
@@ -324,74 +377,53 @@ export default {
   font-size: 15px;
   transition: background 0.2s;
 }
-.tab-button:hover {
-  background: #eaeaea;
-}
+.tab-button:hover { background: #eaeaea; }
 .tab-button.active {
   background: #fff;
   border-bottom: 3px solid #4f46e5;
   font-weight: bold;
 }
-
-/* ─── Content ─────────────────────────────────────── */
-.tab-content {
-  padding: 24px;
-}
-
-/* ─── Profile ─────────────────────────────────────── */
-.profile-section h2 {
-  margin-bottom: 1rem;
-}
-.user-details p {
-  margin: 6px 0;
-  color: #555;
-}
-
-/* ─── Settings ────────────────────────────────────── */
-.settings-section {
-  /* custom styles for StudySettings if needed */
-}
-
-
+/* ─── Content ───────────────────────────────────── */
+.tab-content { padding: 24px; }
+/* ─── Profile ─────────────────────────────────── */
+.profile-section h2 { margin-bottom: 1rem; }
+.user-details p { margin: 6px 0; color: #555; }
+/* ─── Settings ────────────────────────────────── */
+.settings-section { /* if needed */ }
+/* ─── Change Password ────────────────────────── */
 .password-section {
   max-width: 480px;
   margin: 2rem auto;
   padding: 2rem;
-  background: #ffffff;
+  background: #fff;
   border: 1px solid #e0e0e0;
   border-radius: 8px;
   box-shadow: 0 2px 8px rgba(0,0,0,0.05);
 }
-
 .password-section h2 {
   font-size: 1.5rem;
   margin-bottom: 1.5rem;
   text-align: center;
   color: #333;
 }
-
 .password-form {
   display: flex;
   flex-direction: column;
   gap: 1.25rem;
 }
-
 .form-group {
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
 }
-
 .form-group label {
   font-size: 0.95rem;
   color: #444;
+  margin-bottom: 0.5rem;
 }
-
 .password-wrapper {
   display: flex;
   align-items: center;
 }
-
 .password-wrapper input {
   flex: 1;
   padding: 0.6rem 0.8rem;
@@ -399,13 +431,8 @@ export default {
   border: 1px solid #ccc;
   border-radius: 4px 0 0 4px;
   outline: none;
-  transition: border-color 0.2s;
 }
-
-.password-wrapper input:focus {
-  border-color: #4f46e5;
-}
-
+.password-wrapper input:focus { border-color: #4f46e5; }
 .toggle-password {
   padding: 0.6rem 0.8rem;
   background: #f0f0f0;
@@ -414,13 +441,8 @@ export default {
   border-radius: 0 4px 4px 0;
   cursor: pointer;
   font-size: 0.9rem;
-  transition: background 0.2s;
 }
-
-.toggle-password:hover {
-  background: #e5e7eb;
-}
-
+.toggle-password:hover { background: #e5e7eb; }
 .btn-change-password {
   align-self: stretch;
   padding: 0.8rem;
@@ -430,51 +452,17 @@ export default {
   border: none;
   border-radius: 4px;
   cursor: pointer;
-  transition: background 0.2s;
 }
-
-.btn-change-password:hover {
-  background: #3730a3;
-}
-
+.btn-change-password:hover { background: #3730a3; }
 .password-section .message,
 .password-section .error {
   margin-top: 1rem;
   text-align: center;
   font-size: 0.9rem;
 }
-
-.password-section .message {
-  color: #16a34a;
-}
-
-.password-section .error {
-  color: #dc2626;
-}
-
-
-
-/* ─── Make Confirm Password Match New Password Styles ───────────────── */
-.password-section .form-group input {
-  width: 100%;
-  padding: 0.6rem 0.8rem;
-  font-size: 1rem;
-  border: 1px solid #ccc;
-  border-radius: 4px;
-  outline: none;
-  transition: border-color 0.2s;
-}
-
-.password-section .form-group input:focus {
-  border-color: #4f46e5;
-}
-
-/* Remove any leftover default margins/paddings on confirm field */
-.password-section .form-group:last-child {
-  margin-bottom: 1.25rem;
-}
-
-/* ─── Manage Users ───────────────────────────────── */
+.password-section .message { color: #16a34a; }
+.password-section .error { color: #dc2626; }
+/* ─── Manage Users ───────────────────────────── */
 .management-section h2,
 .management-section h3 {
   text-align: center;
@@ -519,4 +507,48 @@ export default {
   background: #f9f9f9;
   font-weight: 600;
 }
+/* ─── Custom Confirm Dialog ─────────────────── */
+.dialog-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+.dialog-box {
+  background: #fff;
+  padding: 1.5rem;
+  border-radius: 6px;
+  max-width: 320px;
+  text-align: center;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+}
+.dialog-box p {
+  margin-bottom: 1rem;
+  font-size: 1rem;
+}
+.dialog-actions {
+  display: flex;
+  justify-content: space-around;
+}
+.btn-confirm {
+  background: #4f46e5;
+  color: #fff;
+  border: none;
+  padding: 0.5rem 1rem;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.btn-confirm:hover { background: #3730a3; }
+.btn-cancel {
+  background: #e5e7eb;
+  color: #333;
+  border: none;
+  padding: 0.5rem 1rem;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.btn-cancel:hover { background: #d1d5db; }
 </style>

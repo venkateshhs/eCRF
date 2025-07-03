@@ -56,6 +56,9 @@ const store = createStore({
         return true;
       } catch (error) {
         console.error("Login failed, error from API:", error.response?.data || error.message);
+        if (error.response?.status === 403) {
+        throw error;
+      }
         return false;
       }
     },

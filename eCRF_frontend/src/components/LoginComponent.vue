@@ -44,8 +44,8 @@ export default {
     togglePasswordVisibility() {
       this.showPassword = !this.showPassword; // Toggle password visibility
     },
-    async handleLogin() {
-      this.error = null; // Reset the error message
+        async handleLogin() {
+      this.error = null;
       console.log("Attempting login with username:", this.username);
 
       try {
@@ -56,15 +56,27 @@ export default {
 
         if (success) {
           console.log("Login successful, redirecting to dashboard...");
-          this.$router.push("/dashboard"); // Redirect to dashboard on success
+          this.$router.push("/dashboard");
         } else {
-          console.log("Login failed: Invalid credentials.");
-          console.log(this.username, this.password);
-          this.error = "Invalid username or password."; // Show error message
+          console.log("Login failed: invalid credentials");
+          this.error = "Invalid username or password.";
         }
-      } catch (err) {
-        console.error("Unexpected error during login:", err);
-        this.error = "An unexpected error occurred. Please try again.";
+      } catch (error) {
+        console.error("Login error:", error);
+
+        if (error.response && error.response.status) {
+          const { status, data } = error.response;
+          if (status === 403) {
+            this.error =
+              "Your account does not have permission to access this application.";
+          } else if (status === 400) {
+            this.error = "Invalid username or password.";
+          } else {
+            this.error = data?.detail || "An unexpected error occurred. Please try again.";
+          }
+        } else {
+          this.error = "Unable to reach server. Please try again.";
+        }
       }
     },
   },
