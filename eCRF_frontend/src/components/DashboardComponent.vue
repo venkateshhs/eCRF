@@ -19,18 +19,17 @@
       </button>
       <nav>
         <ul>
-          <!-- Study Management: hidden from Patients -->
+          <!-- Study Management: only Admin, PI or Investigator -->
           <li
-            v-if="role !== 'Patient'"
+            v-if="isAdmin || isPI || isInvestigator"
             @click="setActiveSection('study-management')"
             class="nav-item"
           >
             <i :class="icons.book" v-if="sidebarCollapsed"></i>
             <span v-if="!sidebarCollapsed">Study Management</span>
           </li>
-          <!-- User Management: only for Admin -->
+          <!-- User Management: visible to all roles -->
           <li
-            v-if="isAdmin"
             @click="navigate('/dashboard/user-info')"
             class="nav-item"
           >
@@ -93,9 +92,9 @@
                     >
                       Edit Study
                     </button>
-                    <!-- Add Data: all except Patient -->
+                    <!-- Add Data: Admin, PI, Investigator -->
                     <button
-                      v-if="role !== 'Patient'"
+                      v-if="isAdmin || isPI || isInvestigator"
                       @click="addData(study)"
                       class="btn-option"
                     >
@@ -153,92 +152,61 @@ export default {
   methods: {
     toggleSidebar() {
       this.sidebarCollapsed = !this.sidebarCollapsed;
-      console.log("Sidebar toggled. Collapsed:", this.sidebarCollapsed);
     },
     setActiveSection(section) {
       this.activeSection = section;
       this.showStudyOptions = false;
-      console.log("Active section set to:", section);
     },
     toggleStudyOptions() {
       this.showStudyOptions = !this.showStudyOptions;
-      console.log("Study options toggled:", this.showStudyOptions);
-      if (this.showStudyOptions) {
-        this.loadStudies();
-      }
+      if (this.showStudyOptions) this.loadStudies();
     },
     async loadStudies() {
       const token = this.$store.state.token;
       if (!token) {
-        alert("Authentication error. Please log in again.");
-        this.$router.push("/login");
-        return;
+        alert("Please log in again.");
+        return this.$router.push("/login");
       }
       try {
-        const response = await axios.get("http://127.0.0.1:8000/forms/studies", {
+        const { data } = await axios.get("http://127.0.0.1:8000/forms/studies", {
           headers: { Authorization: `Bearer ${token}` },
         });
-        this.studies = response.data;
-        console.log("Loaded studies:", this.studies);
-      } catch (error) {
-        console.error("Error loading studies:", error.response?.data || error.message);
-        if (error.response && error.response.status === 401) {
-          alert("Session expired. Please log in again.");
+        this.studies = data;
+      } catch (e) {
+        if (e.response?.status === 401) {
+          alert("Session expired.");
           this.$router.push("/login");
         } else {
           alert("Failed to load studies.");
         }
       }
     },
-    formatDateTime(dateString) {
-      if (!dateString) return "";
-      const date = new Date(dateString);
-      return date.toLocaleString("en-GB", {
-        year: "numeric",
-        month: "short",
-        day: "numeric",
-        hour: "2-digit",
-        minute: "2-digit",
-        second: "2-digit",
+    formatDateTime(d) {
+      if (!d) return "";
+      return new Date(d).toLocaleString("en-GB", {
+        year: "numeric", month: "short", day: "numeric",
+        hour: "2-digit", minute: "2-digit", second: "2-digit",
       });
     },
     async editStudy(study) {
-      // Clear any stored study data.
       localStorage.removeItem("setStudyDetails");
       localStorage.removeItem("scratchForms");
-
       const token = this.$store.state.token;
-      if (!token) {
-        alert("Authentication error. Please log in again.");
-        this.$router.push("/login");
-        return;
-      }
-
+      if (!token) return alert("Please log in again.");
       try {
-        console.log("Fetching full study data for study ID:", study.id);
-        const response = await axios.get(
+        const resp = await axios.get(
           `http://127.0.0.1:8000/forms/studies/${study.id}`,
-          {
-            headers: { Authorization: `Bearer ${token}` },
-        });
-        console.log("Full study response:", response.data);
-
-        // Extract dynamic study data from the API response.
-        const studyData = response.data.content && response.data.content.study_data;
-        if (!studyData) {
-          console.error("Study content is empty.");
-          this.openGenericDialog("Study content is empty.");
-          return;
-        }
-
-        // Extract and flatten meta_info.
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+        const studyData = resp.data.content?.study_data;
+        if (!studyData) return alert("Study content is empty.");
         const meta = studyData.meta_info || {};
         const dynamicStudy = {
           id: study.id,
           name: meta.name,
           description: meta.description,
           studyType: meta.studyType || "Custom",
-          numberOfForms: meta.numberOfForms || (studyData.forms ? studyData.forms.length : 0),
+          numberOfForms: meta.numberOfForms || studyData.forms?.length || 0,
           metaInfo: {
             numberOfSubjects: meta.numberOfSubjects,
             numberOfVisits: meta.numberOfVisits,
@@ -246,54 +214,28 @@ export default {
           },
           customFields: meta.customFields || [],
           metaCustomFields: meta.metaCustomFields || [],
-          forms: studyData.forms
-            ? studyData.forms.map(form => ({
-                formName: form.form_name ? form.form_name : (form.formName || "Untitled Form"),
-                sections: form.sections,
-              }))
-            : [],
+          forms: studyData.forms?.map(f => ({
+            formName: f.form_name || f.formName || "Untitled Form",
+            sections: f.sections,
+          })) || [],
         };
-
-        // Update local state
-        this.metaInfo = dynamicStudy.metaInfo;
-        this.forms = dynamicStudy.forms;
-        this.totalForms = dynamicStudy.numberOfForms;
-        this.currentFormIndex = 0;
-        this.activeSection =
-          (this.forms[0] && this.forms[0].sections && this.forms[0].sections.length > 0) ? 0 : null;
-        console.log("Loaded dynamic study data:", dynamicStudy);
-
-        // Commit the dynamic study data to Vuex.
         this.$store.commit("setStudyDetails", dynamicStudy);
-        console.log("Committed dynamic study data to Vuex:", dynamicStudy);
-
-        // Store forms in localStorage for ScratchFormComponent.
         localStorage.setItem("scratchForms", JSON.stringify(dynamicStudy.forms));
-
-        console.log("Navigating to edit study view for study ID:", study.id);
         this.$router.push({ name: "CreateFormScratch", params: { id: study.id } });
-      } catch (error) {
-        console.error("Error retrieving full study data:", error.response?.data || error.message);
-        alert("Failed to load study data. Please try again.");
+      } catch {
+        alert("Failed to load study data.");
       }
     },
     addData(study) {
-      console.log("Adding data to study:", study.id);
       this.$router.push({ name: "StudyDetail", params: { id: study.id } });
     },
-    navigate(route) {
+    navigate(to) {
       this.activeSection = "";
-      console.log("Navigating to route:", route);
-      this.$router.push(route);
+      this.$router.push(to);
     },
     logout() {
       this.$store.commit("setUser", null);
-      console.log("User logged out.");
-      this.$router.push("/");
-    },
-    openGenericDialog(message, callback = null) {
-      alert(message);
-      if (callback) callback();
+      this.$router.push("/login");
     },
   },
   mounted() {
@@ -305,7 +247,6 @@ export default {
 </script>
 
 <style scoped>
-/* Layout */
 .dashboard-layout {
   display: grid;
   grid-template-areas:
@@ -317,8 +258,6 @@ export default {
   font-family: "Inter", sans-serif;
   transition: grid-template-columns 0.3s ease;
 }
-
-/* Header */
 .dashboard-header {
   grid-area: header;
   display: flex;
@@ -328,11 +267,7 @@ export default {
   background: #f5f5f5;
   border-bottom: 1px solid #ddd;
 }
-
-.logo-container img {
-  width: 110px;
-}
-
+.logo-container img { width: 110px; }
 .user-actions .btn-logout {
   background: none;
   border: none;
@@ -349,16 +284,10 @@ export default {
 .dashboard-sidebar {
   grid-area: sidebar;
   background: #f9f9f9;
-  padding: 20px;
-  border-right: 1px solid #ddd;
+  padding: 20px; border-right: 1px solid #ddd;
   transition: width 0.3s ease;
 }
-
-.dashboard-sidebar.collapsed {
-  width: 70px;
-  padding: 10px;
-}
-
+.dashboard-sidebar.collapsed { width: 70px; padding: 10px; }
 .hamburger-menu {
   background: none;
   border: none;
@@ -369,7 +298,6 @@ export default {
   align-items: center;
   gap: 4px;
 }
-
 .hamburger-menu span {
   display: block;
   width: 20px;
@@ -383,11 +311,7 @@ export default {
 }
 
 /* Sidebar Navigation */
-.dashboard-sidebar nav ul {
-  list-style: none;
-  padding: 0;
-}
-
+.dashboard-sidebar nav ul { list-style: none; padding: 0; }
 .nav-item {
   padding: 10px;
   font-size: 15px;
@@ -406,9 +330,7 @@ export default {
 
 /* Main Content */
 .dashboard-main {
-  grid-area: main;
-  padding: 30px;
-  background: #fff;
+  grid-area: main; padding: 30px; background: #fff;
   transition: margin-left 0.3s ease;
 }
 
@@ -426,9 +348,7 @@ export default {
 }
 
 .study-table {
-  width: 100%;
-  border-collapse: collapse;
-  margin-bottom: 15px;
+  width: 100%; border-collapse: collapse; margin-bottom: 15px;
 }
 
 .study-table th,
@@ -461,9 +381,7 @@ export default {
 }
 
 .btn-back {
-  padding: 8px 12px;
-  background: #f0f0f0;
-  border: 1px solid #bbb;
+  padding: 8px 12px; background: #f0f0f0; border: 1px solid #bbb;
   font-size: 14px;
   color: #555;
   cursor: pointer;
@@ -505,14 +423,8 @@ export default {
 
 /* Responsive Design */
 @media (max-width: 768px) {
-  .dashboard-layout {
-    grid-template-columns: 70px 1fr;
-  }
-  .dashboard-sidebar {
-    width: 70px;
-  }
-  .dashboard-main {
-    padding: 20px;
-  }
+  .dashboard-layout { grid-template-columns: 70px 1fr; }
+  .dashboard-sidebar { width: 70px; }
+  .dashboard-main { padding: 20px; }
 }
 </style>
