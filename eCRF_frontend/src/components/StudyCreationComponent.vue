@@ -248,27 +248,63 @@ export default {
       });
       step.value = 3;
     }
-
-function checkSubjectsSetup() {
+    function checkSubjectsSetup() {
   if (!subjectCount.value || !assignmentMethod.value) {
     console.warn("Provide subject count and assignment method.");
     return;
   }
 
-  const subjects = [];
-  const prefix = (studyData.value.title || "ST").replace(/[^A-Za-z\s]/g, "").trim().split(/\s+/).map(word => word[0]?.toUpperCase() || "").join("") || "ST";
-  const groupNames = groupData.value.map(g => g.name || g.label || "Unnamed");
-  console.log("subjectCount.value", subjectCount.value)
-  for (let i = 1; i <= subjectCount.value; i++) {
-    const id = `SUBJ-${prefix}-${String(i).padStart(3, "0")}`;
-    let group = "";
+  const N = subjectCount.value;
+  const prefix =
+    (studyData.value.title || "ST")
+      .replace(/[^A-Za-z\s]/g, "")
+      .trim()
+      .split(/\s+/)
+      .map((w) => w[0]?.toUpperCase() || "")
+      .join("") || "ST";
 
-    if (assignmentMethod.value === "Random" && groupNames.length > 0) {
-      group = groupNames[Math.floor(Math.random() * groupNames.length)];
+  const groupNames = groupData.value.map(
+    (g) => g.name || g.label || "Unnamed"
+  );
+
+  let assignments = [];
+
+  if (assignmentMethod.value === "Random" && groupNames.length > 0) {
+    const G = groupNames.length;
+    const base = Math.floor(N / G);
+    const rem = N % G;
+
+    // 1) pick which groups get an extra slot
+    const indices = Array.from({ length: G }, (_, i) => i);
+    for (let i = G - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [indices[i], indices[j]] = [indices[j], indices[i]];
+    }
+    const extra = new Set(indices.slice(0, rem));
+
+    // 2) build exactly N slots
+    for (let gi = 0; gi < G; gi++) {
+      const cnt = base + (extra.has(gi) ? 1 : 0);
+      for (let k = 0; k < cnt; k++) {
+        assignments.push(groupNames[gi]);
+      }
     }
 
-    subjects.push({ id, group });
+    // 3) shuffle the N assignments so subject‐order is random
+    for (let i = assignments.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [assignments[i], assignments[j]] = [assignments[j], assignments[i]];
+    }
+  } else {
+    // Manual or Skip: leave group blank
+    assignments = Array(N).fill("");
   }
+
+  // 4) zip with your subject IDs
+  const subjects = assignments.map((grp, idx) => {
+    const id = `SUBJ-${prefix}-${String(idx + 1).padStart(3, "0")}`;
+    return { id, group: grp };
+  });
 
   subjectData.value = subjects;
   console.log("subjects", subjects)
@@ -278,6 +314,7 @@ function checkSubjectsSetup() {
     step.value = 4;
   }
 }
+
 
 
 
