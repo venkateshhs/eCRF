@@ -25,9 +25,14 @@
       </section>
 
       <!-- STUDY SETTINGS TAB -->
-      <section v-else-if="currentTab === 'settings'" class="settings-section">
-        <StudySettings />
-      </section>
+      <!-- only render this section if currentTab==='settings' AND (isAdmin||isPI) -->
+        <section
+          v-else-if="currentTab === 'settings' && (isAdmin || isPI)"
+          class="settings-section"
+        >
+          <StudySettings />
+        </section>
+
 
       <!-- CHANGE PASSWORD TAB -->
       <section v-else-if="currentTab === 'password'" class="password-section">
@@ -200,24 +205,31 @@ export default {
     };
   },
   computed: {
-    userFromStore() {
-      return this.$store.getters.getUser;
-    },
-    isAdmin() {
-      return this.user?.profile?.role === "Administrator";
-    },
-    visibleTabs() {
-      const tabs = [
-        { key: "profile", label: "Profile" },
-        { key: "settings", label: "Study Settings" },
-        { key: "password", label: "Change Password" },
-      ];
-      if (this.isAdmin) {
-        tabs.push({ key: "management", label: "User Management" });
-      }
-      return tabs;
-    },
+  userFromStore() {
+    return this.$store.getters.getUser;
   },
+  isAdmin() {
+    return this.user?.profile?.role === "Administrator";
+  },
+  isPI() {
+    return this.user?.profile?.role === "Principal Investigator";
+  },
+  visibleTabs() {
+    const tabs = [
+      { key: "profile",  label: "Profile" },
+      //  only show Study Settings if Admin *or* PI
+      ...(this.isAdmin || this.isPI
+        ? [{ key: "settings", label: "Study Settings" }]
+        : []),
+      { key: "password", label: "Change Password" },
+    ];
+    if (this.isAdmin) {
+      tabs.push({ key: "management", label: "User Management" });
+    }
+    return tabs;
+  },
+},
+
   async created() {
     // load current user
     this.user = this.userFromStore;
