@@ -87,7 +87,7 @@
     <div v-if="step === 3" class="new-study-form">
       <SubjectForm
         v-model:subjectCount="subjectCount"
-  v-model:assignmentMethod="assignmentMethod"
+        v-model:assignmentMethod="assignmentMethod"
       />
       <div class="form-actions">
         <button @click="step = 2" class="btn-option">← Back</button>
@@ -112,17 +112,23 @@
     <div v-if="step === 5" class="new-study-form">
       <VisitForm :schema="visitSchema" v-model="visitData" />
       <div class="form-actions">
-        <button @click="step = (assignmentMethod === 'Skip' ? 3 : 4)" class="btn-option">← Back</button>
+        <button
+          @click="step = (assignmentMethod === 'Skip' ? 3 : 4)"
+          class="btn-option"
+        >
+          ← Back
+        </button>
         <button @click="checkVisits" class="btn-option">Finish</button>
       </div>
     </div>
   </div>
+
   <div v-if="showDialog" class="dialog-backdrop">
-  <div class="dialog-box">
-    <p>{{ dialogMessage }}</p>
-    <button @click="showDialog = false" class="btn-option">OK</button>
+    <div class="dialog-box">
+      <p>{{ dialogMessage }}</p>
+      <button @click="showDialog = false" class="btn-option">OK</button>
+    </div>
   </div>
-</div>
 </template>
 
 <script>
@@ -159,6 +165,7 @@ export default {
     const router = useRouter();
     const store = useStore();
     const formatLabel = inject("formatLabel");
+
     const step = ref(1);
     const studyData = ref({});
     const groupData = ref([]);
@@ -175,8 +182,6 @@ export default {
     const showDialog = ref(false);
     const dialogMessage = ref("");
 
-
-
     function fieldError(f, value) {
       return f.required && showStudyErrors.value && !value
         ? `${f.label} is required.`
@@ -189,21 +194,21 @@ export default {
       const cls = Object.keys(doc.classes)[0];
       const attrs = doc.classes[cls].attributes;
       schemaRef.value = Object.entries(attrs).map(([n, d]) => {
-        let type = d.widget === 'textarea' ? 'textarea' : 'text';
+        let type = d.widget === "textarea" ? "textarea" : "text";
         const r = (d.range || "").toLowerCase();
         if (r === "date" || r === "datetime") type = "date";
         if (r === "integer" || r === "decimal") type = "number";
         if (d.enum) type = "select";
         return {
-        field: n,
-        label: formatLabel(n),
+          field: n,
+          label: formatLabel(n),
           placeholder: d.description || formatLabel(n),
           type,
-        required: !!d.required,
-          disabled:    !!d.disabled,
-        display: d.display !== false,
-        options: d.enum || [],
-          skip:        d.skip || {}
+          required: !!d.required,
+          disabled: !!d.disabled,
+          display: d.display !== false,
+          options: d.enum || [],
+          skip: d.skip || {}
         };
       });
     }
@@ -213,26 +218,26 @@ export default {
       const hasMissing = studySchema.value.some(f =>
         f.required && !studyData.value[f.field]
       );
+      if (hasMissing) return;
 
-      if (!hasMissing) {
-        showStudyErrors.value = false;
-        const typeField  = studySchema.value.find(f => f.field === 'type');
-        const skipConfig = typeField?.skip || {};
-        const selected   = studyData.value.type;
-        const skips      = skipConfig[selected] || [];
-        const payload = {
-          study: studyData.value,
-          groups: [],
-          visits: []
-        };
+      showStudyErrors.value = false;
+      const typeField = studySchema.value.find(f => f.field === "type");
+      const skipConfig = typeField?.skip || {};
+      const selected = studyData.value.type;
+      const skips = skipConfig[selected] || [];
 
-        if (skips.includes('groups') && skips.includes('visits')) {
-          store.commit('setStudyDetails', payload);
-          router.push({ name: 'CreateFormScratch' });
-        } else {
-          store.commit('setStudyDetails', payload);
-      step.value = 2;
-        }
+      const payload = {
+        study: studyData.value,
+        groups: [],
+        visits: []
+      };
+
+      if (skips.includes("groups") && skips.includes("visits")) {
+        store.commit("setStudyDetails", payload);
+        router.push({ name: "CreateFormScratch" });
+      } else {
+        store.commit("setStudyDetails", payload);
+        step.value = 2;
       }
     }
 
@@ -241,6 +246,7 @@ export default {
         groupSchema.value.some(f => f.required && !g[f.field])
       );
       if (hasErrors) return;
+
       store.commit("setStudyDetails", {
         study: studyData.value,
         groups: groupData.value,
@@ -248,95 +254,81 @@ export default {
       });
       step.value = 3;
     }
+
     function checkSubjectsSetup() {
-  if (!subjectCount.value || !assignmentMethod.value) {
-    console.warn("Provide subject count and assignment method.");
-    return;
-  }
-
-  const N = subjectCount.value;
-  const prefix =
-    (studyData.value.title || "ST")
-      .replace(/[^A-Za-z\s]/g, "")
-      .trim()
-      .split(/\s+/)
-      .map((w) => w[0]?.toUpperCase() || "")
-      .join("") || "ST";
-
-  const groupNames = groupData.value.map(
-    (g) => g.name || g.label || "Unnamed"
-  );
-
-  let assignments = [];
-
-  if (assignmentMethod.value === "Random" && groupNames.length > 0) {
-    const G = groupNames.length;
-    const base = Math.floor(N / G);
-    const rem = N % G;
-
-    // 1) pick which groups get an extra slot
-    const indices = Array.from({ length: G }, (_, i) => i);
-    for (let i = G - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [indices[i], indices[j]] = [indices[j], indices[i]];
-    }
-    const extra = new Set(indices.slice(0, rem));
-
-    // 2) build exactly N slots
-    for (let gi = 0; gi < G; gi++) {
-      const cnt = base + (extra.has(gi) ? 1 : 0);
-      for (let k = 0; k < cnt; k++) {
-        assignments.push(groupNames[gi]);
+      if (!subjectCount.value || !assignmentMethod.value) {
+        console.warn("Provide subject count and assignment method.");
+        return;
       }
+
+      const N = subjectCount.value;
+      const prefix = (studyData.value.title || "ST")
+        .replace(/[^A-Za-z\s]/g, "")
+        .trim()
+        .split(/\s+/)
+        .map(w => w[0]?.toUpperCase() || "")
+        .join("") || "ST";
+      const groupNames = groupData.value.map(g => g.name || g.label || "Unnamed");
+
+      let assignments = [];
+      if (assignmentMethod.value === "Random" && groupNames.length > 0) {
+        const G = groupNames.length;
+        const base = Math.floor(N / G), rem = N % G;
+        const idx = Array.from({ length: G }, (_, i) => i);
+        for (let i = G - 1; i > 0; i--) {
+          const j = Math.floor(Math.random() * (i + 1));
+          [idx[i], idx[j]] = [idx[j], idx[i]];
+        }
+        const extra = new Set(idx.slice(0, rem));
+        for (let gi = 0; gi < G; gi++) {
+          const cnt = base + (extra.has(gi) ? 1 : 0);
+          for (let k = 0; k < cnt; k++) {
+            assignments.push(groupNames[gi]);
+          }
+        }
+        for (let i = assignments.length - 1; i > 0; i--) {
+          const j = Math.floor(Math.random() * (i + 1));
+          [assignments[i], assignments[j]] = [assignments[j], assignments[i]];
+        }
+      } else {
+        assignments = Array(N).fill("");
+      }
+
+      subjectData.value = assignments.map((grp, idx) => ({
+        id: `SUBJ-${prefix}-${String(idx + 1).padStart(3, "0")}`,
+        group: grp
+      }));
+
+      console.log("subjects", subjectData.value);
+      step.value = assignmentMethod.value === "Skip" ? 5 : 4;
     }
-
-    // 3) shuffle the N assignments so subject‐order is random
-    for (let i = assignments.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [assignments[i], assignments[j]] = [assignments[j], assignments[i]];
-    }
-  } else {
-    // Manual or Skip: leave group blank
-    assignments = Array(N).fill("");
-  }
-
-  // 4) zip with your subject IDs
-  const subjects = assignments.map((grp, idx) => {
-    const id = `SUBJ-${prefix}-${String(idx + 1).padStart(3, "0")}`;
-    return { id, group: grp };
-  });
-
-  subjectData.value = subjects;
-  console.log("subjects", subjects)
-  if (assignmentMethod.value === "Skip") {
-    step.value = 5;
-  } else {
-    step.value = 4;
-  }
-}
-
-
-
 
     function checkSubjectsAssigned() {
-      if (subjectData.value.some((s) => !s.group)) {
+      if (subjectData.value.some(s => !s.group)) {
         dialogMessage.value = "All subjects must have a group.";
         showDialog.value = true;
         return;
       }
       step.value = 5;
-}
+    }
 
     function checkVisits() {
       const hasErrors = visitData.value.some(v =>
         visitSchema.value.some(f => f.required && !v[f.field])
       );
       if (hasErrors) return;
+
+      // *** commit everything to Vuex instead of saving to DB ***
       store.commit("setStudyDetails", {
         study: studyData.value,
         groups: groupData.value,
+        subjectCount: subjectCount.value,
+        assignmentMethod: assignmentMethod.value,
+        subjects: subjectData.value,
         visits: visitData.value
       });
+
+      // navigate to your scratch‐form editor
       router.push({ name: "CreateFormScratch" });
     }
 
@@ -345,14 +337,13 @@ export default {
       await loadYaml("/group_schema.yaml", groupSchema);
       await loadYaml("/visit_schema.yaml", visitSchema);
 
-      studySchema.value.forEach(f => studyData.value[f.field] = "");
+      studySchema.value.forEach(f => (studyData.value[f.field] = ""));
       groupData.value = [];
       visitData.value = [];
     });
 
     return {
       step,
-      fieldError,
       studyData,
       groupData,
       subjectData,
@@ -362,15 +353,16 @@ export default {
       studySchema,
       groupSchema,
       visitSchema,
+      showDialog,
+      dialogMessage,
+      fieldError,
       validateStudy,
       checkGroups,
       checkSubjectsSetup,
       checkSubjectsAssigned,
-      checkVisits,
-      showDialog,
-      dialogMessage,
+      checkVisits
     };
-  },
+  }
 };
 </script>
 
@@ -404,23 +396,16 @@ export default {
 }
 .dialog-backdrop {
   position: fixed;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  background: rgba(0, 0, 0, 0.5);
-  display: flex;
-  justify-content: center;
-  align-items: center;
+  top: 0; left: 0; width: 100%; height: 100%;
+  background: rgba(0,0,0,0.5);
+  display: flex; align-items: center; justify-content: center;
   z-index: 1000;
 }
-
 .dialog-box {
   background: white;
   padding: 20px 30px;
   border-radius: 8px;
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.25);
+  box-shadow: 0 2px 10px rgba(0,0,0,0.25);
   text-align: center;
 }
-
 </style>
