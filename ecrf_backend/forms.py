@@ -279,11 +279,18 @@ def create_study(
 @router.get("/studies", response_model=List[schemas.StudyMetadataOut])
 def list_studies(
     db: Session = Depends(get_db),
-    user = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
 ):
-    # Only return studies created by the current user.
-    studies = db.query(models.StudyMetadata).filter(models.StudyMetadata.created_by == user.id).all()
+    if current_user.profile.role == "Administrator":
+        studies = db.query(models.StudyMetadata).all()
+    else:
+        studies = (
+            db.query(models.StudyMetadata)
+            .filter(models.StudyMetadata.created_by == current_user.id)
+            .all()
+        )
     return studies
+
 
 @router.get("/studies/{study_id}", response_model=schemas.StudyFull)
 def read_study(
@@ -295,7 +302,7 @@ def read_study(
     if result is None:
         raise HTTPException(status_code=404, detail="Study not found")
     metadata, content = result
-    if metadata.created_by != user.id:
+    if metadata.created_by != user.id and user.profile.role != "Administrator":
         raise HTTPException(status_code=403, detail="Not authorized to view this study")
     return {"metadata": metadata, "content": content}
 
@@ -312,7 +319,8 @@ def update_study(
     if existing is None:
         raise HTTPException(status_code=404, detail="Study not found")
     metadata, content = existing
-    if metadata.created_by != user.id:
+
+    if metadata.created_by != user.id or user.profile.role == "Administrator":
         raise HTTPException(status_code=403, detail="Not authorized to update this study")
     # Ensure the study id is present in the dynamic content data and update modification time.
     if not study_content.study_data.get("id"):
@@ -383,7 +391,7 @@ def create_share_link(payload: schemas.ShareLinkCreate,request: Request,
                          current_user: User = Depends(get_current_user)):
 
     # 1) Only “technician” or the study’s creator can share
-    if current_user.profile.role not in ["technician", "creator"]:
+    if current_user.profile.role not in ["Investigator", "Administrator","Principal Investigator"]:
         raise HTTPException(status_code=403, detail="Not allowed")
 
     token = generate_token()
