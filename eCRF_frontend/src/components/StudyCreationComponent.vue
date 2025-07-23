@@ -133,7 +133,7 @@
 
 <script>
 import { ref, onMounted, inject } from "vue";
-import { useRouter } from "vue-router";
+import { useRouter, useRoute } from "vue-router";
 import { useStore } from "vuex";
 import yaml from "js-yaml";
 
@@ -161,8 +161,12 @@ export default {
     SubjectForm,
     SubjectAssignmentForm,
   },
-  setup() {
+  props: {
+    id: { type: [String, Number], required: false }
+  },
+  setup(props) {
     const router = useRouter();
+    const route  = useRoute();
     const store = useStore();
     const formatLabel = inject("formatLabel");
 
@@ -337,9 +341,30 @@ export default {
       await loadYaml("/group_schema.yaml", groupSchema);
       await loadYaml("/visit_schema.yaml", visitSchema);
 
-      studySchema.value.forEach(f => (studyData.value[f.field] = ""));
-      groupData.value = [];
-      visitData.value = [];
+      // 2) if we're editing, grab everything out of Vuex
+     const editId = props.id || route.params.id
+     const details = store.state.studyDetails;
+     if (editId && details && details.study) {
+       // Step 1
+       studyData.value        = { ...details.study };
+       // Step 2
+       groupData.value        = Array.isArray(details.groups)  ? [...details.groups]  : [];
+       // Step 3
+       subjectCount.value     = details.subjectCount            ?? subjectCount.value;
+       assignmentMethod.value = details.assignmentMethod        ?? assignmentMethod.value;
+       // Step 4 (if not “Skip”)
+       subjectData.value      = Array.isArray(details.subjects) ? [...details.subjects] : [];
+       // Step 5
+       visitData.value        = Array.isArray(details.visits)   ? [...details.visits]   : [];
+
+       // stay on Step 1 and let the user click “Next →”
+       step.value = 1;
+     } else {
+       // brand‐new: initialize to empty
+       studySchema.value.forEach(f => studyData.value[f.field] = "");
+       groupData.value  = [];
+       visitData.value  = [];
+     }
     });
 
     return {

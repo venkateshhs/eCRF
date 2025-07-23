@@ -24,7 +24,7 @@ const routes = [
     component: DashboardComponent,
     children: [
       { path: "user-info", name: "UserInfo", component: UserInfoComponent },
-      { path: "create-study", name: "CreateStudy", component: StudyCreationComponent },
+      { path: "create-study/:id?", name: "CreateStudy", component: StudyCreationComponent, props: true, },
       //{ path: "create-form", name: "CreateForm", component: CreateFormComponent },
       { path: "view-forms", name: "ViewForms", component: SavedFormsComponent },
       { path: "analytics", name: "Analytics", component: AnalyticsComponent },

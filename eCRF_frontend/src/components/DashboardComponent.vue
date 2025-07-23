@@ -29,10 +29,7 @@
             <span v-if="!sidebarCollapsed">Study Management</span>
           </li>
           <!-- User Management: visible to all roles -->
-          <li
-            @click="navigate('/dashboard/user-info')"
-            class="nav-item"
-          >
+          <li @click="() => { setActiveSection(''); navigate('/dashboard/user-info') }" class="nav-item">
             <i :class="icons.user" v-if="sidebarCollapsed"></i>
             <span v-if="!sidebarCollapsed">User Management</span>
           </li>
@@ -42,7 +39,7 @@
 
     <!-- Main Content -->
     <main :class="['dashboard-main', { expanded: sidebarCollapsed }]">
-      <div v-if="activeSection === 'study-management'">
+      <div v-if="$route.name === 'Dashboard' && activeSection === 'study-management'">
         <h1>Study Management</h1>
         <div class="button-container" v-if="!showStudyOptions">
           <!-- Create Study: only Admin or PI -->
@@ -112,7 +109,7 @@
           </div>
         </div>
       </div>
-      <router-view v-else></router-view>
+      <router-view/>
     </main>
   </div>
 </template>
@@ -164,7 +161,8 @@ export default {
     toggleSidebar() {
       this.sidebarCollapsed = !this.sidebarCollapsed;
     },
-    setActiveSection(section) {
+    async setActiveSection(section) {
+      await this.$router.push({ name: "Dashboard" });
       this.activeSection = section;
       this.showStudyOptions = false;
     },
@@ -204,38 +202,32 @@ export default {
       localStorage.removeItem("scratchForms");
       const token = this.$store.state.token;
       if (!token) return alert("Please log in again.");
-      try {
-        const resp = await axios.get(
-          `http://127.0.0.1:8000/forms/studies/${study.id}`,
-          { headers: { Authorization: `Bearer ${token}` } }
-        );
-        const studyData = resp.data.content?.study_data;
-        if (!studyData) return alert("Study content is empty.");
-        const meta = studyData.meta_info || {};
-        const dynamicStudy = {
-          id: study.id,
-          name: meta.name,
-          description: meta.description,
-          studyType: meta.studyType || "Custom",
-          numberOfForms: meta.numberOfForms || studyData.forms?.length || 0,
-          metaInfo: {
-            numberOfSubjects: meta.numberOfSubjects,
-            numberOfVisits: meta.numberOfVisits,
-            studyMetaDescription: meta.studyMetaDescription,
-          },
-          customFields: meta.customFields || [],
-          metaCustomFields: meta.metaCustomFields || [],
-          forms: studyData.forms?.map(f => ({
-            formName: f.form_name || f.formName || "Untitled Form",
-            sections: f.sections,
-          })) || [],
-        };
-        this.$store.commit("setStudyDetails", dynamicStudy);
-        localStorage.setItem("scratchForms", JSON.stringify(dynamicStudy.forms));
-        this.$router.push({ name: "CreateFormScratch", params: { id: study.id } });
-      } catch {
-        alert("Failed to load study data.");
-      }
+      // 1) fetch the full study_data payload
+     const resp = await axios.get(
+       `http://127.0.0.1:8000/forms/studies/${study.id}`,
+       { headers: { Authorization: `Bearer ${token}` } }
+     );
+     const sd = resp.data.content?.study_data;
+     console.log("data", sd)
+     if (!sd) {
+       return alert("Study content is empty.");
+     }
+
+     // 2) commit *all* parts of study_data so the wizard can pick them up
+     this.$store.commit("setStudyDetails", {
+       study:             sd.study,
+       groups:            sd.groups,
+       visits:            sd.visits,
+       subjectCount:      sd.subjectCount,
+       assignmentMethod:  sd.assignmentMethod,
+       subjects:          sd.subjects,
+     });
+
+     // 2.a drop out of the "study-management" panel so <router-view> shows
+      this.activeSection = "";
+
+     // 3) route into Step 1 of the create‐study wizard
+     this.$router.push({ name: "CreateStudy", params: { id: study.id } })
     },
     addData(study) {
       this.$router.push({ name: "StudyDetail", params: { id: study.id } });
