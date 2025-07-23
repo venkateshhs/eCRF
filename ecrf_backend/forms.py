@@ -259,22 +259,22 @@ def get_form_by_id(
     return form
 """
 
-@router.post("/studies/", response_model=schemas.StudyFull)
-def create_study(
-    study_metadata: schemas.StudyMetadataCreate,
-    study_content: schemas.StudyContentCreate,
-    db: Session = Depends(get_db),
-    user = Depends(get_current_user)
-):
-    # Ensure the study is created only for the logged-in user.
-    if study_metadata.created_by != user.id:
-        raise HTTPException(status_code=403, detail="Not authorized to create study for this user")
-    try:
-        metadata, content = crud.create_study(db, study_metadata, study_content)
-    except Exception as e:
-        logger.error("Error creating study: %s", e)
-        raise HTTPException(status_code=500, detail=str(e))
-    return {"metadata": metadata, "content": content}
+# @router.post("/studies/", response_model=schemas.StudyFull)
+# def create_study(
+#     study_metadata: schemas.StudyMetadataCreate,
+#     study_content: schemas.StudyContentCreate,
+#     db: Session = Depends(get_db),
+#     user = Depends(get_current_user)
+# ):
+#     # Ensure the study is created only for the logged-in user.
+#     if study_metadata.created_by != user.id:
+#         raise HTTPException(status_code=403, detail="Not authorized to create study for this user")
+#     try:
+#         metadata, content = crud.create_study(db, study_metadata, study_content)
+#     except Exception as e:
+#         logger.error("Error creating study: %s", e)
+#         raise HTTPException(status_code=500, detail=str(e))
+#     return {"metadata": metadata, "content": content}
 
 @router.get("/studies", response_model=List[schemas.StudyMetadataOut])
 def list_studies(
