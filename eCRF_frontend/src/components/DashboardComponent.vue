@@ -132,6 +132,17 @@ export default {
       icons,
     };
   },
+  watch: {
+    //whenever the URL has ?openStudies=true, we open the study list
+    '$route.query.openStudies'(val) {
+      if (val === 'true') {
+        this.activeSection = 'study-management';
+        this.showStudyOptions = true;
+        this.loadStudies();
+      }
+    }
+  },
+
   computed: {
     currentUser() {
       return this.$store.getters.getUser || {};
@@ -241,6 +252,11 @@ export default {
   mounted() {
     if (this.$route.path === "/dashboard") {
       this.activeSection = "study-management";
+    }
+    if (this.$route.query.openStudies === 'true') {
+      this.activeSection = 'study-management';
+      this.showStudyOptions = true;
+      this.loadStudies();
     }
   },
 };

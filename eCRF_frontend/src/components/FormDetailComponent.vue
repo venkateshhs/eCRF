@@ -1,5 +1,10 @@
 <template>
   <div class="study-data-container" v-if="study">
+    <div class="dashboard-back">
+      <button @click="goToDashboard" class="btn-back">
+        ← Back to Dashboard
+      </button>
+    </div>
     <!-- ─────────────────────────────────────────────────── -->
     <!-- 1. STUDY DETAILS (Always Visible at the Top)       -->
     <!-- ─────────────────────────────────────────────────── -->
@@ -371,6 +376,12 @@ export default {
   },
 
   methods: {
+    goToDashboard() {
+      this.$router.push({
+        name: "Dashboard",
+       query: { openStudies: "true" }
+      });
+    },
     async loadStudy(studyId) {
       console.log("[DEBUG] loadStudy()", studyId);
       try {
