@@ -6,7 +6,6 @@ import UserInfoComponent from "../components/UserInfoComponent.vue";
 // import CreateFormComponent from "../components/CreateFormComponent.vue";
 import AnalyticsComponent from "../components/AnalyticsComponent.vue";
 import ScratchFormComponent from "../components/ScratchFormComponent.vue";
-import SavedFormsComponent from "../components/SavedFormsComponent.vue";
 import FormDetailComponent from "../components/FormDetailComponent.vue";
 import StudyCreationComponent from "../components/StudyCreationComponent.vue";
 //import YamlViewerComponent from "../components/YamlViewerComponent.vue";
@@ -26,7 +25,6 @@ const routes = [
       { path: "user-info", name: "UserInfo", component: UserInfoComponent },
       { path: "create-study/:id?", name: "CreateStudy", component: StudyCreationComponent, props: true, },
       //{ path: "create-form", name: "CreateForm", component: CreateFormComponent },
-      { path: "view-forms", name: "ViewForms", component: SavedFormsComponent },
       { path: "analytics", name: "Analytics", component: AnalyticsComponent },
     ],
   },
@@ -40,11 +38,6 @@ const routes = [
     path: "/dashboard/create-form-scratch",
     name: "CreateFormScratch",
     component: ScratchFormComponent,
-  },
-  {
-    path: "/saved-forms",
-    name: "SavedForms",
-    component: SavedFormsComponent,
   },
   {
     path: "/studies/:id",
