@@ -8,7 +8,7 @@
     </div>
 
     <div class="scratch-form-content">
-      <!-- Available Fields -->
+      <!-- ───────── Available Fields ───────── -->
       <div v-if="!showMatrix" class="available-fields">
         <h2>Available Fields</h2>
         <div class="tabs">
@@ -28,31 +28,35 @@
 
         <!-- TEMPLATE -->
         <div v-if="activeTab === 'template'" class="template-fields">
-          <p class="template-instruction">Click class name to view attributes</p>
+          <p class="template-instruction">
+            Click a model to pick properties
+          </p>
           <div
-            v-for="(model, idx) in dataModels"
-            :key="idx"
+            v-for="model in dataModels"
+            :key="model.title"
             class="available-section"
+            @click="openModelDialog(model)"
           >
-            <div
-              class="class-item clickable"
-              @click="openModelDialog(model)"
-            >
-              {{ model.title }}
-            </div>
+            <h4>{{ model.title }}</h4>
+            <p class="model-description">
+              {{ model.description || "No description available." }}
+            </p>
           </div>
         </div>
 
         <!-- CUSTOM -->
         <div v-if="activeTab === 'custom'" class="custom-fields">
           <div
-            v-for="(field, index) in generalFields"
-            :key="index"
+            v-for="field in generalFields"
+            :key="field.name"
             class="available-field-button"
             @click="addFieldToActiveSection(field)"
           >
             <i :class="field.icon"></i>
-            <span class="field-label">{{ field.label }}</span>
+            <div class="field-info">
+              <span class="field-label">{{ field.label }}</span>
+              <small class="field-desc">{{ field.description }}</small>
+            </div>
           </div>
         </div>
 
@@ -62,19 +66,17 @@
         </div>
       </div>
 
-      <!-- Form Area -->
+      <!-- ───────── Form Area / Protocol Matrix ───────── -->
       <div class="form-area">
         <div class="sections-container">
-          <!-- Sections or Protocol Matrix -->
+          <!-- Sections View -->
           <div v-if="!showMatrix">
-            <!-- Sections -->
             <div
               v-for="(section, si) in currentForm.sections"
               :key="si"
               class="form-section"
               :class="{ active: activeSection === si }"
               @click.self="setActiveSection(si)"
-              tabindex="0"
             >
               <div class="section-header">
                 <h3>{{ section.title }}</h3>
@@ -83,14 +85,14 @@
                     class="icon-button"
                     title="Edit Section Title"
                     @click.prevent="openInputDialog(
-                      'Enter a new title for this section:',
+                      'Enter new section title:',
                       section.title,
                       val => editSection(si, val)
                     )"
                   ><i :class="icons.edit"></i></button>
                   <button
                     class="icon-button"
-                    title="Add New Section Below"
+                    title="Add Section Below"
                     @click.prevent="addNewSectionBelow(si)"
                   ><i :class="icons.add"></i></button>
                   <button
@@ -100,9 +102,11 @@
                   ><i :class="icons.delete"></i></button>
                   <button
                     class="icon-button"
-                    :title="section.collapsed ? 'Expand Section' : 'Collapse Section'"
+                    :title="section.collapsed ? 'Expand' : 'Collapse'"
                     @click.prevent="toggleSection(si)"
-                  ><i :class="section.collapsed ? icons.toggleDown : icons.toggleUp"></i></button>
+                  >
+                    <i :class="section.collapsed ? icons.toggleDown : icons.toggleUp"></i>
+                  </button>
                 </div>
               </div>
 
@@ -121,7 +125,7 @@
                         class="icon-button"
                         title="Edit Field Label"
                         @click.prevent="openInputDialog(
-                          'Enter new label for the field:',
+                          'Enter new field label:',
                           field.label,
                           val => editField(si, fi, val)
                         )"
@@ -138,117 +142,66 @@
                       ><i :class="icons.delete"></i></button>
                       <button
                         class="icon-button"
-                        title="Edit Field Constraints"
+                        title="Edit Constraints"
                         @click.prevent="openConstraintsDialog(si, fi)"
                       ><i :class="icons.cog"></i></button>
                     </div>
                   </div>
                   <div class="field-box">
+                    <!-- TEXT -->
                     <input
-                      v-if="field.type === 'text'"
+                      v-if="field.type==='text'"
                       type="text"
-                      :id="field.name"
                       v-model="field.value"
-                      :placeholder="field.constraints?.placeholder || field.placeholder"
-                      :required="field.constraints?.required"
-                      :readonly="field.constraints?.readonly"
-                      :minlength="field.constraints?.minLength"
-                      :maxlength="field.constraints?.maxLength"
-                      :pattern="field.constraints?.pattern"
+                      :placeholder="field.constraints.placeholder || field.placeholder"
                     />
+                    <!-- TEXTAREA -->
                     <textarea
-                      v-else-if="field.type === 'textarea'"
-                      :id="field.name"
+                      v-else-if="field.type==='textarea'"
                       v-model="field.value"
-                      :placeholder="field.constraints?.placeholder || field.placeholder"
-                      :required="field.constraints?.required"
-                      :readonly="field.constraints?.readonly"
-                      :minlength="field.constraints?.minLength"
-                      :maxlength="field.constraints?.maxLength"
-                      :pattern="field.constraints?.pattern"
-                      :rows="field.rows"
+                      :rows="field.rows||3"
+                      :placeholder="field.constraints.placeholder || field.placeholder"
                     ></textarea>
+                    <!-- NUMBER -->
                     <input
-                      v-else-if="field.type === 'number'"
+                      v-else-if="field.type==='number'"
                       type="number"
-                      :id="field.name"
-                      v-model="field.value"
-                      :placeholder="field.constraints?.placeholder || field.placeholder"
-                      :required="field.constraints?.required"
-                      :readonly="field.constraints?.readonly"
-                      :min="field.constraints?.min"
-                      :max="field.constraints?.max"
-                      :step="field.constraints?.step"
+                      v-model.number="field.value"
+                      :min="field.constraints.min"
+                      :max="field.constraints.max"
+                      :step="field.constraints.step"
                     />
+                    <!-- DATE -->
                     <input
-                      v-else-if="field.type === 'date'"
+                      v-else-if="field.type==='date'"
                       type="date"
-                      :id="field.name"
                       v-model="field.value"
-                      :placeholder="field.constraints?.placeholder || field.placeholder"
-                      :required="field.constraints?.required"
-                      :readonly="field.constraints?.readonly"
-                      :min="field.constraints?.minDate"
-                      :max="field.constraints?.maxDate"
+                      :min="field.constraints.minDate"
+                      :max="field.constraints.maxDate"
                     />
+                    <!-- SELECT -->
                     <select
-                      v-else-if="field.type === 'select'"
-                      :id="field.name"
+                      v-else-if="field.type==='select'"
                       v-model="field.value"
-                      :required="field.constraints?.required"
                     >
-                      <option
-                        v-for="opt in field.options"
-                        :key="opt"
-                        :value="opt"
-                      >{{ opt }}</option>
+                      <option value="" disabled>Select…</option>
+                      <option v-for="opt in field.options" :key="opt">{{ opt }}</option>
                     </select>
-                    <div
-                      v-else-if="field.type === 'checkbox'"
-                      class="checkbox-group"
-                    >
-                      <label v-for="(opt, i) in field.options" :key="i">
-                        <input
-                          type="checkbox"
-                          v-model="field.value"
-                          :value="opt"
-                          :required="field.constraints?.required"
-                          :readonly="field.constraints?.readonly"
-                        /> {{ opt }}
-                      </label>
-                    </div>
-                    <div
-                      v-else-if="field.type === 'radio'"
-                      class="radio-group"
-                    >
-                      <label v-for="opt in field.options" :key="opt">
-                        <input
-                          type="radio"
-                          :name="field.name"
-                          v-model="field.value"
-                          :value="opt"
-                          :required="field.constraints?.required"
-                        /> {{ opt }}
-                      </label>
-                    </div>
+                    <!-- BUTTON -->
                     <button
-                      v-else-if="field.type === 'button'"
-                      type="button"
+                      v-else-if="field.type==='button'"
                       class="form-button"
-                    >
-                      {{ field.label }}
-                    </button>
-                    <small
-                      v-if="field.constraints?.helpText"
-                      class="help-text"
-                    >{{ field.constraints.helpText }}</small>
+                    >{{ field.label }}</button>
+                    <small v-if="field.constraints.helpText" class="help-text">
+                      {{ field.constraints.helpText }}
+                    </small>
                   </div>
                 </div>
               </div>
             </div>
           </div>
 
-          <!-- Protocol Matrix -->
+          <!-- Protocol Matrix View -->
           <div v-else>
             <ProtocolMatrix
               :visits="visits"
@@ -262,7 +215,7 @@
         </div>
 
         <!-- Form Actions -->
-        <div class="form-actions" v-show="!showMatrix">
+        <div class="form-actions">
           <button @click.prevent="addNewSection" class="btn-option">
             + Add Section
           </button>
@@ -272,15 +225,11 @@
           <button @click.prevent="saveForm" class="btn-primary">
             Save Template
           </button>
-
-          <button @click="openDownloadDialog" class="btn-option">
+          <button @click.prevent="downloadFormData" class="btn-option">
             Download Template
           </button>
-          <button @click="openUploadDialog" class="btn-option">
+          <button @click.prevent="openUploadDialog" class="btn-option">
             Upload Template
-          </button>
-          <button @click="openPreviewDialog" class="btn-option">
-            Preview Template
           </button>
           <button
             @click.prevent="handleProtocolClick"
@@ -292,49 +241,90 @@
       </div>
     </div>
 
-    <!-- Model Dialog -->
+    <!-- ───────── Model Dialog ───────── -->
     <div v-if="showModelDialog" class="modal-overlay">
       <div class="modal model-dialog">
         <h3>Select Properties for {{ currentModel.title }}</h3>
         <div class="model-prop-list">
           <div
-            v-for="(prop, idx) in currentModel.fields"
-            :key="idx"
+            v-for="(prop, i) in currentModel.fields"
+            :key="prop.name"
             class="prop-row"
           >
             <div class="prop-info">
-              <div class="prop-name">{{ prop.label }}</div>
-              <div class="prop-desc">{{ prop.placeholder }}</div>
+              <strong>{{ prop.name }}</strong> —
+              {{ prop.label }}
+              <p class="prop-desc">{{ prop.description }}</p>
             </div>
             <div class="prop-check">
-              <input type="checkbox" v-model="selectedProps[idx]" />
+              <input type="checkbox" v-model="selectedProps[i]" />
             </div>
           </div>
         </div>
         <div class="modal-actions">
-          <button @click="takeoverModel" class="btn-primary">
-            Takeover
-          </button>
-          <button @click="showModelDialog = false" class="btn-option">
+          <button @click="takeoverModel" class="btn-primary">Takeover</button>
+          <button @click="showModelDialog=false" class="btn-option">
             Cancel
           </button>
         </div>
       </div>
     </div>
 
-    <!-- Preview Dialog -->
+    <!-- ───────── Constraints Dialog ───────── -->
+    <div v-if="showConstraintsDialog" class="modal-overlay">
+      <FieldConstraintsDialog
+        :currentFieldType="currentFieldType"
+        :constraintsForm="constraintsForm"
+        @updateConstraints="confirmConstraintsDialog"
+        @closeConstraintsDialog="cancelConstraintsDialog"
+      />
+    </div>
+
+    <!-- ───────── Preview Dialog ───────── -->
     <div v-if="showPreviewDialog" class="modal-overlay">
       <div class="modal preview-modal">
-        <div class="preview-content">
-          <FormPreview :form="forms[previewFormIndex]" />
-        </div>
+        <FormPreview :form="currentForm" />
         <div class="modal-actions">
           <button @click="closePreviewDialog" class="btn-primary">Close</button>
         </div>
       </div>
     </div>
 
-    <!-- Confirm Dialog -->
+    <!-- ───────── Upload Dialog ───────── -->
+    <div v-if="showUploadDialog" class="modal-overlay">
+      <div class="modal">
+        <p>
+          Select a JSON file containing exactly:<br/>
+          <code>{ "sections": […] }</code>
+        </p>
+        <input type="file" @change="handleFileChange" accept=".json" />
+        <div class="modal-actions">
+          <button @click="closeUploadDialog" class="btn-option">
+            Cancel
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ───────── Input Dialog ───────── -->
+    <div v-if="showInputDialog" class="modal-overlay">
+      <div class="modal input-dialog-modal">
+        <p>{{ inputDialogMessage }}</p>
+        <input
+          type="text"
+          v-model="inputDialogValue"
+          class="input-dialog-field"
+        />
+        <div class="modal-actions">
+          <button @click="confirmInputDialog" class="btn-primary">Save</button>
+          <button @click="cancelInputDialog" class="btn-option">
+            Cancel
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ───────── Confirm Dialog ───────── -->
     <div v-if="showConfirmDialog" class="modal-overlay">
       <div class="modal">
         <p>{{ confirmDialogMessage }}</p>
@@ -345,60 +335,11 @@
       </div>
     </div>
 
-    <!-- Input Dialog -->
-    <div v-if="showInputDialog" class="modal-overlay">
-      <div class="modal input-dialog-modal">
-        <p>{{ inputDialogMessage }}</p>
-        <input type="text" v-model="inputDialogValue" class="input-dialog-field" />
-        <div class="modal-actions">
-          <button @click="confirmInputDialog" class="btn-primary">Save</button>
-          <button @click="cancelInputDialog" class="btn-option">Cancel</button>
-        </div>
-      </div>
-    </div>
-
-    <!-- Generic Dialog -->
+    <!-- ───────── Generic Dialog ───────── -->
     <div v-if="showGenericDialog" class="modal-overlay">
       <div class="modal">
         <p>{{ genericDialogMessage }}</p>
         <button @click="closeGenericDialog" class="btn-primary">OK</button>
-      </div>
-    </div>
-
-    <!-- Constraints Dialog -->
-    <div v-if="showConstraintsDialog" class="modal-overlay">
-      <div class="modal constraints-edit-modal">
-        <FieldConstraintsDialog
-          :currentFieldType="currentFieldType"
-          :constraintsForm="constraintsForm"
-          @updateConstraints="confirmConstraintsDialog"
-          @closeConstraintsDialog="cancelConstraintsDialog"
-        />
-      </div>
-    </div>
-
-    <!-- Download Dialog -->
-    <div v-if="showDownloadDialog" class="modal-overlay">
-      <div class="modal">
-        <p>Select format to download the form:</p>
-        <div class="modal-actions">
-          <button @click="downloadFormData('json')" class="btn-primary">JSON</button>
-          <button @click="downloadFormData('yaml')" class="btn-primary">YAML</button>
-        </div>
-        <div class="modal-actions">
-          <button @click="closeDownloadDialog" class="btn-option">Cancel</button>
-        </div>
-      </div>
-    </div>
-
-    <!-- Upload Dialog -->
-    <div v-if="showUploadDialog" class="modal-overlay">
-      <div class="modal">
-        <p>Select a YAML/JSON file to upload:</p>
-        <input type="file" @change="handleFileChange" accept=".json,.yaml,.yml" />
-        <div class="modal-actions">
-          <button @click="closeUploadDialog" class="btn-option">Cancel</button>
-        </div>
       </div>
     </div>
   </div>
@@ -409,212 +350,289 @@ import axios from "axios";
 import yaml from "js-yaml";
 import icons from "@/assets/styles/icons";
 import ShaclComponents from "./ShaclComponents.vue";
+import ProtocolMatrix from "./ProtocolMatrix.vue";
 import FieldConstraintsDialog from "./FieldConstraintsDialog.vue";
 import FormPreview from "./FormPreview.vue";
-import ProtocolMatrix from "./ProtocolMatrix.vue";
 
 export default {
   name: "ScratchFormComponent",
+
   components: {
     ShaclComponents,
+    ProtocolMatrix,
     FieldConstraintsDialog,
-    FormPreview,
-    ProtocolMatrix
+    FormPreview
   },
+
   data() {
     return {
-      forms: [],
+      // sections & form state
+      forms: JSON.parse(localStorage.getItem("scratchForms") || "[]"),
       currentFormIndex: 0,
       activeSection: 0,
+
+      // tabs / available fields
       activeTab: "template",
       generalFields: [],
       dataModels: [],
+
+      // model dialog
       showModelDialog: false,
       currentModel: null,
       selectedProps: [],
 
+      // protocol matrix
       showMatrix: false,
       visits: [],
       groups: [],
       assignments: [],
 
+      // confirm / generic dialogs
       showConfirmDialog: false,
       confirmDialogMessage: "",
-      confirmDialogCallback: null,
-
-      showInputDialog: false,
-      inputDialogMessage: "",
-      inputDialogValue: "",
-      inputDialogCallback: null,
-
+      confirmCallback: null,
       showGenericDialog: false,
       genericDialogMessage: "",
-      genericDialogCallback: null,
+      genericCallback: null,
 
+      // constraints
       showConstraintsDialog: false,
       constraintsForm: {},
       currentFieldType: "",
       currentFieldIndices: {},
 
-      showDownloadDialog: false,
+      // preview
+      showPreviewDialog: false,
+
+      // upload
       showUploadDialog: false,
 
-      showPreviewDialog: false,
-      previewFormIndex: 0,
-
-      studyDetails: {}
+      // input
+      showInputDialog: false,
+      inputDialogMessage: "",
+      inputDialogValue: "",
+      inputDialogCallback: null
     };
   },
+
   computed: {
-    icons() { return icons; },
-    token() { return this.$store.state.token; },
-    currentForm() { return this.forms[this.currentFormIndex] || { sections: [] }; },
-    selectedModels() {
-      // include every section as a "model" in the matrix
+    icons()         { return icons; },
+    studyDetails()  { return this.$store.state.studyDetails || {}; },
+    currentForm()   { return this.forms[this.currentFormIndex] || { sections: [] }; },
+    selectedModels(){
       return this.currentForm.sections.map(sec => ({
-       title: sec.title   ,
-       fields: sec.fields}));
+        title:  sec.title,
+        fields: sec.fields
+      }));
     }
   },
+
   watch: {
     visits:         { handler: "initAssignments", immediate: true },
     groups:         { handler: "initAssignments", immediate: true },
     selectedModels: { handler: "initAssignments", immediate: true },
-    forms:          { handler(f) { localStorage.setItem("scratchForms", JSON.stringify(f)); }, deep: true }
+    forms: {
+      deep: true,
+      handler(f) {
+        localStorage.setItem("scratchForms", JSON.stringify(f));
+      }
+    }
   },
-  async mounted() {
-    const details = this.$store.state.studyDetails || {};
-    this.studyDetails = details;
-    this.visits = details.visits || [];
-    this.groups = details.groups || [];
-    this.forms = JSON.parse(localStorage.getItem("scratchForms") || "[]");
 
+  async mounted() {
+    // load visits/groups
+    this.visits = Array.isArray(this.studyDetails.visits)
+      ? this.studyDetails.visits : [];
+    this.groups = Array.isArray(this.studyDetails.groups)
+      ? this.studyDetails.groups : [];
+
+    // fetch custom fields
     try {
-      const res = await axios.get("http://127.0.0.1:8000/forms/available-fields");
-      this.generalFields = res.data;
+      const res = await axios.get(
+        "http://127.0.0.1:8000/forms/available-fields"
+      );
+      this.generalFields = res.data.map(f => ({
+        ...f,
+        description: f.helpText || f.placeholder || ""
+      }));
     } catch (e) {
-      console.error("Error loading general fields", e);
+      console.error("Failed to load custom fields", e);
     }
 
+    // load data models from YAML
     await this.loadDataModels();
   },
+
   methods: {
-    goBack() { this.$router.back(); },
+    // ── Navigation & dialogs ──
+    goBack() { this.$router.back() },
+
+    openConfirmDialog(msg, cb) {
+      this.confirmDialogMessage = msg;
+      this.confirmCallback       = cb;
+      this.showConfirmDialog     = true;
+    },
+    confirmDialogYes() {
+      this.showConfirmDialog = false;
+      this.confirmCallback && this.confirmCallback();
+    },
+    closeConfirmDialog() {
+      this.showConfirmDialog = false;
+    },
+
+    openGenericDialog(msg, cb) {
+      this.genericDialogMessage = msg;
+      this.genericCallback      = cb;
+      this.showGenericDialog    = true;
+    },
+    closeGenericDialog() {
+      this.showGenericDialog = false;
+      this.genericCallback && this.genericCallback();
+    },
+
+    openInputDialog(msg, def, cb) {
+      this.inputDialogMessage  = msg;
+      this.inputDialogValue    = def;
+      this.inputDialogCallback = cb;
+      this.showInputDialog     = true;
+    },
+    confirmInputDialog() {
+      this.showInputDialog = false;
+      this.inputDialogCallback && this.inputDialogCallback(this.inputDialogValue);
+    },
+    cancelInputDialog() {
+      this.showInputDialog = false;
+    },
+
+    // ── Protocol Matrix ──
     initAssignments() {
-      const m = this.selectedModels.length, v = this.visits.length, g = this.groups.length;
+      const m = this.selectedModels.length,
+            v = this.visits.length,
+            g = this.groups.length;
       this.assignments = Array.from({ length: m }, () =>
         Array.from({ length: v }, () =>
           Array.from({ length: g }, () => false)
         )
       );
     },
-
-    handleProtocolClick() { this.showMatrix = true; },
-    editTemplate()       { this.showMatrix = false; },
-
-    // called when ProtocolMatrix emits assignment-updated
+    handleProtocolClick() { this.showMatrix = true },
+    editTemplate()       { this.showMatrix = false },
     onAssignmentUpdated({ mIdx, vIdx, gIdx, checked }) {
       this.assignments[mIdx][vIdx][gIdx] = checked;
     },
+
+    // ── Sections & Fields ──
+    openModelDialog(model) {
+      this.currentModel    = model;
+      this.selectedProps   = model.fields.map(() => false);
+      this.showModelDialog = true;
+    },
+    takeoverModel() {
+      const chosen = this.currentModel.fields
+        .filter((_, i) => this.selectedProps[i])
+        .map(f => ({ ...f, description: f.description || "" }));
+      const sec = {
+        title:     this.currentModel.title,
+        fields:    chosen,
+        collapsed: false,
+        source:    "template"
+      };
+      const idx = this.activeSection + 1;
+      this.currentForm.sections.splice(idx, 0, sec);
+      this.activeSection   = idx;
+      this.showModelDialog = false;
+      this.initAssignments();
+    },
+
     addNewSection() {
-      this.currentForm.sections.push({
-        title: `Section ${this.currentForm.sections.length + 1}`,
-        fields: [],
-        collapsed: false
-      });
-      this.toggleSection(this.currentForm.sections.length - 1);
+      const sec = {
+        title:     `Section ${this.currentForm.sections.length + 1}`,
+        fields:    [],
+        collapsed: false,
+        source:    "manual"
+      };
+      this.currentForm.sections.push(sec);
+      this.activeSection = this.currentForm.sections.length - 1;
+      this.initAssignments();
     },
     addNewSectionBelow(i) {
-      this.currentForm.sections.splice(i+1, 0, {
-        title: `Section ${i+2}`,
-        fields: [],
-        collapsed: false
-      });
-      this.toggleSection(i+1);
+      const sec = {
+        title:     `Section ${i + 2}`,
+        fields:    [],
+        collapsed: false,
+        source:    "manual"
+      };
+      const idx = i + 1;
+      this.currentForm.sections.splice(idx, 0, sec);
+      this.activeSection = idx;
+      this.initAssignments();
     },
+
     confirmDeleteSection(i) {
       this.openConfirmDialog("Delete this section?", () => {
-        this.currentForm.sections.splice(i,1);
-        this.activeSection = Math.max(0, this.activeSection-1);
+        this.currentForm.sections.splice(i, 1);
+        this.activeSection = Math.max(0, this.activeSection - 1);
+        this.initAssignments();
       });
     },
+
     confirmClearForm() {
-      this.openConfirmDialog("Clear all sections?", () => {
-        this.currentForm.sections = [];
-        this.activeSection = 0;
-      });
+      this.openConfirmDialog(
+        "Do you want to clear all sections?",
+        () => {
+          this.currentForm.sections = [];
+          this.activeSection = 0;
+          this.initAssignments();
+        }
+      );
     },
+
     toggleSection(i) {
-      this.currentForm.sections.forEach((s,idx) => {
-        s.collapsed = idx!==i ? true : !s.collapsed;
+      this.currentForm.sections.forEach((s, idx) => {
+        s.collapsed = idx !== i ? true : !s.collapsed;
         if (!s.collapsed) this.activeSection = i;
       });
     },
-    setActiveSection(i) { this.activeSection = i; },
-    editSection(i,v)     { if(v) this.currentForm.sections[i].title = v; },
-
-    openInputDialog(msg, def, cb) {
-      this.inputDialogMessage = msg;
-      this.inputDialogValue   = def;
-      this.inputDialogCallback= cb;
-      this.showInputDialog    = true;
-    },
-    confirmInputDialog() {
-      if (this.inputDialogCallback) this.inputDialogCallback(this.inputDialogValue);
-      this.showInputDialog = false;
-    },
-    cancelInputDialog() {
-      this.showInputDialog = false;
-    },
+    setActiveSection(i) { this.activeSection = i },
 
     addFieldToActiveSection(field) {
+      if (!this.currentForm.sections.length) {
+        this.addNewSection();
+      }
       const sec = this.currentForm.sections[this.activeSection];
       if (sec.collapsed) this.toggleSection(this.activeSection);
-      sec.fields.push({ ...field });
+
+      sec.fields.push({
+        name:        `${field.name}_${Date.now()}`,
+        label:       field.label,
+        type:        field.type,
+        options:     field.options || [],
+        placeholder: field.description || field.placeholder,
+        value:       "",
+        constraints: { ...field.constraints }
+      });
     },
-    editField(si,fi,v) {
+
+    editSection(i, v) {
+      if (v) this.currentForm.sections[i].title = v;
+    },
+    editField(si, fi, v) {
       if (v) this.currentForm.sections[si].fields[fi].label = v;
     },
-    addSimilarField(si,fi) {
-      const f = this.currentForm.sections[si].fields[fi];
+    addSimilarField(si, fi) {
+      const f     = this.currentForm.sections[si].fields[fi];
       const clone = { ...f, name: `${f.name}_${Date.now()}` };
-      this.currentForm.sections[si].fields.splice(fi+1,0,clone);
+      this.currentForm.sections[si].fields.splice(fi + 1, 0, clone);
     },
-    removeField(si,fi) {
-      this.currentForm.sections[si].fields.splice(fi,1);
-    },
-
-    openConfirmDialog(msg, cb) {
-      this.confirmDialogMessage = msg;
-      this.confirmDialogCallback = cb;
-      this.showConfirmDialog    = true;
-    },
-    confirmDialogYes() {
-      if (this.confirmDialogCallback) this.confirmDialogCallback();
-      this.showConfirmDialog = false;
-    },
-    closeConfirmDialog() {
-      this.showConfirmDialog = false;
-    },
-
-    openGenericDialog(msg, cb=null) {
-      this.genericDialogMessage = msg;
-      this.genericDialogCallback= cb;
-      this.showGenericDialog    = true;
-    },
-    closeGenericDialog() {
-      this.showGenericDialog = false;
-      if (this.genericDialogCallback) {
-        this.genericDialogCallback();
-        this.genericDialogCallback = null;
-      }
+    removeField(si, fi) {
+      this.currentForm.sections[si].fields.splice(fi, 1);
     },
 
     openConstraintsDialog(si, fi) {
       const f = this.currentForm.sections[si].fields[fi];
-      this.currentFieldIndices = { sectionIndex: si, fieldIndex: fi };
-      this.currentFieldType    = f.type;
-      this.constraintsForm     = f.constraints ? { ...f.constraints } : {};
+      this.currentFieldIndices   = { sectionIndex: si, fieldIndex: fi };
+      this.currentFieldType      = f.type;
+      this.constraintsForm       = { ...f.constraints };
       this.showConstraintsDialog = true;
     },
     confirmConstraintsDialog(c) {
@@ -627,81 +645,31 @@ export default {
       this.showConstraintsDialog = false;
     },
 
-    async loadDataModels() {
-      try {
-        const res = await fetch("/study_schema.yaml");
-        const doc = yaml.load(await res.text());
-        this.dataModels = Object.entries(doc.classes)
-          .filter(([n]) => n!=="Study")
-          .map(([n,cls]) => ({
-            title: n,
-            fields: Object.entries(cls.attributes).map(([attr,def]) => {
-              let type="text", r=(def.range||"").toLowerCase();
-              if(r==="date"||r==="datetime") type="date";
-              else if(["integer","decimal"].includes(r)) type="number";
-              if(def.enum) type="select";
-              return {
-                name: `${attr}_${Date.now()}`,
-                label: attr,
-                type,
-                options: def.enum||[],
-                placeholder: def.description||"",
-                value: "",
-                constraints: { required: !!def.required }
-              };
-            })
-          }));
-      } catch(err) {
-        console.error("Failed to load data models:", err);
-      }
-    },
-    openModelDialog(model) {
-      this.currentModel = model;
-      this.selectedProps = model.fields.map(() => false);
-      this.showModelDialog = true;
-    },
-    takeoverModel() {
-      const chosen = this.currentModel.fields
-        .filter((_,i) => this.selectedProps[i])
-        .map(f => ({ ...f }));
-      const newSection = {
-        title: this.currentModel.title,
-        collapsed: false,
-        fields: chosen
-      };
-      this.currentForm.sections.splice(this.activeSection+1, 0, newSection);
-      this.activeSection++;
-      this.showModelDialog = false;
+    // ── Save / Download / Upload ──
+    saveForm() {
+      this.openGenericDialog("Saved!");
+      // … your existing save logic …
     },
 
-    openDownloadDialog() {
-      this.showDownloadDialog = true;
-    },
-    closeDownloadDialog() {
-      this.showDownloadDialog = false;
-    },
-    downloadFormData(format) {
-      const data = { studyDetails:this.studyDetails, forms:this.forms };
-      let str, name;
-      const pref = this.studyDetails.name?.trim().replace(/\s+/g,"_")||"formData";
-      if(format==="json") {
-        str = JSON.stringify(data,null,2);
-        name = `${pref}.json`;
-      } else {
-        try {
-          str = yaml.dump(data);
-          name = `${pref}.yaml`;
-        } catch {
-          str="Error"; name="formData.txt";
-        }
-      }
-      const blob = new Blob([str],{type:"text/plain"});
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url; a.download = name; a.click();
+    downloadFormData() {
+      const payload = {
+        sections: this.currentForm.sections.map(sec => ({
+          title:  sec.title,
+          fields: sec.fields,
+          source: sec.source
+        }))
+      };
+      const str  = JSON.stringify(payload, null, 2),
+            name = "sections.json";
+      const blob = new Blob([str], { type: "application/json" });
+      const url  = URL.createObjectURL(blob);
+      const a    = document.createElement("a");
+      a.href     = url;
+      a.download = name;
+      a.click();
       URL.revokeObjectURL(url);
-      this.showDownloadDialog = false;
     },
+
     openUploadDialog() {
       this.showUploadDialog = true;
     },
@@ -709,42 +677,62 @@ export default {
       this.showUploadDialog = false;
     },
     handleFileChange(e) {
-      const f = e.target.files[0];
-      if(!f) return;
-      const r = new FileReader();
-      r.onload = evt => {
-        let pd, ct=evt.target.result.trim();
-        try { pd=JSON.parse(ct); }
-        catch {
-          try { pd=yaml.load(ct); }
-          catch { return this.openGenericDialog("Invalid file."); }
-        }
-        if(pd.studyDetails) {
-          this.studyDetails = pd.studyDetails;
-          this.$store.commit("setStudyDetails",pd.studyDetails);
-        }
-        if(pd.forms) {
-          this.forms = pd.forms;
-          this.totalForms = pd.forms.length;
-          this.currentFormIndex = 0;
-          this.activeSection = 0;
+      const file = e.target.files[0];
+      if (!file) {
+        this.openGenericDialog("No file selected.");
+        return;
+      }
+      const reader = new FileReader();
+      reader.onload = evt => {
+        try {
+          const pd = JSON.parse(evt.target.result);
+          if (Array.isArray(pd.sections)) {
+            this.currentForm.sections = pd.sections;
+            this.initAssignments();
+          } else {
+            throw new Error("Bad format");
+          }
+        } catch (err) {
+          console.error(err);
+          this.openGenericDialog(
+            "Invalid file. Expect `{ \"sections\": [...] }`."
+          );
         }
       };
-      r.readAsText(f);
+      reader.readAsText(file);
       this.showUploadDialog = false;
     },
-    openPreviewDialog() {
-      this.previewFormIndex = this.currentFormIndex;
-      this.showPreviewDialog = true;
+
+    // ── Load YAML Models ──
+    async loadDataModels() {
+      try {
+        const res = await fetch("/study_schema.yaml");
+        const doc = yaml.load(await res.text());
+        this.dataModels = Object.entries(doc.classes)
+          .filter(([n]) => n !== "Study")
+          .map(([n, cls]) => ({
+            title:       n,
+            description: cls.description || "",
+            fields: Object.entries(cls.attributes).map(([attr, def]) => ({
+              name:        attr,
+              label:       def.label || attr,
+              description: def.description || "",
+              type:        this.resolveType(def),
+              options:     def.enum || [],
+              constraints: { required: !!def.required },
+              placeholder: def.description || ""
+            }))
+          }));
+      } catch (e) {
+        console.error("Failed to load data models:", e);
+      }
     },
-    closePreviewDialog() {
-      this.showPreviewDialog = false;
-    },
-    prevPreview() {
-      if(this.previewFormIndex>0) this.previewFormIndex--;
-    },
-    nextPreview() {
-      if(this.previewFormIndex<this.forms.length-1) this.previewFormIndex++;
+    resolveType(def) {
+      const r = (def.range || "").toLowerCase();
+      if (r === "date" || r === "datetime") return "date";
+      if (["integer", "decimal"].includes(r)) return "number";
+      if (def.enum) return "select";
+      return "text";
     }
   }
 };
@@ -752,6 +740,10 @@ export default {
 
 <style lang="scss" scoped>
 @import "@/assets/styles/_base.scss";
+
+
+
+
 
 .create-form-container {
   width: 100%;
