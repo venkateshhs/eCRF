@@ -440,6 +440,10 @@ export default {
   },
 
   async mounted() {
+    // Initialize forms if empty
+    if (!this.forms.length) {
+      this.forms.push({ sections: [] });
+    }
     // load visits/groups
     this.visits = Array.isArray(this.studyDetails.visits)
       ? this.studyDetails.visits : [];
@@ -551,9 +555,10 @@ export default {
         collapsed: false,
         source:    "manual"
       };
-      this.currentForm.sections.push(sec);
+      this.forms[this.currentFormIndex].sections.push(sec);
       this.activeSection = this.currentForm.sections.length - 1;
       this.initAssignments();
+      this.$forceUpdate(); // Force re-render to ensure new section appears
     },
     addNewSectionBelow(i) {
       const sec = {
@@ -563,9 +568,10 @@ export default {
         source:    "manual"
       };
       const idx = i + 1;
-      this.currentForm.sections.splice(idx, 0, sec);
+      this.forms[this.currentFormIndex].sections.splice(idx, 0, sec);
       this.activeSection = idx;
       this.initAssignments();
+      this.$forceUpdate(); // Force re-render to ensure new section appears
     },
 
     confirmDeleteSection(i) {
@@ -580,20 +586,30 @@ export default {
       this.openConfirmDialog(
         "Do you want to clear all sections?",
         () => {
-          this.currentForm.sections = [];
+          this.forms[this.currentFormIndex].sections = [];
           this.activeSection = 0;
           this.initAssignments();
+          this.$forceUpdate(); // Force re-render to ensure form is cleared
         }
       );
     },
 
     toggleSection(i) {
-      this.currentForm.sections.forEach((s, idx) => {
-        s.collapsed = idx !== i ? true : !s.collapsed;
-        if (!s.collapsed) this.activeSection = i;
-      });
+      const section = this.forms[this.currentFormIndex].sections[i];
+      section.collapsed = !section.collapsed;
+      if (!section.collapsed) {
+        this.activeSection = i;
+      }
+      this.$forceUpdate(); // Force re-render to reflect collapse/expand
     },
-    setActiveSection(i) { this.activeSection = i },
+    setActiveSection(i) {
+      this.activeSection = i;
+      this.forms[this.currentFormIndex].sections.forEach((s, idx) => {
+        if (idx !== i) s.collapsed = true;
+      });
+      this.forms[this.currentFormIndex].sections[i].collapsed = false;
+      this.$forceUpdate(); // Force re-render to update active section
+    },
 
     addFieldToActiveSection(field) {
       if (!this.currentForm.sections.length) {
@@ -740,10 +756,6 @@ export default {
 
 <style lang="scss" scoped>
 @import "@/assets/styles/_base.scss";
-
-
-
-
 
 .create-form-container {
   width: 100%;
