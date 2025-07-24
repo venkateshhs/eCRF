@@ -1,18 +1,18 @@
 import os
 import shutil
 from typing import List, Dict
-
+from fastapi import Request
 from fastapi import APIRouter, HTTPException, Depends, Query, UploadFile, File, Form, Body
 from pathlib import Path
 import json
 import yaml
+from datetime import datetime, timedelta
 from database import get_db
 import schemas, crud, models
 from logger import logger
 from models import User
 from users import get_current_user, oauth2_scheme
-from fastapi.responses import FileResponse, StreamingResponse
-import io
+import secrets
 from sqlalchemy.orm import Session
 
 router = APIRouter(prefix="/forms", tags=["forms"])
@@ -259,31 +259,38 @@ def get_form_by_id(
     return form
 """
 
-@router.post("/studies/", response_model=schemas.StudyFull)
-def create_study(
-    study_metadata: schemas.StudyMetadataCreate,
-    study_content: schemas.StudyContentCreate,
-    db: Session = Depends(get_db),
-    user = Depends(get_current_user)
-):
-    # Ensure the study is created only for the logged-in user.
-    if study_metadata.created_by != user.id:
-        raise HTTPException(status_code=403, detail="Not authorized to create study for this user")
-    try:
-        metadata, content = crud.create_study(db, study_metadata, study_content)
-    except Exception as e:
-        logger.error("Error creating study: %s", e)
-        raise HTTPException(status_code=500, detail=str(e))
-    return {"metadata": metadata, "content": content}
+# @router.post("/studies/", response_model=schemas.StudyFull)
+# def create_study(
+#     study_metadata: schemas.StudyMetadataCreate,
+#     study_content: schemas.StudyContentCreate,
+#     db: Session = Depends(get_db),
+#     user = Depends(get_current_user)
+# ):
+#     # Ensure the study is created only for the logged-in user.
+#     if study_metadata.created_by != user.id:
+#         raise HTTPException(status_code=403, detail="Not authorized to create study for this user")
+#     try:
+#         metadata, content = crud.create_study(db, study_metadata, study_content)
+#     except Exception as e:
+#         logger.error("Error creating study: %s", e)
+#         raise HTTPException(status_code=500, detail=str(e))
+#     return {"metadata": metadata, "content": content}
 
 @router.get("/studies", response_model=List[schemas.StudyMetadataOut])
 def list_studies(
     db: Session = Depends(get_db),
-    user = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
 ):
-    # Only return studies created by the current user.
-    studies = db.query(models.StudyMetadata).filter(models.StudyMetadata.created_by == user.id).all()
+    if current_user.profile.role == "Administrator":
+        studies = db.query(models.StudyMetadata).all()
+    else:
+        studies = (
+            db.query(models.StudyMetadata)
+            .filter(models.StudyMetadata.created_by == current_user.id)
+            .all()
+        )
     return studies
+
 
 @router.get("/studies/{study_id}", response_model=schemas.StudyFull)
 def read_study(
@@ -295,7 +302,7 @@ def read_study(
     if result is None:
         raise HTTPException(status_code=404, detail="Study not found")
     metadata, content = result
-    if metadata.created_by != user.id:
+    if metadata.created_by != user.id and user.profile.role != "Administrator":
         raise HTTPException(status_code=403, detail="Not authorized to view this study")
     return {"metadata": metadata, "content": content}
 
@@ -312,7 +319,8 @@ def update_study(
     if existing is None:
         raise HTTPException(status_code=404, detail="Study not found")
     metadata, content = existing
-    if metadata.created_by != user.id:
+
+    if metadata.created_by != user.id or user.profile.role == "Administrator":
         raise HTTPException(status_code=403, detail="Not authorized to update this study")
     # Ensure the study id is present in the dynamic content data and update modification time.
     if not study_content.study_data.get("id"):
@@ -373,3 +381,77 @@ def upload_file(
         logger.error("Error creating file record: %s", e)
         raise HTTPException(status_code=500, detail="Error creating file record")
     return db_file
+
+def generate_token():
+    return secrets.token_urlsafe(32)
+
+@router.post("/share-link/", status_code=201)
+def create_share_link(payload: schemas.ShareLinkCreate,request: Request,
+                         db: Session = Depends(get_db),
+                         current_user: User = Depends(get_current_user)):
+
+    # 1) Only “technician” or the study’s creator can share
+    if current_user.profile.role not in ["Investigator", "Administrator","Principal Investigator"]:
+        raise HTTPException(status_code=403, detail="Not allowed")
+
+    token = generate_token()
+    expires_at = datetime.utcnow() + timedelta(days=payload.expires_in_days)
+
+    access = models.SharedFormAccess(
+        token=token,
+        study_id=payload.study_id,
+        subject_index=payload.subject_index,
+        visit_index=payload.visit_index,
+        permission=payload.permission,
+        max_uses=payload.max_uses,
+        expires_at=expires_at,
+    )
+    db.add(access)
+    db.commit()
+    db.refresh(access)
+
+    frontend = request.headers.get("x-forwarded-host", None) or request.client.host
+    # or just hard-code for now:
+    frontend = "http://localhost:8080"
+
+    return {
+        "link": f"{frontend}/forms/shared/{token}"
+    }
+
+@router.get("/shared/{token}", response_model=schemas.SharedFormAccessOut)
+def access_shared_form(
+    token: str,
+    db: Session = Depends(get_db),
+):
+    access = (
+        db.query(models.SharedFormAccess)
+          .filter_by(token=token)
+          .first()
+    )
+    if not access:
+        raise HTTPException(404, "Link not found")
+    if access.used_count >= access.max_uses:
+        raise HTTPException(403, "Usage limit exceeded")
+    if access.expires_at < datetime.utcnow():
+        raise HTTPException(403, "Link expired")
+
+    # increment usage
+    access.used_count += 1
+    db.commit()
+
+    # grab the study content
+    content = (
+      db.query(models.StudyContent)
+        .filter_by(study_id=access.study_id)
+        .first()
+    )
+    if not content:
+        raise HTTPException(500, "Study content missing")
+
+    return {
+      "study_id":      access.study_id,
+      "subject_index": access.subject_index,
+      "visit_index":   access.visit_index,
+      "permission":    access.permission,
+      "study_data":    content.study_data
+    }

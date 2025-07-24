@@ -11,5 +11,6 @@ export default {
   cog: "fas fa-cog",
   book: "fas fa-book",
   user: "fas fa-user",
-  arrowLeft: "fas fa-arrow-left"
+  arrowLeft: "fas fa-arrow-left",
+  share:     "fas fa-share-alt",
 };

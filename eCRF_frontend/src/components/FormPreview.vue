@@ -16,54 +16,85 @@
         <div v-for="(field, fIndex) in section.fields" :key="fIndex" class="preview-field">
           <label class="field-label">{{ field.label }}</label>
           <div class="field-value">
-            <!-- Text / Textarea Field -->
-            <template v-if="field.type === 'text' || field.type === 'textarea'">
-              <input
-                type="text"
-                :value="field.value || field.placeholder || ''"
-                disabled
-              />
-            </template>
+            <!-- Text Field -->
+            <BaseTextField
+              v-if="field.type === 'text'"
+              v-model="field.value"
+              :id="field.name"
+              :label="''"
+              :placeholder="field.placeholder"
+              :required="false"
+              :disabled="true"
+              :error="''"
+            />
+
+            <!-- Textarea Field -->
+            <BaseTextarea
+              v-else-if="field.type === 'textarea'"
+              v-model="field.value"
+              :id="field.name"
+              :label="''"
+              :placeholder="field.placeholder"
+              :required="false"
+              :disabled="true"
+              :error="''"
+            />
+
             <!-- Number Field -->
-            <template v-else-if="field.type === 'number'">
-              <input
-                type="number"
-                :value="field.value || field.placeholder || ''"
-                disabled
-              />
-            </template>
+            <BaseNumberField
+              v-else-if="field.type === 'number'"
+              v-model="field.value"
+              :id="field.name"
+              :label="''"
+              :placeholder="field.placeholder"
+              :required="false"
+              :disabled="true"
+              :error="''"
+            />
+
             <!-- Date Field -->
-            <template v-else-if="field.type === 'date'">
-              <input
-                type="date"
-                :value="field.value || field.placeholder || ''"
-                disabled
-              />
-            </template>
+            <BaseDateField
+              v-else-if="field.type === 'date'"
+              v-model="field.value"
+              :id="field.name"
+              :label="''"
+              :required="false"
+              :disabled="true"
+              :error="''"
+            />
+
             <!-- Select Field -->
-            <template v-else-if="field.type === 'select'">
-              <select disabled>
-                <option :selected="true">{{ field.value || '---' }}</option>
-              </select>
-            </template>
-            <!-- Checkbox Field -->
-            <template v-else-if="field.type === 'checkbox'">
-              <div class="checkbox-values">
+            <BaseSelectField
+              v-else-if="field.type === 'select'"
+              v-model="field.value"
+              :id="field.name"
+              :label="''"
+              :options="field.options"
+              :placeholder="field.placeholder || '---'"
+              :required="false"
+              :disabled="true"
+              :error="''"
+            />
+
+            <!-- Fallback for everything else -->
+            <template v-else>
+              <!-- Checkbox -->
+              <div v-if="field.type === 'checkbox'" class="checkbox-values">
                 <span
                   v-for="(item, i) in (Array.isArray(field.value) ? field.value : [field.value])"
                   :key="i"
-                >
-                  {{ item || '---' }}
-                </span>
+                >{{ item || '---' }}</span>
               </div>
-            </template>
-            <!-- Radio Field -->
-            <template v-else-if="field.type === 'radio'">
-              <span>{{ field.value || '---' }}</span>
-            </template>
-            <!-- Button Field -->
-            <template v-else-if="field.type === 'button'">
-              <button disabled>{{ field.label }}</button>
+
+              <!-- Radio -->
+              <span v-else-if="field.type === 'radio'">
+                {{ field.value || '---' }}
+              </span>
+
+              <!-- Button -->
+              <button v-else-if="field.type === 'button'" disabled>
+                {{ field.label }}
+              </button>
             </template>
           </div>
         </div>
@@ -74,9 +105,21 @@
 
 <script>
 import icons from "@/assets/styles/icons";
+import BaseTextField   from "@/components/forms/BaseTextField.vue";
+import BaseTextarea    from "@/components/forms/BaseTextarea.vue";
+import BaseNumberField from "@/components/forms/BaseNumberField.vue";
+import BaseDateField   from "@/components/forms/BaseDateField.vue";
+import BaseSelectField from "@/components/forms/BaseSelectField.vue";
 
 export default {
   name: "FormPreview",
+  components: {
+    BaseTextField,
+    BaseTextarea,
+    BaseNumberField,
+    BaseDateField,
+    BaseSelectField
+  },
   props: {
     form: {
       type: Object,
@@ -115,7 +158,6 @@ export default {
   },
 };
 </script>
-
 <style scoped>
 .form-preview {
   padding: 20px;

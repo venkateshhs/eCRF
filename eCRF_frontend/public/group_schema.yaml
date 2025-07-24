@@ -1,0 +1,12 @@
+classes:
+  Group:
+    attributes:
+      name:
+        range: string
+        description: Cohort name
+        required: true
+      description:
+        range: string
+        description: Cohort description
+        required: false
+        widget: textarea

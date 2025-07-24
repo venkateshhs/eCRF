@@ -1,219 +1,762 @@
 <template>
-  <div class="study-detail-container" v-if="study">
-    <!-- Main Heading: Study Name -->
-    <h1 class="study-name">{{ study.metadata?.study_name }}</h1>
-
-    <!-- Details Header with Toggle Button -->
-    <div class="details-header">
-      <span class="header-text">Study Details</span>
-      <button class="toggle-btn" @click="toggleDetails">
-        <i :class="detailsCollapsed ? icons.toggleDown : icons.toggleUp"></i>
+  <div class="study-data-container" v-if="study">
+    <div class="dashboard-back">
+      <button @click="goToDashboard" class="btn-back">
+        ← Back to Dashboard
       </button>
     </div>
-
-    <!-- Details Section (Collapsible) -->
-    <div class="details-section" v-show="!detailsCollapsed">
-      <p><strong>Study ID:</strong> {{ study.metadata?.id }}</p>
-      <p><strong>Description:</strong> {{ study.metadata?.study_description }}</p>
-      <p>
-        <strong>Number of Forms:</strong>
-        {{ study.metadata?.numberOfForms || study.content?.study_data?.meta_info?.numberOfForms || 1 }}
+    <!-- ─────────────────────────────────────────────────── -->
+    <!-- 1. STUDY DETAILS (Always Visible at the Top)       -->
+    <!-- ─────────────────────────────────────────────────── -->
+    <div class="study-header">
+      <h1 class="study-name">{{ study.metadata.study_name }}</h1>
+      <p class="study-description">{{ study.metadata.study_description }}</p>
+      <p class="study-meta">
+        Subjects: {{ numberOfSubjects }} |
+        Visits: {{ visitList.length }} |
+        Groups: {{ groupList.length }}
       </p>
-      <p>
-        <strong>Study Type:</strong>
-        {{ study.content?.study_data?.meta_info?.studyType || 'Custom' }}
-      </p>
-      <p>
-        <strong>Number of Subjects:</strong>
-        {{ study.content?.study_data?.meta_info?.numberOfSubjects || 'N/A' }}
-      </p>
-      <p>
-        <strong>Number of Visits per Subject:</strong>
-        {{ study.content?.study_data?.meta_info?.numberOfVisits || 'N/A' }}
-      </p>
-      <p>
-        <strong>Study Meta Description:</strong>
-        {{ study.content?.study_data?.meta_info?.studyMetaDescription || 'N/A' }}
-      </p>
-      <!-- Custom Fields -->
-      <div v-if="study.content?.study_data?.meta_info?.customFields?.length">
-        <h4>Custom Fields</h4>
-        <ul>
-          <li v-for="(field, index) in study.content.study_data.meta_info.customFields" :key="'cf-' + index">
-            <strong>{{ field.fieldName }}</strong>: {{ field.fieldValue }}
-          </li>
-        </ul>
-      </div>
-      <!-- Meta Custom Fields -->
-      <div v-if="study.content?.study_data?.meta_info?.metaCustomFields?.length">
-        <h4>Meta Custom Fields</h4>
-        <ul>
-          <li v-for="(field, index) in study.content.study_data.meta_info.metaCustomFields" :key="'mcf-' + index">
-            <strong>{{ field.fieldName }}</strong>: {{ field.fieldValue }}
-          </li>
-        </ul>
-      </div>
+      <hr />
     </div>
 
-    <!-- Forms Section -->
-    <div class="forms-section" v-if="(study.content?.study_data?.forms || []).length">
-      <h2>Forms ({{ study.metadata?.numberOfForms || study.content?.study_data?.meta_info?.numberOfForms || 1 }})</h2>
-      <div v-for="(form, formIndex) in study.content.study_data.forms || []" :key="formIndex" class="form">
-        <h3>{{ form.form_name }}</h3>
-        <div v-for="(section, sectionIndex) in form.sections" :key="sectionIndex" class="form-section">
-          <h4>{{ section.title }}</h4>
-          <div v-for="(field, fieldIndex) in section.fields" :key="fieldIndex" class="form-field">
-            <label v-if="field.type !== 'button'">{{ field.label }}</label>
-            <template v-if="field.type === 'text'">
-              <input type="text" v-model="field.value" :placeholder="field.placeholder" />
-            </template>
-            <template v-else-if="field.type === 'textarea'">
-              <textarea v-model="field.value" :placeholder="field.placeholder"></textarea>
-            </template>
-            <template v-else-if="field.type === 'number'">
-              <input type="number" v-model="field.value" :placeholder="field.placeholder" />
-            </template>
-            <template v-else-if="field.type === 'date'">
-              <input type="date" v-model="field.value" :placeholder="field.placeholder" />
-            </template>
-            <template v-else-if="field.type === 'select'">
-              <select v-model="field.value">
-                <option v-for="option in field.options" :key="option" :value="option">
-                  {{ option }}
-                </option>
-              </select>
-            </template>
+    <!-- ─────────────────────────────────────────────── -->
+    <!-- 2. SELECTION MATRIX: Subject × (Visit)          -->
+    <!-- ─────────────────────────────────────────────── -->
+    <div v-if="showSelection">
+      <h2>Select Subject × Visit</h2>
+      <table class="selection-matrix">
+        <thead>
+          <tr>
+            <th>Subject / Visit</th>
+            <th v-for="combo in visitCombos" :key="combo.visitIndex">
+              {{ combo.label }}
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="sIdx in subjectIndices" :key="sIdx">
+            <td class="subject-cell">Subject {{ sIdx + 1 }}</td>
+            <td v-for="combo in visitCombos" :key="combo.visitIndex">
+              <button
+                class="select-btn"
+                @click="selectCell(sIdx, combo.visitIndex)"
+              >
+                Select
+              </button>
+              <button
+                class="share-icon"
+                title="Share this form link"
+                @click="openShareDialog(sIdx, combo.visitIndex)"
+              >
+                <i :class="icons.share"></i>
+              </button>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- ─────────────────────────────────────────────────── -->
+    <!-- 3. DATA-ENTRY FORM: Shown Once a Cell Is Chosen    -->
+    <!-- ─────────────────────────────────────────────────── -->
+    <div v-else class="entry-form-wrapper">
+      <!-- 3.a COLLAPSIBLE PANEL FOR “Study / Visit” INFO -->
+      <div class="details-panel">
+        <button @click="toggleDetails" class="details-toggle-btn">
+          {{ showDetails ? 'Hide Details ▲' : 'Show Details ▼' }}
+        </button>
+        <button
+          class="share-icon"
+          title="Share this form link"
+          @click="openShareDialog(currentSubjectIndex, currentVisitIndex)"
+        >
+          <i :class="icons.share"></i>
+        </button>
+        <div v-if="showDetails" class="details-content">
+          <div class="details-block">
+            <strong>Study Info:</strong>
+            <ul>
+              <li
+                v-for="[key, val] in Object.entries(study.content.study_data.study)"
+                :key="key"
+              >
+                {{ key }}: {{ val }}
+              </li>
+            </ul>
+          </div>
+          <div class="details-block">
+            <strong>Visit Info:</strong>
+            <ul>
+              <li
+                v-for="[key, val] in Object.entries(visitList[currentVisitIndex])"
+                :key="key"
+              >
+                {{ key }}: {{ val }}
+              </li>
+            </ul>
           </div>
         </div>
       </div>
-    </div>
 
-    <button @click="goBack" class="btn-back">Back</button>
+      <!-- 3.b BREADCRUMB (Exact Subject/Visit) -->
+      <div class="bread-crumb">
+        <strong>Study:</strong> {{ study.metadata.study_name }} &nbsp;|&nbsp;
+        <strong>Subject:</strong> {{ currentSubjectIndex + 1 }} &nbsp;|&nbsp;
+        <strong>Visit:</strong> {{ visitList[currentVisitIndex].name }}
+      </div>
+
+      <!-- 3.c ENTRY FORM FIELDS -->
+      <div class="entry-form-section">
+        <h2>
+          Enter Data for Subject {{ currentSubjectIndex + 1 }},
+          Visit: “{{ visitList[currentVisitIndex].name }}”
+        </h2>
+
+        <div v-if="assignedModelIndices.length">
+          <div
+            v-for="mIdx in assignedModelIndices"
+            :key="mIdx"
+            class="section-block"
+          >
+            <h3>{{ selectedModels[mIdx].title }}</h3>
+            <div
+              v-for="(field, fIdx) in selectedModels[mIdx].fields"
+              :key="fIdx"
+              class="form-field"
+            >
+              <label :for="fieldId(mIdx, fIdx)">
+                {{ field.label }}
+                <span
+                  v-if="field.constraints?.required"
+                  class="required"
+                >*</span>
+              </label>
+
+              <!-- TEXT INPUT -->
+              <input
+                v-if="field.type === 'text'"
+                :id="fieldId(mIdx, fIdx)"
+                type="text"
+                v-model="entryData[currentSubjectIndex][currentVisitIndex][currentGroupIndex][mIdx][fIdx]"
+                :placeholder="field.placeholder"
+                :required="!!field.constraints?.required"
+                :readonly="!!field.constraints?.readonly"
+                :minlength="field.constraints?.minLength"
+                :maxlength="field.constraints?.maxLength"
+                :pattern="field.constraints?.pattern"
+              />
+
+              <!-- TEXTAREA -->
+              <textarea
+                v-else-if="field.type === 'textarea'"
+                :id="fieldId(mIdx, fIdx)"
+                v-model="entryData[currentSubjectIndex][currentVisitIndex][currentGroupIndex][mIdx][fIdx]"
+                :placeholder="field.placeholder"
+                :required="!!field.constraints?.required"
+                :readonly="!!field.constraints?.readonly"
+                :minlength="field.constraints?.minLength"
+                :maxlength="field.constraints?.maxLength"
+                :pattern="field.constraints?.pattern"
+                rows="4"
+              ></textarea>
+
+              <!-- NUMBER INPUT -->
+              <input
+                v-else-if="field.type === 'number'"
+                :id="fieldId(mIdx, fIdx)"
+                type="number"
+                v-model.number="entryData[currentSubjectIndex][currentVisitIndex][currentGroupIndex][mIdx][fIdx]"
+                :placeholder="field.placeholder"
+                :required="!!field.constraints?.required"
+                :readonly="!!field.constraints?.readonly"
+                :min="field.constraints?.min"
+                :max="field.constraints?.max"
+                :step="field.constraints?.step"
+              />
+
+              <!-- DATE INPUT -->
+              <input
+                v-else-if="field.type === 'date'"
+                :id="fieldId(mIdx, fIdx)"
+                type="date"
+                v-model="entryData[currentSubjectIndex][currentVisitIndex][currentGroupIndex][mIdx][fIdx]"
+                :placeholder="field.placeholder"
+                :required="!!field.constraints?.required"
+                :readonly="!!field.constraints?.readonly"
+                :min="field.constraints?.minDate"
+                :max="field.constraints?.maxDate"
+              />
+
+              <!-- SELECT -->
+              <select
+                v-else-if="field.type === 'select'"
+                :id="fieldId(mIdx, fIdx)"
+                v-model="entryData[currentSubjectIndex][currentVisitIndex][currentGroupIndex][mIdx][fIdx]"
+                :required="!!field.constraints?.required"
+              >
+                <option value="" disabled>Select…</option>
+                <option
+                  v-for="opt in field.options"
+                  :key="opt"
+                  :value="opt"
+                >{{ opt }}</option>
+              </select>
+
+              <!-- FALLBACK TEXT -->
+              <input
+                v-else
+                :id="fieldId(mIdx, fIdx)"
+                type="text"
+                v-model="entryData[currentSubjectIndex][currentVisitIndex][currentGroupIndex][mIdx][fIdx]"
+                :placeholder="field.placeholder"
+                :required="!!field.constraints?.required"
+                :readonly="!!field.constraints?.readonly"
+              />
+
+              <!-- ERROR MESSAGE -->
+              <div
+                v-if="fieldErrors(mIdx, fIdx)"
+                class="error-message"
+              >
+                {{ fieldErrors(mIdx, fIdx) }}
+              </div>
+            </div>
+          </div>
+
+          <!-- Save Data Button -->
+          <div class="form-actions">
+            <button @click="submitData" class="btn-save">
+              Save Data
+            </button>
+          </div>
+        </div>
+
+        <div v-else class="no-assigned">
+          <p>No sections are assigned to this Visit for your group.</p>
+        </div>
+      </div>
+
+      <!-- 3.d “Back to Selection” Button -->
+      <div class="back-button-container">
+        <button @click="backToSelection" class="btn-back">
+          ← Back to Selection
+        </button>
+      </div>
+    </div>
   </div>
-  <div v-else>
-    <p>Loading study details...</p>
+
+  <div v-else class="loading">
+    <p>Loading study details…</p>
+  </div>
+
+  <!-- Share-link modal -->
+  <div v-if="showShareDialog" class="dialog-overlay">
+    <div class="dialog">
+      <h3>Generate Share Link</h3>
+      <label>
+        Permission:
+        <select v-model="shareConfig.permission">
+          <option value="view">View Only</option>
+          <option value="add">Allow Add</option>
+        </select>
+      </label>
+      <label>
+        Max Uses:
+        <input type="number" v-model.number="shareConfig.maxUses" min="1" />
+      </label>
+      <label>
+        Expires in (days):
+        <input
+          type="number"
+          v-model.number="shareConfig.expiresInDays"
+          min="1"
+        />
+      </label>
+      <div class="dialog-actions">
+        <button @click="createShareLink">Generate</button>
+        <button @click="showShareDialog = false">Cancel</button>
+      </div>
+      <p v-if="generatedLink">
+        <a :href="generatedLink" target="_blank">{{ generatedLink }}</a>
+      </p>
+    </div>
+  </div>
+
+  <!-- Permission-denied modal -->
+  <div v-if="permissionError" class="dialog-overlay">
+    <div class="dialog">
+      <h3>Permission Denied</h3>
+      <p>You do not have permission to create a share link. Please contact your administrator.</p>
+      <div class="dialog-actions">
+        <button @click="permissionError = false">Close</button>
+      </div>
+    </div>
   </div>
 </template>
 
 <script>
 import axios from "axios";
-import icons from "@/assets/styles/icons"; // Ensure icons.toggleUp and icons.toggleDown are defined
+import icons from "@/assets/styles/icons";
 
 export default {
-  name: "StudyDetailComponent",
+  name: "StudyDataEntryComponent",
+
   data() {
     return {
       study: null,
-      detailsCollapsed: false,
+      showSelection: true,
+      showDetails: false,
+      currentSubjectIndex: null,
+      currentVisitIndex: null,
+      currentGroupIndex: 0,
+      entryData: [],
+      validationErrors: {},
       icons,
+      showShareDialog: false,
+      shareParams: { subjectIndex: null, visitIndex: null },
+      shareConfig: { permission: "view", maxUses: 1, expiresInDays: 7 },
+      generatedLink: "",
+      permissionError: false,
     };
   },
+
   computed: {
     token() {
       return this.$store.state.token;
     },
+    visitList() {
+      return this.study?.content?.study_data?.visits || [];
+    },
+    groupList() {
+      return this.study?.content?.study_data?.groups || [];
+    },
+    selectedModels() {
+      return this.study?.content?.study_data?.selectedModels || [];
+    },
+    assignments() {
+      return this.study?.content?.study_data?.assignments || [];
+    },
+    numberOfSubjects() {
+      const sd = this.study?.content?.study_data;
+      return sd?.subjectCount != null
+        ? sd.subjectCount
+        : sd?.subjects?.length || 0;
+    },
+    visitCombos() {
+      return this.visitList.map((visit, vIdx) => ({
+        visitIndex: vIdx,
+        label: `Visit: ${visit.name}`,
+      }));
+    },
+    subjectIndices() {
+      return Array.from({ length: this.numberOfSubjects }, (_, i) => i);
+    },
+
+    // ——— FIXED: filter by currentGroupIndex, not row.some
+    assignedModelIndices() {
+      const v = this.currentVisitIndex;
+      const g = this.currentGroupIndex;
+      console.log(`[DEBUG] Filtering models for visit ${v}, group ${g}`);
+      return this.selectedModels
+        .map((_, mIdx) => mIdx)
+        .filter((mIdx) => {
+          const row = this.assignments[mIdx]?.[v] || [];
+          const flag = !!row[g];
+          console.log(
+            `[DEBUG] Model ${mIdx} (“${this.selectedModels[mIdx].title}”) → assigned to this group? ${flag}`
+          );
+          return flag;
+        });
+    },
   },
+
   async created() {
     const studyId = this.$route.params.id;
     await this.loadStudy(studyId);
   },
+
   methods: {
+    goToDashboard() {
+      this.$router.push({
+        name: "Dashboard",
+       query: { openStudies: "true" }
+      });
+    },
     async loadStudy(studyId) {
+      console.log("[DEBUG] loadStudy()", studyId);
       try {
-        const response = await axios.get(`http://127.0.0.1:8000/forms/studies/${studyId}`, {
-          headers: { Authorization: `Bearer ${this.token}` },
-        });
-        this.study = response.data;
-        console.log("Loaded study:", this.study);
-      } catch (error) {
-        console.error("Error loading study:", error.response?.data || error.message);
-        alert("Failed to load study details. Please try again.");
+        const resp = await axios.get(
+          `http://127.0.0.1:8000/forms/studies/${studyId}`,
+          { headers: { Authorization: `Bearer ${this.token}` } }
+        );
+        this.study = resp.data;
+        console.log("[DEBUG] Study loaded", this.study);
+        this.initializeEntryData();
+      } catch (err) {
+        console.error("[ERROR] loading study", err);
+        alert("Failed to load study details.");
       }
     },
-    toggleDetails() {
-      this.detailsCollapsed = !this.detailsCollapsed;
+
+    initializeEntryData() {
+      const nS = this.numberOfSubjects;
+      const nV = this.visitList.length;
+      const nG = this.groupList.length;
+      console.log(`[DEBUG] init entryData: ${nS}×${nV}×${nG}`);
+      this.entryData = Array.from({ length: nS }, () =>
+        Array.from({ length: nV }, () =>
+          Array.from({ length: nG }, () =>
+            this.selectedModels.map((sect) => sect.fields.map(() => ""))
+          )
+        )
+      );
+      console.log("[DEBUG] entryData matrix ready");
     },
-    goBack() {
-      this.$router.push("/saved-forms");
+
+    selectCell(sIdx, vIdx) {
+      console.log(`[DEBUG] selectCell() → subject ${sIdx}, visit ${vIdx}`);
+      this.currentSubjectIndex = sIdx;
+      this.currentVisitIndex = vIdx;
+
+      // Resolve subject's assigned group
+      const subj = this.study.content.study_data.subjects[sIdx];
+      console.log(`[DEBUG] subject[${sIdx}] =`, subj);
+      const grpName = subj.group;
+      const idx = this.groupList.findIndex((g) => g.name === grpName);
+      this.currentGroupIndex = idx >= 0 ? idx : 0;
+      console.log(`[DEBUG] resolved groupIndex = ${this.currentGroupIndex}`);
+
+      this.showSelection = false;
+    },
+
+    backToSelection() {
+      console.log("[DEBUG] backToSelection()");
+      this.showSelection = true;
+      this.showDetails = false;
+      this.currentSubjectIndex = null;
+      this.currentVisitIndex = null;
+      this.currentGroupIndex = 0;
+      this.validationErrors = {};
+    },
+
+    toggleDetails() {
+      this.showDetails = !this.showDetails;
+    },
+
+    fieldId(mIdx, fIdx) {
+      return `s${this.currentSubjectIndex}_v${this.currentVisitIndex}_g${this.currentGroupIndex}_m${mIdx}_f${fIdx}`;
+    },
+
+    errorKey(mIdx, fIdx) {
+      return [
+        this.currentSubjectIndex,
+        this.currentVisitIndex,
+        this.currentGroupIndex,
+        mIdx,
+        fIdx,
+      ].join("-");
+    },
+
+    fieldErrors(mIdx, fIdx) {
+      const key = this.errorKey(mIdx, fIdx);
+      return this.validationErrors[key] || "";
+    },
+
+    validateField(mIdx, fIdx) {
+      /* your existing validation */
+      const def = this.selectedModels[mIdx].fields[fIdx];
+      const val =
+        this.entryData[this.currentSubjectIndex][this.currentVisitIndex][
+          this.currentGroupIndex
+        ][mIdx][fIdx];
+      const cons = def.constraints || {};
+      const key = this.errorKey(mIdx, fIdx);
+      this.$delete(this.validationErrors, key);
+
+      if (cons.required && (val === "" || val == null)) {
+        this.$set(this.validationErrors, key, `${def.label} is required.`);
+        return false;
+      }
+      if (def.type === "number") {
+        const num = Number(val);
+        if (isNaN(num)) {
+          this.$set(this.validationErrors, key, `${def.label} must be a number.`);
+          return false;
+        }
+        if (cons.min != null && num < cons.min) {
+          this.$set(this.validationErrors, key, `${def.label} ≥ ${cons.min}`);
+          return false;
+        }
+        if (cons.max != null && num > cons.max) {
+          this.$set(this.validationErrors, key, `${def.label} ≤ ${cons.max}`);
+          return false;
+        }
+      }
+      if (["text", "textarea"].includes(def.type)) {
+        const str = String(val || "");
+        if (cons.minLength != null && str.length < cons.minLength) {
+          this.$set(
+            this.validationErrors,
+            key,
+            `${def.label} needs ≥ ${cons.minLength} chars.`
+          );
+          return false;
+        }
+        if (cons.maxLength != null && str.length > cons.maxLength) {
+          this.$set(
+            this.validationErrors,
+            key,
+            `${def.label} allows ≤ ${cons.maxLength} chars.`
+          );
+          return false;
+        }
+        if (cons.pattern && !new RegExp(cons.pattern).test(str)) {
+          this.$set(
+            this.validationErrors,
+            key,
+            `${def.label} does not match pattern.`
+          );
+          return false;
+        }
+      }
+      return true;
+    },
+
+    openShareDialog(sIdx, vIdx) {
+      this.shareParams = { subjectIndex: sIdx, visitIndex: vIdx };
+      this.generatedLink = "";
+      this.showShareDialog = true;
+    },
+
+    async createShareLink() {
+      /* unchanged */
+      const { subjectIndex, visitIndex } = this.shareParams;
+      const payload = {
+        study_id: this.study.metadata.id,
+        subject_index: subjectIndex,
+        visit_index: visitIndex,
+        permission: this.shareConfig.permission,
+        max_uses: this.shareConfig.maxUses,
+        expires_in_days: this.shareConfig.expiresInDays,
+      };
+      try {
+        const resp = await axios.post(
+          "http://localhost:8000/forms/share-link/",
+          payload,
+          { headers: { Authorization: `Bearer ${this.token}` } }
+        );
+        this.generatedLink = resp.data.link;
+      } catch (err) {
+        console.error(err);
+        this.generatedLink = null;
+        if (err.response?.status === 403) {
+          this.permissionError = true;
+        }
+      }
+    },
+
+    validateCurrentSection() {
+      let ok = true;
+      this.assignedModelIndices.forEach((mIdx) => {
+        this.selectedModels[mIdx].fields.forEach((_, fIdx) => {
+          if (!this.validateField(mIdx, fIdx)) ok = false;
+        });
+      });
+      return ok;
+    },
+
+    async submitData() {
+      console.log(
+        `[DEBUG] submitData() → S:${this.currentSubjectIndex} V:${this.currentVisitIndex} G:${this.currentGroupIndex}`
+      );
+      if (!this.validateCurrentSection()) {
+        alert("Please fix validation errors before saving.");
+        return;
+      }
+      const payload = {
+        study_id: this.study.metadata.id,
+        subject_index: this.currentSubjectIndex,
+        visit_index: this.currentVisitIndex,
+        group_index: this.currentGroupIndex,
+        data:
+          this.entryData[this.currentSubjectIndex][this.currentVisitIndex][
+            this.currentGroupIndex
+          ],
+      };
+      console.log("[DEBUG] Payload to submit:", payload);
+
+      try {
+        const resp = await axios.post(
+          `http://127.0.0.1:8000/forms/studies/${this.study.metadata.id}/data`,
+          payload,
+          { headers: { Authorization: `Bearer ${this.token}` } }
+        );
+        console.log("Data saved response:", resp.data);
+        alert("Data saved successfully for this Subject/Visit.");
+      } catch (err) {
+        console.error("Error saving data:", err.response?.data || err.message);
+        alert("Failed to save data. Check console for details.");
+      }
     },
   },
 };
 </script>
 
+
 <style scoped>
-.study-detail-container {
-  max-width: 800px;
-  margin: auto;
+.study-data-container {
+  max-width: 960px;
+  margin: 20px auto;
   padding: 20px;
-  background: #fff;
-  border-radius: 10px;
-  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
+  background: #ffffff;
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
   font-family: Arial, sans-serif;
 }
-.study-name {
+
+/* ─────────────────────────────────────────────────── */
+/* 1. STUDY DETAILS (Always Visible at Top) */
+/* ─────────────────────────────────────────────────── */
+.study-header {
   text-align: center;
-  margin-bottom: 10px;
+  margin-bottom: 24px;
+}
+.study-name {
   font-size: 28px;
-  color: #333;
+  color: #333333;
+  margin-bottom: 8px;
 }
-.details-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  background: #fff;
-  padding: 10px 15px;
-  border: 1px solid #ddd;
-  border-radius: 5px;
-  margin-bottom: 10px;
-}
-.header-text {
+.study-description {
   font-size: 16px;
+  color: #555555;
+  margin-bottom: 4px;
+}
+.study-meta {
+  font-size: 14px;
+  color: #777777;
+}
+hr {
+  margin-top: 16px;
+  margin-bottom: 24px;
+  border: 0;
+  border-top: 1px solid #e0e0e0;
+}
+
+/* ─────────────────────────────────────────────────── */
+/* 2. SELECTION MATRIX */
+/* ─────────────────────────────────────────────────── */
+.selection-matrix {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 32px;
+}
+.selection-matrix th,
+.selection-matrix td {
+  border: 1px solid #cccccc;
+  padding: 8px;
+  text-align: center;
+}
+.selection-matrix th {
+  background: #f2f2f2;
+  font-weight: 600;
   color: #333;
 }
-.toggle-btn {
-  background: transparent;
+.subject-cell {
+  background: #fafafa;
+  font-weight: bold;
+}
+.select-btn {
+  background: #007bff;
+  color: #fff;
   border: none;
+  padding: 6px 12px;
+  border-radius: 4px;
   cursor: pointer;
-  font-size: 20px;
+}
+.select-btn:hover {
+  background: #0056b3;
+}
+
+/* ─────────────────────────────────────────────────── */
+/* 3. DATA-ENTRY SECTION */
+/* ─────────────────────────────────────────────────── */
+
+/* 3.a Collapsible “Study / Visit” info */
+.details-panel {
+  margin-bottom: 16px;
+}
+.details-toggle-btn {
+  background: none;
+  border: none;
   color: #007bff;
+  font-size: 16px;
+  cursor: pointer;
+  margin-bottom: 8px;
 }
-.details-section {
-  background: #fff; /* Matches the main container */
-  padding: 15px;
-  border: 1px solid #ddd;
-  border-radius: 5px;
-  margin-bottom: 20px;
+.details-content {
+  background: #f7f7f7;
+  border: 1px solid #dddddd;
+  border-radius: 4px;
+  padding: 12px;
 }
-.details-section p {
-  margin: 5px 0;
+.details-block {
+  margin-bottom: 12px;
+}
+.details-block strong {
+  display: block;
+  margin-bottom: 4px;
+}
+.details-block ul {
+  margin: 0 0 12px 16px;
+  padding: 0;
+}
+.details-block li {
   font-size: 14px;
-  color: #555;
+  color: #333333;
 }
-.forms-section {
-  margin-top: 20px;
+
+/* 3.b Breadcrumb */
+.bread-crumb {
+  background: #f7f7f7;
+  padding: 10px 16px;
+  border: 1px solid #e0e0e0;
+  border-radius: 4px;
+  margin-bottom: 24px;
+  font-size: 14px;
+  color: #333333;
 }
-.form {
-  border: 1px solid #ddd;
-  border-radius: 5px;
-  padding: 15px;
-  margin-bottom: 15px;
-  background: #fefefe;
+
+/* 3.c Form fields */
+.entry-form-section h2 {
+  font-size: 20px;
+  margin-bottom: 16px;
+  color: #333333;
 }
-.form h3 {
+.section-block {
+  margin-bottom:
+16px;
+  padding: 12px;
+  border: 1px solid #dddddd;
+  border-radius: 4px;
+  background: #fdfdfd;
+}
+.section-block h3 {
   margin-top: 0;
-}
-.form-section {
-  margin-top: 10px;
-  padding: 10px;
-  border-top: 1px solid #ccc;
+  font-size: 18px;
+  color: #444444;
 }
 .form-field {
-  margin-bottom: 10px;
+  margin-bottom: 14px;
 }
 .form-field label {
-  font-weight: bold;
   display: block;
-  margin-bottom: 5px;
+  margin-bottom: 4px;
+  font-weight: bold;
+  color: #333333;
+}
+.required {
+  color: #d00;
+  margin-left: 4px;
 }
 input[type="text"],
 textarea,
@@ -222,21 +765,128 @@ input[type="date"],
 select {
   width: 100%;
   padding: 8px;
-  border: 1px solid #ccc;
+  border: 1px solid #cccccc;
   border-radius: 4px;
   box-sizing: border-box;
 }
-.btn-back {
-  display: block;
-  margin: 20px auto 0;
-  padding: 10px 20px;
-  background: #007bff;
-  color: #fff;
+.error-message {
+  color: #d00;
+  font-size: 12px;
+  margin-top: 4px;
+}
+.no-assigned {
+  font-style: italic;
+  color: #666666;
+  margin-top: 12px;
+}
+.form-actions {
+  text-align: right;
+  margin-top: 16px;
+}
+.btn-save {
+  background: #28a745;
+  color: #ffffff;
   border: none;
-  border-radius: 5px;
+  padding: 8px 16px;
+  border-radius: 4px;
+  font-size: 14px;
   cursor: pointer;
+}
+.btn-save:hover {
+  background: #218838;
+}
+
+/* 3.d Back button */
+.back-button-container {
+  text-align: center;
+  margin-top: 24px;
+}
+.btn-back {
+  background: #007bff;
+  color: #ffffff;
+  border: none;
+  padding: 10px 20px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
 }
 .btn-back:hover {
   background: #0056b3;
+}
+
+/* Loading State */
+.loading {
+  text-align: center;
+  padding: 50px;
+  font-size: 16px;
+  color: #666666;
+}
+
+/* Modal overlays */
+.dialog-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+.dialog {
+  background: #fff;
+  padding: 1.5rem;
+  border-radius: 0.5rem;
+  width: 320px;
+  max-width: 90%;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+  position: relative;
+}
+.dialog h3 {
+  margin-top: 0;
+  margin-bottom: 1rem;
+  font-size: 1.25rem;
+}
+.dialog label {
+  display: block;
+  margin-bottom: 0.75rem;
+  font-size: 0.9rem;
+}
+.dialog label select,
+.dialog label input {
+  width: 100%;
+  margin-top: 0.25rem;
+  padding: 0.4rem 0.6rem;
+  border: 1px solid #ccc;
+  border-radius: 0.25rem;
+  font-size: 0.9rem;
+  box-sizing: border-box;
+}
+.dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  margin-top: 1rem;
+}
+.dialog-actions button:first-child {
+  background: #4f46e5;
+  color: #fff;
+}
+.dialog-actions button:last-child {
+  background: #e5e7eb;
+  color: #333;
+}
+.dialog-actions button {
+  padding: 0.5rem 1rem;
+  border: none;
+  border-radius: 0.25rem;
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+.dialog p a {
+  display: block;
+  word-break: break-all;
+  margin-top: 1rem;
+  color: #007bff;
+  text-decoration: underline;
 }
 </style>

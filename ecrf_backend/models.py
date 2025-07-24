@@ -27,6 +27,7 @@ class UserProfile(Base):
     first_name = Column(String(50), nullable=False)
     last_name = Column(String(50), nullable=False)
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+    role = Column(String(20), nullable=False, server_default="Investigator")
 
     user = relationship("User", back_populates="profile")
 
@@ -46,16 +47,14 @@ class StudyMetadata(Base):
     user = relationship("User", back_populates="studies")
     # One-to-one relationship with StudyContent
     content = relationship("StudyContent", uselist=False, back_populates="study_metadata", cascade="all, delete")
-
+    shared_links = relationship("SharedFormAccess", back_populates="study", cascade="all, delete-orphan")
 
 class StudyContent(Base):
     __tablename__ = "study_content"
     id = Column(Integer, primary_key=True, index=True)
     study_id = Column(Integer, ForeignKey("study_metadata.id", ondelete="CASCADE"), unique=True, nullable=False)
     study_data = Column(JSON)  # JSON structure that contains metaInfo and forms
-
     study_metadata = relationship("StudyMetadata", back_populates="content")
-
 
 class File(Base):
     __tablename__ = "files"
@@ -75,3 +74,20 @@ class UserSettings(Base):
     user_id = Column(Integer, primary_key=True, index=True)
     settings = Column(JSON, nullable=False)
     updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+
+
+class SharedFormAccess(Base):
+    __tablename__ = "shared_form_access"
+
+    id = Column(Integer, primary_key=True, index=True)
+    token = Column(String(64), unique=True, nullable=False)
+    study_id = Column(Integer, ForeignKey("study_metadata.id"), nullable=False)
+    subject_index = Column(Integer, nullable=False)
+    visit_index = Column(Integer, nullable=False)
+    permission = Column(String(10), default="view")  # "view" or "add"
+    max_uses = Column(Integer, default=1)
+    used_count = Column(Integer, default=0)
+    expires_at = Column(DateTime, nullable=False)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+
+    study = relationship("StudyMetadata", back_populates="shared_links")

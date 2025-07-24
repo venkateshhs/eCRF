@@ -1,0 +1,13 @@
+classes:
+  Visit:
+    attributes:
+      name:
+        range: string
+        description: Visit name (e.g. Baseline)
+        required: true
+      description:
+        range: string
+        description: Cohort description
+        required: false
+        widget: textarea
+

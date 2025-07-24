@@ -1,0 +1,401 @@
+id: https://example.org/clinical-study-schema
+name: ClinicalStudySchema
+description: >
+  A clinical or research study schema. This includes a Study, its Participants,
+  and several data models for demographics, contact information, location,
+  medical measurements, medical history, cognitive assessment, medications,
+  lab results, vital signs, and family medical history.
+prefixes:
+  dlschemas: "https://concepts.datalad.org/s/"
+  dlthings: "https://concepts.datalad.org/s/things/unreleased/"
+  dlidentifiers: "https://concepts.datalad.org/s/identifiers/unreleased/"
+  dcterms: "http://purl.org/dc/terms/"
+  dcat: "http://www.w3.org/ns/dcat#"
+  prov: "http://www.w3.org/ns/prov#"
+  sio: "http://semanticscience.org/resource/"
+  ex: "http://example.org/"
+  rdf: "http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+  rdfs: "http://www.w3.org/2000/01/rdf-schema#"
+  sh: "http://www.w3.org/ns/shacl#"
+  xsd: "http://www.w3.org/2001/XMLSchema#"
+  foaf: "http://xmlns.com/foaf/0.1/"
+  schema: "http://schema.org/"
+  vcard: "http://www.w3.org/2006/vcard/ns#"
+
+classes:
+  Study:
+    description: "A clinical or research study with a persistent identifier and optional metadata."
+    attributes:
+      id:
+        range: anyURI
+        required: false
+        disabled: true
+        display: false
+        description: "Persistent identifier (PID) for the study."
+
+
+      title:
+        range: string
+        description: "Title of the study."
+      short_name:
+        range: string
+        description: "Short name or acronym of the study."
+      description:
+        range: string
+        description: "A description or abstract of the study."
+        widget: textarea
+      type:
+        range: string
+        description: "Type or category of the study."
+        enum:
+          - "Case Report"
+          - "Cross Sectional Study"
+          - "Longitudinal Study"
+          - "Meta Analysis"
+          - "Phase Clinical Trials"
+          - "Pragmatic Clinical Trial"
+          - "Registry Study"
+          - "Systematic Review"
+          - "Custom"
+        skip:
+          "Meta Analysis": [ "groups", "visits" ]
+          "Systematic Review": [ "groups", "visits" ]
+      status:
+        range: string
+        description: "Current status of the study."
+        enum:
+          - "Planning"
+          - "Ongoing"
+          - "Completed"
+          - "Terminated"
+          - "Other"
+      creator:
+        range: string
+        description: "Principal investigator (PI) of the study."
+      publisher:
+        range: string
+        description: "Sponsoring or funding organization of the study."
+      start time:
+        range: dateTime
+        description: "Start date/time of the study."
+      End time:
+        range: dateTime
+        description: "End date/time of the study."
+      Location:
+        range: string
+        description: "Geographic or site locations relevant to the study."
+
+
+  Participant:
+    description: "A participant (subject) in a study with a persistent identifier and optional metadata."
+    attributes:
+      id:
+        range: anyURI
+        required: true
+        description: "Persistent identifier (PID) for the participant."
+      identifiers:
+        range: string
+        multivalued: true
+        description: "Optional additional identifiers for the participant."
+      isPartOf:
+        range: Study
+        description: "Reference to the study the participant is enrolled in."
+      sex:
+        range: string
+        description: "Sex or gender of the participant."
+        enum:
+          - "Male"
+          - "Female"
+          - "Other"
+          - "Unknown"
+      age:
+        range: integer
+        description: "Age of the participant."
+      ethnicity:
+        range: string
+        description: "Ethnicity or race of the participant."
+        enum:
+          - "Hispanic"
+          - "Non-Hispanic"
+          - "Other"
+      date:
+        range: date
+        description: "Enrollment date of the participant."
+      consentGiven:
+        range: boolean
+        description: "Indicates whether the participant has provided consent."
+      consentDate:
+        range: date
+        description: "Date when the participant provided consent."
+      participantStatus:
+        range: string
+        description: "Current status of the participant."
+        enum:
+          - "Enrolled"
+          - "Withdrawn"
+          - "Completed"
+          - "Lost"
+          - "Other"
+      assignedArm:
+        range: string
+        description: "Study arm or group assignment of the participant."
+        enum:
+          - "Treatment"
+          - "Control"
+          - "Other"
+      site:
+        range: string
+        description: "Site or center where the participant was enrolled."
+
+  Demographics:
+    description: "Demographic information about a person."
+    attributes:
+      givenName:
+        range: string
+        required: true
+        pattern: "^[A-Za-z\\-']+$"
+        description: "Given name of the person."
+      familyName:
+        range: string
+        required: true
+        pattern: "^[A-Za-z\\-']+$"
+        description: "Family name of the person."
+      sex:
+        range: string
+        required: true
+        enum:
+          - "Male"
+          - "Female"
+          - "Other"
+        description: "Sex of the person."
+      age:
+        range: integer
+        required: true
+        minimum: 0
+        maximum: 150
+        description: "Age of the person in years."
+      ethnicity:
+        range: string
+        description: "the quality or fact of belonging to a population group or subgroup made up of people who share a common cultural background or descent"
+
+
+  ContactInfo:
+    description: "Contact information for a person."
+    attributes:
+      email:
+        range: string
+        pattern: "^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}$"
+        description: "Email address."
+      phone:
+        range: string
+        pattern: "^\\+?[0-9]{7,15}$"
+        description: "Telephone number."
+
+  Location:
+    description: "Geographic location details."
+    attributes:
+      street_address:
+        range: string
+        description: "Street address of the location."
+      city:
+        range: string
+        description: "City of the location."
+      state:
+        range: string
+        description: "State or province."
+      postal_code:
+        range: string
+        pattern: "^[A-Za-z0-9\\- ]+$"
+        min_length: 3
+        max_length: 10
+        description: "Postal or ZIP code."
+      country:
+        range: string
+        pattern: "^[A-Z]{2}$"
+        description: "Country code."
+
+  MedicalMeasurements:
+    description: "Physical measurements of a person."
+    attributes:
+      weight:
+        range: decimal
+        minimum: 0.0
+        maximum: 500.0
+        description: "Weight in kilograms."
+      height:
+        range: decimal
+        minimum: 0.0
+        maximum: 300.0
+        description: "Height in centimeters."
+      eye_color:
+        range: string
+        enum:
+          - "Brown"
+          - "Blue"
+          - "Green"
+          - "Hazel"
+          - "Gray"
+          - "Other"
+        description: "Eye color."
+
+  MedicalHistory:
+    description: "Chronic conditions and past surgeries."
+    attributes:
+      chronic_conditions:
+        range: string
+        multivalued: true
+        enum:
+          - "Diabetes"
+          - "Hypertension"
+          - "Asthma"
+          - "Heart Disease"
+          - "Cancer"
+        description: "List of chronic conditions."
+      past_surgeries:
+        range: string
+        multivalued: true
+        enum:
+          - "Appendectomy"
+          - "BypassSurgery"
+          - "HipReplacement"
+          - "Cholecystectomy"
+        description: "List of past surgeries."
+
+  CognitiveAssessment:
+    description: "A cognitive test assessment."
+    attributes:
+      assessment_name:
+        range: string
+        required: true
+        enum:
+          - "MMSE"
+          - "MoCA"
+          - "ADAS_Cog"
+          - "Other"
+        description: "Name of the cognitive assessment."
+      score:
+        range: integer
+        required: true
+        minimum: 0
+        maximum: 100
+        description: "Score on the cognitive assessment."
+      assessment_date:
+        range: string
+        pattern: "^\\d{4}-\\d{2}-\\d{2}$"
+        description: "Date of the assessment (YYYY-MM-DD)."
+
+  Medication:
+    description: "Current medication details."
+    attributes:
+      medication_name:
+        range: string
+        required: true
+        description: "Name of the medication."
+      dosage:
+        range: decimal
+        required: true
+        minimum: 0.0
+        description: "Dosage amount."
+      dosage_unit:
+        range: string
+        required: true
+        enum:
+          - "mg"
+          - "ml"
+          - "tablet"
+          - "drop"
+        description: "Dosage unit."
+      frequency:
+        range: string
+        required: true
+        enum:
+          - "Daily"
+          - "Twice_daily"
+          - "Weekly"
+          - "Monthly"
+          - "As_needed"
+        description: "Frequency of medication intake."
+
+  LabResult:
+    description: "Results of a laboratory test."
+    attributes:
+      test_name:
+        range: string
+        required: true
+        enum:
+          - "Glucose"
+          - "Hemoglobin"
+          - "Cholesterol"
+          - "Triglycerides"
+          - "Other"
+        description: "Name of the lab test."
+      test_value:
+        range: decimal
+        required: true
+        description: "Numeric result of the test."
+      test_unit:
+        range: string
+        required: true
+        enum:
+          - "mg/dL"
+          - "mmol/L"
+          - "g/L"
+        description: "Unit for the test result."
+      test_date:
+        range: string
+        pattern: "^\\d{4}-\\d{2}-\\d{2}$"
+        description: "Test date (YYYY-MM-DD)."
+
+  VitalSigns:
+    description: "Vital signs measurement."
+    attributes:
+      heart_rate:
+        range: integer
+        minimum: 0
+        maximum: 300
+        description: "Heart rate in beats per minute."
+      systolic_bp:
+        range: integer
+        minimum: 0
+        maximum: 300
+        description: "Systolic blood pressure (mmHg)."
+      diastolic_bp:
+        range: integer
+        minimum: 0
+        maximum: 200
+        description: "Diastolic blood pressure (mmHg)."
+      body_temperature:
+        range: decimal
+        minimum: 25.0
+        maximum: 45.0
+        description: "Body temperature in Celsius."
+      respiration_rate:
+        range: integer
+        minimum: 0
+        maximum: 60
+        description: "Respiration rate (breaths per minute)."
+
+  FamilyHistory:
+    description: "Family medical history entry."
+    attributes:
+      relationship:
+        range: string
+        required: true
+        enum:
+          - "Father"
+          - "Mother"
+          - "Sibling"
+          - "Grandfather"
+          - "Grandmother"
+          - "Other"
+        description: "Relationship to the person."
+      relative_condition:
+        range: string
+        required: true
+        enum:
+          - "Diabetes"
+          - "Hypertension"
+          - "Asthma"
+          - "Heart Disease"
+          - "Cancer"
+        description: "Medical condition of the relative."

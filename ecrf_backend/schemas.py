@@ -1,5 +1,5 @@
 from datetime import datetime
-from pydantic import BaseModel, EmailStr, constr
+from pydantic import BaseModel, EmailStr, constr, Field
 from typing import Any, Optional
 
 
@@ -11,6 +11,7 @@ class UserBase(BaseModel):
 class UserProfileBase(BaseModel):
     first_name: constr(min_length=1, max_length=50)
     last_name: constr(min_length=1, max_length=50)
+    role: constr(min_length=1, max_length=30)
 
 
 class UserCreate(UserBase, UserProfileBase):
@@ -108,3 +109,41 @@ class FileOut(FileBase):
 # Pydantic model that accepts arbitrary fields
 class SettingsModel(BaseModel):
     model_config = {"extra": "allow"}
+
+
+class ShareLinkCreate(BaseModel):
+    study_id:       int
+    subject_index:  int
+    visit_index:    int
+    permission:     str = Field("view", patternx="^(view|add)$")
+    max_uses:       int = Field(1, gt=0)
+    expires_in_days:int = Field(7, gt=0)
+
+
+
+
+class SharedFormAccessOut(BaseModel):
+    study_id:      int
+    subject_index: int
+    visit_index:   int
+    permission:    str
+    study_data:    Any   # or a more precise type
+
+    class Config:
+        orm_mode = True
+
+
+class AdminUserCreate(BaseModel):
+    username:    constr(min_length=3, max_length=50)
+    email:       EmailStr
+    password:    constr(min_length=8)
+    first_name:  constr(min_length=1, max_length=50)
+    last_name:   constr(min_length=1, max_length=50)
+    role:        constr(min_length=1, max_length=50)
+
+
+    class Config:
+        orm_mode = True
+
+class RoleUpdate(BaseModel):
+    role: constr(min_length=1, max_length=50)

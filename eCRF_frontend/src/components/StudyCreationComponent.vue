@@ -1,475 +1,436 @@
 <template>
   <div class="study-creation-container">
     <h1>Study Management</h1>
-    <div class="new-study-form">
-      <h2>Create a New Study</h2>
 
-      <!-- Study Name (Mandatory) -->
-      <label for="studyName">Study Name: <span class="required">*</span></label>
-      <input type="text" id="studyName" v-model="customStudy.name" placeholder="Enter study name" required />
-      <small v-if="showErrors && !customStudy.name" class="error-text">
-        Study name is required.
-      </small>
-
-      <!-- Study Description (Mandatory) -->
-      <label for="studyDescription">Study Description: <span class="required">*</span></label>
-      <textarea id="studyDescription" v-model="customStudy.description" placeholder="Enter study description" required></textarea>
-      <small v-if="showErrors && !customStudy.description" class="error-text">
-        Study description is required.
-      </small>
-
-      <!-- Case Study Selection -->
-      <label for="studyType">Select Case Study Type:</label>
-      <select id="studyType" v-model="selectedCaseStudyName" @change="loadCaseStudyDetails">
-        <option value="custom">Custom Study</option>
-        <option v-for="caseStudy in caseStudies" :key="caseStudy.name" :value="caseStudy.name">
-          {{ caseStudy.name }}
-        </option>
-      </select>
-      <!-- Case Study Description -->
-      <div v-if="selectedCaseStudy && selectedCaseStudyName !== 'custom'">
-        <h3>{{ selectedCaseStudy.name }}</h3>
-        <p>{{ selectedCaseStudy.description }}</p>
+    <!-- STEP 1 -->
+    <div v-if="step === 1" class="new-study-form">
+      <h2>Step 1: Create a New Study</h2>
+      <div
+        v-for="(f, i) in studySchema.filter(f => f.display)"
+        :key="i"
+        class="schema-field-row"
+      >
+        <BaseTextarea
+          v-if="f.type === 'textarea'"
+          v-model="studyData[f.field]"
+          :id="f.field"
+          :label="f.label"
+          :placeholder="f.placeholder"
+          :required="f.required"
+          :disabled="f.disabled"
+          :error="fieldError(f, studyData[f.field])"
+        />
+        <BaseSelectField
+          v-else-if="f.type === 'select'"
+          v-model="studyData[f.field]"
+          :id="f.field"
+          :label="f.label"
+          :options="f.options"
+          :placeholder="f.placeholder"
+          :required="f.required"
+          :disabled="f.disabled"
+          :error="fieldError(f, studyData[f.field])"
+        />
+        <BaseNumberField
+          v-else-if="f.type === 'number'"
+          v-model="studyData[f.field]"
+          :id="f.field"
+          :label="f.label"
+          :placeholder="f.placeholder"
+          :required="f.required"
+          :disabled="f.disabled"
+          :error="fieldError(f, studyData[f.field])"
+        />
+        <BaseDateField
+          v-else-if="f.type === 'date'"
+          v-model="studyData[f.field]"
+          :id="f.field"
+          :label="f.label"
+          :required="f.required"
+          :disabled="f.disabled"
+          :error="fieldError(f, studyData[f.field])"
+          :min="f.min"
+          :max="f.max"
+        />
+        <BaseTextField
+          v-else
+          v-model="studyData[f.field]"
+          :id="f.field"
+          :label="f.label"
+          :placeholder="f.placeholder"
+          :required="f.required"
+          :disabled="f.disabled"
+          :error="fieldError(f, studyData[f.field])"
+        />
       </div>
-
-      <!-- Number of Forms -->
-      <label for="numForms">Number of Forms:</label>
-      <input
-        id="numForms"
-        type="number"
-        v-model.number="numberOfForms"
-        placeholder="Enter number of forms"
-        min="1"
-        max="1000"
-        step="1"
-        :class="{ 'error-input': showErrors && (!Number.isInteger(numberOfForms) || numberOfForms < 1 || numberOfForms > 1000) }"
-      />
-      <small v-if="showErrors && (!Number.isInteger(numberOfForms) || numberOfForms < 1 || numberOfForms > 1000)" class="error-text">
-        Number of forms must be a whole number between 1 and 1000.
-      </small>
-      <small class="hint">Different forms per visit per condition</small>
-
-      <!-- Study Custom Fields Container (appears immediately after number of forms) -->
-      <div class="custom-fields-section" v-if="customFields.length">
-        <h3>Study Custom Fields</h3>
-        <div v-for="(field, index) in customFields" :key="index" class="custom-field-row">
-          <div class="custom-field-display">
-            <label class="added-field-label">{{ field.fieldName }}</label>
-            <div class="added-field-value">
-              <template v-if="field.fieldType === 'date'">
-                <input type="date" v-model="field.fieldValue" class="field-value" />
-              </template>
-              <template v-else-if="field.fieldType === 'number'">
-                <input type="number" v-model="field.fieldValue" class="field-value" />
-              </template>
-              <template v-else-if="field.fieldType === 'area'">
-                <textarea v-model="field.fieldValue" class="field-value"></textarea>
-              </template>
-              <template v-else>
-                <input type="text" v-model="field.fieldValue" class="field-value" />
-              </template>
-            </div>
-          </div>
-          <button type="button" @click="removeField(index, false)" class="remove-btn">Remove</button>
-        </div>
+      <div class="form-actions">
+        <button
+          type="button"
+          @click="validateStudy"
+          class="btn-option"
+        >
+          Next →
+        </button>
       </div>
-
-      <!-- Meta Information Container (always visible) -->
-      <div class="meta-info-container">
-        <h3>Meta Information</h3>
-        <label>Number of Subjects:</label>
-        <input type="number" v-model.number="metaInfo.numberOfSubjects" placeholder="Enter number of subjects" />
-        <label>Number of Visits per Subject:</label>
-        <input type="number" v-model.number="metaInfo.numberOfVisits" placeholder="Enter number of visits per subject" />
-        <label>Study Meta Description:</label>
-        <textarea v-model="metaInfo.studyMetaDescription" placeholder="Enter additional study information"></textarea>
-      </div>
-
-      <!-- Meta Custom Fields Container (appears immediately after meta info) -->
-      <div class="custom-fields-section" v-if="metaCustomFields.length">
-        <h3>Meta Custom Fields</h3>
-        <div v-for="(field, index) in metaCustomFields" :key="index" class="custom-field-row">
-          <div class="custom-field-display">
-            <label class="added-field-label">{{ field.fieldName }}</label>
-            <div class="added-field-value">
-              <template v-if="field.fieldType === 'date'">
-                <input type="date" v-model="field.fieldValue" class="field-value" />
-              </template>
-              <template v-else-if="field.fieldType === 'number'">
-                <input type="number" v-model="field.fieldValue" class="field-value" />
-              </template>
-              <template v-else-if="field.fieldType === 'area'">
-                <textarea v-model="field.fieldValue" class="field-value"></textarea>
-              </template>
-              <template v-else>
-                <input type="text" v-model="field.fieldValue" class="field-value" />
-              </template>
-            </div>
-          </div>
-          <button type="button" @click="removeField(index, true)" class="remove-btn">Remove</button>
-        </div>
-      </div>
-
-      <!-- Toggle Slider for Unified Custom Field Editor -->
-      <div class="meta-toggle-container">
-        <label class="switch">
-          <input type="checkbox" v-model="showCustomFieldEditor" />
-          <span class="slider"></span>
-        </label>
-        <span class="toggle-label">Show Custom Field Editor</span>
-      </div>
-
-      <!-- Unified Custom Field Editor (shown when toggle is on) -->
-      <div class="new-field-section" v-if="showCustomFieldEditor">
-        <h3>Add New Custom Field</h3>
-        <div class="custom-field-inputs">
-          <select v-model="newField.fieldType" class="field-type">
-            <option value="">Select Field Type</option>
-            <option value="text">Text</option>
-            <option value="number">Number</option>
-            <option value="date">Date</option>
-            <option value="area">Area</option>
-          </select>
-          <input type="text" v-model="newField.fieldName" placeholder="Field Name" class="field-name" />
-          <template v-if="newField.fieldType === 'date'">
-            <input type="date" v-model="newField.fieldValue" class="field-value" />
-          </template>
-          <template v-else-if="newField.fieldType === 'number'">
-            <input type="number" v-model="newField.fieldValue" class="field-value" />
-          </template>
-          <template v-else-if="newField.fieldType === 'area'">
-            <textarea v-model="newField.fieldValue" placeholder="Field Value" class="field-value"></textarea>
-          </template>
-          <template v-else>
-            <input type="text" v-model="newField.fieldValue" placeholder="Field Value" class="field-value" />
-          </template>
-          <!-- Checkbox to mark whether this field is meta data -->
-          <label class="meta-checkbox-label">
-            <input type="checkbox" v-model="newField.isMeta" />
-            Meta Data Field
-          </label>
-          <button type="button" @click="addField" class="add-btn">Add Field</button>
-        </div>
-      </div>
-
     </div>
 
-    <!-- Proceed & Cancel Buttons -->
-    <div class="form-actions">
-      <button @click="validateAndProceed" class="btn-option">Proceed</button>
-      <button @click="resetForm" class="btn-option">Cancel</button>
+    <!-- STEP 2 -->
+    <div v-if="step === 2" class="new-study-form">
+      <GroupForm :schema="groupSchema" v-model="groupData" />
+      <div class="form-actions">
+        <button @click="step = 1" class="btn-option">← Back</button>
+        <button @click="checkGroups" class="btn-option">Next →</button>
+      </div>
+    </div>
+
+    <!-- STEP 3 -->
+    <div v-if="step === 3" class="new-study-form">
+      <SubjectForm
+        v-model:subjectCount="subjectCount"
+        v-model:assignmentMethod="assignmentMethod"
+      />
+      <div class="form-actions">
+        <button @click="step = 2" class="btn-option">← Back</button>
+        <button @click="checkSubjectsSetup" class="btn-option">Next →</button>
+      </div>
+    </div>
+
+    <!-- STEP 4 -->
+    <div v-if="step === 4 && assignmentMethod !== 'Skip'" class="new-study-form">
+      <SubjectAssignmentForm
+        :subjects="subjectData"
+        :groupData="groupData"
+        v-model:subjects="subjectData"
+      />
+      <div class="form-actions">
+        <button @click="step = 3" class="btn-option">← Back</button>
+        <button @click="checkSubjectsAssigned" class="btn-option">Next →</button>
+      </div>
+    </div>
+
+    <!-- STEP 5 -->
+    <div v-if="step === 5" class="new-study-form">
+      <VisitForm :schema="visitSchema" v-model="visitData" />
+      <div class="form-actions">
+        <button
+          @click="step = (assignmentMethod === 'Skip' ? 3 : 4)"
+          class="btn-option"
+        >
+          ← Back
+        </button>
+        <button @click="checkVisits" class="btn-option">Finish</button>
+      </div>
+    </div>
+  </div>
+
+  <div v-if="showDialog" class="dialog-backdrop">
+    <div class="dialog-box">
+      <p>{{ dialogMessage }}</p>
+      <button @click="showDialog = false" class="btn-option">OK</button>
     </div>
   </div>
 </template>
 
 <script>
+import { ref, onMounted, inject } from "vue";
+import { useRouter, useRoute } from "vue-router";
+import { useStore } from "vuex";
+import yaml from "js-yaml";
+
+import BaseTextField from "@/components/forms/BaseTextField.vue";
+import BaseTextarea from "@/components/forms/BaseTextarea.vue";
+import BaseNumberField from "@/components/forms/BaseNumberField.vue";
+import BaseDateField from "@/components/forms/BaseDateField.vue";
+import BaseSelectField from "@/components/forms/BaseSelectField.vue";
+
+import GroupForm from "./GroupForm.vue";
+import VisitForm from "./VisitForm.vue";
+import SubjectForm from "./SubjectForm.vue";
+import SubjectAssignmentForm from "./SubjectAssignmentForm.vue";
+
 export default {
   name: "StudyCreationComponent",
-  data() {
-    return {
-      caseStudies: [],
-      selectedCaseStudyName: "custom",
-      selectedCaseStudy: null,
-      customStudy: { name: "", description: "" },
-      numberOfForms: 1,
-      metaInfo: { numberOfSubjects: null, numberOfVisits: null, studyMetaDescription: "" },
-      // Unified new field object for the custom field editor.
-      newField: { fieldType: "", fieldName: "", fieldValue: "", isMeta: false },
-      // Arrays for added custom fields.
-      customFields: [],
-      metaCustomFields: [],
-      // Toggle for showing the unified custom field editor.
-      showCustomFieldEditor: false,
-      showErrors: false,
-    };
+  components: {
+    BaseTextField,
+    BaseTextarea,
+    BaseNumberField,
+    BaseDateField,
+    BaseSelectField,
+    GroupForm,
+    VisitForm,
+    SubjectForm,
+    SubjectAssignmentForm,
   },
-  created() {
-    this.fetchStudyTypes();
+  props: {
+    id: { type: [String, Number], required: false }
   },
-  methods: {
-    fetchStudyTypes() {
-      fetch("/study_types.json")
-        .then(response => response.json())
-        .then(data => {
-          this.caseStudies = data;
-        })
-        .catch(error => console.error("Error fetching study types:", error));
-    },
-    loadCaseStudyDetails() {
-      if (this.selectedCaseStudyName === "custom") {
-        this.selectedCaseStudy = null;
-      } else {
-        this.selectedCaseStudy = this.caseStudies.find(cs => cs.name === this.selectedCaseStudyName);
-      }
-    },
-    addField() {
-      // Validate that field type and name are provided.
-      if (!this.newField.fieldType || !this.newField.fieldName) return;
-      if (this.newField.isMeta) {
-        this.metaCustomFields.push({ ...this.newField });
-      } else {
-        this.customFields.push({ ...this.newField });
-      }
-      // Reset the new field editor.
-      this.newField = { fieldType: "", fieldName: "", fieldValue: "", isMeta: false };
-    },
-    removeField(index, isMeta) {
-      if (isMeta) {
-        this.metaCustomFields.splice(index, 1);
-      } else {
-        this.customFields.splice(index, 1);
-      }
-    },
-    validateAndProceed() {
-      this.showErrors = true;
-      if (!this.customStudy.name || !this.customStudy.description) return;
-      // Validate that numberOfForms is a whole number and between 1 and 1000.
-      if (!Number.isInteger(this.numberOfForms) || this.numberOfForms < 1 || this.numberOfForms > 1000) return;
-      localStorage.removeItem("studyDetails");
-      localStorage.removeItem("scratchForms");
-      const studyDetails = {
-        name: this.customStudy.name,
-        description: this.customStudy.description,
-        numberOfForms: this.numberOfForms,
-        metaInfo: { ...this.metaInfo },
-        customFields: this.customFields,
-        metaCustomFields: this.metaCustomFields,
-        studyType: this.selectedCaseStudyName || "custom"
+  setup(props) {
+    const router = useRouter();
+    const route  = useRoute();
+    const store = useStore();
+    const formatLabel = inject("formatLabel");
+
+    const step = ref(1);
+    const studyData = ref({});
+    const groupData = ref([]);
+    const subjectData = ref([]);
+    const visitData = ref([]);
+    const subjectCount = ref(1);
+    const assignmentMethod = ref("Random");
+
+    const studySchema = ref([]);
+    const groupSchema = ref([]);
+    const visitSchema = ref([]);
+
+    const showStudyErrors = ref(false);
+    const showDialog = ref(false);
+    const dialogMessage = ref("");
+
+    function fieldError(f, value) {
+      return f.required && showStudyErrors.value && !value
+        ? `${f.label} is required.`
+        : "";
+    }
+
+    async function loadYaml(path, schemaRef) {
+      const res = await fetch(path);
+      const doc = yaml.load(await res.text());
+      const cls = Object.keys(doc.classes)[0];
+      const attrs = doc.classes[cls].attributes;
+      schemaRef.value = Object.entries(attrs).map(([n, d]) => {
+        let type = d.widget === "textarea" ? "textarea" : "text";
+        const r = (d.range || "").toLowerCase();
+        if (r === "date" || r === "datetime") type = "date";
+        if (r === "integer" || r === "decimal") type = "number";
+        if (d.enum) type = "select";
+        return {
+          field: n,
+          label: formatLabel(n),
+          placeholder: d.description || formatLabel(n),
+          type,
+          required: !!d.required,
+          disabled: !!d.disabled,
+          display: d.display !== false,
+          options: d.enum || [],
+          skip: d.skip || {}
+        };
+      });
+    }
+
+    function validateStudy() {
+      showStudyErrors.value = true;
+      const hasMissing = studySchema.value.some(f =>
+        f.required && !studyData.value[f.field]
+      );
+      if (hasMissing) return;
+
+      showStudyErrors.value = false;
+      const typeField = studySchema.value.find(f => f.field === "type");
+      const skipConfig = typeField?.skip || {};
+      const selected = studyData.value.type;
+      const skips = skipConfig[selected] || [];
+
+      const payload = {
+        study: studyData.value,
+        groups: [],
+        visits: []
       };
-      this.$store.commit("setStudyDetails", studyDetails);
-      this.$router.push({ name: "CreateFormScratch" });
-    },
-    resetForm() {
-      this.selectedCaseStudyName = "custom";
-      this.selectedCaseStudy = null;
-      this.customStudy = { name: "", description: "" };
-      this.numberOfForms = 1;
-      this.metaInfo = { numberOfSubjects: null, numberOfVisits: null, studyMetaDescription: "" };
-      this.customFields = [];
-      this.metaCustomFields = [];
-      this.newField = { fieldType: "", fieldName: "", fieldValue: "", isMeta: false };
-      this.showCustomFieldEditor = false;
-      this.showErrors = false;
-    },
-  },
+
+      if (skips.includes("groups") && skips.includes("visits")) {
+        store.commit("setStudyDetails", payload);
+        router.push({ name: "CreateFormScratch" });
+      } else {
+        store.commit("setStudyDetails", payload);
+        step.value = 2;
+      }
+    }
+
+    function checkGroups() {
+      const hasErrors = groupData.value.some(g =>
+        groupSchema.value.some(f => f.required && !g[f.field])
+      );
+      if (hasErrors) return;
+
+      store.commit("setStudyDetails", {
+        study: studyData.value,
+        groups: groupData.value,
+        visits: []
+      });
+      step.value = 3;
+    }
+
+    function checkSubjectsSetup() {
+      if (!subjectCount.value || !assignmentMethod.value) {
+        console.warn("Provide subject count and assignment method.");
+        return;
+      }
+
+      const N = subjectCount.value;
+      const prefix = (studyData.value.title || "ST")
+        .replace(/[^A-Za-z\s]/g, "")
+        .trim()
+        .split(/\s+/)
+        .map(w => w[0]?.toUpperCase() || "")
+        .join("") || "ST";
+      const groupNames = groupData.value.map(g => g.name || g.label || "Unnamed");
+
+      let assignments = [];
+      if (assignmentMethod.value === "Random" && groupNames.length > 0) {
+        const G = groupNames.length;
+        const base = Math.floor(N / G), rem = N % G;
+        const idx = Array.from({ length: G }, (_, i) => i);
+        for (let i = G - 1; i > 0; i--) {
+          const j = Math.floor(Math.random() * (i + 1));
+          [idx[i], idx[j]] = [idx[j], idx[i]];
+        }
+        const extra = new Set(idx.slice(0, rem));
+        for (let gi = 0; gi < G; gi++) {
+          const cnt = base + (extra.has(gi) ? 1 : 0);
+          for (let k = 0; k < cnt; k++) {
+            assignments.push(groupNames[gi]);
+          }
+        }
+        for (let i = assignments.length - 1; i > 0; i--) {
+          const j = Math.floor(Math.random() * (i + 1));
+          [assignments[i], assignments[j]] = [assignments[j], assignments[i]];
+        }
+      } else {
+        assignments = Array(N).fill("");
+      }
+
+      subjectData.value = assignments.map((grp, idx) => ({
+        id: `SUBJ-${prefix}-${String(idx + 1).padStart(3, "0")}`,
+        group: grp
+      }));
+
+      console.log("subjects", subjectData.value);
+      step.value = assignmentMethod.value === "Skip" ? 5 : 4;
+    }
+
+    function checkSubjectsAssigned() {
+      if (subjectData.value.some(s => !s.group)) {
+        dialogMessage.value = "All subjects must have a group.";
+        showDialog.value = true;
+        return;
+      }
+      step.value = 5;
+    }
+
+    function checkVisits() {
+      const hasErrors = visitData.value.some(v =>
+        visitSchema.value.some(f => f.required && !v[f.field])
+      );
+      if (hasErrors) return;
+
+      // *** commit everything to Vuex instead of saving to DB ***
+      store.commit("setStudyDetails", {
+        study: studyData.value,
+        groups: groupData.value,
+        subjectCount: subjectCount.value,
+        assignmentMethod: assignmentMethod.value,
+        subjects: subjectData.value,
+        visits: visitData.value
+      });
+
+      // navigate to your scratch‐form editor
+      router.push({ name: "CreateFormScratch" });
+    }
+
+    onMounted(async () => {
+      await loadYaml("/study_schema.yaml", studySchema);
+      await loadYaml("/group_schema.yaml", groupSchema);
+      await loadYaml("/visit_schema.yaml", visitSchema);
+
+      // 2) if we're editing, grab everything out of Vuex
+     const editId = props.id || route.params.id
+     const details = store.state.studyDetails;
+     if (editId && details && details.study) {
+       // Step 1
+       studyData.value        = { ...details.study };
+       // Step 2
+       groupData.value        = Array.isArray(details.groups)  ? [...details.groups]  : [];
+       // Step 3
+       subjectCount.value     = details.subjectCount            ?? subjectCount.value;
+       assignmentMethod.value = details.assignmentMethod        ?? assignmentMethod.value;
+       // Step 4 (if not “Skip”)
+       subjectData.value      = Array.isArray(details.subjects) ? [...details.subjects] : [];
+       // Step 5
+       visitData.value        = Array.isArray(details.visits)   ? [...details.visits]   : [];
+
+       // stay on Step 1 and let the user click “Next →”
+       step.value = 1;
+     } else {
+       // brand‐new: initialize to empty
+       studySchema.value.forEach(f => studyData.value[f.field] = "");
+       groupData.value  = [];
+       visitData.value  = [];
+     }
+    });
+
+    return {
+      step,
+      studyData,
+      groupData,
+      subjectData,
+      visitData,
+      subjectCount,
+      assignmentMethod,
+      studySchema,
+      groupSchema,
+      visitSchema,
+      showDialog,
+      dialogMessage,
+      fieldError,
+      validateStudy,
+      checkGroups,
+      checkSubjectsSetup,
+      checkSubjectsAssigned,
+      checkVisits
+    };
+  }
 };
 </script>
 
 <style scoped>
 .study-creation-container {
-  max-width: 1200px;
+  max-width: 800px;
   margin: 0 auto;
   font-family: Arial, sans-serif;
 }
 .new-study-form {
   padding: 20px;
-  background-color: #f9f9f9;
+  background: #f9f9f9;
   border-radius: 8px;
-  margin-bottom: 20px;
+  margin-top: 20px;
 }
-label {
-  font-weight: bold;
-  display: block;
-  margin-top: 10px;
+.schema-field-row {
+  margin-bottom: 1rem;
 }
-select,
-input,
-textarea {
-  width: 100%;
-  padding: 8px;
-  font-size: 14px;
-  border: 1px solid #ccc;
-  border-radius: 5px;
-  margin-top: 5px;
-  box-sizing: border-box;
-}
-.hint {
-  font-size: 12px;
-  color: #777;
-  margin-top: 3px;
+.form-actions {
+  margin-top: 1.5rem;
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
 }
 .btn-option {
-  display: block;
-  width: 100%;
-  padding: 10px;
-  margin-top: 15px;
-  background: #f7f7f7;
-  border: 1px solid #ddd;
-  border-radius: 5px;
-  cursor: pointer;
-  text-align: center;
-}
-
-/* Meta Info Container */
-.meta-info-container {
-  margin-top: 20px;
-  padding: 10px;
-  border: 1px solid #ddd;
-  border-radius: 5px;
-  background-color: #fff;
-}
-
-/* Toggle Slider Styling (from reference code) */
-.meta-toggle-container {
-  margin-top: 15px;
-  display: flex;
-  align-items: center;
-}
-.switch {
-  position: relative;
-  display: inline-block;
-  width: 50px;
-  height: 24px;
-  margin-right: 10px;
-}
-.switch input {
-  opacity: 0;
-  width: 0;
-  height: 0;
-}
-.slider {
-  position: absolute;
-  cursor: pointer;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background-color: #ccc;
-  transition: 0.4s;
-  border-radius: 24px;
-}
-.slider:before {
-  position: absolute;
-  content: "";
-  height: 18px;
-  width: 18px;
-  left: 3px;
-  bottom: 3px;
-  background-color: white;
-  transition: 0.4s;
-  border-radius: 50%;
-}
-.switch input:checked + .slider {
-  background-color: #2196F3;
-}
-.switch input:checked + .slider:before {
-  transform: translateX(26px);
-}
-.toggle-label {
-  font-size: 14px;
-  color: #333;
-}
-
-/* Use the same toggle styling for our custom field editor toggle */
-.custom-field-toggle-container {
-  margin-top: 20px;
-  display: flex;
-  align-items: center;
-}
-
-/* New Field Input Section */
-.new-field-section {
-  margin-top: 20px;
-  padding: 10px;
-  border: 1px solid #ddd;
-  border-radius: 5px;
-  background-color: #fff;
-}
-.new-field-section h3 {
-  margin-top: 0;
-  margin-bottom: 10px;
-}
-.custom-field-inputs {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  align-items: center;
-}
-.field-type,
-.field-name,
-.field-value {
-  flex: 1 1 150px;
-}
-.meta-checkbox-label {
-  display: flex;
-  align-items: center;
-  font-size: 14px;
-  margin-top: 5px;
-}
-.meta-checkbox-label input {
-  margin-right: 5px;
-}
-.add-btn {
-  background-color: #ccc;
-  border: 1px solid #bbb;
-  padding: 5px 10px;
-  border-radius: 3px;
-  cursor: pointer;
-}
-.add-btn:hover {
-  background-color: #bbb;
-}
-
-/* Added Fields Lists */
-.custom-fields-section {
-  border: 1px dashed #ccc;
-  padding: 10px;
-  margin-top: 10px;
-  border-radius: 5px;
-}
-.custom-fields-section h3 {
-  margin-top: 0;
-  margin-bottom: 10px;
-}
-.custom-field-row {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  margin-bottom: 10px;
-  border-bottom: 1px solid #eee;
-  padding-bottom: 10px;
-}
-.custom-field-display {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-}
-.added-field-label {
-  font-weight: bold;
-  font-size: 16px;
-  margin-bottom: 5px;
-}
-.added-field-value input,
-.added-field-value textarea {
-  width: 100%;
-  padding: 8px;
-  font-size: 14px;
+  padding: 10px 20px;
+  background: #eee;
   border: 1px solid #ccc;
-  border-radius: 5px;
-  box-sizing: border-box;
-}
-.remove-btn {
-  align-self: flex-end;
-  margin-left: 10px;
-  background-color: #ccc;
-  border: 1px solid #bbb;
-  padding: 5px 10px;
-  border-radius: 3px;
+  border-radius: 4px;
   cursor: pointer;
 }
-.remove-btn:hover {
-  background-color: #bbb;
+.dialog-backdrop {
+  position: fixed;
+  top: 0; left: 0; width: 100%; height: 100%;
+  background: rgba(0,0,0,0.5);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 1000;
 }
-/* Error text styling */
-.error-text {
-  color: red;
-  font-size: 12px;
-  margin-top: 3px;
-  display: block;
-}
-
-/* Error input styling */
-.error-input {
-  border-color: red;
+.dialog-box {
+  background: white;
+  padding: 20px 30px;
+  border-radius: 8px;
+  box-shadow: 0 2px 10px rgba(0,0,0,0.25);
+  text-align: center;
 }
 </style>

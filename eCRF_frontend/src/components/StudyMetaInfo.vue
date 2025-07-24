@@ -15,43 +15,49 @@
         </button>
       </div>
     </div>
-    <div v-if="!metaInfoCollapsed">
-      <p v-if="studyDetails.id"><strong>Study ID:</strong> {{ studyDetails.id }}</p>
-      <p v-if="studyDetails.name"><strong>Study Name:</strong> {{ studyDetails.name }}</p>
-      <p v-if="studyDetails.studyType"><strong>Study Type:</strong> {{ studyDetails.studyType }}</p>
-      <p v-if="studyDetails.description"><strong>Description:</strong> {{ studyDetails.description }}</p>
-      <p v-if="studyDetails.numberOfForms"><strong>Number of Forms:</strong> {{ studyDetails.numberOfForms }}</p>
-      <p v-if="studyDetails.metaInfo && studyDetails.metaInfo.numberOfSubjects">
-        <strong>Number of Subjects:</strong> {{ studyDetails.metaInfo.numberOfSubjects }}
-      </p>
-      <p v-if="studyDetails.metaInfo && studyDetails.metaInfo.numberOfVisits">
-        <strong>Number of Visits per Subject:</strong> {{ studyDetails.metaInfo.numberOfVisits }}
-      </p>
-      <p v-if="studyDetails.metaInfo && studyDetails.metaInfo.studyMetaDescription">
-        <strong>Study Meta Description:</strong> {{ studyDetails.metaInfo.studyMetaDescription }}
-      </p>
 
-      <!-- Display Study Custom Fields (without field type) -->
-      <div v-if="studyDetails.customFields && studyDetails.customFields.length">
-        <h3>Study Custom Fields</h3>
-        <ul>
-          <li v-for="(field, index) in studyDetails.customFields" :key="'study-field-' + index">
-            <strong>{{ field.fieldName }}</strong>: {{ field.fieldValue }}
-          </li>
-        </ul>
+    <!-- Dynamic Rendering of Study Details from Vuex -->
+    <div v-if="!metaInfoCollapsed" class="meta-details">
+      <div v-if="studyDetails">
+        <div v-for="(value, key) in studyDetails" :key="key">
+          <template v-if="!isObject(value)">
+            <p v-if="value">
+              <strong>{{ formatKey(key) }}:</strong> {{ value }}
+            </p>
+          </template>
+          <template v-else>
+            <!-- Special handling for metaInfo: show visits, groups, visit names if present -->
+            <div v-if="key === 'metaInfo'">
+              <h3>{{ formatKey(key) }}</h3>
+              <div v-for="(subValue, subKey) in value" :key="subKey">
+                <p v-if="Array.isArray(subValue)">
+                  <strong>{{ formatKey(subKey) }}:</strong> {{ subValue.join(', ') }}
+                </p>
+                <p v-else>
+                  <strong>{{ formatKey(subKey) }}:</strong> {{ subValue }}
+                </p>
+              </div>
+            </div>
+            <!-- For custom fields arrays -->
+            <div v-else-if="Array.isArray(value)">
+              <h3>{{ formatKey(key) }}</h3>
+              <ul>
+                <li v-for="(item, index) in value" :key="index">
+                  <strong>{{ item.fieldName }}</strong>: {{ item.fieldValue }}
+                </li>
+              </ul>
+            </div>
+            <!-- For plain objects -->
+            <div v-else>
+              <p>
+                <strong>{{ formatKey(key) }}:</strong> {{ value }}
+              </p>
+            </div>
+          </template>
+        </div>
       </div>
 
-      <!-- Display Meta Custom Fields (without field type) -->
-      <div v-if="studyDetails.metaCustomFields && studyDetails.metaCustomFields.length">
-        <h3>Meta Custom Fields</h3>
-        <ul>
-          <li v-for="(field, index) in studyDetails.metaCustomFields" :key="'meta-field-' + index">
-            <strong>{{ field.fieldName }}</strong>: {{ field.fieldValue }}
-          </li>
-        </ul>
-      </div>
-
-      <!-- File Attachment Option with Storage Selector -->
+      <!-- File Attachments Section -->
       <div class="file-attachment">
         <label for="meta-file-upload" class="attach-file-label">Attach File(s):</label>
         <input type="file" id="meta-file-upload" ref="metaFileInput" @change="handleMetaFile" multiple />
@@ -75,95 +81,91 @@
     </div>
   </div>
 
-  <!-- Meta Edit Dialog Modal -->
+  <!-- Mapping Modal / Transition Screen -->
+  <div v-if="showMappingModal" class="modal-overlay">
+    <div class="modal-dialog">
+      <h3>Mapping Details</h3>
+      <div class="modal-input-group">
+        <label>Number of Visits</label>
+        <input type="number" v-model.number="numberOfVisitsInput" min="1" />
+      </div>
+      <div class="modal-input-group">
+        <label>Number of Groups/Cohorts</label>
+        <input type="number" v-model.number="numberOfGroupsInput" min="1" />
+      </div>
+      <div class="modal-input-group groups-container">
+        <label>Enter Group Names</label>
+        <div v-for="n in numberOfGroupsInput" :key="n">
+          <input type="text" v-model="groups[n - 1]" :placeholder="`Group ${n}`" />
+        </div>
+      </div>
+      <div class="modal-input-group">
+        <label>Visit Names</label>
+        <div v-for="(visit, index) in numberOfVisitsInput" :key="'visit-'+index">
+          <input type="text" v-model="visitLabels[index]" :placeholder="`Visit ${index + 1}`" />
+        </div>
+      </div>
+      <div class="modal-actions">
+        <button @click="submitMappingDetails">Submit</button>
+        <button @click="cancelMappingModal">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Mapping Screen: Matrix Layout -->
+  <div v-if="showMappingScreen" class="mapping-screen">
+    <h2>Mapping Data Models</h2>
+    <div class="table-container">
+      <table class="mapping-table">
+        <thead>
+          <tr>
+            <th rowspan="2">Data Model</th>
+            <template v-for="(visit, vIndex) in numberOfVisits" :key="'visit-' + vIndex">
+              <th :colspan="groups.length">
+                <input type="text" v-model="visitLabels[vIndex]" class="visit-label-input" />
+              </th>
+            </template>
+          </tr>
+          <tr>
+            <template v-for="(visit, vIndex) in numberOfVisits" :key="'groups-' + vIndex">
+              <th v-for="(group, gIndex) in groups" :key="'group-' + vIndex + '-' + gIndex">
+                {{ group }}
+              </th>
+            </template>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="(dm, dmIndex) in dataModels" :key="'dm-' + dmIndex">
+            <td class="sticky-col">{{ dm }}</td>
+            <template v-for="(visit, vIndex) in numberOfVisits" :key="'cell-' + vIndex">
+              <td v-for="(group, gIndex) in groups" :key="'cell-' + vIndex + '-' + gIndex">
+                <input type="checkbox" v-model="mappingSelection[vIndex][gIndex][dmIndex]" class="small-checkbox" />
+              </td>
+            </template>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <button @click="finalizeMapping" class="btn-option">Finalize</button>
+  </div>
+
+  <!-- Dynamic Meta Edit Dialog Modal -->
   <div v-if="showMetaEditDialog" class="modal-overlay">
     <div class="modal meta-edit-dialog">
       <h3>Edit Meta Information</h3>
-      <div class="meta-edit-field">
-        <label>Study Name:</label>
-        <input
-          type="text"
-          v-model="metaEditForm.name"
-          placeholder="Enter study name"
-          :class="{ 'error-input': metaEditErrors.name }"
-        />
-        <small v-if="metaEditErrors.name" class="error-text">{{ metaEditErrors.name }}</small>
-      </div>
-      <div class="meta-edit-field">
-        <label>Description:</label>
-        <textarea
-          v-model="metaEditForm.description"
-          placeholder="Enter study description"
-          :class="{ 'error-input': metaEditErrors.description }"
-        ></textarea>
-        <small v-if="metaEditErrors.description" class="error-text">{{ metaEditErrors.description }}</small>
-      </div>
-      <div class="meta-edit-field">
-        <label>Study Type:</label>
-        <input type="text" v-model="metaEditForm.studyType" placeholder="Enter study type" />
-      </div>
-      <div class="meta-edit-field">
-        <label>Number of Forms:</label>
-        <input
-          type="number"
-          min="1"
-          max="1000"
-          step="1"
-          v-model.number="metaEditForm.numberOfForms"
-          placeholder="Enter number of forms"
-          :class="{ 'error-input': metaEditErrors.numberOfForms }"
-        />
-        <small v-if="metaEditErrors.numberOfForms" class="error-text">{{ metaEditErrors.numberOfForms }}</small>
-      </div>
-      <div class="meta-edit-field">
-        <label>Number of Subjects:</label>
-        <input type="number" v-model.number="metaEditForm.numberOfSubjects" placeholder="Enter number of subjects" />
-      </div>
-      <div class="meta-edit-field">
-        <label>Number of Visits per Subject:</label>
-        <input type="number" v-model.number="metaEditForm.numberOfVisits" placeholder="Enter number of visits" />
-      </div>
-      <div class="meta-edit-field">
-        <label>Study Meta Description:</label>
-        <textarea v-model="metaEditForm.studyMetaDescription" placeholder="Enter meta description"></textarea>
-      </div>
-      <!-- Editing Study Custom Fields -->
-      <div class="meta-edit-field" v-if="metaEditForm.customFields && metaEditForm.customFields.length">
-        <label>Study Custom Fields:</label>
-        <div v-for="(field, index) in metaEditForm.customFields" :key="'edit-study-' + index">
-          <p><strong>{{ field.fieldName }}</strong>:</p>
-          <div v-if="field.fieldType === 'date'">
-            <input type="date" v-model="field.fieldValue" />
+      <div v-for="(value, key) in metaEditForm" :key="key" class="meta-edit-field">
+        <label>{{ formatKey(key) }}:</label>
+        <template v-if="!isObject(value)">
+          <input type="text" v-model="metaEditForm[key]" />
+        </template>
+        <template v-else-if="Array.isArray(value)">
+          <div v-for="(item, idx) in value" :key="idx" class="array-field">
+            <input type="text" v-model="metaEditForm[key][idx]" />
           </div>
-          <div v-else-if="field.fieldType === 'number'">
-            <input type="number" v-model="field.fieldValue" />
-          </div>
-          <div v-else-if="field.fieldType === 'area'">
-            <textarea v-model="field.fieldValue"></textarea>
-          </div>
-          <div v-else>
-            <input type="text" v-model="field.fieldValue" />
-          </div>
-        </div>
-      </div>
-      <!-- Editing Meta Custom Fields -->
-      <div class="meta-edit-field" v-if="metaEditForm.metaCustomFields && metaEditForm.metaCustomFields.length">
-        <label>Meta Custom Fields:</label>
-        <div v-for="(field, index) in metaEditForm.metaCustomFields" :key="'edit-meta-' + index">
-          <p><strong>{{ field.fieldName }}</strong>:</p>
-          <div v-if="field.fieldType === 'date'">
-            <input type="date" v-model="field.fieldValue" />
-          </div>
-          <div v-else-if="field.fieldType === 'number'">
-            <input type="number" v-model="field.fieldValue" />
-          </div>
-          <div v-else-if="field.fieldType === 'area'">
-            <textarea v-model="field.fieldValue"></textarea>
-          </div>
-          <div v-else>
-            <input type="text" v-model="field.fieldValue" />
-          </div>
-        </div>
+        </template>
+        <template v-else>
+          <textarea v-model="metaEditForm[key]"></textarea>
+        </template>
       </div>
       <div class="modal-actions">
         <button @click="saveMetaEditDialog" class="btn-primary modal-btn" title="Save Meta Information">Save</button>
@@ -183,7 +185,7 @@
     </div>
   </div>
 
-  <!-- Description Dialog Modal for File Attachments -->
+  <!-- File Description Dialog Modal -->
   <div v-if="showDescriptionDialog" class="modal-overlay">
     <div class="modal description-dialog">
       <h3>Enter Description for Attached File(s)</h3>
@@ -216,22 +218,9 @@ export default {
       pendingMetaEdit: null,
       icons,
       metaStorageOption: "db",
-      metaEditForm: {
-        name: "",
-        description: "",
-        studyType: "",
-        numberOfForms: null,
-        numberOfSubjects: null,
-        numberOfVisits: null,
-        studyMetaDescription: "",
-        customFields: [],
-        metaCustomFields: [],
-      },
-      metaEditErrors: {
-        name: "",
-        description: "",
-        numberOfForms: "",
-      },
+      // metaEditForm will be set dynamically from the Vuex store's studyDetails.
+      metaEditForm: {},
+      metaEditErrors: {},
     };
   },
   computed: {
@@ -239,33 +228,27 @@ export default {
     studyDetails() {
       return this.getStudyDetails || {};
     },
-    metaInfo() {
-      return this.getStudyDetails.metaInfo ? this.getStudyDetails.metaInfo : {};
-    },
   },
   created() {
+    // Instead of assuming specific fields, we simply clone the entire studyDetails object.
     if (this.getStudyDetails) {
-      this.metaEditForm = {
-        name: this.getStudyDetails.name || "",
-        description: this.getStudyDetails.description || "",
-        studyType: this.getStudyDetails.studyType || "custom",
-        numberOfForms: this.getStudyDetails.numberOfForms || 1,
-        numberOfSubjects: this.getStudyDetails.metaInfo?.numberOfSubjects,
-        numberOfVisits: this.getStudyDetails.metaInfo?.numberOfVisits,
-        studyMetaDescription: this.getStudyDetails.metaInfo?.studyMetaDescription || "",
-        customFields: this.getStudyDetails.customFields || [],
-        metaCustomFields: this.getStudyDetails.metaCustomFields || [],
-      };
+      this.metaEditForm = JSON.parse(JSON.stringify(this.getStudyDetails));
     }
     console.log("Initial Vuex studyDetails:", this.getStudyDetails);
   },
   watch: {
-    studyDetails(newVal) {
+    getStudyDetails(newVal) {
       console.log("Updated Vuex studyDetails:", newVal);
     },
   },
   methods: {
-
+    formatKey(key) {
+      if (!key) return "";
+      return key.charAt(0).toUpperCase() + key.slice(1).replace(/_/g, " ");
+    },
+    isObject(val) {
+      return val !== null && typeof val === "object";
+    },
     handleMetaFile(event) {
       const files = event.target.files;
       if (files && files.length) {
@@ -305,76 +288,20 @@ export default {
       this.$emit("toggle-meta-info", this.metaInfoCollapsed);
     },
     openMetaEditDialog() {
-      this.metaEditErrors.name = "";
-      this.metaEditErrors.description = "";
-      this.metaEditErrors.numberOfForms = "";
-      this.metaEditForm = {
-        name: this.getStudyDetails.name || "",
-        description: this.getStudyDetails.description || "",
-        studyType: this.getStudyDetails.studyType || "custom",
-        numberOfForms: this.getStudyDetails.numberOfForms || 1,
-        numberOfSubjects: this.getStudyDetails.metaInfo?.numberOfSubjects,
-        numberOfVisits: this.getStudyDetails.metaInfo?.numberOfVisits,
-        studyMetaDescription: this.getStudyDetails.metaInfo?.studyMetaDescription || "",
-        customFields: this.getStudyDetails.customFields || [],
-        metaCustomFields: this.getStudyDetails.metaCustomFields || [],
-      };
+      // Clone the store details into metaEditForm without assumptions.
+      this.metaEditForm = JSON.parse(JSON.stringify(this.getStudyDetails || {}));
+      // Reset errors
+      this.metaEditErrors = {};
       this.showMetaEditDialog = true;
     },
     cancelMetaEditDialog() {
       this.showMetaEditDialog = false;
     },
     saveMetaEditDialog() {
-      // Reset errors
-      this.metaEditErrors.name = "";
-      this.metaEditErrors.description = "";
-      this.metaEditErrors.numberOfForms = "";
-      let valid = true;
-      // Validate number of forms (must be an integer between 1 and 1000)
-      if (
-        !this.metaEditForm.numberOfForms ||
-        this.metaEditForm.numberOfForms < 1 ||
-        this.metaEditForm.numberOfForms > 1000 ||
-        !Number.isInteger(this.metaEditForm.numberOfForms)
-      ) {
-        this.metaEditErrors.numberOfForms = "Number of forms must be a whole number between 1 and 1000.";
-        valid = false;
-      }
-      // Validate study name is provided (non-empty after trimming)
-      if (!this.metaEditForm.name || this.metaEditForm.name.trim() === "") {
-        this.metaEditErrors.name = "Study name is required.";
-        valid = false;
-      }
-      // Validate study description is provided (non-empty after trimming)
-      if (!this.metaEditForm.description || this.metaEditForm.description.trim() === "") {
-        this.metaEditErrors.description = "Study description is required.";
-        valid = false;
-      }
-      if (!valid) {
-        return;
-      }
-      if (this.getStudyDetails.numberOfForms !== this.metaEditForm.numberOfForms) {
-        this.pendingMetaEdit = { ...this.metaEditForm };
-        this.showMetaEditDialog = false;
-        this.showReinitConfirm = true;
-      } else {
-        this.commitMetaEdit();
-      }
-    },
-    commitMetaEdit() {
-      let updatedDetails = { ...this.getStudyDetails, ...this.metaEditForm };
-      updatedDetails.metaInfo = {
-        numberOfSubjects: this.metaEditForm.numberOfSubjects,
-        numberOfVisits: this.metaEditForm.numberOfVisits,
-        studyMetaDescription: this.metaEditForm.studyMetaDescription,
-      };
-      updatedDetails.description = this.metaEditForm.description;
-      updatedDetails.name = this.metaEditForm.name;
-      updatedDetails.numberOfForms = this.metaEditForm.numberOfForms;
-      updatedDetails.studyType = this.metaEditForm.studyType;
-      updatedDetails.customFields = this.metaEditForm.customFields;
-      updatedDetails.metaCustomFields = this.metaEditForm.metaCustomFields;
-      this.$store.commit("setStudyDetails", updatedDetails);
+      // For a dynamic form, perform minimal validation:
+      // (Here you could iterate over keys and set errors if needed)
+      // For now, we assume all entered values are valid.
+      this.$store.commit("setStudyDetails", this.metaEditForm);
       this.showMetaEditDialog = false;
     },
     confirmReinit() {
@@ -388,35 +315,39 @@ export default {
       this.pendingMetaEdit = null;
       this.commitMetaEdit();
     },
-    validateAndProceed() {
-      this.showErrors = true;
-      if (!this.customStudy.name || !this.customStudy.description) return;
-      if (!Number.isInteger(this.numberOfForms) || this.numberOfForms < 1 || this.numberOfForms > 1000) return;
-      localStorage.removeItem("setStudyDetails");
-      localStorage.removeItem("scratchForms");
-      const studyDetails = {
-        name: this.customStudy.name,
-        description: this.customStudy.description,
-        numberOfForms: this.numberOfForms,
-        metaInfo: { ...this.metaInfo },
-        customFields: this.customFields,
-        metaCustomFields: this.metaCustomFields,
-        studyType: this.selectedCaseStudyName || "custom",
-      };
-      this.$store.commit("setStudyDetails", studyDetails);
-      this.$router.push({ name: "CreateFormScratch" });
+    commitMetaEdit() {
+      this.$store.commit("setStudyDetails", this.metaEditForm);
+      this.showMetaEditDialog = false;
     },
-    resetForm() {
-      this.selectedCaseStudyName = "custom";
-      this.selectedCaseStudy = null;
-      this.customStudy = { name: "", description: "" };
-      this.numberOfForms = 1;
-      this.metaInfo = { numberOfSubjects: null, numberOfVisits: null, studyMetaDescription: "" };
-      this.customFields = [];
-      this.metaCustomFields = [];
-      this.newField = { fieldType: "", fieldName: "", fieldValue: "", isMeta: false };
-      this.showCustomFieldEditor = false;
-      this.showErrors = false;
+    submitMappingDetails() {
+      // Initialize mappingSelection based on input values.
+      if (this.numberOfVisitsInput < 1 || this.numberOfGroupsInput < 1) return;
+      this.numberOfVisits = this.numberOfVisitsInput;
+      this.mappingSelection = Array.from({ length: this.numberOfVisits }, () =>
+        Array.from({ length: this.groups.length }, () =>
+          Array(this.dataModels.length).fill(false)
+        )
+      );
+      this.showMappingModal = false;
+      this.showMappingScreen = true;
+    },
+    cancelMappingModal() {
+      this.showMappingModal = false;
+    },
+    finalizeMapping() {
+      // Merge the new mapping details into the studyDetails object.
+      const updatedDetails = Object.assign({}, this.getStudyDetails, {
+        mapping: {
+          numberOfVisits: this.numberOfVisits,
+          groups: this.groups,
+          visitLabels: this.visitLabels,
+          mappingSelection: this.mappingSelection,
+          dataModels: this.dataModels,
+        },
+      });
+      console.log("Final study details to save:", updatedDetails);
+      this.$store.commit("setStudyDetails", updatedDetails);
+      this.$router.push({ name: "CreateFormScratch" });
     },
   },
 };
@@ -493,29 +424,37 @@ export default {
   left: 0;
   right: 0;
   bottom: 0;
-  background: rgba(0,0,0,0.5);
+  background: rgba(0, 0, 0, 0.5);
   z-index: 1000;
   display: flex;
   align-items: center;
   justify-content: center;
 }
-.modal.description-dialog {
-  background: white;
+.modal-dialog {
+  background: #fff;
   padding: 20px;
   border-radius: 8px;
-  width: 400px;
-  box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+  width: 320px;
+  max-height: 80vh;
+  overflow-y: auto;
 }
-.description-item {
+.modal-input-group {
   margin-bottom: 10px;
 }
-.file-description-input {
+.modal-input-group label {
+  font-size: 14px;
+  margin-bottom: 5px;
+  display: block;
+}
+.modal-input-group input {
   width: 100%;
-  padding: 6px;
+  margin-bottom: 5px;
+}
+.groups-container {
+  max-height: 150px;
+  overflow-y: auto;
   border: 1px solid #ccc;
-  border-radius: 4px;
-  margin-top: 5px;
-  box-sizing: border-box;
+  padding: 5px;
 }
 .modal-actions {
   display: flex;
@@ -525,8 +464,8 @@ export default {
 .modal-actions button {
   flex: 1;
 }
-.modal.meta-edit-dialog {
-  background: white;
+.meta-edit-dialog {
+  background: #fff;
   padding: 20px;
   border-radius: 8px;
   width: 400px;
@@ -534,7 +473,7 @@ export default {
   overflow-y: auto;
   box-shadow: 0 4px 10px rgba(0,0,0,0.1);
 }
-.modal.meta-edit-dialog h3 {
+.meta-edit-dialog h3 {
   margin-top: 0;
 }
 .meta-edit-dialog label {
@@ -558,32 +497,22 @@ export default {
   color: red;
   font-size: 12px;
 }
-.meta-edit-actions {
-  display: flex;
-  gap: 10px;
-  margin-top: 15px;
-}
 .modal.forms-confirm-dialog {
-  background: white;
+  background: #fff;
   padding: 20px;
   border-radius: 8px;
   width: 400px;
   box-shadow: 0 4px 10px rgba(0,0,0,0.1);
 }
-.modal.forms-confirm-dialog h3 {
-  margin-top: 0;
-}
 .modal.forms-confirm-dialog p {
   margin: 0;
 }
-
-
 .new-field-section {
   margin-top: 20px;
   padding: 10px;
   border: 1px solid #ddd;
   border-radius: 5px;
-  background-color: #fff;
+  background: #fff;
 }
 .new-field-section h3 {
   margin-top: 0;
@@ -600,68 +529,12 @@ export default {
 .field-value {
   flex: 1 1 150px;
 }
-.meta-checkbox-label {
-  display: flex;
-  align-items: center;
-  font-size: 14px;
-  margin-top: 5px;
-}
-.meta-checkbox-label input {
-  margin-right: 5px;
-}
-.add-btn {
-  background-color: #ccc;
-  border: 1px solid #bbb;
-  padding: 5px 10px;
-  border-radius: 3px;
-  cursor: pointer;
-}
-
-/* Added Fields Lists */
-.custom-fields-section {
-  border: 1px dashed #ccc;
-  padding: 10px;
-  margin-top: 10px;
-  border-radius: 5px;
-}
-.custom-fields-section h3 {
-  margin-top: 0;
-  margin-bottom: 10px;
-}
-.custom-field-row {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  margin-bottom: 10px;
-  border-bottom: 1px solid #eee;
-  padding-bottom: 10px;
-}
-.custom-field-display {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-}
-.added-field-label {
-  font-weight: bold;
-  font-size: 14px;
-  margin-bottom: 5px;
-}
-.added-field-value input,
-.added-field-value textarea {
+.visit-label-input {
   width: 100%;
-  padding: 8px;
+  padding: 4px;
   font-size: 14px;
-  border: 1px solid #ccc;
-  border-radius: 5px;
-  box-sizing: border-box;
-}
-.remove-btn {
-  align-self: flex-end;
-  margin-left: 10px;
-  background-color: #ccc;
-  border: 1px solid #bbb;
-  padding: 5px 10px;
-  border-radius: 3px;
-  cursor: pointer;
+  text-align: center;
+  border: none;
+  background: transparent;
 }
 </style>

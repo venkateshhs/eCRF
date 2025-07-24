@@ -1,6 +1,11 @@
 from datetime import datetime
-from fastapi import APIRouter, Depends, HTTPException, Header   
+from typing import List
+
+from fastapi import APIRouter, Depends, HTTPException, Header
 from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session
+from fastapi import status
+import schemas, models
 from schemas import UserCreate, LoginRequest, UserResponse
 from crud import get_user_by_username, create_user
 from auth import hash_password, verify_password, create_access_token
@@ -11,6 +16,7 @@ import jwt
 import re
 from fastapi.security import OAuth2PasswordBearer
 from jwt import decode, ExpiredSignatureError, InvalidTokenError
+
 SECRET_KEY = "your-very-secure-secret-key"
 ALGORITHM = "HS256"
 
@@ -58,7 +64,6 @@ def register_user(user_data: UserCreate, db: Session = Depends(get_db)):
     logger.info(f"User {user.username} registered successfully.")
     return user
 
-
 @router.post("/login")
 def login_user(request: LoginRequest, db: Session = Depends(get_db)):
     logger.info(f"Login attempt for username: {request.username}")
@@ -69,8 +74,15 @@ def login_user(request: LoginRequest, db: Session = Depends(get_db)):
         logger.warning(f"Login failed: Username not found: {request.username}")
         raise HTTPException(status_code=400, detail="Invalid username or password.")
 
-    logger.debug(f"Stored password for {request.username}: {user.password}")
-    logger.debug(f"Password entered: {request.password}")
+    # Check “No Access” role
+    # (assuming user.profile is eagerly loaded or can be accessed)
+    if user.profile and user.profile.role == "No Access":
+        logger.warning(f"Login blocked: User {request.username} has 'No Access' role")
+        raise HTTPException(
+            status_code=403,
+            detail="Your account does not have permission to access this application."
+        )
+
 
     if not verify_password(request.password, user.password):
         logger.warning(f"Login failed: Incorrect password for {request.username}")
@@ -80,6 +92,7 @@ def login_user(request: LoginRequest, db: Session = Depends(get_db)):
     token = create_access_token(user.username)
     logger.info(f"User {request.username} logged in successfully.")
     return {"access_token": token, "token_type": "bearer"}
+
 
 @router.post("/change-password")
 def change_password(username: str, new_password: str, db: Session = Depends(get_db)):
@@ -153,6 +166,86 @@ def get_current_user(authorization: str = Header(None), db: Session = Depends(ge
         raise HTTPException(status_code=401, detail="Token expired")
     except InvalidTokenError:
         raise HTTPException(status_code=401, detail="Invalid token")
+
+
+
+
+@router.get(
+    "/admin/users",
+    response_model=List[schemas.UserResponse],
+    dependencies=[Depends(get_current_user)]
+)
+def list_all_users(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    if current_user.profile.role != "Administrator":
+        raise HTTPException(status_code=403, detail="Not allowed")
+    users = db.query(User).all()
+    return users
+
+@router.post(
+    "/admin/users",
+    response_model=schemas.UserResponse,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(get_current_user)]
+)
+def admin_create_user(
+    new: schemas.AdminUserCreate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    if current_user.profile.role != "Administrator":
+        raise HTTPException(status_code=403, detail="Not allowed")
+
+    # 1) create User
+    user = User(
+        username=new.username,
+        email=new.email,
+        password=hash_password(new.password)
+    )
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+
+    # 2) create Profile with provided role
+    profile = models.UserProfile(
+        user_id   = user.id,
+        first_name=new.first_name,
+        last_name = new.last_name,
+        role      = new.role
+    )
+    db.add(profile)
+    db.commit()
+    db.refresh(profile)
+
+    return user
+
+@router.patch(
+    "/admin/users/{user_id}/role",
+    response_model=UserResponse,
+    dependencies=[Depends(get_current_user)]
+)
+def update_user_role(
+    user_id: int,
+    role_update: schemas.RoleUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    # only Administrator may do this
+    if current_user.profile.role != "Administrator":
+        raise HTTPException(status_code=403, detail="Not allowed")
+
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    # update role on the profile
+    user.profile.role = role_update.role
+    db.commit()
+    db.refresh(user)
+    return user
+
 
 
 
