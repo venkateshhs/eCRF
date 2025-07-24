@@ -77,6 +77,7 @@
               class="form-section"
               :class="{ active: activeSection === si }"
               @click.self="setActiveSection(si)"
+              :ref="'section-' + si"
             >
               <div class="section-header">
                 <h3>{{ section.title }}</h3>
@@ -526,6 +527,15 @@ export default {
     },
 
     // ── Sections & Fields ──
+    focusSection(i) {
+      this.$nextTick(() => {
+        const sectionRef = this.$refs[`section-${i}`];
+        if (sectionRef && sectionRef[0]) {
+          sectionRef[0].scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+      });
+    },
+
     openModelDialog(model) {
       this.currentModel    = model;
       this.selectedProps   = model.fields.map(() => false);
@@ -542,10 +552,12 @@ export default {
         source:    "template"
       };
       const idx = this.activeSection + 1;
-      this.currentForm.sections.splice(idx, 0, sec);
+      this.forms[this.currentFormIndex].sections.splice(idx, 0, sec);
       this.activeSection   = idx;
       this.showModelDialog = false;
       this.initAssignments();
+      this.focusSection(idx);
+      this.$forceUpdate();
     },
 
     addNewSection() {
@@ -558,20 +570,26 @@ export default {
       this.forms[this.currentFormIndex].sections.push(sec);
       this.activeSection = this.currentForm.sections.length - 1;
       this.initAssignments();
-      this.$forceUpdate(); // Force re-render to ensure new section appears
+      this.focusSection(this.activeSection);
+      this.$forceUpdate();
     },
     addNewSectionBelow(i) {
+      const currentSection = this.currentForm.sections[i];
       const sec = {
-        title:     `Section ${i + 2}`,
-        fields:    [],
+        title:     `${currentSection.title} (Copy)`,
+        fields:    currentSection.fields.map(field => ({
+          ...field,
+          name: `${field.name}_${Date.now()}`
+        })),
         collapsed: false,
-        source:    "manual"
+        source:    currentSection.source
       };
       const idx = i + 1;
       this.forms[this.currentFormIndex].sections.splice(idx, 0, sec);
       this.activeSection = idx;
       this.initAssignments();
-      this.$forceUpdate(); // Force re-render to ensure new section appears
+      this.focusSection(idx);
+      this.$forceUpdate();
     },
 
     confirmDeleteSection(i) {
@@ -589,7 +607,7 @@ export default {
           this.forms[this.currentFormIndex].sections = [];
           this.activeSection = 0;
           this.initAssignments();
-          this.$forceUpdate(); // Force re-render to ensure form is cleared
+          this.$forceUpdate();
         }
       );
     },
@@ -599,16 +617,20 @@ export default {
       section.collapsed = !section.collapsed;
       if (!section.collapsed) {
         this.activeSection = i;
+        this.forms[this.currentFormIndex].sections.forEach((s, idx) => {
+          if (idx !== i) s.collapsed = true;
+        });
+        this.focusSection(i);
       }
-      this.$forceUpdate(); // Force re-render to reflect collapse/expand
+      this.$forceUpdate();
     },
     setActiveSection(i) {
       this.activeSection = i;
       this.forms[this.currentFormIndex].sections.forEach((s, idx) => {
-        if (idx !== i) s.collapsed = true;
+        s.collapsed = idx !== i;
       });
-      this.forms[this.currentFormIndex].sections[i].collapsed = false;
-      this.$forceUpdate(); // Force re-render to update active section
+      this.focusSection(i);
+      this.$forceUpdate();
     },
 
     addFieldToActiveSection(field) {
@@ -878,6 +900,8 @@ export default {
 .form-section {
   padding: 15px;
   border-bottom: 1px solid $border-color;
+  background: #f5f5f5; /* Light gray background for non-active sections */
+  margin-bottom: 10px; /* Added padding between sections */
 }
 
 .form-section.active {
