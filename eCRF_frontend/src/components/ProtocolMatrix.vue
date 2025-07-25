@@ -15,14 +15,14 @@
         <!-- Full matrix if ≤3 visits -->
         <thead v-if="visitList.length <= 3">
           <tr>
-            <th rowspan="2">Section</th>
+            <th rowspan="2">Data Models</th>
             <th v-for="(visit, vIdx) in visitList" :key="vIdx" :colspan="groupList.length">
-              {{ visit.name }}
+              Visit: {{ visit.name }}
             </th>
           </tr>
           <tr>
             <template v-for="(_, vIdx) in visitList" :key="vIdx">
-              <th v-for="(group, gIdx) in groupList" :key="gIdx">{{ group.name }}</th>
+              <th v-for="(group, gIdx) in groupList" :key="gIdx">Group/Cohort: {{ group.name }}</th>
             </template>
           </tr>
         </thead>
@@ -30,8 +30,8 @@
         <!-- Single-visit view if >3 visits -->
         <thead v-else>
           <tr>
-            <th>Section</th>
-            <th v-for="(group, gIdx) in groupList" :key="gIdx">{{ group.name }}</th>
+            <th>Data Models</th>
+            <th v-for="(group, gIdx) in groupList" :key="gIdx">Group/Cohort: {{ group.name }}</th>
           </tr>
         </thead>
 
@@ -75,12 +75,10 @@
           <button @click="prevPreviewVisit" :disabled="previewVisitIndex === 0" class="nav-btn">&lt;</button>
           <span>Visit: {{ visitList[previewVisitIndex].name }}</span>
           <button @click="nextPreviewVisit" :disabled="previewVisitIndex === visitList.length - 1" class="nav-btn">&gt;</button>
-
-          &nbsp;&nbsp;
-
+          <span class="spacer"></span>
           <!-- Group nav -->
           <button @click="prevPreviewGroup" :disabled="previewGroupPos === 0" class="nav-btn">&lt;</button>
-          <span>Group: {{ groupList[assignedGroups[previewGroupPos]].name }}</span>
+          <span>Group/Cohort: {{ groupList[assignedGroups[previewGroupPos]].name }}</span>
           <button
             @click="nextPreviewGroup"
             :disabled="previewGroupPos === assignedGroups.length - 1"
@@ -99,16 +97,16 @@
 
     <!-- 4. Footer Actions -->
     <div class="matrix-actions">
-      <button @click="$emit('edit-template')" class="btn-action">Edit Template</button>
-      <button @click="saveStudy" class="btn-action">Save</button>
+      <button @click="$emit('edit-template')" class="btn-option">Edit Template</button>
+      <button @click="saveStudy" class="btn-primary">Save</button>
       <button
         @click="openPreview"
         :disabled="!hasAssignment(currentVisitIndex)"
-        class="btn-action"
+        class="btn-option"
       >
         Preview
       </button>
-      <button @click="goToSaved" class="btn-action">View Saved Study</button>
+      <button @click="goToSaved" class="btn-option">View Saved Study</button>
     </div>
   </div>
 </template>
@@ -351,10 +349,13 @@ export default {
 @import "@/assets/styles/_base.scss";
 
 .protocol-matrix-container {
-  padding: 16px;
-  background: #fafafa;
+  display: flex;
+  flex-direction: column;
+  padding: 20px;
+  background: white;
   border: 1px solid $border-color;
-  border-radius: 6px;
+  border-radius: 8px;
+  min-height: calc(100vh - 100px);
 }
 
 /* Visit Pagination */
@@ -362,91 +363,165 @@ export default {
   display: flex;
   justify-content: center;
   align-items: center;
-  margin-bottom: 12px;
+  margin-bottom: 20px;
+  padding: 10px;
+  background: #f5f5f5;
+  border-radius: 4px;
 }
+
 .nav-btn {
   @include button-reset;
   background: $secondary-color;
-  padding: $button-padding;
+  padding: 8px 12px;
+  border: 1px solid $border-color;
   border-radius: $button-border-radius;
   cursor: pointer;
+  font-size: 16px;
 }
+
 .nav-btn:disabled {
-  opacity: 0.4;
+  opacity: 0.5;
   cursor: not-allowed;
 }
+
 .visit-counter {
-  margin: 0 8px;
-  font-weight: bold;
+  margin: 0 12px;
+  font-weight: 600;
+  color: $text-color;
 }
 
 /* Matrix */
 .table-container {
+  flex: 1;
   overflow-x: auto;
-  margin-bottom: 16px;
+  margin-bottom: 20px;
 }
+
 .protocol-table {
   width: 100%;
   border-collapse: collapse;
+  background: white;
 }
+
 .protocol-table th,
 .protocol-table td {
   border: 1px solid $border-color;
-  padding: 8px;
+  padding: 12px;
   text-align: center;
+  font-size: 14px;
+}
+
+.protocol-table th {
+  background: #f5f5f5;
+  color: $text-color;
+  font-weight: 600;
+  text-align: left;
+  padding: 12px 16px;
+}
+
+.protocol-table td {
+  background: #f9f9f9;
+  text-align: center;
+}
+
+.protocol-table tr:nth-child(even) td {
+  background: #f0f4f8;
+}
+
+.protocol-table tr:hover td {
+  background: #e3effd;
+}
+
+.protocol-table input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  cursor: pointer;
 }
 
 /* Preview Modal */
 .modal-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.4);
+  background: rgba(0, 0, 0, 0.5);
   display: flex;
   justify-content: center;
   align-items: center;
   z-index: 1000;
 }
+
 .protocol-preview-modal {
-  background: #fff;
-  border-radius: 6px;
+  background: white;
+  border-radius: 8px;
   width: 80%;
   max-width: 800px;
-  padding: 16px;
+  padding: 20px;
 }
+
 .preview-header {
   display: flex;
   align-items: center;
-  gap: 8px;
-  margin-bottom: 12px;
-  font-size: 1.1em;
-}
-.preview-content {
-  background: #f9f9f9;
+  gap: 12px;
+  margin-bottom: 16px;
+  font-size: 16px;
+  font-weight: 600;
+  background: #f2f3f4;
   padding: 12px;
+  border-radius: 4px;
+}
+
+.spacer {
+  flex: 1;
+}
+
+.preview-content {
+  background: white;
+  padding: 16px;
+  border: 1px solid $border-color;
   border-radius: 4px;
   max-height: 60vh;
   overflow-y: auto;
 }
-.modal-actions {
-  text-align: right;
-  margin-top: 12px;
-}
 
-/* Footer */
-.matrix-actions {
+.modal-actions {
   display: flex;
   justify-content: flex-end;
   gap: 12px;
   margin-top: 16px;
 }
-.btn-action {
-  @include button-reset;
+
+/* Footer */
+.matrix-actions {
+  position: sticky;
+  bottom: 0;
+  background: white;
+  padding: 15px 0;
+  border-top: 1px solid $border-color;
+  display: flex;
+  justify-content: flex-end;
+  gap: 15px;
+  z-index: 10;
+}
+
+.btn-option {
+  background: $secondary-color;
+  padding: $button-padding;
+  border: 1px solid $border-color;
+  border-radius: $button-border-radius;
+  cursor: pointer;
+  flex: 0 1 auto;
+  font-size: 14px;
+}
+
+.btn-primary {
   background: $primary-color;
-  color: #fff;
+  color: white;
   padding: $button-padding;
   border-radius: $button-border-radius;
   cursor: pointer;
+  flex: 0 1 auto;
+  font-size: 14px;
 }
+
 .btn-action:disabled {
   opacity: 0.5;
   cursor: not-allowed;
