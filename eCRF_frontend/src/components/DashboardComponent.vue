@@ -222,8 +222,15 @@ export default {
        assignmentMethod:  sd.assignmentMethod,
        subjects:          sd.subjects,
      });
+     //2.a) populate scratchForms with selectedModels for ScratchFormComponent
+     if (sd.selectedModels) {
+       const scratchForms = [{
+         sections: sd.selectedModels.map(model => ({ title: model.title, fields: model.fields, source: "template" }))
+       }];
+       localStorage.setItem("scratchForms", JSON.stringify(scratchForms));
+     }
 
-     // 2.a drop out of the "study-management" panel so <router-view> shows
+     // 2.b drop out of the "study-management" panel so <router-view> shows
       this.activeSection = "";
 
      // 3) route into Step 1 of the create‐study wizard
