@@ -216,7 +216,7 @@
         </div>
 
         <!-- Form Actions -->
-        <div class="form-actions">
+        <div v-if="!showMatrix" class="form-actions">
           <button @click.prevent="addNewSection" class="btn-option">
             + Add Section
           </button>
@@ -932,15 +932,6 @@ select {
   border: 1px solid $border-color;
   border-radius: 5px;
   margin-top: 5px;
-}
-
-/* MATRIX ACTIONS */
-.matrix-actions {
-  position: absolute;
-  bottom: 20px;
-  right: 20px;
-  display: flex;
-  gap: 10px;
 }
 
 /* FORM ACTIONS */
