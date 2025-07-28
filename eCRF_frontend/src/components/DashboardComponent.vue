@@ -40,7 +40,7 @@
     <!-- Main Content -->
     <main :class="['dashboard-main', { expanded: sidebarCollapsed }]">
       <div v-if="$route.name === 'Dashboard' && activeSection === 'study-management'">
-        <h1>Study Management</h1>
+        <h1 class="study-management-title">Study Management</h1>
         <div class="button-container" v-if="!showStudyOptions">
           <!-- Create Study: only Admin or PI -->
           <button
@@ -62,6 +62,11 @@
 
         <!-- Study Dashboard Table -->
         <div v-if="showStudyOptions" class="study-dashboard">
+          <div class="back-button-container">
+            <button @click="toggleStudyOptions" class="btn-minimal">
+              Back
+            </button>
+          </div>
           <h2>Existing Studies</h2>
           <table class="study-table">
             <thead>
@@ -102,11 +107,6 @@
               </tr>
             </tbody>
           </table>
-          <div class="back-button-container">
-            <button @click="toggleStudyOptions" class="btn-minimal">
-              <i :class="icons.arrowLeft"></i> Back to Selection
-            </button>
-          </div>
         </div>
       </div>
       <router-view/>
@@ -362,14 +362,16 @@ export default {
   margin-left: -150px;
 }
 
+/* Study Management Title */
+.study-management-title {
+  text-align: center;
+  margin-bottom: 20px;
+  color: #333;
+}
+
 /* Study Dashboard Styles */
 .study-dashboard {
   margin-top: 20px;
-}
-
-.study-dashboard h2 {
-  margin-bottom: 15px;
-  color: #333;
 }
 
 .study-table {
@@ -405,7 +407,7 @@ export default {
 .back-button-container {
   display: flex;
   justify-content: flex-start;
-  margin-top: 15px;
+  margin-bottom: 15px;
 }
 
 /* Minimalistic Button Style */

@@ -70,16 +70,18 @@
     <div v-else class="entry-form-wrapper">
       <!-- 3.a COLLAPSIBLE PANEL FOR “Study / Visit” INFO -->
       <div class="details-panel">
-        <button @click="toggleDetails" class="details-toggle-btn">
-          {{ showDetails ? 'Hide Details ▲' : 'Show Details ▼' }}
-        </button>
-        <button
-          class="share-icon"
-          title="Share this form link"
-          @click="openShareDialog(currentSubjectIndex, currentVisitIndex)"
-        >
-          <i :class="icons.share"></i>
-        </button>
+        <div class="details-controls">
+          <button @click="toggleDetails" class="details-toggle-btn">
+            {{ showDetails ? 'Hide Details ▲' : 'Show Details ▼' }}
+          </button>
+          <button
+            class="share-icon"
+            title="Share this form link"
+            @click="openShareDialog(currentSubjectIndex, currentVisitIndex)"
+          >
+            <i :class="icons.share"></i>
+          </button>
+        </div>
         <div v-if="showDetails" class="details-content">
           <div class="details-block">
             <strong>Study Info:</strong>
@@ -732,8 +734,12 @@ hr {
 /* 3.a Collapsible “Study / Visit” info */
 .details-panel {
   margin-bottom: 16px;
+}
+.details-controls {
   display: flex;
   align-items: center;
+  gap: 12px;
+  margin-bottom: 8px;
 }
 .details-toggle-btn {
   background: none;
@@ -742,14 +748,12 @@ hr {
   font-size: 14px;
   font-weight: 500;
   cursor: pointer;
-  margin-right: 12px;
 }
 .details-content {
   background: #f9fafb;
   border: 1px solid #e5e7eb;
   border-radius: 6px;
   padding: 16px;
-  margin-top: 8px;
 }
 .details-block {
   margin-bottom: 16px;
