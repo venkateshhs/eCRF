@@ -6,7 +6,7 @@
         <img src="../assets/logo.png" alt="Logo" class="logo" />
       </div>
       <div class="user-actions">
-        <button @click="logout" class="btn-logout">Logout</button>
+        <button @click="logout" class="btn-minimal">Logout</button>
       </div>
     </header>
 
@@ -85,7 +85,7 @@
                     <button
                       v-if="isAdmin || isPI"
                       @click="editStudy(study)"
-                      class="btn-option"
+                      class="btn-minimal"
                     >
                       Edit Study
                     </button>
@@ -93,7 +93,7 @@
                     <button
                       v-if="isAdmin || isPI || isInvestigator"
                       @click="addData(study)"
-                      class="btn-option"
+                      class="btn-minimal"
                     >
                       Add Data
                     </button>
@@ -103,8 +103,8 @@
             </tbody>
           </table>
           <div class="back-button-container">
-            <button @click="toggleStudyOptions" class="btn-back">
-              <i :class="icons.arrowLeft"></i> Back
+            <button @click="toggleStudyOptions" class="btn-minimal">
+              <i :class="icons.arrowLeft"></i> Back to Selection
             </button>
           </div>
         </div>
@@ -130,7 +130,6 @@ export default {
     };
   },
   watch: {
-    //whenever the URL has ?openStudies=true, we open the study list
     '$route.query.openStudies'(val) {
       if (val === 'true') {
         this.activeSection = 'study-management';
@@ -139,7 +138,6 @@ export default {
       }
     }
   },
-
   computed: {
     currentUser() {
       return this.$store.getters.getUser || {};
@@ -202,39 +200,30 @@ export default {
       localStorage.removeItem("scratchForms");
       const token = this.$store.state.token;
       if (!token) return alert("Please log in again.");
-      // 1) fetch the full study_data payload
-     const resp = await axios.get(
-       `http://127.0.0.1:8000/forms/studies/${study.id}`,
-       { headers: { Authorization: `Bearer ${token}` } }
-     );
-     const sd = resp.data.content?.study_data;
-     console.log("data", sd)
-     if (!sd) {
-       return alert("Study content is empty.");
-     }
-
-     // 2) commit *all* parts of study_data so the wizard can pick them up
-     this.$store.commit("setStudyDetails", {
-       study:             sd.study,
-       groups:            sd.groups,
-       visits:            sd.visits,
-       subjectCount:      sd.subjectCount,
-       assignmentMethod:  sd.assignmentMethod,
-       subjects:          sd.subjects,
-     });
-     //2.a) populate scratchForms with selectedModels for ScratchFormComponent
-     if (sd.selectedModels) {
-       const scratchForms = [{
-         sections: sd.selectedModels.map(model => ({ title: model.title, fields: model.fields, source: "template" }))
-       }];
-       localStorage.setItem("scratchForms", JSON.stringify(scratchForms));
-     }
-
-     // 2.b drop out of the "study-management" panel so <router-view> shows
+      const resp = await axios.get(
+        `http://127.0.0.1:8000/forms/studies/${study.id}`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      const sd = resp.data.content?.study_data;
+      if (!sd) {
+        return alert("Study content is empty.");
+      }
+      this.$store.commit("setStudyDetails", {
+        study: sd.study,
+        groups: sd.groups,
+        visits: sd.visits,
+        subjectCount: sd.subjectCount,
+        assignmentMethod: sd.assignmentMethod,
+        subjects: sd.subjects,
+      });
+      if (sd.selectedModels) {
+        const scratchForms = [{
+          sections: sd.selectedModels.map(model => ({ title: model.title, fields: model.fields, source: "template" }))
+        }];
+        localStorage.setItem("scratchForms", JSON.stringify(scratchForms));
+      }
       this.activeSection = "";
-
-     // 3) route into Step 1 of the create‐study wizard
-     this.$router.push({ name: "CreateStudy", params: { id: study.id } })
+      this.$router.push({ name: "CreateStudy", params: { id: study.id } });
     },
     addData(study) {
       this.$router.push({ name: "StudyDetail", params: { id: study.id } });
@@ -273,6 +262,7 @@ export default {
   font-family: "Inter", sans-serif;
   transition: grid-template-columns 0.3s ease;
 }
+
 .dashboard-header {
   grid-area: header;
   display: flex;
@@ -280,29 +270,41 @@ export default {
   align-items: center;
   padding: 10px 20px;
   background: #f5f5f5;
-  border-bottom: 1px solid #ddd;
+  border-bottom: 1px solid #e0e0e0;
 }
-.logo-container img { width: 110px; }
-.user-actions .btn-logout {
+
+.logo-container img {
+  width: 110px;
+}
+
+.user-actions .btn-minimal {
   background: none;
   border: none;
   font-size: 14px;
-  color: #444;
+  color: #555;
   cursor: pointer;
+  padding: 8px 12px;
+  transition: color 0.3s ease;
 }
 
-.btn-logout:hover {
-  text-decoration: underline;
+.user-actions .btn-minimal:hover {
+  color: #000;
 }
 
 /* Sidebar */
 .dashboard-sidebar {
   grid-area: sidebar;
   background: #f9f9f9;
-  padding: 20px; border-right: 1px solid #ddd;
+  padding: 20px;
+  border-right: 1px solid #e0e0e0;
   transition: width 0.3s ease;
 }
-.dashboard-sidebar.collapsed { width: 70px; padding: 10px; }
+
+.dashboard-sidebar.collapsed {
+  width: 70px;
+  padding: 10px;
+}
+
 .hamburger-menu {
   background: none;
   border: none;
@@ -313,6 +315,7 @@ export default {
   align-items: center;
   gap: 4px;
 }
+
 .hamburger-menu span {
   display: block;
   width: 20px;
@@ -326,11 +329,15 @@ export default {
 }
 
 /* Sidebar Navigation */
-.dashboard-sidebar nav ul { list-style: none; padding: 0; }
+.dashboard-sidebar nav ul {
+  list-style: none;
+  padding: 0;
+}
+
 .nav-item {
   padding: 10px;
   font-size: 15px;
-  color: #444;
+  color: #555;
   cursor: pointer;
   border-radius: 4px;
   transition: background 0.3s ease;
@@ -340,12 +347,14 @@ export default {
 }
 
 .nav-item:hover {
-  background: #eaeaea;
+  background: #e8e8e8;
 }
 
 /* Main Content */
 .dashboard-main {
-  grid-area: main; padding: 30px; background: #fff;
+  grid-area: main;
+  padding: 30px;
+  background: #fff;
   transition: margin-left 0.3s ease;
 }
 
@@ -360,17 +369,20 @@ export default {
 
 .study-dashboard h2 {
   margin-bottom: 15px;
+  color: #333;
 }
 
 .study-table {
-  width: 100%; border-collapse: collapse; margin-bottom: 15px;
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 15px;
 }
 
 .study-table th,
 .study-table td {
   padding: 12px;
   text-align: left;
-  border-bottom: 1px solid #eaeaea;
+  border-bottom: 1px solid #e8e8e8;
 }
 
 .study-table th {
@@ -383,20 +395,25 @@ export default {
   background-color: #f9f9f9;
 }
 
-/* Action Buttons Container for gap */
+/* Action Buttons Container */
 .action-buttons {
   display: flex;
   gap: 10px;
 }
 
+/* Back Button Container */
 .back-button-container {
   display: flex;
   justify-content: flex-start;
-  margin-top: 10px;
+  margin-top: 15px;
 }
 
-.btn-back {
-  padding: 8px 12px; background: #f0f0f0; border: 1px solid #bbb;
+/* Minimalistic Button Style */
+.btn-minimal {
+  background: none;
+  border: 1px solid #e0e0e0;
+  border-radius: 4px;
+  padding: 8px 12px;
   font-size: 14px;
   color: #555;
   cursor: pointer;
@@ -406,18 +423,12 @@ export default {
   gap: 5px;
 }
 
-.btn-back:hover {
-  background: #e0e0e0;
-  color: #333;
+.btn-minimal:hover {
+  background: #e8e8e8;
+  color: #000;
 }
 
-/* Horizontal Button Layout */
-.button-container {
-  display: flex;
-  gap: 15px;
-  margin-top: 20px;
-}
-
+/* Option Button Style for Create/Open Study */
 .btn-option {
   flex: 1;
   padding: 12px;
@@ -436,10 +447,23 @@ export default {
   color: #000;
 }
 
+/* Button Container */
+.button-container {
+  display: flex;
+  gap: 15px;
+  margin-top: 20px;
+}
+
 /* Responsive Design */
 @media (max-width: 768px) {
-  .dashboard-layout { grid-template-columns: 70px 1fr; }
-  .dashboard-sidebar { width: 70px; }
-  .dashboard-main { padding: 20px; }
+  .dashboard-layout {
+    grid-template-columns: 70px 1fr;
+  }
+  .dashboard-sidebar {
+    width: 70px;
+  }
+  .dashboard-main {
+    padding: 20px;
+  }
 }
 </style>

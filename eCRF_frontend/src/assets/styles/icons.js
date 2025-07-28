@@ -12,5 +12,5 @@ export default {
   book: "fas fa-book",
   user: "fas fa-user",
   arrowLeft: "fas fa-arrow-left",
-  share:     "fas fa-share-alt",
+  share:"fas fa-share-alt",
 };
