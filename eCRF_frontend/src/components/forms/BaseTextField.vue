@@ -44,7 +44,6 @@ export default {
 }
 .form-label {
   display: block;
-  font-weight: bold;
   margin-bottom: 0.25rem;
 }
 .form-input {
