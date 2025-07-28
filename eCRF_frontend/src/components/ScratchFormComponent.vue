@@ -441,9 +441,30 @@ export default {
   },
 
   async mounted() {
-    // Initialize forms if empty
-    if (!this.forms.length) {
-      this.forms.push({ sections: [] });
+    // ─── New vs Edit: clear old scratch‐forms on NEW study
+    console.log("this.studyDetails", this.studyDetails)
+    if (this.studyDetails.study_metadata?.id) {
+      // Editing an existing study: load from localStorage or fallback
+      const stored = localStorage.getItem("scratchForms");
+      console.log("scratchForms", stored)
+      if (stored) {
+        try {
+          this.forms = JSON.parse(stored);
+        } catch {
+          this.forms = [{ sections: [] }];
+        }
+      } else if (Array.isArray(this.studyDetails.forms)) {
+        // fallback to Vuex payload (if you committed `forms` there)
+        this.forms = JSON.parse(JSON.stringify(this.studyDetails.forms));
+        localStorage.setItem("scratchForms", JSON.stringify(this.forms));
+      } else {
+        this.forms = [{ sections: [] }];
+        localStorage.setItem("scratchForms", JSON.stringify(this.forms));
+      }
+    } else {
+      // New study: clear any leftover and start fresh
+      localStorage.removeItem("scratchForms");
+      this.forms = [{ sections: [] }];
     }
     // load visits/groups
     this.visits = Array.isArray(this.studyDetails.visits)

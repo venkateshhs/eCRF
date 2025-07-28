@@ -267,8 +267,8 @@ export default {
       // Build metadata
       const metadata = {
         created_by: userId,
-        study_name: studyDetails.name || "",
-        study_description: studyDetails.description || ""
+        study_name: studyDetails.study.title || "",
+        study_description: studyDetails.study.description || ""
       };
       console.log("Built metadata:", metadata);
 
