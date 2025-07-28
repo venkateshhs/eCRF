@@ -64,7 +64,7 @@
 
     <div class="actions">
       <button type="button" class="btn-option" @click="goBack">
-        ← Back
+        Back
       </button>
     </div>
   </div>

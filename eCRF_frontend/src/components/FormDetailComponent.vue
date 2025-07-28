@@ -1,8 +1,16 @@
 <template>
   <div class="study-data-container" v-if="study">
-    <div class="dashboard-back">
+    <div class="dashboard-back" v-if="showSelection">
       <button @click="goToDashboard" class="btn-back">
-        ← Back to Dashboard
+        Back to Dashboard
+      </button>
+    </div>
+    <!-- ─────────────────────────────────────────────────── -->
+    <!-- Back to Selection (Moved to top when not in selection mode) -->
+    <!-- ─────────────────────────────────────────────────── -->
+    <div v-if="!showSelection" class="back-button-container">
+      <button @click="backToSelection" class="btn-back">
+        Back to Selection
       </button>
     </div>
     <!-- ─────────────────────────────────────────────────── -->
@@ -36,7 +44,7 @@
         <tbody>
           <tr v-for="sIdx in subjectIndices" :key="sIdx">
             <td class="subject-cell">Subject {{ sIdx + 1 }}</td>
-            <td v-for="combo in visitCombos" :key="combo.visitIndex">
+            <td v-for="combo in visitCombos" :key="combo.visitIndex" class="button-cell">
               <button
                 class="select-btn"
                 @click="selectCell(sIdx, combo.visitIndex)"
@@ -62,16 +70,18 @@
     <div v-else class="entry-form-wrapper">
       <!-- 3.a COLLAPSIBLE PANEL FOR “Study / Visit” INFO -->
       <div class="details-panel">
-        <button @click="toggleDetails" class="details-toggle-btn">
-          {{ showDetails ? 'Hide Details ▲' : 'Show Details ▼' }}
-        </button>
-        <button
-          class="share-icon"
-          title="Share this form link"
-          @click="openShareDialog(currentSubjectIndex, currentVisitIndex)"
-        >
-          <i :class="icons.share"></i>
-        </button>
+        <div class="details-controls">
+          <button @click="toggleDetails" class="details-toggle-btn">
+            {{ showDetails ? 'Hide Details ▲' : 'Show Details ▼' }}
+          </button>
+          <button
+            class="share-icon"
+            title="Share this form link"
+            @click="openShareDialog(currentSubjectIndex, currentVisitIndex)"
+          >
+            <i :class="icons.share"></i>
+          </button>
+        </div>
         <div v-if="showDetails" class="details-content">
           <div class="details-block">
             <strong>Study Info:</strong>
@@ -235,62 +245,55 @@
           <p>No sections are assigned to this Visit for your group.</p>
         </div>
       </div>
+    </div>
 
-      <!-- 3.d “Back to Selection” Button -->
-      <div class="back-button-container">
-        <button @click="backToSelection" class="btn-back">
-          ← Back to Selection
-        </button>
+    <!-- Share-link modal -->
+    <div v-if="showShareDialog" class="dialog-overlay">
+      <div class="dialog">
+        <h3>Generate Share Link</h3>
+        <label>
+          Permission:
+          <select v-model="shareConfig.permission">
+            <option value="view">View Only</option>
+            <option value="add">Allow Add</option>
+          </select>
+        </label>
+        <label>
+          Max Uses:
+          <input type="number" v-model.number="shareConfig.maxUses" min="1" />
+        </label>
+        <label>
+          Expires in (days):
+          <input
+            type="number"
+            v-model.number="shareConfig.expiresInDays"
+            min="1"
+          />
+        </label>
+        <div class="dialog-actions">
+          <button @click="createShareLink">Generate</button>
+          <button @click="showShareDialog = false">Cancel</button>
+        </div>
+        <p v-if="generatedLink">
+          <a :href="generatedLink" target="_blank">{{ generatedLink }}</a>
+        </p>
+      </div>
+    </div>
+
+    <!-- Permission-denied modal -->
+    <div v-if="permissionError" class="dialog-overlay">
+      <div class="dialog">
+        <h3>Permission Denied</h3>
+        <p>You do not have permission to create a share link. Please contact your administrator.</p>
+        <div class="dialog-actions">
+          <button @click="permissionError = false">Close</button>
+        </div>
       </div>
     </div>
   </div>
 
   <div v-else class="loading">
     <p>Loading study details…</p>
-  </div>
-
-  <!-- Share-link modal -->
-  <div v-if="showShareDialog" class="dialog-overlay">
-    <div class="dialog">
-      <h3>Generate Share Link</h3>
-      <label>
-        Permission:
-        <select v-model="shareConfig.permission">
-          <option value="view">View Only</option>
-          <option value="add">Allow Add</option>
-        </select>
-      </label>
-      <label>
-        Max Uses:
-        <input type="number" v-model.number="shareConfig.maxUses" min="1" />
-      </label>
-      <label>
-        Expires in (days):
-        <input
-          type="number"
-          v-model.number="shareConfig.expiresInDays"
-          min="1"
-        />
-      </label>
-      <div class="dialog-actions">
-        <button @click="createShareLink">Generate</button>
-        <button @click="showShareDialog = false">Cancel</button>
-      </div>
-      <p v-if="generatedLink">
-        <a :href="generatedLink" target="_blank">{{ generatedLink }}</a>
-      </p>
-    </div>
-  </div>
-
-  <!-- Permission-denied modal -->
-  <div v-if="permissionError" class="dialog-overlay">
-    <div class="dialog">
-      <h3>Permission Denied</h3>
-      <p>You do not have permission to create a share link. Please contact your administrator.</p>
-      <div class="dialog-actions">
-        <button @click="permissionError = false">Close</button>
-      </div>
-    </div>
   </div>
 </template>
 
@@ -352,7 +355,6 @@ export default {
       return Array.from({ length: this.numberOfSubjects }, (_, i) => i);
     },
 
-    // ——— FIXED: filter by currentGroupIndex, not row.some
     assignedModelIndices() {
       const v = this.currentVisitIndex;
       const g = this.currentGroupIndex;
@@ -379,7 +381,7 @@ export default {
     goToDashboard() {
       this.$router.push({
         name: "Dashboard",
-       query: { openStudies: "true" }
+        query: { openStudies: "true" }
       });
     },
     async loadStudy(studyId) {
@@ -463,7 +465,6 @@ export default {
     },
 
     validateField(mIdx, fIdx) {
-      /* your existing validation */
       const def = this.selectedModels[mIdx].fields[fIdx];
       const val =
         this.entryData[this.currentSubjectIndex][this.currentVisitIndex][
@@ -529,7 +530,6 @@ export default {
     },
 
     async createShareLink() {
-      /* unchanged */
       const { subjectIndex, visitIndex } = this.shareParams;
       const payload = {
         study_id: this.study.metadata.id,
@@ -602,16 +602,15 @@ export default {
 };
 </script>
 
-
 <style scoped>
 .study-data-container {
   max-width: 960px;
-  margin: 20px auto;
-  padding: 20px;
+  margin: 24px auto;
+  padding: 24px;
   background: #ffffff;
   border-radius: 8px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-  font-family: Arial, sans-serif;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
 }
 
 /* ─────────────────────────────────────────────────── */
@@ -622,24 +621,46 @@ export default {
   margin-bottom: 24px;
 }
 .study-name {
-  font-size: 28px;
-  color: #333333;
+  font-size: 24px;
+  font-weight: 600;
+  color: #1f2937;
   margin-bottom: 8px;
 }
 .study-description {
   font-size: 16px;
-  color: #555555;
-  margin-bottom: 4px;
+  color: #4b5563;
+  margin-bottom: 8px;
 }
 .study-meta {
   font-size: 14px;
-  color: #777777;
+  color: #6b7280;
 }
 hr {
-  margin-top: 16px;
-  margin-bottom: 24px;
+  margin: 16px 0;
   border: 0;
-  border-top: 1px solid #e0e0e0;
+  border-top: 1px solid #e5e7eb;
+}
+
+/* ─────────────────────────────────────────────────── */
+/* Back Buttons (Dashboard and Selection) */
+/* ─────────────────────────────────────────────────── */
+.back-button-container,
+.dashboard-back {
+  margin-bottom: 16px;
+}
+.btn-back {
+  background: #d1d5db;
+  color: #1f2937;
+  border: none;
+  padding: 8px 16px;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+.btn-back:hover {
+  background: #9ca3af;
 }
 
 /* ─────────────────────────────────────────────────── */
@@ -652,29 +673,58 @@ hr {
 }
 .selection-matrix th,
 .selection-matrix td {
-  border: 1px solid #cccccc;
-  padding: 8px;
+  border: 1px solid #e5e7eb;
+  padding: 12px;
   text-align: center;
 }
 .selection-matrix th {
-  background: #f2f2f2;
+  background: #f9fafb;
   font-weight: 600;
-  color: #333;
+  color: #1f2937;
 }
 .subject-cell {
-  background: #fafafa;
-  font-weight: bold;
+  background: #f9fafb;
+  font-weight: 500;
+  color: #374151;
+}
+.button-cell {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
 }
 .select-btn {
-  background: #007bff;
-  color: #fff;
+  background: #e5e7eb;
+  color: #1f2937;
   border: none;
   padding: 6px 12px;
-  border-radius: 4px;
+  border-radius: 6px;
   cursor: pointer;
+  font-size: 14px;
+  transition: background 0.2s;
 }
 .select-btn:hover {
-  background: #0056b3;
+  background: #d1d5db;
+}
+.share-icon {
+  background: none;
+  border: none;
+  color: #6b7280;
+  cursor: pointer;
+  font-size: 16px;
+  padding: 6px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.share-icon i {
+  font-family: 'Font Awesome 5 Free' !important;
+  font-weight: 900;
+  font-style: normal;
+  display: inline-block;
+}
+.share-icon:hover {
+  color: #374151;
 }
 
 /* ─────────────────────────────────────────────────── */
@@ -685,26 +735,34 @@ hr {
 .details-panel {
   margin-bottom: 16px;
 }
+.details-controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 8px;
+}
 .details-toggle-btn {
   background: none;
   border: none;
-  color: #007bff;
-  font-size: 16px;
+  color: #374151;
+  font-size: 14px;
+  font-weight: 500;
   cursor: pointer;
-  margin-bottom: 8px;
 }
 .details-content {
-  background: #f7f7f7;
-  border: 1px solid #dddddd;
-  border-radius: 4px;
-  padding: 12px;
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  padding: 16px;
 }
 .details-block {
-  margin-bottom: 12px;
+  margin-bottom: 16px;
 }
 .details-block strong {
   display: block;
-  margin-bottom: 4px;
+  font-size: 14px;
+  color: #1f2937;
+  margin-bottom: 6px;
 }
 .details-block ul {
   margin: 0 0 12px 16px;
@@ -712,50 +770,52 @@ hr {
 }
 .details-block li {
   font-size: 14px;
-  color: #333333;
+  color: #374151;
 }
 
 /* 3.b Breadcrumb */
 .bread-crumb {
-  background: #f7f7f7;
-  padding: 10px 16px;
-  border: 1px solid #e0e0e0;
-  border-radius: 4px;
+  background: #f9fafb;
+  padding: 12px 16px;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
   margin-bottom: 24px;
   font-size: 14px;
-  color: #333333;
+  color: #374151;
 }
 
 /* 3.c Form fields */
 .entry-form-section h2 {
-  font-size: 20px;
+  font-size: 18px;
+  font-weight: 600;
+  color: #1f2937;
   margin-bottom: 16px;
-  color: #333333;
 }
 .section-block {
-  margin-bottom:
-16px;
-  padding: 12px;
-  border: 1px solid #dddddd;
-  border-radius: 4px;
-  background: #fdfdfd;
+  margin-bottom: 16px;
+  padding: 16px;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  background: #ffffff;
 }
 .section-block h3 {
-  margin-top: 0;
-  font-size: 18px;
-  color: #444444;
+  margin: 0 0 12px 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: #1f2937;
 }
 .form-field {
-  margin-bottom: 14px;
+  margin-bottom: 16px;
 }
 .form-field label {
   display: block;
-  margin-bottom: 4px;
-  font-weight: bold;
-  color: #333333;
+  margin-bottom: 6px;
+  font-size: 14px;
+  font-weight: 500;
+  color: #1f2937;
 }
 .required {
-  color: #d00;
+  color: #dc2626;
   margin-left: 4px;
 }
 input[type="text"],
@@ -765,18 +825,27 @@ input[type="date"],
 select {
   width: 100%;
   padding: 8px;
-  border: 1px solid #cccccc;
-  border-radius: 4px;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
   box-sizing: border-box;
+  font-size: 14px;
+  color: #1f2937;
+}
+input:focus,
+textarea:focus,
+select:focus {
+  outline: none;
+  border-color: #6b7280;
+  box-shadow: 0 0 0 3px rgba(107, 114, 128, 0.1);
 }
 .error-message {
-  color: #d00;
+  color: #dc2626;
   font-size: 12px;
   margin-top: 4px;
 }
 .no-assigned {
   font-style: italic;
-  color: #666666;
+  color: #6b7280;
   margin-top: 12px;
 }
 .form-actions {
@@ -784,34 +853,17 @@ select {
   margin-top: 16px;
 }
 .btn-save {
-  background: #28a745;
+  background: #16a34a;
   color: #ffffff;
   border: none;
   padding: 8px 16px;
-  border-radius: 4px;
+  border-radius: 6px;
   font-size: 14px;
   cursor: pointer;
+  transition: background 0.2s;
 }
 .btn-save:hover {
-  background: #218838;
-}
-
-/* 3.d Back button */
-.back-button-container {
-  text-align: center;
-  margin-top: 24px;
-}
-.btn-back {
-  background: #007bff;
-  color: #ffffff;
-  border: none;
-  padding: 10px 20px;
-  border-radius: 4px;
-  cursor: pointer;
-  font-size: 14px;
-}
-.btn-back:hover {
-  background: #0056b3;
+  background: #15803d;
 }
 
 /* Loading State */
@@ -819,47 +871,47 @@ select {
   text-align: center;
   padding: 50px;
   font-size: 16px;
-  color: #666666;
+  color: #6b7280;
 }
 
 /* Modal overlays */
 .dialog-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0,0,0,0.5);
+  background: rgba(0, 0, 0, 0.5);
   display: flex;
   align-items: center;
   justify-content: center;
   z-index: 1000;
 }
 .dialog {
-  background: #fff;
+  background: #ffffff;
   padding: 1.5rem;
-  border-radius: 0.5rem;
+  border-radius: 8px;
   width: 320px;
   max-width: 90%;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-  position: relative;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
 }
 .dialog h3 {
-  margin-top: 0;
-  margin-bottom: 1rem;
+  margin: 0 0 1rem 0;
   font-size: 1.25rem;
+  font-weight: 600;
+  color: #1f2937;
 }
 .dialog label {
   display: block;
   margin-bottom: 0.75rem;
   font-size: 0.9rem;
+  color: #374151;
 }
 .dialog label select,
 .dialog label input {
   width: 100%;
   margin-top: 0.25rem;
-  padding: 0.4rem 0.6rem;
-  border: 1px solid #ccc;
-  border-radius: 0.25rem;
+  padding: 0.5rem;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
   font-size: 0.9rem;
-  box-sizing: border-box;
 }
 .dialog-actions {
   display: flex;
@@ -868,25 +920,31 @@ select {
   margin-top: 1rem;
 }
 .dialog-actions button:first-child {
-  background: #4f46e5;
-  color: #fff;
+  background: #e5e7eb;
+  color: #1f2937;
 }
 .dialog-actions button:last-child {
   background: #e5e7eb;
-  color: #333;
+  color: #1f2937;
 }
 .dialog-actions button {
   padding: 0.5rem 1rem;
   border: none;
-  border-radius: 0.25rem;
+  border-radius: 6px;
   cursor: pointer;
   font-size: 0.9rem;
+}
+.dialog-actions button:hover {
+  background: #d1d5db;
 }
 .dialog p a {
   display: block;
   word-break: break-all;
   margin-top: 1rem;
-  color: #007bff;
+  color: #374151;
+  text-decoration: none;
+}
+.dialog p a:hover {
   text-decoration: underline;
 }
 </style>

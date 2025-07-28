@@ -50,7 +50,6 @@ export default {
 .form-field { margin-bottom: 1rem; }
 .form-label {
   display: block;
-  font-weight: bold;
   margin-bottom: 0.25rem;
 }
 .form-input {
