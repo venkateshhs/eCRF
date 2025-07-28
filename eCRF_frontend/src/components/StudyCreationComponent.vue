@@ -1,7 +1,5 @@
 <template>
   <div class="study-creation-container">
-    <h1>Study Management</h1>
-
     <!-- STEP 1 -->
     <div v-if="step === 1" class="new-study-form">
       <h2>Step 1: Create a New Study</h2>
@@ -66,10 +64,17 @@
       <div class="form-actions">
         <button
           type="button"
+          @click="goToStudyManagement"
+          class="btn-option"
+        >
+          Back
+        </button>
+        <button
+          type="button"
           @click="validateStudy"
           class="btn-option"
         >
-          Next →
+          Next
         </button>
       </div>
     </div>
@@ -78,20 +83,21 @@
     <div v-if="step === 2" class="new-study-form">
       <GroupForm :schema="groupSchema" v-model="groupData" />
       <div class="form-actions">
-        <button @click="step = 1" class="btn-option">← Back</button>
-        <button @click="checkGroups" class="btn-option">Next →</button>
+        <button @click="step = 1" class="btn-option">Back</button>
+        <button @click="checkGroups" class="btn-option">Next</button>
       </div>
     </div>
 
     <!-- STEP 3 -->
     <div v-if="step === 3" class="new-study-form">
+    <h2>Step 3: Subject Setup</h2>
       <SubjectForm
         v-model:subjectCount="subjectCount"
         v-model:assignmentMethod="assignmentMethod"
       />
       <div class="form-actions">
-        <button @click="step = 2" class="btn-option">← Back</button>
-        <button @click="checkSubjectsSetup" class="btn-option">Next →</button>
+        <button @click="step = 2" class="btn-option">Back</button>
+        <button @click="checkSubjectsSetup" class="btn-option">Next</button>
       </div>
     </div>
 
@@ -103,8 +109,8 @@
         v-model:subjects="subjectData"
       />
       <div class="form-actions">
-        <button @click="step = 3" class="btn-option">← Back</button>
-        <button @click="checkSubjectsAssigned" class="btn-option">Next →</button>
+        <button @click="step = 3" class="btn-option">Back</button>
+        <button @click="checkSubjectsAssigned" class="btn-option">Next</button>
       </div>
     </div>
 
@@ -116,7 +122,7 @@
           @click="step = (assignmentMethod === 'Skip' ? 3 : 4)"
           class="btn-option"
         >
-          ← Back
+          Back
         </button>
         <button @click="checkVisits" class="btn-option">Finish</button>
       </div>
@@ -166,7 +172,7 @@ export default {
   },
   setup(props) {
     const router = useRouter();
-    const route  = useRoute();
+    const route = useRoute();
     const store = useStore();
     const formatLabel = inject("formatLabel");
 
@@ -322,7 +328,6 @@ export default {
       );
       if (hasErrors) return;
 
-      // *** commit everything to Vuex instead of saving to DB ***
       store.commit("setStudyDetails", {
         study: studyData.value,
         groups: groupData.value,
@@ -332,8 +337,11 @@ export default {
         visits: visitData.value
       });
 
-      // navigate to your scratch‐form editor
       router.push({ name: "CreateFormScratch" });
+    }
+
+    function goToStudyManagement() {
+      router.push({ name: "Dashboard", query: { openStudies: "false" } });
     }
 
     onMounted(async () => {
@@ -341,30 +349,21 @@ export default {
       await loadYaml("/group_schema.yaml", groupSchema);
       await loadYaml("/visit_schema.yaml", visitSchema);
 
-      // 2) if we're editing, grab everything out of Vuex
-     const editId = props.id || route.params.id
-     const details = store.state.studyDetails;
-     if (editId && details && details.study) {
-       // Step 1
-       studyData.value        = { ...details.study };
-       // Step 2
-       groupData.value        = Array.isArray(details.groups)  ? [...details.groups]  : [];
-       // Step 3
-       subjectCount.value     = details.subjectCount            ?? subjectCount.value;
-       assignmentMethod.value = details.assignmentMethod        ?? assignmentMethod.value;
-       // Step 4 (if not “Skip”)
-       subjectData.value      = Array.isArray(details.subjects) ? [...details.subjects] : [];
-       // Step 5
-       visitData.value        = Array.isArray(details.visits)   ? [...details.visits]   : [];
-
-       // stay on Step 1 and let the user click “Next →”
-       step.value = 1;
-     } else {
-       // brand‐new: initialize to empty
-       studySchema.value.forEach(f => studyData.value[f.field] = "");
-       groupData.value  = [];
-       visitData.value  = [];
-     }
+      const editId = props.id || route.params.id;
+      const details = store.state.studyDetails;
+      if (editId && details && details.study) {
+        studyData.value = { ...details.study };
+        groupData.value = Array.isArray(details.groups) ? [...details.groups] : [];
+        subjectCount.value = details.subjectCount ?? subjectCount.value;
+        assignmentMethod.value = details.assignmentMethod ?? assignmentMethod.value;
+        subjectData.value = Array.isArray(details.subjects) ? [...details.subjects] : [];
+        visitData.value = Array.isArray(details.visits) ? [...details.visits] : [];
+        step.value = 1;
+      } else {
+        studySchema.value.forEach(f => studyData.value[f.field] = "");
+        groupData.value = [];
+        visitData.value = [];
+      }
     });
 
     return {
@@ -385,7 +384,8 @@ export default {
       checkGroups,
       checkSubjectsSetup,
       checkSubjectsAssigned,
-      checkVisits
+      checkVisits,
+      goToStudyManagement
     };
   }
 };

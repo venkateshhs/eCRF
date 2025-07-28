@@ -2,7 +2,7 @@
   <div class="study-data-container" v-if="study">
     <div class="dashboard-back" v-if="showSelection">
       <button @click="goToDashboard" class="btn-back">
-        ← Back to Dashboard
+        Back to Dashboard
       </button>
     </div>
     <!-- ─────────────────────────────────────────────────── -->
@@ -10,7 +10,7 @@
     <!-- ─────────────────────────────────────────────────── -->
     <div v-if="!showSelection" class="back-button-container">
       <button @click="backToSelection" class="btn-back">
-        ← Back to Selection
+        Back to Selection
       </button>
     </div>
     <!-- ─────────────────────────────────────────────────── -->

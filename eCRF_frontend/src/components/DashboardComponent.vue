@@ -135,6 +135,9 @@ export default {
         this.activeSection = 'study-management';
         this.showStudyOptions = true;
         this.loadStudies();
+      } else {
+        this.activeSection = 'study-management';
+        this.showStudyOptions = false;
       }
     }
   },
@@ -166,7 +169,12 @@ export default {
     },
     toggleStudyOptions() {
       this.showStudyOptions = !this.showStudyOptions;
-      if (this.showStudyOptions) this.loadStudies();
+      if (this.showStudyOptions) {
+        this.$router.push({ name: "Dashboard", query: { openStudies: "true" } });
+        this.loadStudies();
+      } else {
+        this.$router.push({ name: "Dashboard", query: { openStudies: "false" } });
+      }
     },
     async loadStudies() {
       const token = this.$store.state.token;
@@ -240,6 +248,7 @@ export default {
   mounted() {
     if (this.$route.path === "/dashboard") {
       this.activeSection = "study-management";
+      this.showStudyOptions = false;
     }
     if (this.$route.query.openStudies === 'true') {
       this.activeSection = 'study-management';
