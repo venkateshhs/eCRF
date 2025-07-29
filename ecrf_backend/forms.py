@@ -319,8 +319,8 @@ def update_study(
     if existing is None:
         raise HTTPException(status_code=404, detail="Study not found")
     metadata, content = existing
-
-    if metadata.created_by != user.id or user.profile.role == "Administrator":
+    # Other than original creator or "Administartor", study cannot be edited by someone else
+    if metadata.created_by != user.id and user.profile.role != "Administrator":
         raise HTTPException(status_code=403, detail="Not authorized to update this study")
     # Ensure the study id is present in the dynamic content data and update modification time.
     if not study_content.study_data.get("id"):
