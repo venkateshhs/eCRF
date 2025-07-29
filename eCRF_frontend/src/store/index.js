@@ -33,8 +33,14 @@ const store = createStore({
     setCurrentForm(state, form) {
       state.currentForm = form;
     },
-    setStudyDetails(state, details) {
-      state.studyDetails = details;
+    setStudyDetails(state, payload) {
+     state.studyDetails = {
+        ...state.studyDetails,
+        ...payload
+      };
+    },
+    resetStudyDetails(state) {
+      state.studyDetails = {};
     },
   },
   actions: {

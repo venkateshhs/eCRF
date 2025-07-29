@@ -95,7 +95,14 @@
       </div>
     </div>
 
-    <!-- 4. Footer Actions -->
+    <!-- 4. Custom Dialog for Notifications -->
+    <CustomDialog
+      :message="dialogMessage"
+      :isVisible="showDialog"
+      @close="closeDialog"
+    />
+
+    <!-- 5. Footer Actions -->
     <div class="matrix-actions">
       <button @click="$emit('edit-template')" class="btn-option">Edit Template</button>
       <button @click="saveStudy" class="btn-primary">Save</button>
@@ -117,10 +124,11 @@ import { useRouter } from "vue-router";
 import { useStore } from "vuex";
 import axios from "axios";
 import FormPreview from "@/components/FormPreview.vue";
+import CustomDialog from "@/components/CustomDialog.vue";
 
 export default {
   name: "ProtocolMatrix",
-  components: { FormPreview },
+  components: { FormPreview, CustomDialog },
   props: {
     visits:         { type: Array, required: true },
     groups:         { type: Array, required: true },
@@ -139,6 +147,10 @@ export default {
     const showPreviewModal  = ref(false);
     const previewVisitIndex = ref(0);
     const previewGroupIndex = ref(0);
+
+    // Dialog state
+    const showDialog = ref(false);
+    const dialogMessage = ref("");
 
     // Lists with fallback
     const visitList = computed(() => props.visits.length ? props.visits : [{ name: "All Visits" }]);
@@ -252,27 +264,34 @@ export default {
       console.log("Preview modal closed");
     }
 
-    // Save the entire study into the database using POST /studies/
+    // Dialog control
+    function showDialogMessage(message) {
+      console.log("Showing dialog with message:", message);
+      dialogMessage.value = message;
+      showDialog.value = true;
+    }
+    function closeDialog() {
+      showDialog.value = false;
+      dialogMessage.value = "";
+      console.log("Dialog closed");
+    }
+
+    // Save or update the study in the database
     async function saveStudy() {
       console.log("saveStudy() called");
       const studyDetails = store.state.studyDetails || {};
+      console.log("studyDetails", studyDetails);
       const userId = store.state.user?.id;
-      console.log("Retrieved userId from store:", userId);
+      const studyId = studyDetails.study_metadata?.id;
+      console.log("Retrieved userId:", userId, "studyId:", studyId);
 
       if (!userId) {
         console.error("saveStudy aborted: no authenticated user found in store");
+        showDialogMessage("Please log in again.");
         return;
       }
 
-      // Build metadata
-      const metadata = {
-        created_by: userId,
-        study_name: studyDetails.name || "",
-        study_description: studyDetails.description || ""
-      };
-      console.log("Built metadata:", metadata);
-
-      // Combine everything into a single JSON object for study_data
+      // Prepare study data
       const studyData = {
         ...studyDetails,
         visits: props.visits,
@@ -280,7 +299,32 @@ export default {
         selectedModels: props.selectedModels,
         assignments: props.assignments
       };
-      console.log("Built studyData (full JSON):", studyData);
+      console.log("Built studyData:", studyData);
+
+      // Prepare metadata
+      let metadata;
+      if (studyId) {
+        // Update existing study
+        const existingMetadata = studyDetails.study_metadata || {};
+        metadata = {
+          created_by: existingMetadata.created_by === userId ? existingMetadata.created_by : userId,
+          study_name: studyDetails.study?.title || existingMetadata.name || "",
+          study_description: existingMetadata.description || studyDetails.study?.description || "",
+          created_at: existingMetadata.created_at || new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        };
+        console.log("Updated metadata for existing study:", metadata);
+      } else {
+        // Create new study
+        metadata = {
+          created_by: userId,
+          study_name: studyDetails.study?.title || "",
+          study_description: studyDetails.study?.description || "",
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        };
+        console.log("New metadata for new study:", metadata);
+      }
 
       // Final payload
       const payload = {
@@ -289,11 +333,13 @@ export default {
       };
       console.log("Final payload to send:", payload);
 
-      // Send request to POST /studies/
+      // Send request
+      const url = studyId ? `http://localhost:8000/forms/studies/${studyId}` : "http://localhost:8000/forms/studies/";
+      const method = studyId ? "put" : "post";
       try {
-        console.log("Sending axios POST to /studies/ …");
-        const response = await axios.post(
-          "http://localhost:8000/forms/studies/",
+        console.log(`Sending ${method.toUpperCase()} to ${url} …`);
+        const response = await axios[method](
+          url,
           payload,
           {
             headers: {
@@ -302,10 +348,31 @@ export default {
           }
         );
         console.log("API response received:", response.data);
-        alert("Study successfully saved to database!");
+
+        // Update Vuex store with the response data
+        const updatedMetadata = response.data.study_metadata || metadata;
+        const updatedStudyData = response.data.content?.study_data || studyData;
+        store.commit("setStudyDetails", {
+          study_metadata: {
+            id: studyId || response.data.study_metadata?.id,
+            name: updatedMetadata.study_name,
+            description: updatedMetadata.study_description,
+            created_at: updatedMetadata.created_at,
+            updated_at: updatedMetadata.updated_at,
+            created_by: updatedMetadata.created_by
+          },
+          study: { id: studyId || response.data.study_metadata?.id, ...updatedStudyData.study },
+          groups: updatedStudyData.groups,
+          visits: updatedStudyData.visits,
+          subjectCount: updatedStudyData.subjectCount,
+          assignmentMethod: updatedStudyData.assignmentMethod,
+          subjects: updatedStudyData.subjects
+        });
+
+        showDialogMessage(studyId ? "Study successfully updated!" : "Study successfully saved!");
       } catch (error) {
-        console.error("Error saving study to database:", error);
-        alert("Failed to save study. Check console for details.");
+        console.error(`Error ${studyId ? "updating" : "saving"} study:`, error);
+        showDialogMessage(`Failed to ${studyId ? "update" : "save"} study. Check console for details.`);
       }
     }
 
@@ -337,6 +404,10 @@ export default {
       // toggles
       onToggle,
       hasAssignment,
+      // dialog
+      showDialog,
+      dialogMessage,
+      closeDialog,
       // save
       saveStudy,
       goToSaved

@@ -213,11 +213,21 @@ export default {
         { headers: { Authorization: `Bearer ${token}` } }
       );
       const sd = resp.data.content?.study_data;
+      const meta = resp.data.metadata || {};
+      const studyInfo = {
+       id:          meta.id,
+       name:        meta.study_name,
+       description: meta.study_description,
+       created_at:   meta.created_at,
+       updated_at:   meta.updated_at,
+       created_by:  meta.created_by
+     };
       if (!sd) {
         return alert("Study content is empty.");
       }
       this.$store.commit("setStudyDetails", {
-        study: sd.study,
+        study_metadata: studyInfo,
+        study: { id: meta.id, ...sd.study },
         groups: sd.groups,
         visits: sd.visits,
         subjectCount: sd.subjectCount,

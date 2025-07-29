@@ -345,11 +345,15 @@ export default {
     }
 
     onMounted(async () => {
+    const editId = props.id || route.params.id;
+     if (!editId) {
+       store.commit("resetStudyDetails");
+     }
       await loadYaml("/study_schema.yaml", studySchema);
       await loadYaml("/group_schema.yaml", groupSchema);
       await loadYaml("/visit_schema.yaml", visitSchema);
 
-      const editId = props.id || route.params.id;
+
       const details = store.state.studyDetails;
       if (editId && details && details.study) {
         studyData.value = { ...details.study };
