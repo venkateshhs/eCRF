@@ -140,6 +140,11 @@ export default {
     const router = useRouter();
     const store = useStore();
 
+
+    // Log assignments prop on setup
+    console.log("ProtocolMatrix setup: assignments prop:", props.assignments);
+    console.log("Detailed assignments prop:", JSON.stringify(props.assignments, null, 2));
+
     // Matrix indices
     const currentVisitIndex = ref(0);
 
@@ -240,10 +245,14 @@ export default {
 
     // Only open preview if the current visit has at least one assignment
     function hasAssignment(vIdx) {
+      console.log(`hasAssignment(${vIdx}) checking assignments:`, props.assignments);
+      console.log(`Detailed assignments for vIdx ${vIdx}:`, JSON.stringify(props.assignments.map(row => row[vIdx]), null, 2));
       const result = groupList.value.some((_, gIdx) =>
-        props.selectedModels.some((_, mIdx) =>
-          props.assignments[mIdx][vIdx]?.[gIdx]
-        )
+        props.selectedModels.some((_, mIdx) => {
+          const value = props.assignments[mIdx]?.[vIdx]?.[gIdx];
+          console.log(`Checking [${mIdx}][${vIdx}][${gIdx}] =`, value);
+          return value === true;
+        })
       );
       console.log(`hasAssignment(${vIdx}) =>`, result);
       return result;
@@ -366,7 +375,8 @@ export default {
           visits: updatedStudyData.visits,
           subjectCount: updatedStudyData.subjectCount,
           assignmentMethod: updatedStudyData.assignmentMethod,
-          subjects: updatedStudyData.subjects
+          subjects: updatedStudyData.subjects,
+          assignments: updatedStudyData.assignments
         });
 
         showDialogMessage(studyId ? "Study successfully updated!" : "Study successfully saved!");

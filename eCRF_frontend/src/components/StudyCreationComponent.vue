@@ -90,7 +90,7 @@
 
     <!-- STEP 3 -->
     <div v-if="step === 3" class="new-study-form">
-    <h2>Step 3: Subject Setup</h2>
+      <h2>Step 3: Subject Setup</h2>
       <SubjectForm
         v-model:subjectCount="subjectCount"
         v-model:assignmentMethod="assignmentMethod"
@@ -183,6 +183,7 @@ export default {
     const visitData = ref([]);
     const subjectCount = ref(1);
     const assignmentMethod = ref("Random");
+    const assignments = ref([]);
 
     const studySchema = ref([]);
     const groupSchema = ref([]);
@@ -223,6 +224,14 @@ export default {
       });
     }
 
+    function initializeAssignments(models, visits, groups) {
+      return Array(models.length).fill().map(() =>
+        Array(visits.length).fill().map(() =>
+          Array(groups.length).fill(false)
+        )
+      );
+    }
+
     function validateStudy() {
       showStudyErrors.value = true;
       const hasMissing = studySchema.value.some(f =>
@@ -239,12 +248,13 @@ export default {
       const payload = {
         study: studyData.value,
         groups: [],
-        visits: []
+        visits: [],
+        assignments: assignments.value
       };
 
       if (skips.includes("groups") && skips.includes("visits")) {
         store.commit("setStudyDetails", payload);
-        router.push({ name: "CreateFormScratch" });
+        router.push({ name: "CreateFormScratch", params: { assignments: assignments.value } });
       } else {
         store.commit("setStudyDetails", payload);
         step.value = 2;
@@ -257,20 +267,28 @@ export default {
       );
       if (hasErrors) return;
 
+      // Reinitialize assignments if groups change
+      if (assignments.value.length > 0 && assignments.value[0]?.[0]?.length !== groupData.value.length) {
+        assignments.value = initializeAssignments(studyData.value.selectedModels || [], visitData.value, groupData.value);
+      }
+
       store.commit("setStudyDetails", {
         study: studyData.value,
         groups: groupData.value,
-        visits: []
+        visits: [],
+        assignments: assignments.value
       });
       step.value = 3;
     }
 
     function checkSubjectsSetup() {
       if (!subjectCount.value || !assignmentMethod.value) {
-        console.warn("Provide subject count and assignment method.");
+        dialogMessage.value = "Please provide subject count and assignment method.";
+        showDialog.value = true;
         return;
       }
 
+      const editId = props.id || route.params.id;
       const N = subjectCount.value;
       const prefix = (studyData.value.title || "ST")
         .replace(/[^A-Za-z\s]/g, "")
@@ -280,34 +298,57 @@ export default {
         .join("") || "ST";
       const groupNames = groupData.value.map(g => g.name || g.label || "Unnamed");
 
-      let assignments = [];
-      if (assignmentMethod.value === "Random" && groupNames.length > 0) {
-        const G = groupNames.length;
-        const base = Math.floor(N / G), rem = N % G;
-        const idx = Array.from({ length: G }, (_, i) => i);
-        for (let i = G - 1; i > 0; i--) {
-          const j = Math.floor(Math.random() * (i + 1));
-          [idx[i], idx[j]] = [idx[j], idx[i]];
-        }
-        const extra = new Set(idx.slice(0, rem));
-        for (let gi = 0; gi < G; gi++) {
-          const cnt = base + (extra.has(gi) ? 1 : 0);
-          for (let k = 0; k < cnt; k++) {
-            assignments.push(groupNames[gi]);
-          }
-        }
-        for (let i = assignments.length - 1; i > 0; i--) {
-          const j = Math.floor(Math.random() * (i + 1));
-          [assignments[i], assignments[j]] = [assignments[j], assignments[i]];
+      // If editing and subjectData is populated, adjust to new subjectCount
+      if (editId && subjectData.value.length > 0) {
+        const currentCount = subjectData.value.length;
+        if (N === currentCount) {
+          // No change in count, keep existing assignments
+          step.value = assignmentMethod.value === "Skip" ? 5 : 4;
+          return;
+        } else if (N > currentCount) {
+          // Add new subjects with empty or random assignments
+          const additionalSubjects = Array(N - currentCount).fill().map((_, idx) => ({
+            id: `SUBJ-${prefix}-${String(currentCount + idx + 1).padStart(3, "0")}`,
+            group: assignmentMethod.value === "Random" && groupNames.length > 0
+              ? groupNames[Math.floor(Math.random() * groupNames.length)]
+              : ""
+          }));
+          subjectData.value = [...subjectData.value, ...additionalSubjects];
+        } else {
+          // Remove excess subjects
+          subjectData.value = subjectData.value.slice(0, N);
         }
       } else {
-        assignments = Array(N).fill("");
-      }
+        // New study: generate assignments
+        let assignments = [];
+        if (assignmentMethod.value === "Random" && groupNames.length > 0) {
+          const G = groupNames.length;
+          const base = Math.floor(N / G), rem = N % G;
+          const idx = Array.from({ length: G }, (_, i) => i);
+          for (let i = G - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [idx[i], idx[j]] = [idx[j], idx[i]];
+          }
+          const extra = new Set(idx.slice(0, rem));
+          for (let gi = 0; gi < G; gi++) {
+            const cnt = base + (extra.has(gi) ? 1 : 0);
+            for (let k = 0; k < cnt; k++) {
+              assignments.push(groupNames[gi]);
+            }
+          }
+          for (let i = assignments.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [assignments[i], assignments[j]] = [assignments[j], assignments[i]];
+          }
+        } else {
+          assignments = Array(N).fill("");
+        }
 
-      subjectData.value = assignments.map((grp, idx) => ({
-        id: `SUBJ-${prefix}-${String(idx + 1).padStart(3, "0")}`,
-        group: grp
-      }));
+        subjectData.value = assignments.map((grp, idx) => ({
+          id: `SUBJ-${prefix}-${String(idx + 1).padStart(3, "0")}`,
+          group: grp
+        }));
+      }
 
       console.log("subjects", subjectData.value);
       step.value = assignmentMethod.value === "Skip" ? 5 : 4;
@@ -334,25 +375,29 @@ export default {
         subjectCount: subjectCount.value,
         assignmentMethod: assignmentMethod.value,
         subjects: subjectData.value,
-        visits: visitData.value
+        visits: visitData.value,
+        assignments: assignments.value
       });
 
-      router.push({ name: "CreateFormScratch" });
+      router.push({ name: "CreateFormScratch", params: { assignments: assignments.value } });
     }
 
     function goToStudyManagement() {
       router.push({ name: "Dashboard", query: { openStudies: "false" } });
     }
 
+    function handleAssignmentUpdated({ mIdx, vIdx, gIdx, checked }) {
+      assignments.value[mIdx][vIdx][gIdx] = checked;
+    }
+
     onMounted(async () => {
-    const editId = props.id || route.params.id;
-     if (!editId) {
-       store.commit("resetStudyDetails");
-     }
+      const editId = props.id || route.params.id;
+      if (!editId) {
+        store.commit("resetStudyDetails");
+      }
       await loadYaml("/study_schema.yaml", studySchema);
       await loadYaml("/group_schema.yaml", groupSchema);
       await loadYaml("/visit_schema.yaml", visitSchema);
-
 
       const details = store.state.studyDetails;
       if (editId && details && details.study) {
@@ -362,11 +407,16 @@ export default {
         assignmentMethod.value = details.assignmentMethod ?? assignmentMethod.value;
         subjectData.value = Array.isArray(details.subjects) ? [...details.subjects] : [];
         visitData.value = Array.isArray(details.visits) ? [...details.visits] : [];
+        assignments.value = Array.isArray(details.assignments)
+          ? JSON.parse(JSON.stringify(details.assignments)) // Deep copy
+          : initializeAssignments(details.selectedModels || [], details.visits || [], details.groups || []);
         step.value = 1;
       } else {
         studySchema.value.forEach(f => studyData.value[f.field] = "");
         groupData.value = [];
+        subjectData.value = [];
         visitData.value = [];
+        assignments.value = [];
       }
     });
 
@@ -378,6 +428,7 @@ export default {
       visitData,
       subjectCount,
       assignmentMethod,
+      assignments,
       studySchema,
       groupSchema,
       visitSchema,
@@ -389,7 +440,8 @@ export default {
       checkSubjectsSetup,
       checkSubjectsAssigned,
       checkVisits,
-      goToStudyManagement
+      goToStudyManagement,
+      handleAssignmentUpdated
     };
   }
 };

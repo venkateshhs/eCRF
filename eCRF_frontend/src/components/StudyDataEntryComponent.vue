@@ -87,8 +87,8 @@
           </tr>
         </thead>
         <tbody>
-          <tr v-for="sIdx in subjectIndices" :key="'subject-' + sIdx">
-            <td class="subject-cell">Subject {{ sIdx + 1 }}</td>
+          <tr v-for="(subject, sIdx) in study.content.study_data.subjects" :key="'subject-' + sIdx">
+            <td class="subject-cell">{{ subject.id }}</td>
             <td v-for="combo in visitCombos" :key="'visit-td-' + sIdx + '-' + combo.visitIndex" class="visit-cell">
               <button
                 class="select-btn"
@@ -107,18 +107,16 @@
     <div v-else class="entry-form-wrapper">
       <!-- 3.b BREADCRUMB (Exact Subject/Visit/Group) -->
       <div class="bread-crumb">
-        <strong>Study:</strong> {{ study.metadata.study_name }} &nbsp;|&nbsp;
-        <strong>Subject:</strong> {{ currentSubjectIndex + 1 }} &nbsp;|&nbsp;
-        <strong>Visit:</strong> {{ visitList[currentVisitIndex].name }} &nbsp;|&nbsp;
-        <strong>Group:</strong> {{ groupList[currentGroupIndex].name }}
+        <strong>Study:</strong> {{ study.metadata.study_name }}
+        <strong>Subject:</strong> {{ study.content.study_data.subjects[currentSubjectIndex].id }}
+        <strong>Visit:</strong> {{ visitList[currentVisitIndex].name }}
       </div>
 
       <!-- 3.c ENTRY FORM FIELDS -->
       <div class="entry-form-section">
         <h2>
-          Enter Data for Subject {{ currentSubjectIndex + 1 }},
-          Visit: “{{ visitList[currentVisitIndex].name }}”,
-          Group: “{{ groupList[currentGroupIndex].name }}”
+          Enter Data for Subject: {{ study.content.study_data.subjects[currentSubjectIndex].id }},
+          Visit: “{{ visitList[currentVisitIndex].name }}”
         </h2>
 
         <div v-if="assignedModelIndices.length">
@@ -250,7 +248,7 @@
     <div v-if="showShareDialog" class="dialog-overlay">
       <div class="dialog">
         <h3>Generate Share Link</h3>
-        <p>Sharing for Subject {{ shareParams.subjectIndex + 1 }}, Visit {{ visitList[shareParams.visitIndex]?.name }}, Group {{ groupList[shareParams.groupIndex]?.name }}</p>
+        <p>Sharing for Subject {{ shareParams.subjectIndex != null ? study.content.study_data.subjects[shareParams.subjectIndex]?.id : 'N/A' }}, Visit {{ visitList[shareParams.visitIndex]?.name }}, Group {{ groupList[shareParams.groupIndex]?.name }}</p>
         <label>
           Permission:
           <select v-model="shareConfig.permission">

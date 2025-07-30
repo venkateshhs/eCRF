@@ -186,8 +186,11 @@ export default {
         const { data } = await axios.get("http://127.0.0.1:8000/forms/studies", {
           headers: { Authorization: `Bearer ${token}` },
         });
+        console.log('Fetched studies:', JSON.stringify(data, null, 2));
         this.studies = data;
       } catch (e) {
+        console.error('Failed to load studies:', e);
+        console.log('Error details:', e.response?.data || e.message);
         if (e.response?.status === 401) {
           alert("Session expired.");
           this.$router.push("/login");
@@ -207,41 +210,88 @@ export default {
       localStorage.removeItem("setStudyDetails");
       localStorage.removeItem("scratchForms");
       const token = this.$store.state.token;
-      if (!token) return alert("Please log in again.");
-      const resp = await axios.get(
-        `http://127.0.0.1:8000/forms/studies/${study.id}`,
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
-      const sd = resp.data.content?.study_data;
-      const meta = resp.data.metadata || {};
-      const studyInfo = {
-       id:          meta.id,
-       name:        meta.study_name,
-       description: meta.study_description,
-       created_at:   meta.created_at,
-       updated_at:   meta.updated_at,
-       created_by:  meta.created_by
-     };
-      if (!sd) {
-        return alert("Study content is empty.");
+      if (!token) {
+        alert("Please log in again.");
+        return;
       }
-      this.$store.commit("setStudyDetails", {
-        study_metadata: studyInfo,
-        study: { id: meta.id, ...sd.study },
-        groups: sd.groups,
-        visits: sd.visits,
-        subjectCount: sd.subjectCount,
-        assignmentMethod: sd.assignmentMethod,
-        subjects: sd.subjects,
-      });
-      if (sd.selectedModels) {
-        const scratchForms = [{
-          sections: sd.selectedModels.map(model => ({ title: model.title, fields: model.fields, source: "template" }))
-        }];
-        localStorage.setItem("scratchForms", JSON.stringify(scratchForms));
+      try {
+        const resp = await axios.get(
+          `http://127.0.0.1:8000/forms/studies/${study.id}`,
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+        console.log('Fetched study details:', JSON.stringify(resp.data, null, 2));
+        const sd = resp.data.content?.study_data;
+        const meta = resp.data.metadata || {};
+        if (!sd) {
+          console.error('Study content is empty');
+          alert("Study content is empty.");
+          return;
+        }
+
+        // Initialize assignments
+        let assignments = Array.isArray(sd.assignments) ? sd.assignments : [];
+        if (!assignments.length && sd.selectedModels?.length) {
+          console.warn('Assignments missing in backend response, initializing empty assignments');
+          const m = sd.selectedModels.length;
+          const v = sd.visits?.length || 0;
+          const g = sd.groups?.length || 0;
+          assignments = Array.from({ length: m }, () =>
+            Array.from({ length: v }, () =>
+              Array.from({ length: g }, () => false)
+            )
+          );
+        }
+        console.log('Loaded assignments from backend:', JSON.stringify(assignments, null, 2));
+
+        // Prepare study metadata
+        const studyInfo = {
+          id: meta.id,
+          name: meta.study_name,
+          description: meta.study_description,
+          created_at: meta.created_at,
+          updated_at: meta.updated_at,
+          created_by: meta.created_by
+        };
+
+        // Commit to Vuex store
+        this.$store.commit("setStudyDetails", {
+          study_metadata: studyInfo,
+          study: { id: meta.id, ...sd.study },
+          groups: sd.groups || [],
+          visits: sd.visits || [],
+          subjectCount: sd.subjectCount || 0,
+          assignmentMethod: sd.assignmentMethod || 'random',
+          subjects: sd.subjects || [],
+          assignments: assignments,
+          forms: sd.selectedModels ? [{
+            sections: sd.selectedModels.map(model => ({
+              title: model.title,
+              fields: model.fields,
+              source: 'template'
+            }))
+          }] : []
+        });
+        console.log('Committed studyDetails to Vuex:', JSON.stringify(this.$store.state.studyDetails, null, 2));
+
+        // Store scratchForms in localStorage
+        if (sd.selectedModels) {
+          const scratchForms = [{
+            sections: sd.selectedModels.map(model => ({
+              title: model.title,
+              fields: model.fields,
+              source: 'template'
+            }))
+          }];
+          localStorage.setItem("scratchForms", JSON.stringify(scratchForms));
+        }
+
+        this.activeSection = "";
+        this.$router.push({ name: "CreateStudy", params: { id: study.id } });
+      } catch (e) {
+        console.error('Failed to fetch study details:', e);
+        console.log('Error details:', e.response?.data || e.message);
+        alert("Failed to load study details.");
       }
-      this.activeSection = "";
-      this.$router.push({ name: "CreateStudy", params: { id: study.id } });
     },
     addData(study) {
       this.$router.push({ name: "StudyDetail", params: { id: study.id } });
@@ -252,6 +302,7 @@ export default {
     },
     logout() {
       this.$store.commit("setUser", null);
+      this.$store.commit("setToken", null);
       this.$router.push("/login");
     },
   },
@@ -268,7 +319,6 @@ export default {
   },
 };
 </script>
-
 <style scoped>
 .dashboard-layout {
   display: grid;
