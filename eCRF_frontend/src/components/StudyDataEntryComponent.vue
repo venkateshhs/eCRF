@@ -64,7 +64,7 @@
           <button
             class="share-icon"
             title="Share this form link"
-            @click="openShareDialog(currentSubjectIndex, currentVisitIndex)"
+            @click="openShareDialog(currentSubjectIndex, currentVisitIndex, currentGroupIndex)"
           >
             <i :class="icons.share"></i>
           </button>
@@ -92,21 +92,34 @@
               </li>
             </ul>
           </div>
+          <div class="details-block">
+            <strong>Group Info:</strong>
+            <ul>
+              <li
+                v-for="[key, val] in Object.entries(groupList[currentGroupIndex])"
+                :key="key"
+              >
+                {{ key }}: {{ val }}
+              </li>
+            </ul>
+          </div>
         </div>
       </div>
 
-      <!-- 3.b BREADCRUMB (Exact Subject/Visit) -->
+      <!-- 3.b BREADCRUMB (Exact Subject/Visit/Group) -->
       <div class="bread-crumb">
         <strong>Study:</strong> {{ study.metadata.study_name }} &nbsp;|&nbsp;
         <strong>Subject:</strong> {{ currentSubjectIndex + 1 }} &nbsp;|&nbsp;
-        <strong>Visit:</strong> {{ visitList[currentVisitIndex].name }}
+        <strong>Visit:</strong> {{ visitList[currentVisitIndex].name }} &nbsp;|&nbsp;
+        <strong>Group:</strong> {{ groupList[currentGroupIndex].name }}
       </div>
 
       <!-- 3.c ENTRY FORM FIELDS -->
       <div class="entry-form-section">
         <h2>
           Enter Data for Subject {{ currentSubjectIndex + 1 }},
-          Visit: “{{ visitList[currentVisitIndex].name }}”
+          Visit: “{{ visitList[currentVisitIndex].name }}”,
+          Group: “{{ groupList[currentGroupIndex].name }}”
         </h2>
 
         <div v-if="assignedModelIndices.length">
@@ -238,6 +251,7 @@
     <div v-if="showShareDialog" class="dialog-overlay">
       <div class="dialog">
         <h3>Generate Share Link</h3>
+        <p>Sharing for Subject {{ shareParams.subjectIndex + 1 }}, Visit {{ visitList[shareParams.visitIndex]?.name }}, Group {{ groupList[shareParams.groupIndex]?.name }}</p>
         <label>
           Permission:
           <select v-model="shareConfig.permission">
@@ -311,7 +325,7 @@ export default {
       validationErrors: {},
       icons,
       showShareDialog: false,
-      shareParams: { subjectIndex: null, visitIndex: null },
+      shareParams: { subjectIndex: null, visitIndex: null, groupIndex: null },
       shareConfig: { permission: "view", maxUses: 1, expiresInDays: 7 },
       generatedLink: "",
       permissionError: false,
@@ -445,7 +459,7 @@ export default {
       const idx = this.groupList.findIndex((g) => (g.name || "").trim().toLowerCase() === grpName);
       this.currentGroupIndex = idx >= 0 ? idx : 0;
       console.log(`[DEBUG] resolved groupIndex = ${this.currentGroupIndex}, groupName = ${this.groupList[this.currentGroupIndex]?.name || 'undefined'}`);
-      
+
       this.showSelection = false;
       console.log("[DEBUG] showSelection set to false, rendering entry form");
     },
@@ -543,20 +557,21 @@ export default {
       return true;
     },
 
-    openShareDialog(sIdx, vIdx) {
-      console.log("[DEBUG] openShareDialog()", { sIdx, vIdx });
-      this.shareParams = { subjectIndex: sIdx, visitIndex: vIdx };
+    openShareDialog(sIdx, vIdx, gIdx) {
+      console.log("[DEBUG] openShareDialog()", { sIdx, vIdx, gIdx });
+      this.shareParams = { subjectIndex: sIdx, visitIndex: vIdx, groupIndex: gIdx };
       this.generatedLink = "";
       this.showShareDialog = true;
     },
 
     async createShareLink() {
       console.log("[DEBUG] createShareLink()", this.shareParams);
-      const { subjectIndex, visitIndex } = this.shareParams;
+      const { subjectIndex, visitIndex, groupIndex } = this.shareParams;
       const payload = {
         study_id: this.study.metadata.id,
         subject_index: subjectIndex,
         visit_index: visitIndex,
+        group_index: groupIndex,
         permission: this.shareConfig.permission,
         max_uses: this.shareConfig.maxUses,
         expires_in_days: this.shareConfig.expiresInDays,
