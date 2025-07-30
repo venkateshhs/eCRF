@@ -1,83 +1,36 @@
 <template>
   <div class="study-data-container" v-if="study">
-    <div class="dashboard-back" v-if="showSelection">
-      <button @click="goToDashboard" class="btn-back">
-        Back to Dashboard
+    <!-- Back Buttons (Always at Top Left) -->
+    <div class="back-buttons-container">
+      <button v-if="showSelection" @click="goToDashboard" class="btn-back">
+        <i :class="icons.back"></i> Back to Dashboard
+      </button>
+      <button v-if="!showSelection" @click="backToSelection" class="btn-back">
+        <i :class="icons.back"></i> Back to Selection
       </button>
     </div>
-    <!-- ─────────────────────────────────────────────────── -->
-    <!-- Back to Selection (Moved to top when not in selection mode) -->
-    <!-- ─────────────────────────────────────────────────── -->
-    <div v-if="!showSelection" class="back-button-container">
-      <button @click="backToSelection" class="btn-back">
-        Back to Selection
-      </button>
-    </div>
-    <!-- ─────────────────────────────────────────────────── -->
-    <!-- 1. STUDY DETAILS (Always Visible at the Top)       -->
-    <!-- ─────────────────────────────────────────────────── -->
-    <div class="study-header">
-      <h1 class="study-name">{{ study.metadata.study_name }}</h1>
-      <p class="study-description">{{ study.metadata.study_description }}</p>
-      <p class="study-meta">
-        Subjects: {{ numberOfSubjects }} |
-        Visits: {{ visitList.length }} |
-        Groups: {{ groupList.length }}
-      </p>
-      <hr />
-    </div>
 
-    <!-- ─────────────────────────────────────────────── -->
-    <!-- 2. SELECTION MATRIX: Subject × (Visit)          -->
-    <!-- ─────────────────────────────────────────────── -->
-    <div v-if="showSelection">
-      <h2>Select Subject × Visit</h2>
-      <table class="selection-matrix">
-        <thead>
-          <tr>
-            <th>Subject / Visit</th>
-            <th v-for="combo in visitCombos" :key="combo.visitIndex">
-              {{ combo.label }}
-            </th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="sIdx in subjectIndices" :key="sIdx">
-            <td class="subject-cell">Subject {{ sIdx + 1 }}</td>
-            <td v-for="combo in visitCombos" :key="combo.visitIndex" class="button-cell">
-              <button
-                class="select-btn"
-                @click="selectCell(sIdx, combo.visitIndex)"
-              >
-                Select
-              </button>
-              <button
-                class="share-icon"
-                title="Share this form link"
-                @click="openShareDialog(sIdx, combo.visitIndex)"
-              >
-                <i :class="icons.share"></i>
-              </button>
-            </td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
-
-    <!-- ─────────────────────────────────────────────────── -->
-    <!-- 3. DATA-ENTRY FORM: Shown Once a Cell Is Chosen    -->
-    <!-- ─────────────────────────────────────────────────── -->
-    <div v-else class="entry-form-wrapper">
-      <!-- 3.a COLLAPSIBLE PANEL FOR “Study / Visit” INFO -->
+    <!-- 1. STUDY DETAILS AND DETAILS PANEL (Below Back Buttons) -->
+    <div class="study-header-container">
+      <div class="study-header">
+        <h1 class="study-name">{{ study.metadata.study_name }}</h1>
+        <p class="study-description">{{ study.metadata.study_description }}</p>
+        <p class="study-meta">
+          Subjects: {{ numberOfSubjects }} |
+          Visits: {{ visitList.length }} |
+          Groups: {{ groupList.length }}
+        </p>
+      </div>
       <div class="details-panel">
         <div class="details-controls">
           <button @click="toggleDetails" class="details-toggle-btn">
-            {{ showDetails ? 'Hide Details ▲' : 'Show Details ▼' }}
+            <i :class="showDetails ? icons.toggleUp : icons.toggleDown"></i>
+            {{ showDetails ? 'Hide Details' : 'Show Details' }}
           </button>
           <button
             class="share-icon"
             title="Share this form link"
-            @click="openShareDialog(currentSubjectIndex, currentVisitIndex)"
+            @click="openShareDialog(currentSubjectIndex, currentVisitIndex, currentGroupIndex)"
           >
             <i :class="icons.share"></i>
           </button>
@@ -98,7 +51,18 @@
             <strong>Visit Info:</strong>
             <ul>
               <li
-                v-for="[key, val] in Object.entries(visitList[currentVisitIndex])"
+                v-for="[key, val] in Object.entries(visitList[currentVisitIndex] || {})"
+                :key="key"
+              >
+                {{ key }}: {{ val }}
+              </li>
+            </ul>
+          </div>
+          <div class="details-block">
+            <strong>Group Info:</strong>
+            <ul>
+              <li
+                v-for="[key, val] in Object.entries(groupList[currentGroupIndex] || {})"
                 :key="key"
               >
                 {{ key }}: {{ val }}
@@ -107,19 +71,54 @@
           </div>
         </div>
       </div>
+      <hr />
+    </div>
 
-      <!-- 3.b BREADCRUMB (Exact Subject/Visit) -->
+    <!-- 2. SELECTION MATRIX: Subject × (Visit) -->
+    <div v-if="showSelection">
+      <h2>Select Subject × Visit</h2>
+      <table class="selection-matrix">
+        <thead>
+          <tr>
+            <th>Subject / Visit</th>
+            <th v-for="combo in visitCombos" :key="'visit-th-' + combo.visitIndex">
+              {{ combo.label }}
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="sIdx in subjectIndices" :key="'subject-' + sIdx">
+            <td class="subject-cell">Subject {{ sIdx + 1 }}</td>
+            <td v-for="combo in visitCombos" :key="'visit-td-' + sIdx + '-' + combo.visitIndex" class="visit-cell">
+              <button
+                class="select-btn"
+                :class="{ 'visit-2-btn': combo.visitIndex === 1 }"
+                @click="selectCell(sIdx, combo.visitIndex)"
+              >
+                Select
+              </button>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- 3. DATA-ENTRY FORM: Shown Once a Cell Is Chosen -->
+    <div v-else class="entry-form-wrapper">
+      <!-- 3.b BREADCRUMB (Exact Subject/Visit/Group) -->
       <div class="bread-crumb">
         <strong>Study:</strong> {{ study.metadata.study_name }} &nbsp;|&nbsp;
         <strong>Subject:</strong> {{ currentSubjectIndex + 1 }} &nbsp;|&nbsp;
-        <strong>Visit:</strong> {{ visitList[currentVisitIndex].name }}
+        <strong>Visit:</strong> {{ visitList[currentVisitIndex].name }} &nbsp;|&nbsp;
+        <strong>Group:</strong> {{ groupList[currentGroupIndex].name }}
       </div>
 
       <!-- 3.c ENTRY FORM FIELDS -->
       <div class="entry-form-section">
         <h2>
           Enter Data for Subject {{ currentSubjectIndex + 1 }},
-          Visit: “{{ visitList[currentVisitIndex].name }}”
+          Visit: “{{ visitList[currentVisitIndex].name }}”,
+          Group: “{{ groupList[currentGroupIndex].name }}”
         </h2>
 
         <div v-if="assignedModelIndices.length">
@@ -251,6 +250,7 @@
     <div v-if="showShareDialog" class="dialog-overlay">
       <div class="dialog">
         <h3>Generate Share Link</h3>
+        <p>Sharing for Subject {{ shareParams.subjectIndex + 1 }}, Visit {{ visitList[shareParams.visitIndex]?.name }}, Group {{ groupList[shareParams.groupIndex]?.name }}</p>
         <label>
           Permission:
           <select v-model="shareConfig.permission">
@@ -290,6 +290,13 @@
         </div>
       </div>
     </div>
+
+    <!-- Custom Dialog for Notifications -->
+    <CustomDialog
+      :message="dialogMessage"
+      :isVisible="showDialog"
+      @close="closeDialog"
+    />
   </div>
 
   <div v-else class="loading">
@@ -300,10 +307,11 @@
 <script>
 import axios from "axios";
 import icons from "@/assets/styles/icons";
+import CustomDialog from "@/components/CustomDialog.vue";
 
 export default {
   name: "StudyDataEntryComponent",
-
+  components: { CustomDialog },
   data() {
     return {
       study: null,
@@ -316,10 +324,12 @@ export default {
       validationErrors: {},
       icons,
       showShareDialog: false,
-      shareParams: { subjectIndex: null, visitIndex: null },
+      shareParams: { subjectIndex: null, visitIndex: null, groupIndex: null },
       shareConfig: { permission: "view", maxUses: 1, expiresInDays: 7 },
       generatedLink: "",
       permissionError: false,
+      showDialog: false,
+      dialogMessage: "",
     };
   },
 
@@ -328,57 +338,76 @@ export default {
       return this.$store.state.token;
     },
     visitList() {
+      console.log("[DEBUG] Computing visitList:", this.study?.content?.study_data?.visits);
       return this.study?.content?.study_data?.visits || [];
     },
     groupList() {
+      console.log("[DEBUG] Computing groupList:", this.study?.content?.study_data?.groups);
       return this.study?.content?.study_data?.groups || [];
     },
     selectedModels() {
+      console.log("[DEBUG] Computing selectedModels:", this.study?.content?.study_data?.selectedModels);
       return this.study?.content?.study_data?.selectedModels || [];
     },
     assignments() {
+      console.log("[DEBUG] Computing assignments:", this.study?.content?.study_data?.assignments);
       return this.study?.content?.study_data?.assignments || [];
     },
     numberOfSubjects() {
       const sd = this.study?.content?.study_data;
-      return sd?.subjectCount != null
-        ? sd.subjectCount
-        : sd?.subjects?.length || 0;
+      const count = sd?.subjectCount != null ? sd.subjectCount : sd?.subjects?.length || 0;
+      console.log("[DEBUG] Computing numberOfSubjects:", count);
+      return count;
     },
     visitCombos() {
-      return this.visitList.map((visit, vIdx) => ({
-        visitIndex: vIdx,
-        label: `Visit: ${visit.name}`,
-      }));
+      const combos = this.visitList.map((visit, vIdx) => {
+        console.log(`[DEBUG] Rendering visit combo: visitIndex=${vIdx}, label=Visit: ${visit.name}`);
+        return {
+          visitIndex: vIdx,
+          label: `Visit: ${visit.name}`,
+        };
+      });
+      console.log("[DEBUG] Computing visitCombos:", combos);
+      return combos;
     },
     subjectIndices() {
-      return Array.from({ length: this.numberOfSubjects }, (_, i) => i);
+      const indices = Array.from({ length: this.numberOfSubjects }, (_, i) => i);
+      console.log("[DEBUG] Computing subjectIndices:", indices);
+      return indices;
     },
-
     assignedModelIndices() {
       const v = this.currentVisitIndex;
       const g = this.currentGroupIndex;
-      console.log(`[DEBUG] Filtering models for visit ${v}, group ${g}`);
-      return this.selectedModels
+      console.log(`[DEBUG] Filtering models for visit ${v}, group ${g} (groupName: ${this.groupList[g]?.name || 'undefined'})`);
+      console.log(`[DEBUG] assignments:`, this.assignments);
+      const indices = this.selectedModels
         .map((_, mIdx) => mIdx)
         .filter((mIdx) => {
-          const row = this.assignments[mIdx]?.[v] || [];
+          const row = this.assignments[mIdx]?.[v];
+          if (!row) {
+            console.log(`[DEBUG] Model ${mIdx} has no assignments for visit ${v}`);
+            return false;
+          }
           const flag = !!row[g];
           console.log(
-            `[DEBUG] Model ${mIdx} (“${this.selectedModels[mIdx].title}”) → assigned to this group? ${flag}`
+            `[DEBUG] Model ${mIdx} (“${this.selectedModels[mIdx]?.title || 'undefined'}”) → assigned to group ${g}? ${flag}`
           );
           return flag;
         });
+      console.log("[DEBUG] assignedModelIndices result:", indices);
+      return indices;
     },
   },
 
   async created() {
     const studyId = this.$route.params.id;
+    console.log("[DEBUG] created() with studyId:", studyId);
     await this.loadStudy(studyId);
   },
 
   methods: {
     goToDashboard() {
+      console.log("[DEBUG] goToDashboard()");
       this.$router.push({
         name: "Dashboard",
         query: { openStudies: "true" }
@@ -396,7 +425,7 @@ export default {
         this.initializeEntryData();
       } catch (err) {
         console.error("[ERROR] loading study", err);
-        alert("Failed to load study details.");
+        this.showDialogMessage("Failed to load study details.");
       }
     },
 
@@ -423,12 +452,15 @@ export default {
       // Resolve subject's assigned group
       const subj = this.study.content.study_data.subjects[sIdx];
       console.log(`[DEBUG] subject[${sIdx}] =`, subj);
-      const grpName = subj.group;
-      const idx = this.groupList.findIndex((g) => g.name === grpName);
+      const grpName = (subj.group || "").trim().toLowerCase();
+      console.log(`[DEBUG] Subject group name (normalized): ${grpName}`);
+      console.log(`[DEBUG] groupList:`, this.groupList);
+      const idx = this.groupList.findIndex((g) => (g.name || "").trim().toLowerCase() === grpName);
       this.currentGroupIndex = idx >= 0 ? idx : 0;
-      console.log(`[DEBUG] resolved groupIndex = ${this.currentGroupIndex}`);
+      console.log(`[DEBUG] resolved groupIndex = ${this.currentGroupIndex}, groupName = ${this.groupList[this.currentGroupIndex]?.name || 'undefined'}`);
 
       this.showSelection = false;
+      console.log("[DEBUG] showSelection set to false, rendering entry form");
     },
 
     backToSelection() {
@@ -442,6 +474,7 @@ export default {
     },
 
     toggleDetails() {
+      console.log("[DEBUG] toggleDetails() showDetails:", !this.showDetails);
       this.showDetails = !this.showDetails;
     },
 
@@ -523,18 +556,21 @@ export default {
       return true;
     },
 
-    openShareDialog(sIdx, vIdx) {
-      this.shareParams = { subjectIndex: sIdx, visitIndex: vIdx };
+    openShareDialog(sIdx, vIdx, gIdx) {
+      console.log("[DEBUG] openShareDialog()", { sIdx, vIdx, gIdx });
+      this.shareParams = { subjectIndex: sIdx, visitIndex: vIdx, groupIndex: gIdx };
       this.generatedLink = "";
       this.showShareDialog = true;
     },
 
     async createShareLink() {
-      const { subjectIndex, visitIndex } = this.shareParams;
+      console.log("[DEBUG] createShareLink()", this.shareParams);
+      const { subjectIndex, visitIndex, groupIndex } = this.shareParams;
       const payload = {
         study_id: this.study.metadata.id,
         subject_index: subjectIndex,
         visit_index: visitIndex,
+        group_index: groupIndex,
         permission: this.shareConfig.permission,
         max_uses: this.shareConfig.maxUses,
         expires_in_days: this.shareConfig.expiresInDays,
@@ -546,22 +582,26 @@ export default {
           { headers: { Authorization: `Bearer ${this.token}` } }
         );
         this.generatedLink = resp.data.link;
+        console.log("[DEBUG] Share link generated:", this.generatedLink);
       } catch (err) {
-        console.error(err);
+        console.error("[ERROR] creating share link", err);
         this.generatedLink = null;
         if (err.response?.status === 403) {
           this.permissionError = true;
+          console.log("[DEBUG] Permission error for share link");
         }
       }
     },
 
     validateCurrentSection() {
+      console.log("[DEBUG] validateCurrentSection()");
       let ok = true;
       this.assignedModelIndices.forEach((mIdx) => {
         this.selectedModels[mIdx].fields.forEach((_, fIdx) => {
           if (!this.validateField(mIdx, fIdx)) ok = false;
         });
       });
+      console.log("[DEBUG] Validation result:", ok);
       return ok;
     },
 
@@ -570,7 +610,7 @@ export default {
         `[DEBUG] submitData() → S:${this.currentSubjectIndex} V:${this.currentVisitIndex} G:${this.currentGroupIndex}`
       );
       if (!this.validateCurrentSection()) {
-        alert("Please fix validation errors before saving.");
+        this.showDialogMessage("Please fix validation errors before saving.");
         return;
       }
       const payload = {
@@ -591,12 +631,23 @@ export default {
           payload,
           { headers: { Authorization: `Bearer ${this.token}` } }
         );
-        console.log("Data saved response:", resp.data);
-        alert("Data saved successfully for this Subject/Visit.");
+        console.log("[DEBUG] Data saved response:", resp.data);
+        this.showDialogMessage("Data saved successfully for this Subject/Visit.");
       } catch (err) {
-        console.error("Error saving data:", err.response?.data || err.message);
-        alert("Failed to save data. Check console for details.");
+        console.error("[ERROR] saving data:", err.response?.data || err.message);
+        this.showDialogMessage("Failed to save data. Check console for details.");
       }
+    },
+
+    showDialogMessage(message) {
+      console.log("[DEBUG] Showing dialog with message:", message);
+      this.dialogMessage = message;
+      this.showDialog = true;
+    },
+    closeDialog() {
+      console.log("[DEBUG] Dialog closed");
+      this.showDialog = false;
+      this.dialogMessage = "";
     },
   },
 };
@@ -613,12 +664,38 @@ export default {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
 }
 
-/* ─────────────────────────────────────────────────── */
-/* 1. STUDY DETAILS (Always Visible at Top) */
-/* ─────────────────────────────────────────────────── */
+/* Back Buttons (Always at Top Left) */
+.back-buttons-container {
+  margin-bottom: 16px;
+}
+.btn-back {
+  background: #d1d5db;
+  color: #1f2937;
+  border: none;
+  padding: 8px 16px;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.2s;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.btn-back:hover {
+  background: #9ca3af;
+}
+.btn-back i {
+  font-size: 14px;
+}
+
+/* 1. STUDY HEADER AND DETAILS PANEL */
+.study-header-container {
+  margin-bottom: 24px;
+}
 .study-header {
   text-align: center;
-  margin-bottom: 24px;
+  margin-bottom: 16px;
 }
 .study-name {
   font-size: 24px;
@@ -636,102 +713,11 @@ export default {
   color: #6b7280;
 }
 hr {
-  margin: 16px 0;
+  margin: 12px 0;
   border: 0;
   border-top: 1px solid #e5e7eb;
 }
 
-/* ─────────────────────────────────────────────────── */
-/* Back Buttons (Dashboard and Selection) */
-/* ─────────────────────────────────────────────────── */
-.back-button-container,
-.dashboard-back {
-  margin-bottom: 16px;
-}
-.btn-back {
-  background: #d1d5db;
-  color: #1f2937;
-  border: none;
-  padding: 8px 16px;
-  border-radius: 6px;
-  font-size: 14px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: background 0.2s;
-}
-.btn-back:hover {
-  background: #9ca3af;
-}
-
-/* ─────────────────────────────────────────────────── */
-/* 2. SELECTION MATRIX */
-/* ─────────────────────────────────────────────────── */
-.selection-matrix {
-  width: 100%;
-  border-collapse: collapse;
-  margin-bottom: 32px;
-}
-.selection-matrix th,
-.selection-matrix td {
-  border: 1px solid #e5e7eb;
-  padding: 12px;
-  text-align: center;
-}
-.selection-matrix th {
-  background: #f9fafb;
-  font-weight: 600;
-  color: #1f2937;
-}
-.subject-cell {
-  background: #f9fafb;
-  font-weight: 500;
-  color: #374151;
-}
-.button-cell {
-  display: flex;
-  justify-content: center;
-  gap: 8px;
-}
-.select-btn {
-  background: #e5e7eb;
-  color: #1f2937;
-  border: none;
-  padding: 6px 12px;
-  border-radius: 6px;
-  cursor: pointer;
-  font-size: 14px;
-  transition: background 0.2s;
-}
-.select-btn:hover {
-  background: #d1d5db;
-}
-.share-icon {
-  background: none;
-  border: none;
-  color: #6b7280;
-  cursor: pointer;
-  font-size: 16px;
-  padding: 6px;
-  line-height: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-.share-icon i {
-  font-family: 'Font Awesome 5 Free' !important;
-  font-weight: 900;
-  font-style: normal;
-  display: inline-block;
-}
-.share-icon:hover {
-  color: #374151;
-}
-
-/* ─────────────────────────────────────────────────── */
-/* 3. DATA-ENTRY SECTION */
-/* ─────────────────────────────────────────────────── */
-
-/* 3.a Collapsible “Study / Visit” info */
 .details-panel {
   margin-bottom: 16px;
 }
@@ -748,6 +734,30 @@ hr {
   font-size: 14px;
   font-weight: 500;
   cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.details-toggle-btn i {
+  font-size: 14px;
+}
+.share-icon {
+  background: none;
+  border: none;
+  color: #6b7280;
+  cursor: pointer;
+  font-size: 16px;
+  padding: 6px;
+  line-height: 1;
+}
+.share-icon i {
+  font-family: 'Font Awesome 5 Free' !important;
+  font-weight: 900;
+  font-style: normal;
+  display: inline-block;
+}
+.share-icon:hover {
+  color: #374151;
 }
 .details-content {
   background: #f9fafb;
@@ -773,7 +783,54 @@ hr {
   color: #374151;
 }
 
-/* 3.b Breadcrumb */
+/* 2. SELECTION MATRIX */
+.selection-matrix {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 32px;
+  table-layout: fixed;
+}
+.selection-matrix th,
+.selection-matrix td {
+  border: 1px solid #e5e7eb;
+  padding: 12px;
+  text-align: center;
+  vertical-align: middle;
+}
+.selection-matrix th {
+  background: #f9fafb;
+  font-weight: 600;
+  color: #1f2937;
+}
+.subject-cell {
+  background: #f9fafb;
+  font-weight: 500;
+  color: #374151;
+  width: 20%;
+}
+.visit-cell {
+  width: 40%;
+}
+.select-btn {
+  background: #e5e7eb;
+  color: #1f2937;
+  border: none;
+  padding: 6px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 14px;
+  transition: background 0.2s;
+  display: block;
+  margin: 0 auto;
+}
+.visit-2-btn {
+  background: #e5e7eb;
+}
+.select-btn:hover {
+  background: #d1d5db;
+}
+
+/* 3. DATA-ENTRY SECTION */
 .bread-crumb {
   background: #f9fafb;
   padding: 12px 16px;
@@ -784,7 +841,6 @@ hr {
   color: #374151;
 }
 
-/* 3.c Form fields */
 .entry-form-section h2 {
   font-size: 18px;
   font-weight: 600;

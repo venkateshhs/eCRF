@@ -386,12 +386,12 @@ def generate_token():
     return secrets.token_urlsafe(32)
 
 @router.post("/share-link/", status_code=201)
-def create_share_link(payload: schemas.ShareLinkCreate,request: Request,
-                         db: Session = Depends(get_db),
+def create_share_link(payload: schemas.ShareLinkCreate, request: Request,
+                     db: Session = Depends(get_db),
                          current_user: User = Depends(get_current_user)):
 
     # 1) Only “technician” or the study’s creator can share
-    if current_user.profile.role not in ["Investigator", "Administrator","Principal Investigator"]:
+    if current_user.profile.role not in ["Investigator", "Administrator", "Principal Investigator"]:
         raise HTTPException(status_code=403, detail="Not allowed")
 
     token = generate_token()
@@ -402,6 +402,7 @@ def create_share_link(payload: schemas.ShareLinkCreate,request: Request,
         study_id=payload.study_id,
         subject_index=payload.subject_index,
         visit_index=payload.visit_index,
+        group_index=payload.group_index,
         permission=payload.permission,
         max_uses=payload.max_uses,
         expires_at=expires_at,
@@ -439,19 +440,44 @@ def access_shared_form(
     access.used_count += 1
     db.commit()
 
-    # grab the study content
+    # Grab the study content and metadata
     content = (
-      db.query(models.StudyContent)
+        db.query(models.StudyContent)
         .filter_by(study_id=access.study_id)
         .first()
     )
     if not content:
         raise HTTPException(500, "Study content missing")
 
+    metadata = (
+        db.query(models.StudyMetadata)
+        .filter_by(id=access.study_id)
+        .first()
+    )
+    if not metadata:
+        raise HTTPException(500, "Study metadata missing")
+
+    if not content.study_data or not isinstance(content.study_data.get("assignments"), list):
+        raise HTTPException(500, "Study assignments data is missing or invalid")
+
+
     return {
-      "study_id":      access.study_id,
-      "subject_index": access.subject_index,
-      "visit_index":   access.visit_index,
-      "permission":    access.permission,
-      "study_data":    content.study_data
+        "study_id":      access.study_id,
+        "subject_index": access.subject_index,
+        "visit_index":   access.visit_index,
+        "group_index":   access.group_index,
+        "permission":    access.permission,
+        "study": {
+            "metadata": {
+                "id": metadata.id,
+                "study_name": metadata.study_name,
+                "study_description": metadata.study_description,
+                "created_by": metadata.created_by,
+                "created_at": metadata.created_at,
+                "updated_at": metadata.updated_at
+            },
+            "content": {
+                "study_data": content.study_data
+            }
+        }
     }

@@ -6,13 +6,13 @@ import UserInfoComponent from "../components/UserInfoComponent.vue";
 // import CreateFormComponent from "../components/CreateFormComponent.vue";
 import AnalyticsComponent from "../components/AnalyticsComponent.vue";
 import ScratchFormComponent from "../components/ScratchFormComponent.vue";
-import FormDetailComponent from "../components/FormDetailComponent.vue";
+import StudyDataEntryComponent from "../components/StudyDataEntryComponent.vue";
 import StudyCreationComponent from "../components/StudyCreationComponent.vue";
 //import YamlViewerComponent from "../components/YamlViewerComponent.vue";
 import StudySettings from "../components/StudySettings.vue";
 import SavedStudyView         from '../components/SavedStudyView.vue'
 import SharedFormComponent from '../components/SharedFormComponent.vue'
-import StudyDataEntryComponent from '../components/DataEntryComponent.vue'
+//import StudyDataEntryComponent from '../components/DataEntryComponent.vue'
 const routes = [
   { path: "/", redirect: "/login" },
   { path: "/login", name: "Login", component: LoginComponent },
@@ -42,7 +42,7 @@ const routes = [
   {
     path: "/studies/:id",
     name: "StudyDetail",
-    component: FormDetailComponent,
+    component: StudyDataEntryComponent,
   },
   {
     path: '/saved-study',
@@ -59,12 +59,12 @@ const routes = [
     name: "SharedForm",
     component: SharedFormComponent,
   },
-  {
-    path: "/studies/:id",
-    name: "StudyDataEntry",
-    component: StudyDataEntryComponent,
-    props: route => ({ id: Number(route.params.id) })
-  },
+//  {
+//    path: "/studies/:id",
+//    name: "StudyDataEntry",
+//    component: StudyDataEntryComponent,
+//    props: route => ({ id: Number(route.params.id) })
+//  },
 ];
 
 const router = createRouter({

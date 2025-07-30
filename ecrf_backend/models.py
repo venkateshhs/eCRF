@@ -84,6 +84,7 @@ class SharedFormAccess(Base):
     study_id = Column(Integer, ForeignKey("study_metadata.id"), nullable=False)
     subject_index = Column(Integer, nullable=False)
     visit_index = Column(Integer, nullable=False)
+    group_index = Column(Integer, nullable=False)
     permission = Column(String(10), default="view")  # "view" or "add"
     max_uses = Column(Integer, default=1)
     used_count = Column(Integer, default=0)
