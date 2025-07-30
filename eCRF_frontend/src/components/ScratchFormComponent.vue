@@ -429,9 +429,21 @@ export default {
   },
 
   watch: {
-    visits:         { handler: "initAssignments", immediate: true },
-    groups:         { handler: "initAssignments", immediate: true },
-    selectedModels: { handler: "initAssignments", immediate: true },
+    visits: {
+      handler() { this.adjustAssignments('visits'); },
+      immediate: true,
+      deep: true
+    },
+    groups: {
+      handler() { this.adjustAssignments('groups'); },
+      immediate: true,
+      deep: true
+    },
+    selectedModels: {
+      handler() { this.adjustAssignments('selectedModels'); },
+      immediate: true,
+      deep: true
+    },
     forms: {
       deep: true,
       handler(f) {
@@ -442,11 +454,11 @@ export default {
 
   async mounted() {
     // ─── New vs Edit: clear old scratch‐forms on NEW study
-    console.log("this.studyDetails", this.studyDetails)
+    console.log("this.studyDetails", this.studyDetails);
     if (this.studyDetails.study_metadata?.id) {
       // Editing an existing study: load from localStorage or fallback
       const stored = localStorage.getItem("scratchForms");
-      console.log("scratchForms", stored)
+      console.log("scratchForms", stored);
       if (stored) {
         try {
           this.forms = JSON.parse(stored);
@@ -468,9 +480,15 @@ export default {
     }
     // load visits/groups
     this.visits = Array.isArray(this.studyDetails.visits)
-      ? this.studyDetails.visits : [];
+      ? JSON.parse(JSON.stringify(this.studyDetails.visits))
+      : [];
     this.groups = Array.isArray(this.studyDetails.groups)
-      ? this.studyDetails.groups : [];
+      ? JSON.parse(JSON.stringify(this.studyDetails.groups))
+      : [];
+
+    // Initialize assignments
+    console.log("studyDetails.assignments before adjustAssignments:", this.studyDetails.assignments);
+    this.adjustAssignments('initial');
 
     // fetch custom fields
     try {
@@ -495,8 +513,8 @@ export default {
 
     openConfirmDialog(msg, cb) {
       this.confirmDialogMessage = msg;
-      this.confirmCallback       = cb;
-      this.showConfirmDialog     = true;
+      this.confirmCallback = cb;
+      this.showConfirmDialog = true;
     },
     confirmDialogYes() {
       this.showConfirmDialog = false;
@@ -508,8 +526,8 @@ export default {
 
     openGenericDialog(msg, cb) {
       this.genericDialogMessage = msg;
-      this.genericCallback      = cb;
-      this.showGenericDialog    = true;
+      this.genericCallback = cb;
+      this.showGenericDialog = true;
     },
     closeGenericDialog() {
       this.showGenericDialog = false;
@@ -517,10 +535,10 @@ export default {
     },
 
     openInputDialog(msg, def, cb) {
-      this.inputDialogMessage  = msg;
-      this.inputDialogValue    = def;
+      this.inputDialogMessage = msg;
+      this.inputDialogValue = def;
       this.inputDialogCallback = cb;
-      this.showInputDialog     = true;
+      this.showInputDialog = true;
     },
     confirmInputDialog() {
       this.showInputDialog = false;
@@ -531,20 +549,68 @@ export default {
     },
 
     // ── Protocol Matrix ──
-    initAssignments() {
-      const m = this.selectedModels.length,
-            v = this.visits.length,
-            g = this.groups.length;
-      this.assignments = Array.from({ length: m }, () =>
-        Array.from({ length: v }, () =>
-          Array.from({ length: g }, () => false)
-        )
-      );
+    adjustAssignments(trigger) {
+
+      const m = this.selectedModels.length;
+      const v = this.visits.length;
+      const g = this.groups.length;
+      console.log(`adjustAssignments triggered by ${trigger}:`, { m, v, g });
+
+      // Validate dimensions
+      if (m === 0 || v === 0 || g === 0) {
+        console.log("Invalid dimensions, initializing empty assignments");
+        this.assignments = [];
+        return;
+      }
+
+      // If editing a study, try to preserve existing assignments
+      if (this.studyDetails.study_metadata?.id && Array.isArray(this.studyDetails.assignments)) {
+        const oldAssignments = this.studyDetails.assignments;
+        console.log("Old assignments:", oldAssignments);
+        const newAssignments = [];
+
+        // Initialize new assignments array with correct dimensions
+        for (let mi = 0; mi < m; mi++) {
+          newAssignments[mi] = [];
+          for (let vi = 0; vi < v; vi++) {
+            newAssignments[mi][vi] = [];
+            for (let gi = 0; gi < g; gi++) {
+              // Preserve existing assignments if available and valid, otherwise set to false
+              const oldValue = oldAssignments[mi]?.[vi]?.[gi];
+              newAssignments[mi][vi][gi] = typeof oldValue === 'boolean' ? oldValue : false;
+            }
+          }
+        }
+
+        this.assignments = newAssignments;
+        console.log("Preserved assignments for editing:", this.assignments);
+        // Log detailed assignments structure
+        console.log("Detailed assignments:", JSON.stringify(this.assignments, null, 2));
+      } else {
+        // New study: initialize empty assignments
+        this.assignments = Array.from({ length: m }, () =>
+          Array.from({ length: v }, () =>
+            Array.from({ length: g }, () => false)
+          )
+        );
+        console.log("Initialized empty assignments for new study:", this.assignments);
+        console.log("Detailed assignments:", JSON.stringify(this.assignments, null, 2));
+      }
     },
-    handleProtocolClick() { this.showMatrix = true },
-    editTemplate()       { this.showMatrix = false },
+
+    handleProtocolClick() {
+      console.log("handleProtocolClick: assignments before showing matrix:", this.assignments);
+      this.showMatrix = true;
+    },
+    editTemplate() { this.showMatrix = false },
     onAssignmentUpdated({ mIdx, vIdx, gIdx, checked }) {
       this.assignments[mIdx][vIdx][gIdx] = checked;
+      console.log("Assignment updated:", { mIdx, vIdx, gIdx, checked });
+      // Update Vuex store to persist changes
+      this.$store.commit("setStudyDetails", {
+        ...this.studyDetails,
+        assignments: this.assignments
+      });
     },
 
     // ── Sections & Fields ──
@@ -558,8 +624,8 @@ export default {
     },
 
     openModelDialog(model) {
-      this.currentModel    = model;
-      this.selectedProps   = model.fields.map(() => false);
+      this.currentModel = model;
+      this.selectedProps = model.fields.map(() => false);
       this.showModelDialog = true;
     },
     takeoverModel() {
@@ -567,48 +633,48 @@ export default {
         .filter((_, i) => this.selectedProps[i])
         .map(f => ({ ...f, description: f.description || "" }));
       const sec = {
-        title:     this.currentModel.title,
-        fields:    chosen,
+        title: this.currentModel.title,
+        fields: chosen,
         collapsed: false,
-        source:    "template"
+        source: "template"
       };
       const idx = this.activeSection + 1;
       this.forms[this.currentFormIndex].sections.splice(idx, 0, sec);
-      this.activeSection   = idx;
+      this.activeSection = idx;
       this.showModelDialog = false;
-      this.initAssignments();
+      this.adjustAssignments('takeoverModel');
       this.focusSection(idx);
       this.$forceUpdate();
     },
 
     addNewSection() {
       const sec = {
-        title:     `Section ${this.currentForm.sections.length + 1}`,
-        fields:    [],
+        title: `Section ${this.currentForm.sections.length + 1}`,
+        fields: [],
         collapsed: false,
-        source:    "manual"
+        source: "manual"
       };
       this.forms[this.currentFormIndex].sections.push(sec);
       this.activeSection = this.currentForm.sections.length - 1;
-      this.initAssignments();
+      this.adjustAssignments('addNewSection');
       this.focusSection(this.activeSection);
       this.$forceUpdate();
     },
     addNewSectionBelow(i) {
       const currentSection = this.currentForm.sections[i];
       const sec = {
-        title:     `${currentSection.title} (Copy)`,
-        fields:    currentSection.fields.map(field => ({
+        title: `${currentSection.title} (Copy)`,
+        fields: currentSection.fields.map(field => ({
           ...field,
           name: `${field.name}_${Date.now()}`
         })),
         collapsed: false,
-        source:    currentSection.source
+        source: currentSection.source
       };
       const idx = i + 1;
       this.forms[this.currentFormIndex].sections.splice(idx, 0, sec);
       this.activeSection = idx;
-      this.initAssignments();
+      this.adjustAssignments('addNewSectionBelow');
       this.focusSection(idx);
       this.$forceUpdate();
     },
@@ -617,7 +683,7 @@ export default {
       this.openConfirmDialog("Delete this section?", () => {
         this.currentForm.sections.splice(i, 1);
         this.activeSection = Math.max(0, this.activeSection - 1);
-        this.initAssignments();
+        this.adjustAssignments('confirmDeleteSection');
       });
     },
 
@@ -627,7 +693,7 @@ export default {
         () => {
           this.forms[this.currentFormIndex].sections = [];
           this.activeSection = 0;
-          this.initAssignments();
+          this.adjustAssignments('confirmClearForm');
           this.$forceUpdate();
         }
       );
@@ -662,12 +728,12 @@ export default {
       if (sec.collapsed) this.toggleSection(this.activeSection);
 
       sec.fields.push({
-        name:        `${field.name}_${Date.now()}`,
-        label:       field.label,
-        type:        field.type,
-        options:     field.options || [],
+        name: `${field.name}_${Date.now()}`,
+        label: field.label,
+        type: field.type,
+        options: field.options || [],
         placeholder: field.description || field.placeholder,
-        value:       "",
+        value: "",
         constraints: { ...field.constraints }
       });
     },
@@ -679,7 +745,7 @@ export default {
       if (v) this.currentForm.sections[si].fields[fi].label = v;
     },
     addSimilarField(si, fi) {
-      const f     = this.currentForm.sections[si].fields[fi];
+      const f = this.currentForm.sections[si].fields[fi];
       const clone = { ...f, name: `${f.name}_${Date.now()}` };
       this.currentForm.sections[si].fields.splice(fi + 1, 0, clone);
     },
@@ -689,9 +755,9 @@ export default {
 
     openConstraintsDialog(si, fi) {
       const f = this.currentForm.sections[si].fields[fi];
-      this.currentFieldIndices   = { sectionIndex: si, fieldIndex: fi };
-      this.currentFieldType      = f.type;
-      this.constraintsForm       = { ...f.constraints };
+      this.currentFieldIndices = { sectionIndex: si, fieldIndex: fi };
+      this.currentFieldType = f.type;
+      this.constraintsForm = { ...f.constraints };
       this.showConstraintsDialog = true;
     },
     confirmConstraintsDialog(c) {
@@ -713,17 +779,17 @@ export default {
     downloadFormData() {
       const payload = {
         sections: this.currentForm.sections.map(sec => ({
-          title:  sec.title,
+          title: sec.title,
           fields: sec.fields,
           source: sec.source
         }))
       };
-      const str  = JSON.stringify(payload, null, 2),
+      const str = JSON.stringify(payload, null, 2),
             name = "sections.json";
       const blob = new Blob([str], { type: "application/json" });
-      const url  = URL.createObjectURL(blob);
-      const a    = document.createElement("a");
-      a.href     = url;
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
       a.download = name;
       a.click();
       URL.revokeObjectURL(url);
@@ -747,7 +813,7 @@ export default {
           const pd = JSON.parse(evt.target.result);
           if (Array.isArray(pd.sections)) {
             this.currentForm.sections = pd.sections;
-            this.initAssignments();
+            this.adjustAssignments('handleFileChange');
           } else {
             throw new Error("Bad format");
           }
@@ -770,14 +836,14 @@ export default {
         this.dataModels = Object.entries(doc.classes)
           .filter(([n]) => n !== "Study")
           .map(([n, cls]) => ({
-            title:       n,
+            title: n,
             description: cls.description || "",
             fields: Object.entries(cls.attributes).map(([attr, def]) => ({
-              name:        attr,
-              label:       def.label || attr,
+              name: attr,
+              label: def.label || attr,
               description: def.description || "",
-              type:        this.resolveType(def),
-              options:     def.enum || [],
+              type: this.resolveType(def),
+              options: def.enum || [],
               constraints: { required: !!def.required },
               placeholder: def.description || ""
             }))

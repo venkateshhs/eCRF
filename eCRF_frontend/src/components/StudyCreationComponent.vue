@@ -183,6 +183,7 @@ export default {
     const visitData = ref([]);
     const subjectCount = ref(1);
     const assignmentMethod = ref("Random");
+    const assignments = ref([]);
 
     const studySchema = ref([]);
     const groupSchema = ref([]);
@@ -223,6 +224,14 @@ export default {
       });
     }
 
+    function initializeAssignments(models, visits, groups) {
+      return Array(models.length).fill().map(() =>
+        Array(visits.length).fill().map(() =>
+          Array(groups.length).fill(false)
+        )
+      );
+    }
+
     function validateStudy() {
       showStudyErrors.value = true;
       const hasMissing = studySchema.value.some(f =>
@@ -239,12 +248,13 @@ export default {
       const payload = {
         study: studyData.value,
         groups: [],
-        visits: []
+        visits: [],
+        assignments: assignments.value
       };
 
       if (skips.includes("groups") && skips.includes("visits")) {
         store.commit("setStudyDetails", payload);
-        router.push({ name: "CreateFormScratch" });
+        router.push({ name: "CreateFormScratch", params: { assignments: assignments.value } });
       } else {
         store.commit("setStudyDetails", payload);
         step.value = 2;
@@ -257,10 +267,16 @@ export default {
       );
       if (hasErrors) return;
 
+      // Reinitialize assignments if groups change
+      if (assignments.value.length > 0 && assignments.value[0]?.[0]?.length !== groupData.value.length) {
+        assignments.value = initializeAssignments(studyData.value.selectedModels || [], visitData.value, groupData.value);
+      }
+
       store.commit("setStudyDetails", {
         study: studyData.value,
         groups: groupData.value,
-        visits: []
+        visits: [],
+        assignments: assignments.value
       });
       step.value = 3;
     }
@@ -359,14 +375,19 @@ export default {
         subjectCount: subjectCount.value,
         assignmentMethod: assignmentMethod.value,
         subjects: subjectData.value,
-        visits: visitData.value
+        visits: visitData.value,
+        assignments: assignments.value
       });
 
-      router.push({ name: "CreateFormScratch" });
+      router.push({ name: "CreateFormScratch", params: { assignments: assignments.value } });
     }
 
     function goToStudyManagement() {
       router.push({ name: "Dashboard", query: { openStudies: "false" } });
+    }
+
+    function handleAssignmentUpdated({ mIdx, vIdx, gIdx, checked }) {
+      assignments.value[mIdx][vIdx][gIdx] = checked;
     }
 
     onMounted(async () => {
@@ -386,12 +407,16 @@ export default {
         assignmentMethod.value = details.assignmentMethod ?? assignmentMethod.value;
         subjectData.value = Array.isArray(details.subjects) ? [...details.subjects] : [];
         visitData.value = Array.isArray(details.visits) ? [...details.visits] : [];
+        assignments.value = Array.isArray(details.assignments)
+          ? JSON.parse(JSON.stringify(details.assignments)) // Deep copy
+          : initializeAssignments(details.selectedModels || [], details.visits || [], details.groups || []);
         step.value = 1;
       } else {
         studySchema.value.forEach(f => studyData.value[f.field] = "");
         groupData.value = [];
         subjectData.value = [];
         visitData.value = [];
+        assignments.value = [];
       }
     });
 
@@ -403,6 +428,7 @@ export default {
       visitData,
       subjectCount,
       assignmentMethod,
+      assignments,
       studySchema,
       groupSchema,
       visitSchema,
@@ -414,7 +440,8 @@ export default {
       checkSubjectsSetup,
       checkSubjectsAssigned,
       checkVisits,
-      goToStudyManagement
+      goToStudyManagement,
+      handleAssignmentUpdated
     };
   }
 };
