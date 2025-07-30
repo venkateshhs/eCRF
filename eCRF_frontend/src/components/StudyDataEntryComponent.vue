@@ -1,25 +1,76 @@
 <template>
   <div class="study-data-container" v-if="study">
-    <div class="dashboard-back" v-if="showSelection">
-      <button @click="goToDashboard" class="btn-back">
+    <!-- Back Buttons (Always at Top Left) -->
+    <div class="back-buttons-container">
+      <button v-if="showSelection" @click="goToDashboard" class="btn-back">
         <i :class="icons.back"></i> Back to Dashboard
       </button>
-    </div>
-    <!-- Back to Selection (Moved to top when not in selection mode) -->
-    <div v-if="!showSelection" class="back-button-container">
-      <button @click="backToSelection" class="btn-back">
+      <button v-if="!showSelection" @click="backToSelection" class="btn-back">
         <i :class="icons.back"></i> Back to Selection
       </button>
     </div>
-    <!-- 1. STUDY DETAILS (Always Visible at the Top) -->
-    <div class="study-header">
-      <h1 class="study-name">{{ study.metadata.study_name }}</h1>
-      <p class="study-description">{{ study.metadata.study_description }}</p>
-      <p class="study-meta">
-        Subjects: {{ numberOfSubjects }} |
-        Visits: {{ visitList.length }} |
-        Groups: {{ groupList.length }}
-      </p>
+
+    <!-- 1. STUDY DETAILS AND DETAILS PANEL (Below Back Buttons) -->
+    <div class="study-header-container">
+      <div class="study-header">
+        <h1 class="study-name">{{ study.metadata.study_name }}</h1>
+        <p class="study-description">{{ study.metadata.study_description }}</p>
+        <p class="study-meta">
+          Subjects: {{ numberOfSubjects }} |
+          Visits: {{ visitList.length }} |
+          Groups: {{ groupList.length }}
+        </p>
+      </div>
+      <div class="details-panel">
+        <div class="details-controls">
+          <button @click="toggleDetails" class="details-toggle-btn">
+            <i :class="showDetails ? icons.toggleUp : icons.toggleDown"></i>
+            {{ showDetails ? 'Hide Details' : 'Show Details' }}
+          </button>
+          <button
+            class="share-icon"
+            title="Share this form link"
+            @click="openShareDialog(currentSubjectIndex, currentVisitIndex, currentGroupIndex)"
+          >
+            <i :class="icons.share"></i>
+          </button>
+        </div>
+        <div v-if="showDetails" class="details-content">
+          <div class="details-block">
+            <strong>Study Info:</strong>
+            <ul>
+              <li
+                v-for="[key, val] in Object.entries(study.content.study_data.study)"
+                :key="key"
+              >
+                {{ key }}: {{ val }}
+              </li>
+            </ul>
+          </div>
+          <div class="details-block">
+            <strong>Visit Info:</strong>
+            <ul>
+              <li
+                v-for="[key, val] in Object.entries(visitList[currentVisitIndex] || {})"
+                :key="key"
+              >
+                {{ key }}: {{ val }}
+              </li>
+            </ul>
+          </div>
+          <div class="details-block">
+            <strong>Group Info:</strong>
+            <ul>
+              <li
+                v-for="[key, val] in Object.entries(groupList[currentGroupIndex] || {})"
+                :key="key"
+              >
+                {{ key }}: {{ val }}
+              </li>
+            </ul>
+          </div>
+        </div>
+      </div>
       <hr />
     </div>
 
@@ -54,58 +105,6 @@
 
     <!-- 3. DATA-ENTRY FORM: Shown Once a Cell Is Chosen -->
     <div v-else class="entry-form-wrapper">
-      <!-- 3.a COLLAPSIBLE PANEL FOR “Study / Visit” INFO -->
-      <div class="details-panel">
-        <div class="details-controls">
-          <button @click="toggleDetails" class="details-toggle-btn">
-            <i :class="showDetails ? icons.toggleUp : icons.toggleDown"></i>
-            {{ showDetails ? 'Hide Details' : 'Show Details' }}
-          </button>
-          <button
-            class="share-icon"
-            title="Share this form link"
-            @click="openShareDialog(currentSubjectIndex, currentVisitIndex, currentGroupIndex)"
-          >
-            <i :class="icons.share"></i>
-          </button>
-        </div>
-        <div v-if="showDetails" class="details-content">
-          <div class="details-block">
-            <strong>Study Info:</strong>
-            <ul>
-              <li
-                v-for="[key, val] in Object.entries(study.content.study_data.study)"
-                :key="key"
-              >
-                {{ key }}: {{ val }}
-              </li>
-            </ul>
-          </div>
-          <div class="details-block">
-            <strong>Visit Info:</strong>
-            <ul>
-              <li
-                v-for="[key, val] in Object.entries(visitList[currentVisitIndex])"
-                :key="key"
-              >
-                {{ key }}: {{ val }}
-              </li>
-            </ul>
-          </div>
-          <div class="details-block">
-            <strong>Group Info:</strong>
-            <ul>
-              <li
-                v-for="[key, val] in Object.entries(groupList[currentGroupIndex])"
-                :key="key"
-              >
-                {{ key }}: {{ val }}
-              </li>
-            </ul>
-          </div>
-        </div>
-      </div>
-
       <!-- 3.b BREADCRUMB (Exact Subject/Visit/Group) -->
       <div class="bread-crumb">
         <strong>Study:</strong> {{ study.metadata.study_name }} &nbsp;|&nbsp;
@@ -665,35 +664,8 @@ export default {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
 }
 
-/* 1. STUDY DETAILS (Always Visible at Top) */
-.study-header {
-  text-align: center;
-  margin-bottom: 24px;
-}
-.study-name {
-  font-size: 24px;
-  font-weight: 600;
-  color: #1f2937;
-  margin-bottom: 8px;
-}
-.study-description {
-  font-size: 16px;
-  color: #4b5563;
-  margin-bottom: 8px;
-}
-.study-meta {
-  font-size: 14px;
-  color: #6b7280;
-}
-hr {
-  margin: 12px 0;
-  border: 0;
-  border-top: 1px solid #e5e7eb;
-}
-
-/* Back Buttons (Dashboard and Selection) */
-.back-button-container,
-.dashboard-back {
+/* Back Buttons (Always at Top Left) */
+.back-buttons-container {
   margin-bottom: 16px;
 }
 .btn-back {
@@ -717,54 +689,35 @@ hr {
   font-size: 14px;
 }
 
-/* 2. SELECTION MATRIX */
-.selection-matrix {
-  width: 100%;
-  border-collapse: collapse;
-  margin-bottom: 32px;
-  table-layout: fixed; /* Ensure fixed column layout */
+/* 1. STUDY HEADER AND DETAILS PANEL */
+.study-header-container {
+  margin-bottom: 24px;
 }
-.selection-matrix th,
-.selection-matrix td {
-  border: 1px solid #e5e7eb;
-  padding: 12px;
+.study-header {
   text-align: center;
-  vertical-align: middle;
+  margin-bottom: 16px;
 }
-.selection-matrix th {
-  background: #f9fafb;
+.study-name {
+  font-size: 24px;
   font-weight: 600;
   color: #1f2937;
+  margin-bottom: 8px;
 }
-.subject-cell {
-  background: #f9fafb;
-  font-weight: 500;
-  color: #374151;
-  width: 20%; /* Fixed width for subject column */
+.study-description {
+  font-size: 16px;
+  color: #4b5563;
+  margin-bottom: 8px;
 }
-.visit-cell {
-  width: 40%; /* Equal width for each visit column */
-}
-.select-btn {
-  background: #e5e7eb;
-  color: #1f2937;
-  border: none;
-  padding: 6px 12px;
-  border-radius: 6px;
-  cursor: pointer;
+.study-meta {
   font-size: 14px;
-  transition: background 0.2s;
-  display: block;
-  margin: 0 auto; /* Center align the button */
+  color: #6b7280;
 }
-.visit-2-btn {
-  background: #e5e7eb; /* Match Visit 1 color for minimalistic look */
-}
-.select-btn:hover {
-  background: #d1d5db;
+hr {
+  margin: 12px 0;
+  border: 0;
+  border-top: 1px solid #e5e7eb;
 }
 
-/* 3. DATA-ENTRY SECTION */
 .details-panel {
   margin-bottom: 16px;
 }
@@ -830,7 +783,54 @@ hr {
   color: #374151;
 }
 
-/* 3.b Breadcrumb */
+/* 2. SELECTION MATRIX */
+.selection-matrix {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 32px;
+  table-layout: fixed;
+}
+.selection-matrix th,
+.selection-matrix td {
+  border: 1px solid #e5e7eb;
+  padding: 12px;
+  text-align: center;
+  vertical-align: middle;
+}
+.selection-matrix th {
+  background: #f9fafb;
+  font-weight: 600;
+  color: #1f2937;
+}
+.subject-cell {
+  background: #f9fafb;
+  font-weight: 500;
+  color: #374151;
+  width: 20%;
+}
+.visit-cell {
+  width: 40%;
+}
+.select-btn {
+  background: #e5e7eb;
+  color: #1f2937;
+  border: none;
+  padding: 6px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 14px;
+  transition: background 0.2s;
+  display: block;
+  margin: 0 auto;
+}
+.visit-2-btn {
+  background: #e5e7eb;
+}
+.select-btn:hover {
+  background: #d1d5db;
+}
+
+/* 3. DATA-ENTRY SECTION */
 .bread-crumb {
   background: #f9fafb;
   padding: 12px 16px;
@@ -841,7 +841,6 @@ hr {
   color: #374151;
 }
 
-/* 3.c Form fields */
 .entry-form-section h2 {
   font-size: 18px;
   font-weight: 600;
