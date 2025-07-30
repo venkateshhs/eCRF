@@ -10,11 +10,10 @@
     <h2>Shared Data Entry</h2>
     <div class="bread-crumb">
       <strong>Study:</strong> {{ info.study.metadata.study_name }} |
-      <strong>Subject:</strong> {{ info.subject_index + 1 }} |
+      <strong>Subject:</strong> {{ info.study.content.study_data.subjects[info.subject_index]?.id || '–' }} |
       <strong>Visit:</strong>
         {{ visits[info.visit_index]?.name || '–' }} |
-      <strong>Group:</strong>
-        {{ groups[info.group_index]?.name || '–' }}
+
     </div>
 
     <div v-if="modelIndices.length">
@@ -134,9 +133,9 @@ const models = computed(() =>
 const visits = computed(() =>
   info.value?.study?.content?.study_data?.visits || []
 )
-const groups = computed(() =>
-  info.value?.study?.content?.study_data?.groups || []
-)
+//const groups = computed(() =>
+//  info.value?.study?.content?.study_data?.groups || []
+//)
 
 // which models apply to this visit&group?
 const modelIndices = computed(() => {
