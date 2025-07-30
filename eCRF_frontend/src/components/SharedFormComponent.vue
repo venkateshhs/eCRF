@@ -5,47 +5,85 @@
   <div v-else-if="error" class="error">
     <p>{{ error }}</p>
   </div>
-  <div v-else-if="info && info.study && info.study.metadata" class="share-link-viewer">
-    <h2>Shared Data Entry View</h2>
+
+  <div v-else class="share-link-viewer">
+    <h2>Shared Data Entry</h2>
     <div class="bread-crumb">
-      <strong>Study:</strong> {{ info.study.metadata.study_name }} &nbsp;|&nbsp;
-      <strong>Subject:</strong> {{ info.subject_index + 1 }} &nbsp;|&nbsp;
-      <strong>Visit:</strong> {{ info.study.content.study_data.visits[info.visit_index]?.name || 'Unknown Visit' }} &nbsp;|&nbsp;
-      <strong>Group:</strong> {{ info.study.content.study_data.groups[info.group_index]?.name || 'Unknown Group' }}
+      <strong>Study:</strong> {{ info.study.metadata.study_name }} |
+      <strong>Subject:</strong> {{ info.subject_index + 1 }} |
+      <strong>Visit:</strong>
+        {{ visits[info.visit_index]?.name || '–' }} |
+      <strong>Group:</strong>
+        {{ groups[info.group_index]?.name || '–' }}
     </div>
+
     <div v-if="modelIndices.length">
-      <div v-for="mIdx in modelIndices" :key="mIdx" class="section-block">
+      <div
+        v-for="mIdx in modelIndices"
+        :key="mIdx"
+        class="section-block"
+      >
         <h3>{{ models[mIdx].title }}</h3>
-        <div v-for="(field, fIdx) in models[mIdx].fields" :key="fIdx" class="form-field">
-          <label>{{ field.label }}</label>
+
+        <div
+          v-for="(field, fIdx) in models[mIdx].fields"
+          :key="fIdx"
+          class="form-field"
+        >
+          <label :for="fieldId(mIdx,fIdx)">
+            {{ field.label }}
+            <span v-if="field.constraints?.required" class="required">*</span>
+          </label>
+
+          <!-- TEXT -->
           <input
-            v-if="field.type === 'text'"
-            :value="entryData[mIdx]?.[fIdx] || ''"
-            readonly
+            v-if="field.type==='text'"
+            :id="fieldId(mIdx,fIdx)"
             type="text"
+            v-model="entryData[mIdx][fIdx]"
+            :readonly="isViewOnly"
+            :placeholder="field.placeholder"
           />
+
+          <!-- TEXTAREA -->
           <textarea
-            v-else-if="field.type === 'textarea'"
-            :value="entryData[mIdx]?.[fIdx] || ''"
-            readonly
-            rows="4"
+            v-else-if="field.type==='textarea'"
+            :id="fieldId(mIdx,fIdx)"
+            v-model="entryData[mIdx][fIdx]"
+            :readonly="isViewOnly"
+            :rows="4"
+            :placeholder="field.placeholder"
           ></textarea>
+
+          <!-- NUMBER -->
           <input
-            v-else-if="field.type === 'number'"
-            :value="entryData[mIdx]?.[fIdx] || ''"
-            readonly
+            v-else-if="field.type==='number'"
+            :id="fieldId(mIdx,fIdx)"
             type="number"
+            v-model.number="entryData[mIdx][fIdx]"
+            :readonly="isViewOnly"
+            :min="field.constraints?.min"
+            :max="field.constraints?.max"
+            :step="field.constraints?.step||'any'"
           />
+
+          <!-- DATE -->
           <input
-            v-else-if="field.type === 'date'"
-            :value="entryData[mIdx]?.[fIdx] || ''"
-            readonly
+            v-else-if="field.type==='date'"
+            :id="fieldId(mIdx,fIdx)"
             type="date"
+            v-model="entryData[mIdx][fIdx]"
+            :readonly="isViewOnly"
+            :min="field.constraints?.minDate"
+            :max="field.constraints?.maxDate"
           />
+
+          <!-- SELECT -->
           <select
-            v-else-if="field.type === 'select'"
-            :value="entryData[mIdx]?.[fIdx] || ''"
-            disabled
+            v-else-if="field.type==='select'"
+            :id="fieldId(mIdx,fIdx)"
+            v-model="entryData[mIdx][fIdx]"
+            :disabled="isViewOnly"
           >
             <option value="" disabled>Select…</option>
             <option
@@ -54,160 +92,207 @@
               :value="opt"
             >{{ opt }}</option>
           </select>
-          <p v-else>Unsupported field type: {{ field.type }}</p>
+
+          <!-- FALLBACK -->
+          <div v-else>Unsupported field type: {{ field.type }}</div>
         </div>
       </div>
+
+      <div class="form-actions" v-if="!isViewOnly">
+        <button @click="submitData" class="btn-primary">
+          Save
+        </button>
+      </div>
     </div>
-    <div v-else>
-      <p>No data available for this share link.</p>
+
+    <div v-else class="no-assigned">
+      <p>No sections assigned for this visit & group.</p>
     </div>
-  </div>
-  <div v-else class="error">
-    <p>Invalid or missing study data. Please check the shared link.</p>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue';
-import { useRoute } from 'vue-router';
-import axios from 'axios';
+import { ref, computed, watch, onMounted } from 'vue'
+import { useRoute } from 'vue-router'
+import axios from 'axios'
 
-const route = useRoute();
-const loading = ref(true);
-const error = ref(null);
-const info = ref(null);
+// ----- state -----
+const route   = useRoute()
+const loading = ref(true)
+const error   = ref(null)
+const info    = ref(null)
 
-const token = computed(() => route.params.token);
+// extract token & permission
+const token      = computed(() => route.params.token)
+const permission = computed(() => info.value?.permission || 'view')
+const isViewOnly = computed(() => permission.value === 'view')
 
-const models = computed(() => info.value?.study?.content?.study_data?.selectedModels || []);
+// models, visits, groups
+const models = computed(() =>
+  info.value?.study?.content?.study_data?.selectedModels || []
+)
+const visits = computed(() =>
+  info.value?.study?.content?.study_data?.visits || []
+)
+const groups = computed(() =>
+  info.value?.study?.content?.study_data?.groups || []
+)
 
+// which models apply to this visit&group?
 const modelIndices = computed(() => {
-  if (!info.value || info.value.visit_index === null || info.value.group_index === null) return [];
-  const assignments = info.value?.study?.content?.study_data?.assignments;
-  if (!Array.isArray(assignments)) {
-    console.warn("[WARN] Assignments array is missing or invalid in study_data");
-    return [];
-  }
+  if (!info.value) return []
+  const a = info.value.study.content.study_data.assignments
+  const v = info.value.visit_index
+  const g = info.value.group_index
+  if (!Array.isArray(a)) return []
   return models.value
     .map((_, i) => i)
-    .filter(i => {
-      const visitArray = assignments[i];
-      if (!Array.isArray(visitArray)) return false;
-      const groupArray = visitArray[info.value.visit_index];
-      if (!Array.isArray(groupArray)) return false;
-      return groupArray[info.value.group_index] === true;
-    });
-});
+    .filter(i => !!a[i]?.[v]?.[g])
+})
 
-const entryData = computed(() => {
-  if (
-    !info.value ||
-    info.value.subject_index === null ||
-    info.value.visit_index === null ||
-    info.value.group_index === null ||
-    !info.value.study?.content?.study_data?.entryData
-  ) {
-    console.warn("[WARN] entryData is missing or invalid in study_data");
-    return [];
-  }
-  const entryData = info.value.study.content.study_data.entryData;
-  if (
-    !Array.isArray(entryData) ||
-    !Array.isArray(entryData[info.value.subject_index]) ||
-    !Array.isArray(entryData[info.value.subject_index][info.value.visit_index]) ||
-    !Array.isArray(entryData[info.value.subject_index][info.value.visit_index][info.value.group_index])
-  ) {
-    console.warn("[WARN] entryData structure is invalid for indices", {
-      subjectIndex: info.value.subject_index,
-      visitIndex: info.value.visit_index,
-      groupIndex: info.value.group_index
-    });
-    return [];
-  }
-  return entryData[info.value.subject_index][info.value.visit_index][info.value.group_index] || [];
-});
+// entryData: editable copy of the shared entryData slice
+const entryData = ref([])
 
+function initEntryData() {
+  const subj = info.value.subject_index
+  const v    = info.value.visit_index
+  const g    = info.value.group_index
+  const raw  = info.value.study.content.study_data.entryData
+
+  if (
+    raw?.[subj]?.[v]?.[g] &&
+    Array.isArray(raw[subj][v][g])
+  ) {
+    // deep‑clone so we can v-model
+    entryData.value = JSON.parse(
+      JSON.stringify(raw[subj][v][g])
+    )
+  } else {
+    // fallback: one empty row per section
+    entryData.value = models.value.map(()=>[])
+  }
+}
+
+// update whenever we load or permission changes
+watch(info, val => {
+  if (val) initEntryData()
+})
+
+// fetch on mount
 onMounted(async () => {
-  console.log("[DEBUG] DataEntryComponent mounted with token:", token.value);
   try {
     const resp = await axios.get(
       `http://localhost:8000/forms/shared/${token.value}/`,
       { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } }
-    );
-    info.value = resp.data;
-    console.log("[DEBUG] Shared data loaded:", {
-      study: info.value.study,
-      indices: {
-        subjectIndex: info.value.subject_index,
-        visitIndex: info.value.visit_index,
-        groupIndex: info.value.group_index
-      },
-    });
-    if (!info.value.study || !info.value.study.metadata) {
-      throw new Error("Study metadata is missing in the response.");
-    }
-    if (!info.value.study.content?.study_data?.assignments) {
-      console.warn("[WARN] No assignments array in study_data");
-    }
-    if (!info.value.study.content?.study_data?.entryData) {
-      console.warn("[WARN] No entryData array in study_data");
-    }
-  } catch (err) {
-    console.error("[ERROR] loading shared data", {
-      message: err.message,
-      response: err.response?.data,
-      status: err.response?.status
-    });
-    error.value = err.response?.data?.detail || "Failed to load shared data. Please check the link or contact the administrator.";
+    )
+    info.value = resp.data
+  } catch (e) {
+    console.error(e)
+    error.value = e.response?.data?.detail
+      || 'Failed to load shared data.'
   } finally {
-    loading.value = false;
+    loading.value = false
   }
-});
+})
+
+// generate unique IDs for labels
+function fieldId(mIdx,fIdx){
+  return `s${info.value.subject_index}` +
+         `v${info.value.visit_index}` +
+         `g${info.value.group_index}` +
+         `m${mIdx}` +
+         `f${fIdx}`
+}
+
+// save back to server
+async function submitData() {
+  try {
+    await axios.post(
+      `http://localhost:8000/forms/studies/` +
+        `${info.value.study.metadata.id}/data`,
+      {
+        study_id:      info.value.study.metadata.id,
+        subject_index: info.value.subject_index,
+        visit_index:   info.value.visit_index,
+        group_index:   info.value.group_index,
+        data:          entryData.value
+      },
+      { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } }
+    )
+    alert('Data saved successfully.')
+  } catch (e) {
+    console.error(e)
+    alert('Failed to save data.')
+  }
+}
 </script>
 
 <style scoped>
+.loading, .error {
+  text-align: center;
+  padding: 2rem;
+  color: #666;
+}
 .share-link-viewer {
-  max-width: 960px;
-  margin: 24px auto;
-  padding: 24px;
-  background: #ffffff;
-  border-radius: 8px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+  max-width: 900px;
+  margin: 2rem auto;
+  padding: 1rem;
+  background: #fff;
+  border-radius: 6px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.1);
 }
 .bread-crumb {
-  background: #f9fafb;
-  padding: 12px 16px;
-  border: 1px solid #e5e7eb;
-  border-radius: 6px;
-  margin-bottom: 24px;
-  font-size: 14px;
-  color: #374151;
+  font-size: 0.9rem;
+  margin-bottom: 1rem;
+  color: #333;
 }
 .section-block {
-  margin-bottom: 16px;
-  padding: 16px;
-  border: 1px solid #e5e7eb;
-  border-radius: 6px;
+  margin-bottom: 1.5rem;
+  padding: 1rem;
+  border: 1px solid #ddd;
+  border-radius: 4px;
 }
 .form-field {
-  margin-bottom: 12px;
+  margin-bottom: 0.75rem;
 }
 .form-field label {
   display: block;
-  margin-bottom: 6px;
+  margin-bottom: 0.25rem;
   font-weight: 500;
 }
-input[readonly], textarea[readonly], select[disabled] {
-  background: #f9fafb;
-  border: 1px solid #d1d5db;
-  padding: 8px;
-  border-radius: 6px;
+input, textarea, select {
   width: 100%;
+  padding: 0.5rem;
+  border: 1px solid #ccc;
+  border-radius: 4px;
   box-sizing: border-box;
 }
-.loading, .error {
+input[readonly], textarea[readonly], select[disabled] {
+  background: #f9f9f9;
+  color: #555;
+}
+.required {
+  color: #c00;
+  margin-left: 4px;
+}
+.form-actions {
+  text-align: right;
+}
+.btn-primary {
+  background: #007bff;
+  color: white;
+  border: none;
+  padding: 0.6rem 1.2rem;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.btn-primary:hover {
+  background: #0069d9;
+}
+.no-assigned {
+  font-style: italic;
+  color: #666;
   text-align: center;
-  padding: 50px;
-  color: #6b7280;
+  padding: 1rem;
 }
 </style>
