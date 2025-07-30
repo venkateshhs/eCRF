@@ -332,6 +332,7 @@ export default {
           id: `SUBJ-${prefix}-${String(idx + 1).padStart(3, "0")}`,
           group: grp
         }));
+      }
 
       console.log("subjects", subjectData.value);
       step.value = assignmentMethod.value === "Skip" ? 5 : 4;
