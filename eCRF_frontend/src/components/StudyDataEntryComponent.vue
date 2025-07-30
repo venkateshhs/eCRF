@@ -107,9 +107,9 @@
     <div v-else class="entry-form-wrapper">
       <!-- 3.b BREADCRUMB (Exact Subject/Visit/Group) -->
       <div class="bread-crumb">
-        <strong>Study:</strong> {{ study.metadata.study_name }} &nbsp;|&nbsp;
-        <strong>Subject:</strong> {{ study.content.study_data.subjects[currentSubjectIndex].id }} &nbsp;|&nbsp;
-        <strong>Visit:</strong> {{ visitList[currentVisitIndex].name }} &nbsp;|&nbsp;
+        <strong>Study:</strong> {{ study.metadata.study_name }}
+        <strong>Subject:</strong> {{ study.content.study_data.subjects[currentSubjectIndex].id }}
+        <strong>Visit:</strong> {{ visitList[currentVisitIndex].name }}
       </div>
 
       <!-- 3.c ENTRY FORM FIELDS -->
