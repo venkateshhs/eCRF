@@ -248,7 +248,7 @@
     <div v-if="showShareDialog" class="dialog-overlay">
       <div class="dialog">
         <h3>Generate Share Link</h3>
-        <p>Sharing for Subject {{ shareParams.subjectIndex != null ? study.content.study_data.subjects[shareParams.subjectIndex]?.id : 'N/A' }}, Visit {{ visitList[shareParams.visitIndex]?.name }}, Group {{ groupList[shareParams.groupIndex]?.name }}</p>
+        <p>Sharing for Subject {{ shareParams.subjectIndex != null ? study.content.study_data.subjects[shareParams.subjectIndex]?.id : 'N/A' }}, Visit {{ visitList[shareParams.visitIndex]?.name }}</p>
         <label>
           Permission:
           <select v-model="shareConfig.permission">
