@@ -118,8 +118,23 @@
                   class="form-group"
                 >
                   <div class="field-header">
-                    <label v-if="field.type !== 'button'" :for="field.name">
+                    <label
+                      v-if="field.type !== 'button' && field.type !== 'checkbox'"
+                      :for="field.name"
+                    >
                       {{ field.label }}
+                    </label>
+                    <label
+                      v-else-if="field.type === 'checkbox'"
+                      class="checkbox-label"
+                      :for="field.name"
+                    >
+                      {{ field.label }}
+                      <input
+                        type="checkbox"
+                        :id="field.name"
+                        v-model="field.value"
+                      />
                     </label>
                     <div class="field-actions">
                       <button
@@ -151,21 +166,21 @@
                   <div class="field-box">
                     <!-- TEXT -->
                     <input
-                      v-if="field.type==='text'"
+                      v-if="field.type === 'text'"
                       type="text"
                       v-model="field.value"
                       :placeholder="field.constraints.placeholder || field.placeholder"
                     />
                     <!-- TEXTAREA -->
                     <textarea
-                      v-else-if="field.type==='textarea'"
+                      v-else-if="field.type === 'textarea'"
                       v-model="field.value"
-                      :rows="field.rows||3"
+                      :rows="field.rows || 3"
                       :placeholder="field.constraints.placeholder || field.placeholder"
                     ></textarea>
                     <!-- NUMBER -->
                     <input
-                      v-else-if="field.type==='number'"
+                      v-else-if="field.type === 'number'"
                       type="number"
                       v-model.number="field.value"
                       :min="field.constraints.min"
@@ -174,7 +189,7 @@
                     />
                     <!-- DATE -->
                     <input
-                      v-else-if="field.type==='date'"
+                      v-else-if="field.type === 'date'"
                       type="date"
                       v-model="field.value"
                       :min="field.constraints.minDate"
@@ -182,7 +197,7 @@
                     />
                     <!-- SELECT -->
                     <select
-                      v-else-if="field.type==='select'"
+                      v-else-if="field.type === 'select'"
                       v-model="field.value"
                     >
                       <option value="" disabled>Select…</option>
@@ -190,7 +205,7 @@
                     </select>
                     <!-- BUTTON -->
                     <button
-                      v-else-if="field.type==='button'"
+                      v-else-if="field.type === 'button'"
                       class="form-button"
                     >{{ field.label }}</button>
                     <small v-if="field.constraints.helpText" class="help-text">
@@ -253,13 +268,12 @@
             class="prop-row"
           >
             <div class="prop-info">
-              <strong>{{ prop.name }}</strong> —
-              {{ prop.label }}
+              <strong>{{ prop.name }}</strong> — {{ prop.label }}
               <p class="prop-desc">{{ prop.description }}</p>
             </div>
-            <div class="prop-check">
-              <input type="checkbox" v-model="selectedProps[i]" />
-            </div>
+            <label class="prop-check">
+              <input type="checkbox" :id="'prop-check-' + i" v-model="selectedProps[i]" />
+            </label>
           </div>
         </div>
         <div class="modal-actions">
@@ -733,7 +747,7 @@ export default {
         type: field.type,
         options: field.options || [],
         placeholder: field.description || field.placeholder,
-        value: "",
+        value: field.type === 'checkbox' ? false : "", // Initialize checkbox value as boolean
         constraints: { ...field.constraints }
       });
     },
@@ -1005,6 +1019,47 @@ export default {
 .field-actions {
   display: flex;
   gap: 10px;
+}
+
+.field-header .checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.field-header .checkbox-label input[type="checkbox"] {
+  display: block !important;
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  cursor: pointer;
+  border: 2px solid #ccc;
+  border-radius: 4px;
+  background-color: #fff;
+  appearance: none;
+  position: relative;
+  transition: background-color 0.2s ease, border-color 0.2s ease;
+}
+
+.field-header .checkbox-label input[type="checkbox"]:checked {
+  background-color: #444;
+  border-color: #444;
+}
+
+.field-header .checkbox-label input[type="checkbox"]:checked::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 5px;
+  width: 4px;
+  height: 8px;
+  border: solid #fff;
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+}
+
+.field-header .checkbox-label input[type="checkbox"]:hover:not(:checked) {
+  border-color: #666;
 }
 
 .field-box {
