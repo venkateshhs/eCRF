@@ -28,6 +28,7 @@
             {{ showDetails ? 'Hide Details' : 'Show Details' }}
           </button>
           <button
+            v-if="!showSelection"
             class="share-icon"
             title="Share this form link"
             @click="openShareDialog(currentSubjectIndex, currentVisitIndex, currentGroupIndex)"
@@ -47,22 +48,11 @@
               </li>
             </ul>
           </div>
-          <div class="details-block">
+          <div v-if="!showSelection" class="details-block">
             <strong>Visit Info:</strong>
             <ul>
               <li
                 v-for="[key, val] in Object.entries(visitList[currentVisitIndex] || {})"
-                :key="key"
-              >
-                {{ key }}: {{ val }}
-              </li>
-            </ul>
-          </div>
-          <div class="details-block">
-            <strong>Group Info:</strong>
-            <ul>
-              <li
-                v-for="[key, val] in Object.entries(groupList[currentGroupIndex] || {})"
                 :key="key"
               >
                 {{ key }}: {{ val }}
@@ -74,7 +64,7 @@
       <hr />
     </div>
 
-    <!-- 2. SELECTION MATRIX: Subject × (Visit) -->
+    <!-- 2. SELECTION MATRIX: Subject × Visit -->
     <div v-if="showSelection">
       <h2>Select Subject × Visit</h2>
       <table class="selection-matrix">
