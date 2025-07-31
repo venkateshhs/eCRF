@@ -161,6 +161,12 @@
                         title="Edit Constraints"
                         @click.prevent="openConstraintsDialog(si, fi)"
                       ><i :class="icons.cog"></i></button>
+                      <button
+                        v-if="field.type === 'radio'"
+                        class="edit-options-button"
+                        title="Edit Options"
+                        @click.prevent="openRadioDialog(field, si, fi)"
+                      >Edit Options</button>
                     </div>
                   </div>
                   <div class="field-box">
@@ -203,6 +209,22 @@
                       <option value="" disabled>Select…</option>
                       <option v-for="opt in field.options" :key="opt">{{ opt }}</option>
                     </select>
+                    <!-- RADIO -->
+                    <div v-else-if="field.type === 'radio'" class="radio-group">
+                      <label
+                        v-for="(opt, i) in field.options"
+                        :key="i"
+                        class="radio-label"
+                      >
+                        <input
+                          type="radio"
+                          :name="field.name"
+                          :value="opt"
+                          v-model="field.value"
+                        />
+                        {{ opt }}
+                      </label>
+                    </div>
                     <!-- BUTTON -->
                     <button
                       v-else-if="field.type === 'button'"
@@ -281,6 +303,42 @@
           <button @click="showModelDialog=false" class="btn-option">
             Cancel
           </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ───────── Radio Group Dialog ───────── -->
+    <div v-if="showRadioDialog" class="modal-overlay">
+      <div class="modal radio-dialog">
+        <h3>{{ radioDialogField?.name ? 'Edit Radio Options' : 'Configure Radio Options' }}</h3>
+        <div class="radio-dialog-content">
+          <label>
+            Number of options:
+            <input
+              type="number"
+              v-model.number="radioDialogOptionsCount"
+              min="1"
+              class="input-dialog-field"
+              @input="updateOptionsArray"
+            />
+          </label>
+          <div class="options-list">
+            <div v-for="(option, index) in radioDialogOptions" :key="index" class="option-row">
+              <label>
+                Option {{ index + 1 }}:
+                <input
+                  type="text"
+                  v-model="radioDialogOptions[index]"
+                  class="input-dialog-field"
+                  placeholder="Enter option label"
+                />
+              </label>
+            </div>
+          </div>
+        </div>
+        <div class="modal-actions">
+          <button @click="confirmRadioDialog" class="btn-primary">Save</button>
+          <button @click="cancelRadioDialog" class="btn-option">Cancel</button>
         </div>
       </div>
     </div>
@@ -395,6 +453,13 @@ export default {
       showModelDialog: false,
       currentModel: null,
       selectedProps: [],
+
+      // radio dialog
+      showRadioDialog: false,
+      radioDialogOptionsCount: 1,
+      radioDialogOptions: ['Option 1'],
+      radioDialogField: null,
+      radioDialogEditIndices: null, // To track section and field indices during edit
 
       // protocol matrix
       showMatrix: false,
@@ -560,6 +625,86 @@ export default {
     },
     cancelInputDialog() {
       this.showInputDialog = false;
+    },
+
+    // ── Radio Group Dialog ──
+    openRadioDialog(field, sectionIndex = null, fieldIndex = null) {
+      // Deep copy to avoid mutating original field
+      this.radioDialogField = JSON.parse(JSON.stringify(field));
+      this.radioDialogEditIndices = sectionIndex !== null && fieldIndex !== null
+        ? { sectionIndex, fieldIndex }
+        : null;
+      if (this.radioDialogEditIndices) {
+        // Editing existing radio field
+        const currentField = this.currentForm.sections[sectionIndex].fields[fieldIndex];
+        this.radioDialogOptionsCount = currentField.options?.length || 1;
+        this.radioDialogOptions = currentField.options?.length ? [...currentField.options] : ['Option 1'];
+      } else {
+        // Adding new radio field
+        this.radioDialogOptionsCount = 1;
+        this.radioDialogOptions = ['Option 1'];
+      }
+      this.showRadioDialog = true;
+    },
+    updateOptionsArray() {
+      const count = Math.max(1, this.radioDialogOptionsCount || 1);
+      const currentLength = this.radioDialogOptions.length;
+      if (count > currentLength) {
+        this.radioDialogOptions = [
+          ...this.radioDialogOptions,
+          ...Array(count - currentLength).fill().map((_, i) => `Option ${currentLength + i + 1}`)
+        ];
+      } else if (count < currentLength) {
+        this.radioDialogOptions = this.radioDialogOptions.slice(0, count);
+      }
+      this.radioDialogOptionsCount = count;
+    },
+    confirmRadioDialog() {
+      if (!this.radioDialogField || this.radioDialogOptionsCount < 1 || this.radioDialogOptions.some(opt => !opt || !opt.trim())) {
+        this.openGenericDialog("Please provide a valid number of options and ensure all options have non-empty labels.");
+        return;
+      }
+      const options = this.radioDialogOptions.map(opt => opt.trim());
+      if (!this.currentForm.sections.length) {
+        this.addNewSection();
+      }
+      const sec = this.currentForm.sections[this.activeSection];
+      if (sec.collapsed) this.toggleSection(this.activeSection);
+
+      if (this.radioDialogEditIndices) {
+        // Editing existing radio field
+        const { sectionIndex, fieldIndex } = this.radioDialogEditIndices;
+        const field = this.currentForm.sections[sectionIndex].fields[fieldIndex];
+        field.options = [...options]; // New array for reactivity
+        field.value = ''; // Reset for single-selection
+        field.constraints = { ...field.constraints, allowMultiple: false };
+      } else {
+        // Adding new radio field
+        sec.fields.push({
+          name: `${this.radioDialogField.name}_${Date.now()}`,
+          label: this.radioDialogField.label,
+          type: 'radio',
+          options: [...options],
+          value: '',
+          constraints: {
+            ...this.radioDialogField.constraints,
+            allowMultiple: false
+          },
+          placeholder: this.radioDialogField.description || this.radioDialogField.placeholder
+        });
+      }
+      console.log('Radio Group saved:', {
+        label: this.radioDialogField.label,
+        options
+      });
+      this.cancelRadioDialog();
+    },
+    cancelRadioDialog() {
+      this.showRadioDialog = false;
+      this.radioDialogField = null;
+      this.radioDialogEditIndices = null;
+      this.radioDialogOptionsCount = 1;
+      this.radioDialogOptions = ['Option 1'];
     },
 
     // ── Protocol Matrix ──
@@ -735,6 +880,10 @@ export default {
     },
 
     addFieldToActiveSection(field) {
+      if (field.type === 'radio') {
+        this.openRadioDialog(field);
+        return;
+      }
       if (!this.currentForm.sections.length) {
         this.addNewSection();
       }
@@ -760,7 +909,13 @@ export default {
     },
     addSimilarField(si, fi) {
       const f = this.currentForm.sections[si].fields[fi];
-      const clone = { ...f, name: `${f.name}_${Date.now()}` };
+      const clone = {
+        ...f,
+        name: `${f.name}_${Date.now()}`,
+        options: f.options ? [...f.options] : [],
+        constraints: { ...f.constraints },
+        value: f.type === 'radio' && f.constraints.allowMultiple ? [] : f.type === 'radio' ? '' : f.value
+      };
       this.currentForm.sections[si].fields.splice(fi + 1, 0, clone);
     },
     removeField(si, fi) {
@@ -1066,6 +1221,90 @@ export default {
   margin-top: 10px;
 }
 
+.field-box .radio-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.field-box .radio-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.field-box .radio-label input[type="radio"],
+.field-box .radio-label input[type="checkbox"] {
+  display: block !important;
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  cursor: pointer;
+  border: 2px solid #ccc;
+  border-radius: 50%;
+  background-color: #fff;
+  appearance: none;
+  position: relative;
+  transition: background-color 0.2s ease, border-color 0.2s ease;
+}
+
+.field-box .radio-label input[type="radio"]:checked,
+.field-box .radio-label input[type="checkbox"]:checked {
+  background-color: #444;
+  border-color: #444;
+}
+
+.field-box .radio-label input[type="radio"]:checked::after {
+  content: '';
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  width: 8px;
+  height: 8px;
+  background: #fff;
+  border-radius: 50%;
+}
+
+.field-box .radio-label input[type="checkbox"]:checked::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 5px;
+  width: 4px;
+  height: 8px;
+  border: solid #fff;
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+}
+
+.field-box .radio-label input[type="radio"]:hover:not(:checked),
+.field-box .radio-label input[type="checkbox"]:hover:not(:checked) {
+  border-color: #666;
+}
+
+.field-box .field-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.edit-options-button {
+  background: $secondary-color;
+  border: 1px solid $border-color;
+  border-radius: 4px;
+  padding: 4px 8px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.edit-options-button:hover {
+  background: $primary-color;
+  color: white;
+  border-color: $primary-color;
+}
+
 input,
 textarea,
 select {
@@ -1129,6 +1368,71 @@ select {
   max-width: 90%;
   max-height: 90%;
   overflow-y: auto;
+}
+
+.modal.radio-dialog {
+  width: 400px;
+  padding: 20px 16px;
+}
+
+.radio-dialog-content {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 20px;
+}
+
+.radio-dialog-content label {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.radio-dialog-content input[type="number"] {
+  width: 100%;
+  padding: 8px;
+  border: 1px solid $border-color;
+  border-radius: 5px;
+}
+
+.radio-dialog-content .checkbox-label {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+}
+
+.radio-dialog-content input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  cursor: pointer;
+  border: 2px solid #ccc;
+  border-radius: 4px;
+  background-color: #fff;
+  appearance: none;
+  position: relative;
+  transition: background-color 0.2s ease, border-color 0.2s ease;
+}
+
+.radio-dialog-content input[type="checkbox"]:checked {
+  background-color: #444;
+  border-color: #444;
+}
+
+.radio-dialog-content input[type="checkbox"]:checked::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 5px;
+  width: 4px;
+  height: 8px;
+  border: solid #fff;
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+}
+
+.radio-dialog-content input[type="checkbox"]:hover:not(:checked) {
+  border-color: #666;
 }
 
 .modal.model-dialog {
@@ -1207,5 +1511,29 @@ select {
   .available-fields {
     width: 100%;
   }
+}
+
+/* Added styles for options list */
+.options-list {
+  max-height: 200px;
+  overflow-y: auto;
+  margin: 10px 0;
+}
+
+.option-row {
+  margin-bottom: 8px;
+}
+
+.option-row label {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.option-row input {
+  width: 100%;
+  padding: 8px;
+  border: 1px solid $border-color;
+  border-radius: 5px;
 }
 </style>
