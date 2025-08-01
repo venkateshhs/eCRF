@@ -61,11 +61,6 @@
     "label": "Button",
     "icon": "fas fa-mouse-pointer",
     "default": "Click Me"
-  },
-  {
-    "type": "paragraph",
-    "label": "Paragraph",
-    "icon": "fas fa-paragraph",
-    "default": "This is a sample paragraph text."
   }
+
 ]
