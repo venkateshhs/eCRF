@@ -318,6 +318,8 @@ export default {
       permissionError: false,
       showDialog: false,
       dialogMessage: "",
+      existingEntries: [],
+      entryIds: [],
     };
   },
 
@@ -389,8 +391,8 @@ export default {
 
   async created() {
     const studyId = this.$route.params.id;
-    console.log("[DEBUG] created() with studyId:", studyId);
     await this.loadStudy(studyId);
+    await this.loadExistingEntries(studyId);
   },
 
   methods: {
@@ -416,6 +418,35 @@ export default {
         this.showDialogMessage("Failed to load study details.");
       }
     },
+    async loadExistingEntries(studyId) {
+      try {
+        const resp = await axios.get(
+          `http://127.0.0.1:8000/forms/studies/${studyId}/data_entries`,
+          { headers: { Authorization: `Bearer ${this.token}` } }
+        );
+        this.existingEntries = resp.data;
+        this.populateFromExisting();
+      } catch (err) {
+        console.error("Failed to load existing entries", err);
+      }
+    },
+
+    populateFromExisting() {
+      // make sure entryIds is initialized
+      this.initializeEntryData();
+      this.existingEntries.forEach((e) => {
+        const { subject_index: s, visit_index: v, group_index: g, data, id } = e;
+        if (
+          this.entryData[s] &&
+          this.entryData[s][v] &&
+          this.entryData[s][v][g]
+        ) {
+          // overwrite the blank with saved data
+          this.entryData[s][v][g] = data;
+          this.entryIds[s][v][g] = id;
+        }
+      });
+    },
 
     initializeEntryData() {
       const nS = this.numberOfSubjects;
@@ -430,6 +461,11 @@ export default {
         )
       );
       console.log("[DEBUG] entryData matrix ready");
+      this.entryIds = Array.from({ length: nS }, () =>
+        Array.from({ length: nV }, () =>
+          Array.from({ length: nG }, () => null)
+        )
+      );
     },
 
     selectCell(sIdx, vIdx) {
@@ -594,35 +630,48 @@ export default {
     },
 
     async submitData() {
-      console.log(
-        `[DEBUG] submitData() → S:${this.currentSubjectIndex} V:${this.currentVisitIndex} G:${this.currentGroupIndex}`
-      );
       if (!this.validateCurrentSection()) {
         this.showDialogMessage("Please fix validation errors before saving.");
         return;
       }
+
+      const s = this.currentSubjectIndex,
+            v = this.currentVisitIndex,
+            g = this.currentGroupIndex;
+
       const payload = {
         study_id: this.study.metadata.id,
-        subject_index: this.currentSubjectIndex,
-        visit_index: this.currentVisitIndex,
-        group_index: this.currentGroupIndex,
-        data:
-          this.entryData[this.currentSubjectIndex][this.currentVisitIndex][
-            this.currentGroupIndex
-          ],
+        subject_index: s,
+        visit_index: v,
+        group_index: g,
+        data: this.entryData[s][v][g],
       };
-      console.log("[DEBUG] Payload to submit:", payload);
+
+      const existingId = this.entryIds[s][v][g];
 
       try {
-        const resp = await axios.post(
-          `http://127.0.0.1:8000/forms/studies/${this.study.metadata.id}/data`,
-          payload,
-          { headers: { Authorization: `Bearer ${this.token}` } }
-        );
-        console.log("[DEBUG] Data saved response:", resp.data);
-        this.showDialogMessage("Data saved successfully for this Subject/Visit.");
+        let resp;
+        if (existingId) {
+          // UPDATE
+          resp = await axios.put(
+            `http://127.0.0.1:8000/forms/studies/${this.study.metadata.id}/data_entries/${existingId}`,
+            payload,
+            { headers: { Authorization: `Bearer ${this.token}` } }
+          );
+          this.showDialogMessage("Data updated successfully.");
+        } else {
+          // CREATE
+          resp = await axios.post(
+            `http://127.0.0.1:8000/forms/studies/${this.study.metadata.id}/data`,
+            payload,
+            { headers: { Authorization: `Bearer ${this.token}` } }
+          );
+          // capture new ID so future edits update instead of insert
+          this.entryIds[s][v][g] = resp.data.id;
+          this.showDialogMessage("Data saved successfully.");
+        }
       } catch (err) {
-        console.error("[ERROR] saving data:", err.response?.data || err.message);
+        console.error("[ERROR] saving data:", err);
         this.showDialogMessage("Failed to save data. Check console for details.");
       }
     },

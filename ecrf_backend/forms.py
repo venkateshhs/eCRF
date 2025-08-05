@@ -520,6 +520,37 @@ def save_study_data(study_id: int, payload: schemas.StudyDataEntryCreate, db: Se
     db.refresh(entry)
     return entry
 
+@router.put(
+  "/studies/{study_id}/data_entries/{entry_id}",
+  response_model=schemas.StudyDataEntryOut
+)
+def update_study_data_entry(
+    study_id: int,
+    entry_id: int,
+    payload: schemas.StudyDataEntryCreate,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user)
+):
+    # Optional: verify user owns the study...
+    entry = (
+        db.query(models.StudyEntryData)
+          .filter_by(id=entry_id, study_id=study_id)
+          .first()
+    )
+    if not entry:
+        raise HTTPException(status_code=404, detail="Entry not found")
+
+    # Update fields
+    entry.subject_index = payload.subject_index
+    entry.visit_index   = payload.visit_index
+    entry.group_index   = payload.group_index
+    entry.data          = payload.data
+
+    db.commit()
+    db.refresh(entry)
+    return entry
+
+
 @router.get("/studies/{study_id}/data_entries", response_model=List[schemas.StudyDataEntryOut])
 def list_study_data_entries(
     study_id: int,

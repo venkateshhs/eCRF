@@ -102,6 +102,12 @@
                     >
                       Add Data
                     </button>
+                      <button
+                        v-if="isAdmin || isPI || isInvestigator"
+                        @click="viewData(study)"
+                        class="btn-minimal"
+                      >View Data
+                      </button>
                   </div>
                 </td>
               </tr>
@@ -295,6 +301,9 @@ export default {
     },
     addData(study) {
       this.$router.push({ name: "StudyDetail", params: { id: study.id } });
+    },
+    viewData(study) {
+    this.$router.push({ name: "StudyDataDashboard", params: { id: study.id } });
     },
     navigate(to) {
       this.activeSection = "";
