@@ -175,31 +175,31 @@
                       v-if="field.type === 'text'"
                       type="text"
                       v-model="field.value"
-                      :placeholder="field.constraints.placeholder || field.placeholder"
+                      :placeholder="field.constraints?.placeholder || field.placeholder"
                     />
                     <!-- TEXTAREA -->
                     <textarea
                       v-else-if="field.type === 'textarea'"
                       v-model="field.value"
                       :rows="field.rows || 3"
-                      :placeholder="field.constraints.placeholder || field.placeholder"
+                      :placeholder="field.constraints?.placeholder || field.placeholder"
                     ></textarea>
                     <!-- NUMBER -->
                     <input
                       v-else-if="field.type === 'number'"
                       type="number"
                       v-model.number="field.value"
-                      :min="field.constraints.min"
-                      :max="field.constraints.max"
-                      :step="field.constraints.step"
+                      :min="field.constraints?.min"
+                      :max="field.constraints?.max"
+                      :step="field.constraints?.step"
                     />
                     <!-- DATE -->
                     <input
                       v-else-if="field.type === 'date'"
                       type="date"
                       v-model="field.value"
-                      :min="field.constraints.minDate"
-                      :max="field.constraints.maxDate"
+                      :min="field.constraints?.minDate"
+                      :max="field.constraints?.maxDate"
                     />
                     <!-- SELECT -->
                     <select
@@ -230,7 +230,7 @@
                       v-else-if="field.type === 'button'"
                       class="form-button"
                     >{{ field.label }}</button>
-                    <small v-if="field.constraints.helpText" class="help-text">
+                    <small v-if="field.constraints?.helpText" class="help-text">
                       {{ field.constraints.helpText }}
                     </small>
                   </div>
@@ -577,8 +577,10 @@ export default {
       this.generalFields = res.data.map(f => ({
         ...f,
         description: f.helpText || f.placeholder || "",
-        options: f.type === 'select' || f.type === 'radio' ? [] : f.options // Prevent default options
+        options: f.type === 'select' || f.type === 'radio' ? [] : f.options || [],
+        constraints: f.constraints || {} // Ensure constraints is always an object
       }));
+      console.log("generalFields loaded:", this.generalFields);
     } catch (e) {
       console.error("Failed to load custom fields", e);
     }
@@ -688,7 +690,7 @@ export default {
           options: [...options],
           value: '',
           constraints: {
-            ...this.optionsDialogField.constraints,
+            ...this.optionsDialogField.constraints || {}, // Ensure constraints is an object
             allowMultiple: false
           },
           placeholder: this.optionsDialogField.description || this.optionsDialogField.placeholder
@@ -791,7 +793,11 @@ export default {
     takeoverModel() {
       const chosen = this.currentModel.fields
         .filter((_, i) => this.selectedProps[i])
-        .map(f => ({ ...f, description: f.description || "" }));
+        .map(f => ({
+          ...f,
+          description: f.description || "",
+          constraints: f.constraints || {} // Ensure constraints is an object
+        }));
       const sec = {
         title: this.currentModel.title,
         fields: chosen,
@@ -826,7 +832,8 @@ export default {
         title: `${currentSection.title} (Copy)`,
         fields: currentSection.fields.map(field => ({
           ...field,
-          name: `${field.name}_${Date.now()}`
+          name: `${field.name}_${Date.now()}`,
+          constraints: field.constraints || {} // Ensure constraints is an object
         })),
         collapsed: false,
         source: currentSection.source
@@ -898,7 +905,7 @@ export default {
         options: field.options || [],
         placeholder: field.description || field.placeholder,
         value: field.type === 'checkbox' ? false : "",
-        constraints: { ...field.constraints }
+        constraints: field.constraints || {} // Ensure constraints is an object
       });
     },
 
@@ -914,8 +921,8 @@ export default {
         ...f,
         name: `${f.name}_${Date.now()}`,
         options: f.options ? [...f.options] : [],
-        constraints: { ...f.constraints },
-        value: f.type === 'radio' && f.constraints.allowMultiple ? [] : f.type === 'radio' || f.type === 'select' ? '' : f.value
+        constraints: f.constraints || {}, // Ensure constraints is an object
+        value: f.type === 'radio' && f.constraints?.allowMultiple ? [] : f.type === 'radio' || f.type === 'select' ? '' : f.value
       };
       this.currentForm.sections[si].fields.splice(fi + 1, 0, clone);
     },
@@ -927,7 +934,7 @@ export default {
       const f = this.currentForm.sections[si].fields[fi];
       this.currentFieldIndices = { sectionIndex: si, fieldIndex: fi };
       this.currentFieldType = f.type;
-      this.constraintsForm = { ...f.constraints };
+      this.constraintsForm = { ...f.constraints || {} }; // Ensure constraints is an object
       this.showConstraintsDialog = true;
     },
     confirmConstraintsDialog(c) {
@@ -982,6 +989,14 @@ export default {
         try {
           const pd = JSON.parse(evt.target.result);
           if (Array.isArray(pd.sections)) {
+            // Ensure constraints is defined for all fields in uploaded sections
+            pd.sections = pd.sections.map(sec => ({
+              ...sec,
+              fields: sec.fields.map(field => ({
+                ...field,
+                constraints: field.constraints || {}
+              }))
+            }));
             this.currentForm.sections = pd.sections;
             this.adjustAssignments('handleFileChange');
           } else {
@@ -1014,10 +1029,11 @@ export default {
               description: def.description || "",
               type: this.resolveType(def),
               options: def.enum || [],
-              constraints: { required: !!def.required },
+              constraints: { required: !!def.required }, // Constraints already defined
               placeholder: def.description || ""
             }))
           }));
+        console.log("dataModels loaded:", this.dataModels);
       } catch (e) {
         console.error("Failed to load data models:", e);
       }
