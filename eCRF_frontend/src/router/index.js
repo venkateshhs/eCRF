@@ -59,6 +59,12 @@ const routes = [
     name: "SharedForm",
     component: SharedFormComponent,
   },
+  {
+  path: "/dashboard/study/:id/data",
+  name: "StudyDataDashboard",
+  component: () => import("@/components/StudyDataDashboard.vue"),
+  meta: { requiresAuth: true }
+}
 //  {
 //    path: "/studies/:id",
 //    name: "StudyDataEntry",

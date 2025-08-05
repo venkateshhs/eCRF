@@ -118,8 +118,23 @@
                   class="form-group"
                 >
                   <div class="field-header">
-                    <label v-if="field.type !== 'button'" :for="field.name">
+                    <label
+                      v-if="field.type !== 'button' && field.type !== 'checkbox'"
+                      :for="field.name"
+                    >
                       {{ field.label }}
+                    </label>
+                    <label
+                      v-else-if="field.type === 'checkbox'"
+                      class="checkbox-label"
+                      :for="field.name"
+                    >
+                      {{ field.label }}
+                      <input
+                        type="checkbox"
+                        :id="field.name"
+                        v-model="field.value"
+                      />
                     </label>
                     <div class="field-actions">
                       <button
@@ -146,54 +161,76 @@
                         title="Edit Constraints"
                         @click.prevent="openConstraintsDialog(si, fi)"
                       ><i :class="icons.cog"></i></button>
+                      <button
+                        v-if="field.type === 'radio' || field.type === 'select'"
+                        class="edit-options-button"
+                        title="Edit Options"
+                        @click.prevent="openOptionsDialog(field, si, fi)"
+                      >Edit Options</button>
                     </div>
                   </div>
                   <div class="field-box">
                     <!-- TEXT -->
                     <input
-                      v-if="field.type==='text'"
+                      v-if="field.type === 'text'"
                       type="text"
                       v-model="field.value"
-                      :placeholder="field.constraints.placeholder || field.placeholder"
+                      :placeholder="field.constraints?.placeholder || field.placeholder"
                     />
                     <!-- TEXTAREA -->
                     <textarea
-                      v-else-if="field.type==='textarea'"
+                      v-else-if="field.type === 'textarea'"
                       v-model="field.value"
-                      :rows="field.rows||3"
-                      :placeholder="field.constraints.placeholder || field.placeholder"
+                      :rows="field.rows || 3"
+                      :placeholder="field.constraints?.placeholder || field.placeholder"
                     ></textarea>
                     <!-- NUMBER -->
                     <input
-                      v-else-if="field.type==='number'"
+                      v-else-if="field.type === 'number'"
                       type="number"
                       v-model.number="field.value"
-                      :min="field.constraints.min"
-                      :max="field.constraints.max"
-                      :step="field.constraints.step"
+                      :min="field.constraints?.min"
+                      :max="field.constraints?.max"
+                      :step="field.constraints?.step"
                     />
                     <!-- DATE -->
                     <input
-                      v-else-if="field.type==='date'"
+                      v-else-if="field.type === 'date'"
                       type="date"
                       v-model="field.value"
-                      :min="field.constraints.minDate"
-                      :max="field.constraints.maxDate"
+                      :min="field.constraints?.minDate"
+                      :max="field.constraints?.maxDate"
                     />
                     <!-- SELECT -->
                     <select
-                      v-else-if="field.type==='select'"
+                      v-else-if="field.type === 'select'"
                       v-model="field.value"
                     >
                       <option value="" disabled>Select…</option>
                       <option v-for="opt in field.options" :key="opt">{{ opt }}</option>
                     </select>
+                    <!-- RADIO -->
+                    <div v-else-if="field.type === 'radio'" class="radio-group">
+                      <label
+                        v-for="(opt, i) in field.options"
+                        :key="i"
+                        class="radio-label"
+                      >
+                        <input
+                          type="radio"
+                          :name="field.name"
+                          :value="opt"
+                          v-model="field.value"
+                        />
+                        {{ opt }}
+                      </label>
+                    </div>
                     <!-- BUTTON -->
                     <button
-                      v-else-if="field.type==='button'"
+                      v-else-if="field.type === 'button'"
                       class="form-button"
                     >{{ field.label }}</button>
-                    <small v-if="field.constraints.helpText" class="help-text">
+                    <small v-if="field.constraints?.helpText" class="help-text">
                       {{ field.constraints.helpText }}
                     </small>
                   </div>
@@ -253,13 +290,12 @@
             class="prop-row"
           >
             <div class="prop-info">
-              <strong>{{ prop.name }}</strong> —
-              {{ prop.label }}
+              <strong>{{ prop.name }}</strong> — {{ prop.label }}
               <p class="prop-desc">{{ prop.description }}</p>
             </div>
-            <div class="prop-check">
-              <input type="checkbox" v-model="selectedProps[i]" />
-            </div>
+            <label class="prop-check">
+              <input type="checkbox" :id="'prop-check-' + i" v-model="selectedProps[i]" />
+            </label>
           </div>
         </div>
         <div class="modal-actions">
@@ -267,6 +303,42 @@
           <button @click="showModelDialog=false" class="btn-option">
             Cancel
           </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ───────── Options Dialog (for Radio and Dropdown) ───────── -->
+    <div v-if="showOptionsDialog" class="modal-overlay">
+      <div class="modal options-dialog">
+        <h3>{{ optionsDialogField?.name ? 'Edit Options' : 'Configure Options' }}</h3>
+        <div class="options-dialog-content">
+          <label>
+            Number of options:
+            <input
+              type="number"
+              v-model.number="optionsDialogOptionsCount"
+              min="1"
+              class="input-dialog-field"
+              @input="updateOptionsArray"
+            />
+          </label>
+          <div class="options-list">
+            <div v-for="(option, index) in optionsDialogOptions" :key="index" class="option-row">
+              <label>
+                Option {{ index + 1 }}:
+                <input
+                  type="text"
+                  v-model="optionsDialogOptions[index]"
+                  class="input-dialog-field"
+                  placeholder="Enter option label"
+                />
+              </label>
+            </div>
+          </div>
+        </div>
+        <div class="modal-actions">
+          <button @click="confirmOptionsDialog" class="btn-primary">Save</button>
+          <button @click="cancelOptionsDialog" class="btn-option">Cancel</button>
         </div>
       </div>
     </div>
@@ -381,6 +453,13 @@ export default {
       showModelDialog: false,
       currentModel: null,
       selectedProps: [],
+
+      // options dialog (for radio and select)
+      showOptionsDialog: false,
+      optionsDialogOptionsCount: 1,
+      optionsDialogOptions: ['Option 1'],
+      optionsDialogField: null,
+      optionsDialogEditIndices: null, // To track section and field indices during edit
 
       // protocol matrix
       showMatrix: false,
@@ -497,8 +576,11 @@ export default {
       );
       this.generalFields = res.data.map(f => ({
         ...f,
-        description: f.helpText || f.placeholder || ""
+        description: f.helpText || f.placeholder || "",
+        options: f.type === 'select' || f.type === 'radio' ? [] : f.options || [],
+        constraints: f.constraints || {} // Ensure constraints is always an object
       }));
+      console.log("generalFields loaded:", this.generalFields);
     } catch (e) {
       console.error("Failed to load custom fields", e);
     }
@@ -548,9 +630,89 @@ export default {
       this.showInputDialog = false;
     },
 
+    // ── Options Dialog (for Radio and Select) ──
+    openOptionsDialog(field, sectionIndex = null, fieldIndex = null) {
+      // Deep copy to avoid mutating original field
+      this.optionsDialogField = JSON.parse(JSON.stringify(field));
+      this.optionsDialogEditIndices = sectionIndex !== null && fieldIndex !== null
+        ? { sectionIndex, fieldIndex }
+        : null;
+      if (this.optionsDialogEditIndices) {
+        // Editing existing field
+        const currentField = this.currentForm.sections[sectionIndex].fields[fieldIndex];
+        this.optionsDialogOptionsCount = currentField.options?.length || 1;
+        this.optionsDialogOptions = currentField.options?.length ? [...currentField.options] : ['Option 1'];
+      } else {
+        // Adding new field
+        this.optionsDialogOptionsCount = 1;
+        this.optionsDialogOptions = ['Option 1'];
+      }
+      this.showOptionsDialog = true;
+    },
+    updateOptionsArray() {
+      const count = Math.max(1, this.optionsDialogOptionsCount || 1);
+      const currentLength = this.optionsDialogOptions.length;
+      if (count > currentLength) {
+        this.optionsDialogOptions = [
+          ...this.optionsDialogOptions,
+          ...Array(count - currentLength).fill().map((_, i) => `Option ${currentLength + i + 1}`)
+        ];
+      } else if (count < currentLength) {
+        this.optionsDialogOptions = this.optionsDialogOptions.slice(0, count);
+      }
+      this.optionsDialogOptionsCount = count;
+    },
+    confirmOptionsDialog() {
+      if (!this.optionsDialogField || this.optionsDialogOptionsCount < 1 || this.optionsDialogOptions.some(opt => !opt || !opt.trim())) {
+        this.openGenericDialog("Please provide a valid number of options and ensure all options have non-empty labels.");
+        return;
+      }
+      const options = this.optionsDialogOptions.map(opt => opt.trim());
+      if (!this.currentForm.sections.length) {
+        this.addNewSection();
+      }
+      const sec = this.currentForm.sections[this.activeSection];
+      if (sec.collapsed) this.toggleSection(this.activeSection);
+
+      if (this.optionsDialogEditIndices) {
+        // Editing existing field
+        const { sectionIndex, fieldIndex } = this.optionsDialogEditIndices;
+        const field = this.currentForm.sections[sectionIndex].fields[fieldIndex];
+        field.options = [...options]; // New array for reactivity
+        field.value = ''; // Reset for single-selection
+        field.constraints = { ...field.constraints, allowMultiple: false };
+      } else {
+        // Adding new field
+        sec.fields.push({
+          name: `${this.optionsDialogField.name}_${Date.now()}`,
+          label: this.optionsDialogField.label,
+          type: this.optionsDialogField.type,
+          options: [...options],
+          value: '',
+          constraints: {
+            ...this.optionsDialogField.constraints || {}, // Ensure constraints is an object
+            allowMultiple: false
+          },
+          placeholder: this.optionsDialogField.description || this.optionsDialogField.placeholder
+        });
+      }
+      console.log('Options saved:', {
+        label: this.optionsDialogField.label,
+        type: this.optionsDialogField.type,
+        options
+      });
+      this.cancelOptionsDialog();
+    },
+    cancelOptionsDialog() {
+      this.showOptionsDialog = false;
+      this.optionsDialogField = null;
+      this.optionsDialogEditIndices = null;
+      this.optionsDialogOptionsCount = 1;
+      this.optionsDialogOptions = ['Option 1'];
+    },
+
     // ── Protocol Matrix ──
     adjustAssignments(trigger) {
-
       const m = this.selectedModels.length;
       const v = this.visits.length;
       const g = this.groups.length;
@@ -631,7 +793,11 @@ export default {
     takeoverModel() {
       const chosen = this.currentModel.fields
         .filter((_, i) => this.selectedProps[i])
-        .map(f => ({ ...f, description: f.description || "" }));
+        .map(f => ({
+          ...f,
+          description: f.description || "",
+          constraints: f.constraints || {} // Ensure constraints is an object
+        }));
       const sec = {
         title: this.currentModel.title,
         fields: chosen,
@@ -666,7 +832,8 @@ export default {
         title: `${currentSection.title} (Copy)`,
         fields: currentSection.fields.map(field => ({
           ...field,
-          name: `${field.name}_${Date.now()}`
+          name: `${field.name}_${Date.now()}`,
+          constraints: field.constraints || {} // Ensure constraints is an object
         })),
         collapsed: false,
         source: currentSection.source
@@ -721,6 +888,10 @@ export default {
     },
 
     addFieldToActiveSection(field) {
+      if (field.type === 'radio' || field.type === 'select') {
+        this.openOptionsDialog(field);
+        return;
+      }
       if (!this.currentForm.sections.length) {
         this.addNewSection();
       }
@@ -733,8 +904,8 @@ export default {
         type: field.type,
         options: field.options || [],
         placeholder: field.description || field.placeholder,
-        value: "",
-        constraints: { ...field.constraints }
+        value: field.type === 'checkbox' ? false : "",
+        constraints: field.constraints || {} // Ensure constraints is an object
       });
     },
 
@@ -746,7 +917,13 @@ export default {
     },
     addSimilarField(si, fi) {
       const f = this.currentForm.sections[si].fields[fi];
-      const clone = { ...f, name: `${f.name}_${Date.now()}` };
+      const clone = {
+        ...f,
+        name: `${f.name}_${Date.now()}`,
+        options: f.options ? [...f.options] : [],
+        constraints: f.constraints || {}, // Ensure constraints is an object
+        value: f.type === 'radio' && f.constraints?.allowMultiple ? [] : f.type === 'radio' || f.type === 'select' ? '' : f.value
+      };
       this.currentForm.sections[si].fields.splice(fi + 1, 0, clone);
     },
     removeField(si, fi) {
@@ -757,7 +934,7 @@ export default {
       const f = this.currentForm.sections[si].fields[fi];
       this.currentFieldIndices = { sectionIndex: si, fieldIndex: fi };
       this.currentFieldType = f.type;
-      this.constraintsForm = { ...f.constraints };
+      this.constraintsForm = { ...f.constraints || {} }; // Ensure constraints is an object
       this.showConstraintsDialog = true;
     },
     confirmConstraintsDialog(c) {
@@ -812,6 +989,14 @@ export default {
         try {
           const pd = JSON.parse(evt.target.result);
           if (Array.isArray(pd.sections)) {
+            // Ensure constraints is defined for all fields in uploaded sections
+            pd.sections = pd.sections.map(sec => ({
+              ...sec,
+              fields: sec.fields.map(field => ({
+                ...field,
+                constraints: field.constraints || {}
+              }))
+            }));
             this.currentForm.sections = pd.sections;
             this.adjustAssignments('handleFileChange');
           } else {
@@ -844,10 +1029,11 @@ export default {
               description: def.description || "",
               type: this.resolveType(def),
               options: def.enum || [],
-              constraints: { required: !!def.required },
+              constraints: { required: !!def.required }, // Constraints already defined
               placeholder: def.description || ""
             }))
           }));
+        console.log("dataModels loaded:", this.dataModels);
       } catch (e) {
         console.error("Failed to load data models:", e);
       }
@@ -1007,8 +1193,133 @@ export default {
   gap: 10px;
 }
 
+.field-header .checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.field-header .checkbox-label input[type="checkbox"] {
+  display: block !important;
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  cursor: pointer;
+  border: 2px solid #ccc;
+  border-radius: 4px;
+  background-color: #fff;
+  appearance: none;
+  position: relative;
+  transition: background-color 0.2s ease, border-color 0.2s ease;
+}
+
+.field-header .checkbox-label input[type="checkbox"]:checked {
+  background-color: #444;
+  border-color: #444;
+}
+
+.field-header .checkbox-label input[type="checkbox"]:checked::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 5px;
+  width: 4px;
+  height: 8px;
+  border: solid #fff;
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+}
+
+.field-header .checkbox-label input[type="checkbox"]:hover:not(:checked) {
+  border-color: #666;
+}
+
 .field-box {
   margin-top: 10px;
+}
+
+.field-box .radio-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.field-box .radio-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.field-box .radio-label input[type="radio"],
+.field-box .radio-label input[type="checkbox"] {
+  display: block !important;
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  cursor: pointer;
+  border: 2px solid #ccc;
+  border-radius: 50%;
+  background-color: #fff;
+  appearance: none;
+  position: relative;
+  transition: background-color 0.2s ease, border-color 0.2s ease;
+}
+
+.field-box .radio-label input[type="radio"]:checked,
+.field-box .radio-label input[type="checkbox"]:checked {
+  background-color: #444;
+  border-color: #444;
+}
+
+.field-box .radio-label input[type="radio"]:checked::after {
+  content: '';
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  width: 8px;
+  height: 8px;
+  background: #fff;
+  border-radius: 50%;
+}
+
+.field-box .radio-label input[type="checkbox"]:checked::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 5px;
+  width: 4px;
+  height: 8px;
+  border: solid #fff;
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+}
+
+.field-box .radio-label input[type="radio"]:hover:not(:checked),
+.field-box .radio-label input[type="checkbox"]:hover:not(:checked) {
+  border-color: #666;
+}
+
+.field-box .field-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.edit-options-button {
+  background: $secondary-color;
+  border: 1px solid $border-color;
+  border-radius: 4px;
+  padding: 4px 8px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.edit-options-button:hover {
+  background: $primary-color;
+  color: white;
+  border-color: $primary-color;
 }
 
 input,
@@ -1074,6 +1385,71 @@ select {
   max-width: 90%;
   max-height: 90%;
   overflow-y: auto;
+}
+
+.modal.options-dialog {
+  width: 400px;
+  padding: 20px 16px;
+}
+
+.options-dialog-content {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 20px;
+}
+
+.options-dialog-content label {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.options-dialog-content input[type="number"] {
+  width: 100%;
+  padding: 8px;
+  border: 1px solid $border-color;
+  border-radius: 5px;
+}
+
+.options-dialog-content .checkbox-label {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+}
+
+.options-dialog-content input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  cursor: pointer;
+  border: 2px solid #ccc;
+  border-radius: 4px;
+  background-color: #fff;
+  appearance: none;
+  position: relative;
+  transition: background-color 0.2s ease, border-color 0.2s ease;
+}
+
+.options-dialog-content input[type="checkbox"]:checked {
+  background-color: #444;
+  border-color: #444;
+}
+
+.options-dialog-content input[type="checkbox"]:checked::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 5px;
+  width: 4px;
+  height: 8px;
+  border: solid #fff;
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+}
+
+.options-dialog-content input[type="checkbox"]:hover:not(:checked) {
+  border-color: #666;
 }
 
 .modal.model-dialog {
@@ -1152,5 +1528,29 @@ select {
   .available-fields {
     width: 100%;
   }
+}
+
+/* Added styles for options list */
+.options-list {
+  max-height: 200px;
+  overflow-y: auto;
+  margin: 10px 0;
+}
+
+.option-row {
+  margin-bottom: 8px;
+}
+
+.option-row label {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.option-row input {
+  width: 100%;
+  padding: 8px;
+  border: 1px solid $border-color;
+  border-radius: 5px;
 }
 </style>
