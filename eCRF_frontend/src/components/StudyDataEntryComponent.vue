@@ -82,7 +82,7 @@
             <td v-for="combo in visitCombos" :key="'visit-td-' + sIdx + '-' + combo.visitIndex" class="visit-cell">
               <button
                 class="select-btn"
-                :class="{ 'visit-2-btn': combo.visitIndex === 1 }"
+                :class="[ statusClass(sIdx, combo.visitIndex), { 'visit-2-btn': combo.visitIndex === 1 } ]"
                 @click="selectCell(sIdx, combo.visitIndex)"
               >
                 Select
@@ -328,64 +328,35 @@ export default {
       return this.$store.state.token;
     },
     visitList() {
-      console.log("[DEBUG] Computing visitList:", this.study?.content?.study_data?.visits);
       return this.study?.content?.study_data?.visits || [];
     },
     groupList() {
-      console.log("[DEBUG] Computing groupList:", this.study?.content?.study_data?.groups);
       return this.study?.content?.study_data?.groups || [];
     },
     selectedModels() {
-      console.log("[DEBUG] Computing selectedModels:", this.study?.content?.study_data?.selectedModels);
       return this.study?.content?.study_data?.selectedModels || [];
     },
     assignments() {
-      console.log("[DEBUG] Computing assignments:", this.study?.content?.study_data?.assignments);
       return this.study?.content?.study_data?.assignments || [];
     },
     numberOfSubjects() {
       const sd = this.study?.content?.study_data;
-      const count = sd?.subjectCount != null ? sd.subjectCount : sd?.subjects?.length || 0;
-      console.log("[DEBUG] Computing numberOfSubjects:", count);
-      return count;
+      return sd?.subjectCount != null
+        ? sd.subjectCount
+        : sd.subjects?.length || 0;
     },
     visitCombos() {
-      const combos = this.visitList.map((visit, vIdx) => {
-        console.log(`[DEBUG] Rendering visit combo: visitIndex=${vIdx}, label=Visit: ${visit.name}`);
-        return {
-          visitIndex: vIdx,
-          label: `Visit: ${visit.name}`,
-        };
-      });
-      console.log("[DEBUG] Computing visitCombos:", combos);
-      return combos;
-    },
-    subjectIndices() {
-      const indices = Array.from({ length: this.numberOfSubjects }, (_, i) => i);
-      console.log("[DEBUG] Computing subjectIndices:", indices);
-      return indices;
+      return this.visitList.map((visit, vIdx) => ({
+        visitIndex: vIdx,
+        label: `Visit: ${visit.name}`,
+      }));
     },
     assignedModelIndices() {
       const v = this.currentVisitIndex;
       const g = this.currentGroupIndex;
-      console.log(`[DEBUG] Filtering models for visit ${v}, group ${g} (groupName: ${this.groupList[g]?.name || 'undefined'})`);
-      console.log(`[DEBUG] assignments:`, this.assignments);
-      const indices = this.selectedModels
+      return this.selectedModels
         .map((_, mIdx) => mIdx)
-        .filter((mIdx) => {
-          const row = this.assignments[mIdx]?.[v];
-          if (!row) {
-            console.log(`[DEBUG] Model ${mIdx} has no assignments for visit ${v}`);
-            return false;
-          }
-          const flag = !!row[g];
-          console.log(
-            `[DEBUG] Model ${mIdx} (“${this.selectedModels[mIdx]?.title || 'undefined'}”) → assigned to group ${g}? ${flag}`
-          );
-          return flag;
-        });
-      console.log("[DEBUG] assignedModelIndices result:", indices);
-      return indices;
+        .filter((mIdx) => !!this.assignments[mIdx]?.[v]?.[g]);
     },
   },
 
@@ -397,24 +368,17 @@ export default {
 
   methods: {
     goToDashboard() {
-      console.log("[DEBUG] goToDashboard()");
-      this.$router.push({
-        name: "Dashboard",
-        query: { openStudies: "true" }
-      });
+      this.$router.push({ name: "Dashboard", query: { openStudies: "true" } });
     },
     async loadStudy(studyId) {
-      console.log("[DEBUG] loadStudy()", studyId);
       try {
         const resp = await axios.get(
           `http://127.0.0.1:8000/forms/studies/${studyId}`,
           { headers: { Authorization: `Bearer ${this.token}` } }
         );
         this.study = resp.data;
-        console.log("[DEBUG] Study loaded", this.study);
         this.initializeEntryData();
       } catch (err) {
-        console.error("[ERROR] loading study", err);
         this.showDialogMessage("Failed to load study details.");
       }
     },
@@ -430,9 +394,24 @@ export default {
         console.error("Failed to load existing entries", err);
       }
     },
-
+    initializeEntryData() {
+      const nS = this.numberOfSubjects,
+        nV = this.visitList.length,
+        nG = this.groupList.length;
+      this.entryData = Array.from({ length: nS }, () =>
+        Array.from({ length: nV }, () =>
+          Array.from({ length: nG }, () =>
+            this.selectedModels.map((sect) => sect.fields.map(() => ""))
+          )
+        )
+      );
+      this.entryIds = Array.from({ length: nS }, () =>
+        Array.from({ length: nV }, () =>
+          Array.from({ length: nG }, () => null)
+        )
+      );
+    },
     populateFromExisting() {
-      // make sure entryIds is initialized
       this.initializeEntryData();
       this.existingEntries.forEach((e) => {
         const { subject_index: s, visit_index: v, group_index: g, data, id } = e;
@@ -441,54 +420,24 @@ export default {
           this.entryData[s][v] &&
           this.entryData[s][v][g]
         ) {
-          // overwrite the blank with saved data
           this.entryData[s][v][g] = data;
           this.entryIds[s][v][g] = id;
         }
       });
     },
 
-    initializeEntryData() {
-      const nS = this.numberOfSubjects;
-      const nV = this.visitList.length;
-      const nG = this.groupList.length;
-      console.log(`[DEBUG] init entryData: ${nS}×${nV}×${nG}`);
-      this.entryData = Array.from({ length: nS }, () =>
-        Array.from({ length: nV }, () =>
-          Array.from({ length: nG }, () =>
-            this.selectedModels.map((sect) => sect.fields.map(() => ""))
-          )
-        )
-      );
-      console.log("[DEBUG] entryData matrix ready");
-      this.entryIds = Array.from({ length: nS }, () =>
-        Array.from({ length: nV }, () =>
-          Array.from({ length: nG }, () => null)
-        )
-      );
-    },
-
     selectCell(sIdx, vIdx) {
-      console.log(`[DEBUG] selectCell() → subject ${sIdx}, visit ${vIdx}`);
       this.currentSubjectIndex = sIdx;
       this.currentVisitIndex = vIdx;
-
-      // Resolve subject's assigned group
       const subj = this.study.content.study_data.subjects[sIdx];
-      console.log(`[DEBUG] subject[${sIdx}] =`, subj);
       const grpName = (subj.group || "").trim().toLowerCase();
-      console.log(`[DEBUG] Subject group name (normalized): ${grpName}`);
-      console.log(`[DEBUG] groupList:`, this.groupList);
-      const idx = this.groupList.findIndex((g) => (g.name || "").trim().toLowerCase() === grpName);
+      const idx = this.groupList.findIndex(
+        (g) => (g.name || "").trim().toLowerCase() === grpName
+      );
       this.currentGroupIndex = idx >= 0 ? idx : 0;
-      console.log(`[DEBUG] resolved groupIndex = ${this.currentGroupIndex}, groupName = ${this.groupList[this.currentGroupIndex]?.name || 'undefined'}`);
-
       this.showSelection = false;
-      console.log("[DEBUG] showSelection set to false, rendering entry form");
     },
-
     backToSelection() {
-      console.log("[DEBUG] backToSelection()");
       this.showSelection = true;
       this.showDetails = false;
       this.currentSubjectIndex = null;
@@ -496,16 +445,13 @@ export default {
       this.currentGroupIndex = 0;
       this.validationErrors = {};
     },
-
     toggleDetails() {
-      console.log("[DEBUG] toggleDetails() showDetails:", !this.showDetails);
       this.showDetails = !this.showDetails;
     },
 
     fieldId(mIdx, fIdx) {
       return `s${this.currentSubjectIndex}_v${this.currentVisitIndex}_g${this.currentGroupIndex}_m${mIdx}_f${fIdx}`;
     },
-
     errorKey(mIdx, fIdx) {
       return [
         this.currentSubjectIndex,
@@ -515,12 +461,10 @@ export default {
         fIdx,
       ].join("-");
     },
-
     fieldErrors(mIdx, fIdx) {
       const key = this.errorKey(mIdx, fIdx);
       return this.validationErrors[key] || "";
     },
-
     validateField(mIdx, fIdx) {
       const def = this.selectedModels[mIdx].fields[fIdx];
       const val =
@@ -530,7 +474,6 @@ export default {
       const cons = def.constraints || {};
       const key = this.errorKey(mIdx, fIdx);
       delete this.validationErrors[key];
-
       if (cons.required && (val === "" || val == null)) {
         this.$set(this.validationErrors, key, `${def.label} is required.`);
         return false;
@@ -581,14 +524,11 @@ export default {
     },
 
     openShareDialog(sIdx, vIdx, gIdx) {
-      console.log("[DEBUG] openShareDialog()", { sIdx, vIdx, gIdx });
       this.shareParams = { subjectIndex: sIdx, visitIndex: vIdx, groupIndex: gIdx };
       this.generatedLink = "";
       this.showShareDialog = true;
     },
-
     async createShareLink() {
-      console.log("[DEBUG] createShareLink()", this.shareParams);
       const { subjectIndex, visitIndex, groupIndex } = this.shareParams;
       const payload = {
         study_id: this.study.metadata.id,
@@ -606,26 +546,18 @@ export default {
           { headers: { Authorization: `Bearer ${this.token}` } }
         );
         this.generatedLink = resp.data.link;
-        console.log("[DEBUG] Share link generated:", this.generatedLink);
       } catch (err) {
-        console.error("[ERROR] creating share link", err);
-        this.generatedLink = null;
-        if (err.response?.status === 403) {
-          this.permissionError = true;
-          console.log("[DEBUG] Permission error for share link");
-        }
+        if (err.response?.status === 403) this.permissionError = true;
       }
     },
 
     validateCurrentSection() {
-      console.log("[DEBUG] validateCurrentSection()");
       let ok = true;
       this.assignedModelIndices.forEach((mIdx) => {
         this.selectedModels[mIdx].fields.forEach((_, fIdx) => {
           if (!this.validateField(mIdx, fIdx)) ok = false;
         });
       });
-      console.log("[DEBUG] Validation result:", ok);
       return ok;
     },
 
@@ -634,63 +566,140 @@ export default {
         this.showDialogMessage("Please fix validation errors before saving.");
         return;
       }
-
       const s = this.currentSubjectIndex,
-            v = this.currentVisitIndex,
-            g = this.currentGroupIndex;
-
-      const payload = {
-        study_id: this.study.metadata.id,
-        subject_index: s,
-        visit_index: v,
-        group_index: g,
-        data: this.entryData[s][v][g],
-      };
-
-      const existingId = this.entryIds[s][v][g];
-
+        v = this.currentVisitIndex,
+        g = this.currentGroupIndex,
+        payload = {
+          study_id: this.study.metadata.id,
+          subject_index: s,
+          visit_index: v,
+          group_index: g,
+          data: this.entryData[s][v][g],
+        },
+        existingId = this.entryIds[s][v][g];
       try {
-        let resp;
         if (existingId) {
-          // UPDATE
-          resp = await axios.put(
+          await axios.put(
             `http://127.0.0.1:8000/forms/studies/${this.study.metadata.id}/data_entries/${existingId}`,
             payload,
             { headers: { Authorization: `Bearer ${this.token}` } }
           );
           this.showDialogMessage("Data updated successfully.");
         } else {
-          // CREATE
-          resp = await axios.post(
+          const resp = await axios.post(
             `http://127.0.0.1:8000/forms/studies/${this.study.metadata.id}/data`,
             payload,
             { headers: { Authorization: `Bearer ${this.token}` } }
           );
-          // capture new ID so future edits update instead of insert
           this.entryIds[s][v][g] = resp.data.id;
+          this.existingEntries.push(resp.data);
           this.showDialogMessage("Data saved successfully.");
         }
       } catch (err) {
-        console.error("[ERROR] saving data:", err);
         this.showDialogMessage("Failed to save data. Check console for details.");
       }
     },
 
     showDialogMessage(message) {
-      console.log("[DEBUG] Showing dialog with message:", message);
       this.dialogMessage = message;
       this.showDialog = true;
     },
     closeDialog() {
-      console.log("[DEBUG] Dialog closed");
       this.showDialog = false;
       this.dialogMessage = "";
+    },
+
+
+    statusFor(sIdx, vIdx) {
+      // resolve group index
+      const subj = this.study.content.study_data.subjects[sIdx];
+      const name = (subj.group || "").trim().toLowerCase();
+      const gi = this.groupList.findIndex(
+        (g) => (g.name || "").trim().toLowerCase() === name
+      );
+      const gIdx = gi >= 0 ? gi : 0;
+      // find saved entry
+      const e = this.existingEntries.find(
+        (x) =>
+          x.subject_index === sIdx &&
+          x.visit_index === vIdx &&
+          x.group_index === gIdx
+      );
+      if (!e) return "none";
+      // only the assigned sections
+      const assigned = this.assignments
+        .map((_, i) => i)
+        .filter((i) => this.assignments[i]?.[vIdx]?.[gIdx]);
+      const flat = assigned.flatMap((i) => e.data[i] || []);
+      const total = flat.length;
+      const filled = flat.filter((v) => v != null && v !== "").length;
+      if (filled === 0) return "none";
+      if (filled === total) return "complete";
+      return "partial";
+    },
+    statusClass(sIdx, vIdx) {
+      return `status-${this.statusFor(sIdx, vIdx)}`;
     },
   },
 };
 </script>
 
 <style scoped>
+.selection-matrix {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 32px;
+  table-layout: fixed;
+}
+.selection-matrix th,
+.selection-matrix td {
+  border: 1px solid #e5e7eb;
+  padding: 12px;
+  text-align: center;
+  vertical-align: middle;
+}
+.selection-matrix th {
+  background: #f9fafb;
+  font-weight: 600;
+  color: #1f2937;
+}
+.subject-cell {
+  background: #f9fafb;
+  font-weight: 500;
+  color: #374151;
+  width: 20%;
+}
+.visit-cell {
+  width: 40%;
+}
+/* base button */
+.select-btn {
+  color: #fff;
+  border: none;
+  padding: 6px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 14px;
+  transition: opacity 0.2s;
+  display: block;
+  margin: 0 auto;
+}
+
+.select-btn.status-none {
+  background: #e5e7eb;
+  color: #1f2937;
+}
+.select-btn.status-partial {
+  background: #fbbf24;
+}
+.select-btn.status-complete {
+  background: #16a34a;
+}
+
+.select-btn:hover {
+  opacity: 0.8;
+}
+
 .study-data-container {
   max-width: 960px;
   margin: 24px auto;
@@ -818,53 +827,6 @@ hr {
 .details-block li {
   font-size: 14px;
   color: #374151;
-}
-
-/* 2. SELECTION MATRIX */
-.selection-matrix {
-  width: 100%;
-  border-collapse: collapse;
-  margin-bottom: 32px;
-  table-layout: fixed;
-}
-.selection-matrix th,
-.selection-matrix td {
-  border: 1px solid #e5e7eb;
-  padding: 12px;
-  text-align: center;
-  vertical-align: middle;
-}
-.selection-matrix th {
-  background: #f9fafb;
-  font-weight: 600;
-  color: #1f2937;
-}
-.subject-cell {
-  background: #f9fafb;
-  font-weight: 500;
-  color: #374151;
-  width: 20%;
-}
-.visit-cell {
-  width: 40%;
-}
-.select-btn {
-  background: #e5e7eb;
-  color: #1f2937;
-  border: none;
-  padding: 6px 12px;
-  border-radius: 6px;
-  cursor: pointer;
-  font-size: 14px;
-  transition: background 0.2s;
-  display: block;
-  margin: 0 auto;
-}
-.visit-2-btn {
-  background: #e5e7eb;
-}
-.select-btn:hover {
-  background: #d1d5db;
 }
 
 /* 3. DATA-ENTRY SECTION */
