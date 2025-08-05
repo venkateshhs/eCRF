@@ -14,6 +14,7 @@ from models import User
 from users import get_current_user, oauth2_scheme
 import secrets
 from sqlalchemy.orm import Session
+from models import StudyTemplateVersion
 
 router = APIRouter(prefix="/forms", tags=["forms"])
 
@@ -481,3 +482,61 @@ def access_shared_form(
             }
         }
     }
+
+
+def get_current_form_version(db: Session, study_id: int) -> int:
+    latest_version = (
+        db.query(StudyTemplateVersion)
+        .filter(StudyTemplateVersion.study_id == study_id)
+        .order_by(StudyTemplateVersion.version.desc())
+        .first()
+    )
+    if not latest_version:
+        raise ValueError(f"No template version found for study_id={study_id}")
+    return latest_version.version
+
+@router.post("/studies/{study_id}/data", response_model=schemas.StudyDataEntryOut)
+def save_study_data(study_id: int, payload: schemas.StudyDataEntryCreate, db: Session = Depends(get_db)):
+    study = db.query(models.StudyMetadata).filter(models.StudyMetadata.id == study_id).first()
+    if not study:
+        raise HTTPException(status_code=404, detail="Study not found")
+
+    try:
+        form_version     = get_current_form_version(db, study_id)
+    except ValueError:
+        # no versions exist yet ⇒ default to 1
+        form_version = 1
+
+    entry = models.StudyEntryData(
+        study_id=study_id,
+        subject_index=payload.subject_index,
+        visit_index=payload.visit_index,
+        group_index=payload.group_index,
+        data=payload.data,
+        form_version=form_version
+    )
+    db.add(entry)
+    db.commit()
+    db.refresh(entry)
+    return entry
+
+@router.get("/studies/{study_id}/data_entries", response_model=List[schemas.StudyDataEntryOut])
+def list_study_data_entries(
+    study_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    # (optional) authorization check...
+    exists = db.query(models.StudyMetadata).get(study_id)
+    if not exists:
+        raise HTTPException(404, "Study not found")
+
+    entries = (
+        db.query(models.StudyEntryData)
+          .filter_by(study_id=study_id)
+          .order_by(models.StudyEntryData.subject_index,
+                    models.StudyEntryData.visit_index,
+                    models.StudyEntryData.group_index)
+          .all()
+    )
+    return entries

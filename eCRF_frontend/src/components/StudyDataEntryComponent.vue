@@ -493,7 +493,7 @@ export default {
         ][mIdx][fIdx];
       const cons = def.constraints || {};
       const key = this.errorKey(mIdx, fIdx);
-      this.$delete(this.validationErrors, key);
+      delete this.validationErrors[key];
 
       if (cons.required && (val === "" || val == null)) {
         this.$set(this.validationErrors, key, `${def.label} is required.`);

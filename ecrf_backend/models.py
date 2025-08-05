@@ -48,6 +48,8 @@ class StudyMetadata(Base):
     # One-to-one relationship with StudyContent
     content = relationship("StudyContent", uselist=False, back_populates="study_metadata", cascade="all, delete")
     shared_links = relationship("SharedFormAccess", back_populates="study", cascade="all, delete-orphan")
+    entry_data = relationship("StudyEntryData", back_populates="study", cascade="all, delete-orphan")
+    template_versions = relationship("StudyTemplateVersion", back_populates="study", cascade="all, delete-orphan")
 
 class StudyContent(Base):
     __tablename__ = "study_content"
@@ -92,3 +94,29 @@ class SharedFormAccess(Base):
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
 
     study = relationship("StudyMetadata", back_populates="shared_links")
+
+class StudyTemplateVersion(Base):
+    __tablename__ = "study_template_versions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    study_id = Column(Integer, ForeignKey("study_metadata.id", ondelete="CASCADE"), nullable=False)
+    version = Column(Integer, nullable=False)
+    schema = Column(JSON, nullable=False)  # Full form structure with constraints
+    created_at = Column(DateTime, server_default=func.now())
+
+    study = relationship("StudyMetadata", back_populates="template_versions")
+
+
+class StudyEntryData(Base):
+    __tablename__ = "study_entry_data"
+
+    id = Column(Integer, primary_key=True, index=True)
+    study_id = Column(Integer, ForeignKey("study_metadata.id", ondelete="CASCADE"), nullable=False)
+    form_version = Column(Integer, nullable=False)
+    subject_index = Column(Integer, nullable=False)
+    visit_index = Column(Integer, nullable=False)
+    group_index = Column(Integer, nullable=False)
+    data = Column(JSON, nullable=False)  # Actual field data per form instance
+    created_at = Column(DateTime, server_default=func.now())
+
+    study = relationship("StudyMetadata", back_populates="entry_data")

@@ -1,6 +1,6 @@
 from datetime import datetime
 from pydantic import BaseModel, EmailStr, constr, Field
-from typing import Any, Optional, Dict
+from typing import Any, Optional, Dict, List
 
 
 class UserBase(BaseModel):
@@ -152,3 +152,44 @@ class AdminUserCreate(BaseModel):
 
 class RoleUpdate(BaseModel):
     role: constr(min_length=1, max_length=50)
+
+class StudyTemplateVersionBase(BaseModel):
+    version: int
+    content: Any  # flexible field for JSON structure
+
+class StudyTemplateVersionCreate(StudyTemplateVersionBase):
+    pass
+
+class StudyTemplateVersionOut(StudyTemplateVersionBase):
+    id: int
+    created_at: datetime
+
+    class Config:
+        orm_mode = True
+
+class StudyDataEntryCreate(BaseModel):
+    study_id: int
+    subject_index: int
+    visit_index: int
+    group_index: int
+    data: list
+
+class StudyDataEntryOut(StudyDataEntryCreate):
+    id: int
+    created_at: datetime
+
+    class Config:
+        orm_mode = True
+
+class StudyDataEntryOut(BaseModel):
+    id: int
+    study_id: int
+    form_version: int
+    subject_index: int
+    visit_index: int
+    group_index: int
+    data: List[Any]
+    created_at: datetime
+
+    class Config:
+        orm_mode = True
