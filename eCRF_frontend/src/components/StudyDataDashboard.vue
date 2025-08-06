@@ -3,12 +3,27 @@
     <!-- header controls -->
     <div class="dashboard-header-controls">
       <button class="btn-minimal" @click="goBack">
-        ← Back
+        Back
       </button>
       <h2 class="dashboard-title">{{ study.metadata.study_name }}</h2>
+
+      <div class="legend-dropdown">
+        <button class="btn-minimal icon-only" @click="showLegend = !showLegend" title="Table Legend">
+          <i :class="icons.info"></i>
+        </button>
+        <div
+          v-if="showLegend"
+          class="legend-content"
+          @click.stop
+        >
+          <p><strong>-</strong>: No section is assigned to this subject's group for this visit.</p>
+          <p><strong>(No data)</strong>: Section is assigned, but no data has been entered. Use the data entry form to add data.</p>
+          <p>Data is displayed for each subject under the visit and section assigned to their group. </p>
+          </div>
+      </div>
       <div class="export-dropdown">
         <button class="btn-minimal" @click.stop="toggleExportMenu">
-          Export ▼
+          Export <i :class="icons.export"></i>
         </button>
         <div
           v-if="showExportMenu"
@@ -89,7 +104,7 @@
       </table>
     </div>
     <div v-if="!entries.length" class="no-data">
-      No data entries found. Please enter data for the assigned sections.
+      No data entries found. Please enter data for the assigned sections using the data entry form.
     </div>
   </div>
 
@@ -100,6 +115,7 @@
 
 <script>
 import axios from 'axios';
+import icons from "@/assets/styles/icons"; // eslint-disable-line no-unused-vars
 
 export default {
   name: 'StudyDataDashboard',
@@ -108,7 +124,9 @@ export default {
       study: null,
       entries: [],
       showExportMenu: false,
-      token: this.$store.state.token
+      showLegend: false, // Default to collapsed
+      token: this.$store.state.token,
+      icons
     };
   },
   computed: {
@@ -273,7 +291,7 @@ export default {
 <style scoped>
 .dashboard-header-controls {
   display: grid;
-  grid-template-columns: auto 1fr auto;
+  grid-template-columns: auto 1fr auto auto;
   align-items: center;
   gap: 12px;
   margin-bottom: 16px;
@@ -285,7 +303,11 @@ export default {
 
 .dashboard-header-controls .export-dropdown {
   justify-self: end;
-  /* allow absolute menu to sit here */
+  position: relative;
+}
+
+.dashboard-header-controls .legend-dropdown {
+  justify-self: end;
   position: relative;
 }
 
@@ -299,30 +321,41 @@ export default {
 
 .btn-minimal {
   background: transparent;
-  border: 1px solid #bbb;
+  border: 1px solid #d1d5db;
   border-radius: 4px;
   padding: 6px 12px;
   font-size: 0.9rem;
-  color: #333;
+  color: #374151;
   cursor: pointer;
   transition: background 0.15s, color 0.15s, border-color 0.15s;
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .btn-minimal:hover {
-  background: #f5f5f5;
-  border-color: #999;
-  color: #000;
+  background: #f3f4f6;
+  border-color: #9ca3af;
+  color: #1f2937;
 }
 
-.export-menu {
+.icon-only {
+  padding: 6px;
+  font-size: 1rem;
+}
+
+.export-menu,
+.legend-content {
   position: absolute;
   top: 100%;
   right: 0;
   background: white;
-  border: 1px solid #ccc;
+  border: 1px solid #d1d5db;
   border-radius: 4px;
   box-shadow: 0 2px 6px rgba(0,0,0,0.1);
   z-index: 20;
+  padding: 12px;
+  min-width: 200px;
 }
 
 .export-menu button {
@@ -337,7 +370,13 @@ export default {
 }
 
 .export-menu button:hover {
-  background: #f0f0f0;
+  background: #f3f4f6;
+}
+
+.legend-content p {
+  font-size: 0.9rem;
+  color: #4b5563;
+  margin: 0 0 8px;
 }
 
 .table-wrapper {
@@ -352,36 +391,57 @@ export default {
 
 .dashboard-table th,
 .dashboard-table td {
-  border: 1px solid #ddd;
+  border: 1px solid #e5e7eb;
   padding: 8px 12px;
-  white-space: nowrap;
   font-size: 0.9rem;
 }
 
-.dashboard-table thead th {
-  background: #fafafa;
+.dashboard-table thead tr:nth-child(1) th {
+  background: #e5e7eb;
   font-weight: 600;
   text-align: center;
+  color: #1f2937;
 }
 
-.dashboard-table tbody tr:nth-child(odd) {
-  background: #fcfcfc;
+.dashboard-table thead tr:nth-child(2) th {
+  background: #f3f4f6;
+  font-weight: 600;
+  text-align: center;
+  color: #374151;
 }
 
-.dashboard-table tbody tr:hover {
-  background: #f1faff;
+.dashboard-table thead tr:nth-child(3) th {
+  background: #f9fafb;
+  font-weight: 500;
+  text-align: center;
+  color: #4b5563;
+}
+
+.dashboard-table tbody td:first-child {
+  background: #f9fafb;
+  font-weight: 600;
+  color: #1f2937;
+}
+
+.dashboard-table tbody td:not(:first-child) {
+  background: #ffffff;
+  color: #4b5563;
+}
+
+.dashboard-table tbody tr:hover td {
+  background: #f1f5f9;
 }
 
 .loading {
   text-align: center;
   padding: 24px;
-  color: #666;
+  color: #6b7280;
 }
 
 .no-data {
   text-align: center;
   padding: 16px;
-  color: #666;
+  color: #6b7280;
   font-style: italic;
 }
 </style>
