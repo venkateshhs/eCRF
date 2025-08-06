@@ -134,8 +134,13 @@ export default {
       this.entries = entriesResp.data;
     })
     .catch(err => {
-      console.error('Failed to load dashboard data', err);
-      alert('Could not load study data');
+      // if token expired or invalid, go back to login
+      if (err.response && err.response.status === 401) {
+        this.$router.push({ name: 'Login' });
+      } else {
+        console.error('Failed to load dashboard data', err);
+        alert('Could not load study data');
+      }
     });
   },
   methods: {
