@@ -7,7 +7,6 @@
       </button>
       <h2 class="dashboard-title">{{ study.metadata.study_name }}</h2>
       <div class="export-dropdown">
-        <!-- stop propagation here -->
         <button class="btn-minimal" @click.stop="toggleExportMenu">
           Export ▼
         </button>
@@ -27,34 +26,37 @@
         <thead>
           <tr>
             <th rowspan="3">Subject ID</th>
-            <th
-              v-for="(visit, vIdx) in visits"
-              :key="'hdr1-v'+vIdx"
-              :colspan="totalFieldsPerVisit"
-            >
-              {{ visit.name }}
-            </th>
+            <template v-for="(visit, vIdx) in visits" :key="'hdr1-v'+vIdx">
+              <th
+                :colspan="sections.reduce((sum, _, sIdx) => sum + (study.content.study_data.assignments[sIdx]?.[vIdx]?.some(flag => flag) ? fieldsPerSection[sIdx] : 0), 0)"
+              >
+                {{ visit.name }}
+              </th>
+            </template>
           </tr>
           <tr>
             <template v-for="(visit, vIdx) in visits" :key="'hdr2-v'+vIdx">
-              <th
-                v-for="(section, sIdx) in sections"
-                :key="'hdr2-v'+vIdx+'-s'+sIdx"
-                :colspan="fieldsPerSection[sIdx]"
-              >
-                {{ section.title }}
-              </th>
+              <template v-for="(section, sIdx) in sections" :key="'hdr2-v'+vIdx+'-s'+sIdx">
+                <th
+                  v-if="study.content.study_data.assignments[sIdx]?.[vIdx]?.some(flag => flag)"
+                  :colspan="fieldsPerSection[sIdx]"
+                >
+                  {{ section.title }}
+                </th>
+              </template>
             </template>
           </tr>
           <tr>
             <template v-for="(visit, vIdx) in visits" :key="'hdr3-v'+vIdx">
               <template v-for="(section, sIdx) in sections" :key="'hdr3-v'+vIdx+'-s'+sIdx">
-                <th
-                  v-for="(field, fIdx) in section.fields"
-                  :key="'hdr3-v'+vIdx+'-s'+sIdx+'-f'+fIdx"
-                >
-                  {{ field.label }}
-                </th>
+                <template v-if="study.content.study_data.assignments[sIdx]?.[vIdx]?.some(flag => flag)">
+                  <th
+                    v-for="(field, fIdx) in section.fields"
+                    :key="'hdr3-v'+vIdx+'-s'+sIdx+'-f'+fIdx"
+                  >
+                    {{ field.label }}
+                  </th>
+                </template>
               </template>
             </template>
           </tr>
@@ -62,25 +64,32 @@
         <tbody>
           <tr v-for="(subject, subjIdx) in subjects" :key="'row-'+subjIdx">
             <td>{{ subject.id }}</td>
-            <template
-              v-for="(visit, vIdx) in visits"
-              :key="'row-'+subjIdx+'-v'+vIdx"
-            >
-              <template
-                v-for="(section, sIdx) in sections"
-                :key="'row-'+subjIdx+'-v'+vIdx+'-s'+sIdx"
-              >
-                <td
-                  v-for="(field, fIdx) in section.fields"
-                  :key="'cell-'+subjIdx+'-'+vIdx+'-'+sIdx+'-'+fIdx"
-                >
-                  {{ getValue(subjIdx, vIdx, sIdx, fIdx) }}
-                </td>
+            <template v-for="(visit, vIdx) in visits" :key="'row-'+subjIdx+'-v'+vIdx">
+              <template v-for="(section, sIdx) in sections" :key="'row-'+subjIdx+'-v'+vIdx+'-s'+sIdx">
+                <template v-if="study.content.study_data.assignments[sIdx]?.[vIdx]?.[resolveGroup(subjIdx)]">
+                  <td
+                    v-for="(field, fIdx) in section.fields"
+                    :key="'cell-'+subjIdx+'-'+vIdx+'-'+sIdx+'-'+fIdx"
+                  >
+                    {{ getValue(subjIdx, vIdx, sIdx, fIdx) || '(No data)' }}
+                  </td>
+                </template>
+                <template v-else>
+                  <td
+                    v-for="(_field, fIdx) in (study.content.study_data.assignments[sIdx]?.[vIdx]?.some(flag => flag) ? section.fields : [])"
+                    :key="'empty-'+subjIdx+'-'+vIdx+'-'+sIdx+'-'+fIdx"
+                  >
+                    -
+                  </td>
+                </template>
               </template>
             </template>
           </tr>
         </tbody>
       </table>
+    </div>
+    <div v-if="!entries.length" class="no-data">
+      No data entries found. Please enter data for the assigned sections.
     </div>
   </div>
 
@@ -367,5 +376,12 @@ export default {
   text-align: center;
   padding: 24px;
   color: #666;
+}
+
+.no-data {
+  text-align: center;
+  padding: 16px;
+  color: #666;
+  font-style: italic;
 }
 </style>
