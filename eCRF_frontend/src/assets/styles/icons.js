@@ -13,4 +13,6 @@ export default {
   user: "fas fa-user",
   arrowLeft: "fas fa-arrow-left",
   share:"fas fa-share-alt",
+  export: "fas fa-file-export",
+  info: "fas fa-question-circle"
 };
