@@ -48,7 +48,7 @@
         <div v-if="activeTab === 'custom'" class="custom-fields">
           <div
             v-for="field in generalFields"
-            :key="field.name"
+            :key="field.name || field.label"
             class="available-field-button"
             @click="addFieldToActiveSection(field)"
           >
@@ -146,29 +146,43 @@
                           val => editField(si, fi, val)
                         )"
                       ><i :class="icons.edit"></i></button>
+
                       <button
                         class="icon-button"
                         title="Add Similar Field"
                         @click.prevent="addSimilarField(si, fi)"
                       ><i :class="icons.add"></i></button>
+
                       <button
                         class="icon-button"
                         title="Delete Field"
                         @click.prevent="removeField(si, fi)"
                       ><i :class="icons.delete"></i></button>
+
                       <button
                         class="icon-button"
                         title="Edit Constraints"
                         @click.prevent="openConstraintsDialog(si, fi)"
                       ><i :class="icons.cog"></i></button>
+
+                      <!-- Options button for select/radio -->
                       <button
                         v-if="field.type === 'radio' || field.type === 'select'"
                         class="edit-options-button"
                         title="Edit Options"
                         @click.prevent="openOptionsDialog(field, si, fi)"
                       >Edit Options</button>
+
+                      <!-- Date format button -->
+                      <button
+                        v-if="field.type === 'date'"
+                        class="edit-options-button"
+                        title="Edit Date Format"
+                        @click.prevent="openDateFormatDialog(si, fi)"
+                      >Date Format</button>
                     </div>
                   </div>
+
                   <div class="field-box">
                     <!-- TEXT -->
                     <input
@@ -177,6 +191,7 @@
                       v-model="field.value"
                       :placeholder="field.constraints?.placeholder || field.placeholder"
                     />
+
                     <!-- TEXTAREA -->
                     <textarea
                       v-else-if="field.type === 'textarea'"
@@ -184,6 +199,7 @@
                       :rows="field.rows || 3"
                       :placeholder="field.constraints?.placeholder || field.placeholder"
                     ></textarea>
+
                     <!-- NUMBER -->
                     <input
                       v-else-if="field.type === 'number'"
@@ -193,14 +209,25 @@
                       :max="field.constraints?.max"
                       :step="field.constraints?.step"
                     />
-                    <!-- DATE -->
-                    <input
+
+                    <!-- DATE (uses real date picker component) -->
+                    <DateFormatPicker
                       v-else-if="field.type === 'date'"
-                      type="date"
                       v-model="field.value"
-                      :min="field.constraints?.minDate"
-                      :max="field.constraints?.maxDate"
+                      :format="field.constraints?.dateFormat || 'dd.MM.yyyy'"
+                      :placeholder="field.placeholder || (field.constraints?.dateFormat || 'dd.MM.yyyy')"
+                      :min-date="field.constraints?.minDate || null"
+                      :max-date="field.constraints?.maxDate || null"
                     />
+
+                    <!-- TIME -->
+                    <input
+                      v-else-if="field.type === 'time'"
+                      type="time"
+                      v-model="field.value"
+                      :step="field.constraints?.step || null"
+                    />
+
                     <!-- SELECT -->
                     <select
                       v-else-if="field.type === 'select'"
@@ -209,6 +236,7 @@
                       <option value="" disabled>Select…</option>
                       <option v-for="opt in field.options" :key="opt">{{ opt }}</option>
                     </select>
+
                     <!-- RADIO -->
                     <div v-else-if="field.type === 'radio'" class="radio-group">
                       <label
@@ -225,11 +253,21 @@
                         {{ opt }}
                       </label>
                     </div>
+
                     <!-- BUTTON -->
                     <button
                       v-else-if="field.type === 'button'"
                       class="form-button"
                     >{{ field.label }}</button>
+
+                    <!-- FALLBACK -->
+                    <input
+                      v-else
+                      type="text"
+                      v-model="field.value"
+                      :placeholder="field.constraints?.placeholder || field.placeholder"
+                    />
+
                     <small v-if="field.constraints?.helpText" class="help-text">
                       {{ field.constraints.helpText }}
                     </small>
@@ -343,6 +381,30 @@
       </div>
     </div>
 
+    <!-- ───────── Date Format Dialog ───────── -->
+    <div v-if="showDateFormatDialog" class="modal-overlay">
+      <div class="modal options-dialog">
+        <h3>Select a Date Format</h3>
+        <div class="options-dialog-content">
+          <div class="df-list">
+            <label v-for="fmt in dateFormatOptions" :key="fmt" class="df-item">
+              <input
+                type="radio"
+                name="date-format"
+                :value="fmt"
+                v-model="dateFormatSelection"
+              />
+              <span class="df-item-text">{{ fmt }}</span>
+            </label>
+          </div>
+        </div>
+        <div class="modal-actions">
+          <button @click="confirmDateFormatDialog" class="btn-primary">Apply</button>
+          <button @click="cancelDateFormatDialog" class="btn-option">Cancel</button>
+        </div>
+      </div>
+    </div>
+
     <!-- ───────── Constraints Dialog ───────── -->
     <div v-if="showConstraintsDialog" class="modal-overlay">
       <FieldConstraintsDialog
@@ -426,6 +488,7 @@ import ShaclComponents from "./ShaclComponents.vue";
 import ProtocolMatrix from "./ProtocolMatrix.vue";
 import FieldConstraintsDialog from "./FieldConstraintsDialog.vue";
 import FormPreview from "./FormPreview.vue";
+import DateFormatPicker from "./DateFormatPicker.vue";
 
 export default {
   name: "ScratchFormComponent",
@@ -434,7 +497,8 @@ export default {
     ShaclComponents,
     ProtocolMatrix,
     FieldConstraintsDialog,
-    FormPreview
+    FormPreview,
+    DateFormatPicker
   },
 
   data() {
@@ -448,6 +512,7 @@ export default {
       activeTab: "template",
       generalFields: [],
       dataModels: [],
+      shaclComponents: [],
 
       // model dialog
       showModelDialog: false,
@@ -459,7 +524,23 @@ export default {
       optionsDialogOptionsCount: 1,
       optionsDialogOptions: ['Option 1'],
       optionsDialogField: null,
-      optionsDialogEditIndices: null, // To track section and field indices during edit
+      optionsDialogEditIndices: null,
+
+      // date format dialog
+      showDateFormatDialog: false,
+      dateFormatEditIndices: null, // { sectionIndex, fieldIndex }
+      dateFormatSelection: 'dd.MM.yyyy',
+      dateFormatOptions: [
+        'dd.MM.yyyy',
+        'MM-dd-yyyy',
+        'dd-MM-yyyy',
+        'yyyy-MM-dd',
+        'MM/yyyy',
+        'MM-yyyy',
+        'yyyy/MM',
+        'yyyy-MM',
+        'yyyy'
+      ],
 
       // protocol matrix
       showMatrix: false,
@@ -509,17 +590,17 @@ export default {
 
   watch: {
     visits: {
-      handler() { this.adjustAssignments('visits'); },
+      handler() { this.adjustAssignments(); },
       immediate: true,
       deep: true
     },
     groups: {
-      handler() { this.adjustAssignments('groups'); },
+      handler() { this.adjustAssignments(); },
       immediate: true,
       deep: true
     },
     selectedModels: {
-      handler() { this.adjustAssignments('selectedModels'); },
+      handler() { this.adjustAssignments(); },
       immediate: true,
       deep: true
     },
@@ -532,12 +613,9 @@ export default {
   },
 
   async mounted() {
-    // ─── New vs Edit: clear old scratch‐forms on NEW study
-    console.log("this.studyDetails", this.studyDetails);
+    // New vs Edit
     if (this.studyDetails.study_metadata?.id) {
-      // Editing an existing study: load from localStorage or fallback
       const stored = localStorage.getItem("scratchForms");
-      console.log("scratchForms", stored);
       if (stored) {
         try {
           this.forms = JSON.parse(stored);
@@ -545,7 +623,6 @@ export default {
           this.forms = [{ sections: [] }];
         }
       } else if (Array.isArray(this.studyDetails.forms)) {
-        // fallback to Vuex payload (if you committed `forms` there)
         this.forms = JSON.parse(JSON.stringify(this.studyDetails.forms));
         localStorage.setItem("scratchForms", JSON.stringify(this.forms));
       } else {
@@ -553,11 +630,11 @@ export default {
         localStorage.setItem("scratchForms", JSON.stringify(this.forms));
       }
     } else {
-      // New study: clear any leftover and start fresh
       localStorage.removeItem("scratchForms");
       this.forms = [{ sections: [] }];
     }
-    // load visits/groups
+
+    // visits/groups
     this.visits = Array.isArray(this.studyDetails.visits)
       ? JSON.parse(JSON.stringify(this.studyDetails.visits))
       : [];
@@ -566,26 +643,23 @@ export default {
       : [];
 
     // Initialize assignments
-    console.log("studyDetails.assignments before adjustAssignments:", this.studyDetails.assignments);
-    this.adjustAssignments('initial');
+    this.adjustAssignments();
 
     // fetch custom fields
     try {
-      const res = await axios.get(
-        "http://127.0.0.1:8000/forms/available-fields"
-      );
-      this.generalFields = res.data.map(f => ({
+      const res = await axios.get("http://127.0.0.1:8000/forms/available-fields");
+      // normalize and ensure constraints object
+      this.generalFields = res.data.map((f, idx) => ({
         ...f,
+        name: f.name || `${f.type}_${idx}`,
         description: f.helpText || f.placeholder || "",
-        options: f.type === 'select' || f.type === 'radio' ? [] : f.options || [],
-        constraints: f.constraints || {} // Ensure constraints is always an object
+        options: (f.type === 'select' || f.type === 'radio') ? (f.options || []) : (f.options || []),
+        constraints: f.constraints || {}
       }));
-      console.log("generalFields loaded:", this.generalFields);
     } catch (e) {
       console.error("Failed to load custom fields", e);
     }
 
-    // load data models from YAML
     await this.loadDataModels();
   },
 
@@ -600,7 +674,7 @@ export default {
     },
     confirmDialogYes() {
       this.showConfirmDialog = false;
-      this.confirmCallback && this.confirmCallback();
+      if (this.confirmCallback) this.confirmCallback();
     },
     closeConfirmDialog() {
       this.showConfirmDialog = false;
@@ -613,7 +687,7 @@ export default {
     },
     closeGenericDialog() {
       this.showGenericDialog = false;
-      this.genericCallback && this.genericCallback();
+      if (this.genericCallback) this.genericCallback();
     },
 
     openInputDialog(msg, def, cb) {
@@ -624,7 +698,7 @@ export default {
     },
     confirmInputDialog() {
       this.showInputDialog = false;
-      this.inputDialogCallback && this.inputDialogCallback(this.inputDialogValue);
+      if (this.inputDialogCallback) this.inputDialogCallback(this.inputDialogValue);
     },
     cancelInputDialog() {
       this.showInputDialog = false;
@@ -632,18 +706,16 @@ export default {
 
     // ── Options Dialog (for Radio and Select) ──
     openOptionsDialog(field, sectionIndex = null, fieldIndex = null) {
-      // Deep copy to avoid mutating original field
       this.optionsDialogField = JSON.parse(JSON.stringify(field));
-      this.optionsDialogEditIndices = sectionIndex !== null && fieldIndex !== null
+      this.optionsDialogEditIndices = (sectionIndex !== null && fieldIndex !== null)
         ? { sectionIndex, fieldIndex }
         : null;
+
       if (this.optionsDialogEditIndices) {
-        // Editing existing field
         const currentField = this.currentForm.sections[sectionIndex].fields[fieldIndex];
         this.optionsDialogOptionsCount = currentField.options?.length || 1;
         this.optionsDialogOptions = currentField.options?.length ? [...currentField.options] : ['Option 1'];
       } else {
-        // Adding new field
         this.optionsDialogOptionsCount = 1;
         this.optionsDialogOptions = ['Option 1'];
       }
@@ -675,14 +747,12 @@ export default {
       if (sec.collapsed) this.toggleSection(this.activeSection);
 
       if (this.optionsDialogEditIndices) {
-        // Editing existing field
         const { sectionIndex, fieldIndex } = this.optionsDialogEditIndices;
         const field = this.currentForm.sections[sectionIndex].fields[fieldIndex];
-        field.options = [...options]; // New array for reactivity
-        field.value = ''; // Reset for single-selection
+        field.options = [...options];
+        field.value = '';
         field.constraints = { ...field.constraints, allowMultiple: false };
       } else {
-        // Adding new field
         sec.fields.push({
           name: `${this.optionsDialogField.name}_${Date.now()}`,
           label: this.optionsDialogField.label,
@@ -690,17 +760,12 @@ export default {
           options: [...options],
           value: '',
           constraints: {
-            ...this.optionsDialogField.constraints || {}, // Ensure constraints is an object
+            ...(this.optionsDialogField.constraints || {}),
             allowMultiple: false
           },
           placeholder: this.optionsDialogField.description || this.optionsDialogField.placeholder
         });
       }
-      console.log('Options saved:', {
-        label: this.optionsDialogField.label,
-        type: this.optionsDialogField.type,
-        options
-      });
       this.cancelOptionsDialog();
     },
     cancelOptionsDialog() {
@@ -711,64 +776,68 @@ export default {
       this.optionsDialogOptions = ['Option 1'];
     },
 
+    // ── Date Format Dialog ──
+    openDateFormatDialog(sectionIndex, fieldIndex) {
+      this.dateFormatEditIndices = { sectionIndex, fieldIndex };
+      const field = this.currentForm.sections[sectionIndex].fields[fieldIndex];
+      const currentFmt = field?.constraints?.dateFormat || 'dd.MM.yyyy';
+      this.dateFormatSelection = currentFmt;
+      this.showDateFormatDialog = true;
+    },
+    confirmDateFormatDialog() {
+      if (!this.dateFormatEditIndices) return;
+      const { sectionIndex, fieldIndex } = this.dateFormatEditIndices;
+      const field = this.currentForm.sections[sectionIndex].fields[fieldIndex];
+      field.constraints = { ...(field.constraints || {}), dateFormat: this.dateFormatSelection };
+      // also reflect as placeholder with the token string
+      field.placeholder = this.dateFormatSelection;
+      this.cancelDateFormatDialog();
+    },
+    cancelDateFormatDialog() {
+      this.showDateFormatDialog = false;
+      this.dateFormatEditIndices = null;
+    },
+
     // ── Protocol Matrix ──
-    adjustAssignments(trigger) {
+    adjustAssignments() {
       const m = this.selectedModels.length;
       const v = this.visits.length;
       const g = this.groups.length;
-      console.log(`adjustAssignments triggered by ${trigger}:`, { m, v, g });
 
-      // Validate dimensions
       if (m === 0 || v === 0 || g === 0) {
-        console.log("Invalid dimensions, initializing empty assignments");
         this.assignments = [];
         return;
       }
 
-      // If editing a study, try to preserve existing assignments
       if (this.studyDetails.study_metadata?.id && Array.isArray(this.studyDetails.assignments)) {
         const oldAssignments = this.studyDetails.assignments;
-        console.log("Old assignments:", oldAssignments);
         const newAssignments = [];
-
-        // Initialize new assignments array with correct dimensions
         for (let mi = 0; mi < m; mi++) {
           newAssignments[mi] = [];
           for (let vi = 0; vi < v; vi++) {
             newAssignments[mi][vi] = [];
             for (let gi = 0; gi < g; gi++) {
-              // Preserve existing assignments if available and valid, otherwise set to false
               const oldValue = oldAssignments[mi]?.[vi]?.[gi];
               newAssignments[mi][vi][gi] = typeof oldValue === 'boolean' ? oldValue : false;
             }
           }
         }
-
         this.assignments = newAssignments;
-        console.log("Preserved assignments for editing:", this.assignments);
-        // Log detailed assignments structure
-        console.log("Detailed assignments:", JSON.stringify(this.assignments, null, 2));
       } else {
-        // New study: initialize empty assignments
         this.assignments = Array.from({ length: m }, () =>
           Array.from({ length: v }, () =>
             Array.from({ length: g }, () => false)
           )
         );
-        console.log("Initialized empty assignments for new study:", this.assignments);
-        console.log("Detailed assignments:", JSON.stringify(this.assignments, null, 2));
       }
     },
 
     handleProtocolClick() {
-      console.log("handleProtocolClick: assignments before showing matrix:", this.assignments);
       this.showMatrix = true;
     },
     editTemplate() { this.showMatrix = false },
     onAssignmentUpdated({ mIdx, vIdx, gIdx, checked }) {
       this.assignments[mIdx][vIdx][gIdx] = checked;
-      console.log("Assignment updated:", { mIdx, vIdx, gIdx, checked });
-      // Update Vuex store to persist changes
       this.$store.commit("setStudyDetails", {
         ...this.studyDetails,
         assignments: this.assignments
@@ -796,7 +865,7 @@ export default {
         .map(f => ({
           ...f,
           description: f.description || "",
-          constraints: f.constraints || {} // Ensure constraints is an object
+          constraints: f.constraints || {}
         }));
       const sec = {
         title: this.currentModel.title,
@@ -807,10 +876,9 @@ export default {
       const idx = this.activeSection + 1;
       this.forms[this.currentFormIndex].sections.splice(idx, 0, sec);
       this.activeSection = idx;
-      this.showModelDialog = false;
-      this.adjustAssignments('takeoverModel');
+      this.adjustAssignments();
       this.focusSection(idx);
-      this.$forceUpdate();
+      this.showModelDialog = false;
     },
 
     addNewSection() {
@@ -822,9 +890,8 @@ export default {
       };
       this.forms[this.currentFormIndex].sections.push(sec);
       this.activeSection = this.currentForm.sections.length - 1;
-      this.adjustAssignments('addNewSection');
+      this.adjustAssignments();
       this.focusSection(this.activeSection);
-      this.$forceUpdate();
     },
     addNewSectionBelow(i) {
       const currentSection = this.currentForm.sections[i];
@@ -833,7 +900,7 @@ export default {
         fields: currentSection.fields.map(field => ({
           ...field,
           name: `${field.name}_${Date.now()}`,
-          constraints: field.constraints || {} // Ensure constraints is an object
+          constraints: field.constraints || {}
         })),
         collapsed: false,
         source: currentSection.source
@@ -841,16 +908,15 @@ export default {
       const idx = i + 1;
       this.forms[this.currentFormIndex].sections.splice(idx, 0, sec);
       this.activeSection = idx;
-      this.adjustAssignments('addNewSectionBelow');
+      this.adjustAssignments();
       this.focusSection(idx);
-      this.$forceUpdate();
     },
 
     confirmDeleteSection(i) {
       this.openConfirmDialog("Delete this section?", () => {
         this.currentForm.sections.splice(i, 1);
         this.activeSection = Math.max(0, this.activeSection - 1);
-        this.adjustAssignments('confirmDeleteSection');
+        this.adjustAssignments();
       });
     },
 
@@ -860,8 +926,7 @@ export default {
         () => {
           this.forms[this.currentFormIndex].sections = [];
           this.activeSection = 0;
-          this.adjustAssignments('confirmClearForm');
-          this.$forceUpdate();
+          this.adjustAssignments();
         }
       );
     },
@@ -876,7 +941,6 @@ export default {
         });
         this.focusSection(i);
       }
-      this.$forceUpdate();
     },
     setActiveSection(i) {
       this.activeSection = i;
@@ -884,29 +948,38 @@ export default {
         s.collapsed = idx !== i;
       });
       this.focusSection(i);
-      this.$forceUpdate();
     },
 
     addFieldToActiveSection(field) {
-      if (field.type === 'radio' || field.type === 'select') {
-        this.openOptionsDialog(field);
-        return;
-      }
       if (!this.currentForm.sections.length) {
         this.addNewSection();
       }
       const sec = this.currentForm.sections[this.activeSection];
       if (sec.collapsed) this.toggleSection(this.activeSection);
 
-      sec.fields.push({
-        name: `${field.name}_${Date.now()}`,
+      // For radio/select, use the options dialog
+      if (field.type === 'radio' || field.type === 'select') {
+        this.openOptionsDialog(field);
+        return;
+      }
+
+      const base = {
+        name: `${(field.name || field.type)}_${Date.now()}`,
         label: field.label,
         type: field.type,
         options: field.options || [],
-        placeholder: field.description || field.placeholder,
+        placeholder: field.description || field.placeholder || '',
         value: field.type === 'checkbox' ? false : "",
-        constraints: field.constraints || {} // Ensure constraints is an object
-      });
+        constraints: field.constraints || {}
+      };
+
+      // default date format constraints
+      if (base.type === 'date') {
+        base.constraints = { ...base.constraints, dateFormat: base.constraints.dateFormat || 'dd.MM.yyyy' };
+        base.placeholder = base.placeholder || base.constraints.dateFormat;
+      }
+
+      sec.fields.push(base);
     },
 
     editSection(i, v) {
@@ -921,8 +994,13 @@ export default {
         ...f,
         name: `${f.name}_${Date.now()}`,
         options: f.options ? [...f.options] : [],
-        constraints: f.constraints || {}, // Ensure constraints is an object
-        value: f.type === 'radio' && f.constraints?.allowMultiple ? [] : f.type === 'radio' || f.type === 'select' ? '' : f.value
+        constraints: f.constraints || {},
+        value:
+          f.type === 'radio' && f.constraints?.allowMultiple
+            ? []
+            : (f.type === 'radio' || f.type === 'select')
+              ? ''
+              : f.value
       };
       this.currentForm.sections[si].fields.splice(fi + 1, 0, clone);
     },
@@ -934,7 +1012,7 @@ export default {
       const f = this.currentForm.sections[si].fields[fi];
       this.currentFieldIndices = { sectionIndex: si, fieldIndex: fi };
       this.currentFieldType = f.type;
-      this.constraintsForm = { ...f.constraints || {} }; // Ensure constraints is an object
+      this.constraintsForm = { ...(f.constraints || {}) };
       this.showConstraintsDialog = true;
     },
     confirmConstraintsDialog(c) {
@@ -950,7 +1028,7 @@ export default {
     // ── Save / Download / Upload ──
     saveForm() {
       this.openGenericDialog("Saved!");
-      // … your existing save logic …
+      // hook your existing save logic as needed
     },
 
     downloadFormData() {
@@ -961,8 +1039,8 @@ export default {
           source: sec.source
         }))
       };
-      const str = JSON.stringify(payload, null, 2),
-            name = "sections.json";
+      const str = JSON.stringify(payload, null, 2);
+      const name = "sections.json";
       const blob = new Blob([str], { type: "application/json" });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
@@ -989,7 +1067,6 @@ export default {
         try {
           const pd = JSON.parse(evt.target.result);
           if (Array.isArray(pd.sections)) {
-            // Ensure constraints is defined for all fields in uploaded sections
             pd.sections = pd.sections.map(sec => ({
               ...sec,
               fields: sec.fields.map(field => ({
@@ -998,7 +1075,7 @@ export default {
               }))
             }));
             this.currentForm.sections = pd.sections;
-            this.adjustAssignments('handleFileChange');
+            this.adjustAssignments();
           } else {
             throw new Error("Bad format");
           }
@@ -1029,11 +1106,10 @@ export default {
               description: def.description || "",
               type: this.resolveType(def),
               options: def.enum || [],
-              constraints: { required: !!def.required }, // Constraints already defined
+              constraints: { required: !!def.required },
               placeholder: def.description || ""
             }))
           }));
-        console.log("dataModels loaded:", this.dataModels);
       } catch (e) {
         console.error("Failed to load data models:", e);
       }
@@ -1173,8 +1249,8 @@ export default {
 .form-section {
   padding: 15px;
   border-bottom: 1px solid $border-color;
-  background: #f5f5f5; /* Light gray background for non-active sections */
-  margin-bottom: 10px; /* Added padding between sections */
+  background: #f5f5f5;
+  margin-bottom: 10px;
 }
 
 .form-section.active {
@@ -1405,7 +1481,8 @@ select {
   gap: 5px;
 }
 
-.options-dialog-content input[type="number"] {
+.options-dialog-content input[type="number"],
+.input-dialog-field {
   width: 100%;
   padding: 8px;
   border: 1px solid $border-color;
@@ -1520,37 +1597,19 @@ select {
   margin-top: 4px;
 }
 
-@media (max-width: 768px) {
-  .scratch-form-content {
-    flex-direction: column;
-  }
-  .form-area,
-  .available-fields {
-    width: 100%;
-  }
-}
-
-/* Added styles for options list */
-.options-list {
-  max-height: 200px;
-  overflow-y: auto;
-  margin: 10px 0;
-}
-
-.option-row {
-  margin-bottom: 8px;
-}
-
-.option-row label {
+/* Date format list (vertical) */
+.dfp-wrapper { width: 100%; }
+.df-list {
   display: flex;
   flex-direction: column;
-  gap: 5px;
+  gap: 8px;
 }
-
-.option-row input {
-  width: 100%;
-  padding: 8px;
-  border: 1px solid $border-color;
-  border-radius: 5px;
+.df-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.df-item-text {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
 }
 </style>

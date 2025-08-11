@@ -51,6 +51,13 @@
     "default": ""
   },
   {
+    "type": "time",
+    "label": "Time Field",
+    "placeholder": "Select a time",
+    "icon": "fas fa-clock",
+    "default": ""
+  },
+  {
     "type": "file",
     "label": "File Upload",
     "icon": "fas fa-file-upload",
