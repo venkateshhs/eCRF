@@ -171,17 +171,41 @@
                 :step="field.constraints?.step"
               />
 
-              <!-- DATE INPUT -->
-              <input
+              <!-- CHECKBOX -->
+              <FieldCheckbox
+                v-else-if="field.type === 'checkbox'"
+                :id="fieldId(mIdx, fIdx)"
+                v-model="entryData[currentSubjectIndex][currentVisitIndex][currentGroupIndex][mIdx][fIdx]"
+              />
+
+              <!-- RADIO GROUP -->
+              <FieldRadioGroup
+                v-else-if="field.type === 'radio'"
+                :id="fieldId(mIdx, fIdx)"
+                :name="fieldId(mIdx, fIdx)"
+                :options="field.options || []"
+                v-model="entryData[currentSubjectIndex][currentVisitIndex][currentGroupIndex][mIdx][fIdx]"
+              />
+
+              <!-- DATE (with format) -->
+              <DateFormatPicker
                 v-else-if="field.type === 'date'"
                 :id="fieldId(mIdx, fIdx)"
-                type="date"
                 v-model="entryData[currentSubjectIndex][currentVisitIndex][currentGroupIndex][mIdx][fIdx]"
-                :placeholder="field.placeholder"
-                :required="!!field.constraints?.required"
-                :readonly="!!field.constraints?.readonly"
-                :min="field.constraints?.minDate"
-                :max="field.constraints?.maxDate"
+                :format="field.constraints?.dateFormat || 'dd.MM.yyyy'"
+                :placeholder="field.placeholder || (field.constraints?.dateFormat || 'dd.MM.yyyy')"
+                :min-date="field.constraints?.minDate || null"
+                :max-date="field.constraints?.maxDate || null"
+              />
+
+              <!-- TIME -->
+              <FieldTime
+                v-else-if="field.type === 'time'"
+                :id="fieldId(mIdx, fIdx)"
+                v-model="entryData[currentSubjectIndex][currentVisitIndex][currentGroupIndex][mIdx][fIdx]"
+                :format="field.constraints?.timeFormat || 'HH:mm'"
+                :step="field.constraints?.step"
+                :placeholder="field.placeholder || (field.constraints?.timeFormat || 'HH:mm')"
               />
 
               <!-- SELECT -->
@@ -296,10 +320,20 @@
 import axios from "axios";
 import icons from "@/assets/styles/icons";
 import CustomDialog from "@/components/CustomDialog.vue";
+import DateFormatPicker from "@/components/DateFormatPicker.vue";
+import FieldCheckbox from "@/components/fields/FieldCheckbox.vue";
+import FieldRadioGroup from "@/components/fields/FieldRadioGroup.vue";
+import FieldTime from "@/components/fields/FieldTime.vue";
 
 export default {
   name: "StudyDataEntryComponent",
-  components: { CustomDialog },
+  components: {
+    CustomDialog,
+    DateFormatPicker,
+    FieldCheckbox,
+    FieldRadioGroup,
+    FieldTime,
+  },
   data() {
     return {
       study: null,
@@ -388,7 +422,7 @@ export default {
           `http://127.0.0.1:8000/forms/studies/${studyId}/data_entries`,
           { headers: { Authorization: `Bearer ${this.token}` } }
         );
-        this.existingEntries = Array.isArray(resp.data)? resp.data: (resp.data?.entries || []);
+        this.existingEntries = Array.isArray(resp.data) ? resp.data : (resp.data?.entries || []);
         this.populateFromExisting();
       } catch (err) {
         console.error("Failed to load existing entries", err);
@@ -401,7 +435,13 @@ export default {
       this.entryData = Array.from({ length: nS }, () =>
         Array.from({ length: nV }, () =>
           Array.from({ length: nG }, () =>
-            this.selectedModels.map((sect) => sect.fields.map(() => ""))
+            this.selectedModels.map((sect) =>
+              sect.fields.map((f) => {
+                // sensible defaults per field type
+                if (f.type === "checkbox") return false;
+                return "";
+              })
+            )
           )
         )
       );
@@ -474,10 +514,18 @@ export default {
       const cons = def.constraints || {};
       const key = this.errorKey(mIdx, fIdx);
       delete this.validationErrors[key];
-      if (cons.required && (val === "" || val == null)) {
-        this.$set(this.validationErrors, key, `${def.label} is required.`);
-        return false;
+
+      if (cons.required) {
+        // required = must have a value
+        const empty =
+          val == null ||
+          (typeof val === "string" && val.trim() === "");
+        if (empty) {
+          this.$set(this.validationErrors, key, `${def.label} is required.`);
+          return false;
+        }
       }
+
       if (def.type === "number") {
         const num = Number(val);
         if (isNaN(num)) {
@@ -493,7 +541,8 @@ export default {
           return false;
         }
       }
-      if (["text", "textarea"].includes(def.type)) {
+
+      if (def.type === "text" || def.type === "textarea") {
         const str = String(val || "");
         if (cons.minLength != null && str.length < cons.minLength) {
           this.$set(
@@ -585,16 +634,15 @@ export default {
             { headers: { Authorization: `Bearer ${this.token}` } }
           );
           this.showDialogMessage("Data updated successfully.");
-          // Replace the updated entry locally (optional but nice)
           const idx = this.existingEntries.findIndex(x => x.id === existingId);
           if (idx >= 0) this.existingEntries.splice(idx, 1, {
-           id: existingId,
-           study_id: this.study.metadata.id,
-           subject_index: s, visit_index: v, group_index: g,
-           data: this.entryData[s][v][g],
-           form_version: this.existingEntries[idx]?.form_version ?? 1,
-           created_at: this.existingEntries[idx]?.created_at
-         });
+            id: existingId,
+            study_id: this.study.metadata.id,
+            subject_index: s, visit_index: v, group_index: g,
+            data: this.entryData[s][v][g],
+            form_version: this.existingEntries[idx]?.form_version ?? 1,
+            created_at: this.existingEntries[idx]?.created_at
+          });
         } else {
           const resp = await axios.post(
             `http://127.0.0.1:8000/forms/studies/${this.study.metadata.id}/data`,
@@ -620,24 +668,22 @@ export default {
       this.dialogMessage = "";
     },
 
-
     statusFor(sIdx, vIdx) {
-      // resolve group index
       const subj = this.study.content.study_data.subjects[sIdx];
       const name = (subj.group || "").trim().toLowerCase();
       const gi = this.groupList.findIndex(
         (g) => (g.name || "").trim().toLowerCase() === name
       );
       const gIdx = gi >= 0 ? gi : 0;
-      // find saved entry
-      const e = this.existingEntries.find(
+
+      const e = (Array.isArray(this.existingEntries) ? this.existingEntries : []).find(
         (x) =>
           x.subject_index === sIdx &&
           x.visit_index === vIdx &&
           x.group_index === gIdx
       );
       if (!e) return "none";
-      // only the assigned sections
+
       const assigned = this.assignments
         .map((_, i) => i)
         .filter((i) => this.assignments[i]?.[vIdx]?.[gIdx]);

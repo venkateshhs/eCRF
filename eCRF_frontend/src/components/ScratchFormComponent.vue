@@ -130,8 +130,8 @@
                       :for="field.name"
                     >
                       {{ field.label }}
-                      <input
-                        type="checkbox"
+                      <!-- REPLACED raw input with FieldCheckbox -->
+                      <FieldCheckbox
                         :id="field.name"
                         v-model="field.value"
                       />
@@ -220,12 +220,12 @@
                       :max-date="field.constraints?.maxDate || null"
                     />
 
-                    <!-- TIME -->
-                    <input
+                     <FieldTime
                       v-else-if="field.type === 'time'"
-                      type="time"
                       v-model="field.value"
+                      :format="field.constraints?.timeFormat || 'HH:mm'"
                       :step="field.constraints?.step || null"
+                      :placeholder="field.placeholder || (field.constraints?.timeFormat || 'HH:mm')"
                     />
 
                     <!-- SELECT -->
@@ -237,22 +237,13 @@
                       <option v-for="opt in field.options" :key="opt">{{ opt }}</option>
                     </select>
 
-                    <!-- RADIO -->
-                    <div v-else-if="field.type === 'radio'" class="radio-group">
-                      <label
-                        v-for="(opt, i) in field.options"
-                        :key="i"
-                        class="radio-label"
-                      >
-                        <input
-                          type="radio"
-                          :name="field.name"
-                          :value="opt"
-                          v-model="field.value"
-                        />
-                        {{ opt }}
-                      </label>
-                    </div>
+
+                    <FieldRadioGroup
+                      v-else-if="field.type === 'radio'"
+                      :name="field.name"
+                      :options="field.options"
+                      v-model="field.value"
+                    />
 
                     <!-- BUTTON -->
                     <button
@@ -489,6 +480,9 @@ import ProtocolMatrix from "./ProtocolMatrix.vue";
 import FieldConstraintsDialog from "./FieldConstraintsDialog.vue";
 import FormPreview from "./FormPreview.vue";
 import DateFormatPicker from "./DateFormatPicker.vue";
+import FieldCheckbox from "@/components/fields/FieldCheckbox.vue";
+import FieldRadioGroup from "@/components/fields/FieldRadioGroup.vue";
+import FieldTime from "@/components/fields/FieldTime.vue";
 
 export default {
   name: "ScratchFormComponent",
@@ -498,7 +492,10 @@ export default {
     ProtocolMatrix,
     FieldConstraintsDialog,
     FormPreview,
-    DateFormatPicker
+    DateFormatPicker,
+    FieldCheckbox,
+    FieldRadioGroup,
+    FieldTime
   },
 
   data() {
@@ -528,7 +525,7 @@ export default {
 
       // date format dialog
       showDateFormatDialog: false,
-      dateFormatEditIndices: null, // { sectionIndex, fieldIndex }
+      dateFormatEditIndices: null,
       dateFormatSelection: 'dd.MM.yyyy',
       dateFormatOptions: [
         'dd.MM.yyyy',
@@ -789,7 +786,6 @@ export default {
       const { sectionIndex, fieldIndex } = this.dateFormatEditIndices;
       const field = this.currentForm.sections[sectionIndex].fields[fieldIndex];
       field.constraints = { ...(field.constraints || {}), dateFormat: this.dateFormatSelection };
-      // also reflect as placeholder with the token string
       field.placeholder = this.dateFormatSelection;
       this.cancelDateFormatDialog();
     },
