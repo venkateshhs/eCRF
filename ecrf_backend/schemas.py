@@ -192,4 +192,10 @@ class StudyDataEntryOut(BaseModel):
     created_at: datetime
 
     class Config:
-        orm_mode = True
+        from_attributes = True
+
+class PaginatedStudyDataEntries(BaseModel):
+    total: int
+    entries: List[StudyDataEntryOut]
+    class Config:
+        from_attributes = True

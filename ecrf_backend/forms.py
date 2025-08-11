@@ -1,6 +1,6 @@
 import os
 import shutil
-from typing import List, Dict
+from typing import List, Dict, Optional
 from fastapi import Request
 from fastapi import APIRouter, HTTPException, Depends, Query, UploadFile, File, Form, Body
 from pathlib import Path
@@ -551,23 +551,58 @@ def update_study_data_entry(
     return entry
 
 
-@router.get("/studies/{study_id}/data_entries", response_model=List[schemas.StudyDataEntryOut])
+@router.get(
+    "/studies/{study_id}/data_entries",
+    response_model=schemas.PaginatedStudyDataEntries
+)
 def list_study_data_entries(
     study_id: int,
+    # When the UI is showing "rows" (subjects × visits), it will send the
+    # subject/visit indexes for the rows visible on the current page.
+    subject_indexes: Optional[str] = Query(None, description="Comma-separated subject indexes for current page"),
+    visit_indexes: Optional[str] = Query(None, description="Comma-separated visit indexes for current page"),
+    # Explicit "all" fetch (used for small studies or for export):
+    all: bool = Query(False, description="Return all entries for the study"),
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    # (optional) authorization check...
-    exists = db.query(models.StudyMetadata).get(study_id)
+    # Authorization / existence check
+    exists = db.query(models.StudyMetadata).filter_by(id=study_id).first()
     if not exists:
         raise HTTPException(404, "Study not found")
 
-    entries = (
+    q = (
         db.query(models.StudyEntryData)
           .filter_by(study_id=study_id)
-          .order_by(models.StudyEntryData.subject_index,
-                    models.StudyEntryData.visit_index,
-                    models.StudyEntryData.group_index)
-          .all()
+          .order_by(
+              models.StudyEntryData.subject_index.asc(),
+              models.StudyEntryData.visit_index.asc(),
+              models.StudyEntryData.group_index.asc(),
+              models.StudyEntryData.id.asc()
+          )
     )
-    return entries
+
+    total = q.count()
+
+    if not all:
+        # Filter by current page "window" if provided
+        subj_idx_list = None
+        visit_idx_list = None
+
+        if subject_indexes:
+            subj_idx_list = [int(s) for s in subject_indexes.split(",") if s.strip().isdigit()]
+            if subj_idx_list:
+                q = q.filter(models.StudyEntryData.subject_index.in_(subj_idx_list))
+
+        if visit_indexes:
+            visit_idx_list = [int(s) for s in visit_indexes.split(",") if s.strip().isdigit()]
+            if visit_idx_list:
+                q = q.filter(models.StudyEntryData.visit_index.in_(visit_idx_list))
+
+    entries = q.all()
+
+    # Pydantic v2 note: ensure schemas.StudyDataEntryOut.Config.from_attributes = True
+    entries_out = [schemas.StudyDataEntryOut.from_orm(e) for e in entries]
+
+    return {"total": total, "entries": entries_out}
+

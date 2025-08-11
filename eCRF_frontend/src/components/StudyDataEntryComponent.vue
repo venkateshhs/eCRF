@@ -388,7 +388,7 @@ export default {
           `http://127.0.0.1:8000/forms/studies/${studyId}/data_entries`,
           { headers: { Authorization: `Bearer ${this.token}` } }
         );
-        this.existingEntries = resp.data;
+        this.existingEntries = Array.isArray(resp.data)? resp.data: (resp.data?.entries || []);
         this.populateFromExisting();
       } catch (err) {
         console.error("Failed to load existing entries", err);
@@ -413,7 +413,7 @@ export default {
     },
     populateFromExisting() {
       this.initializeEntryData();
-      this.existingEntries.forEach((e) => {
+      (Array.isArray(this.existingEntries) ? this.existingEntries : []).forEach((e) => {
         const { subject_index: s, visit_index: v, group_index: g, data, id } = e;
         if (
           this.entryData[s] &&
@@ -585,6 +585,16 @@ export default {
             { headers: { Authorization: `Bearer ${this.token}` } }
           );
           this.showDialogMessage("Data updated successfully.");
+          // Replace the updated entry locally (optional but nice)
+          const idx = this.existingEntries.findIndex(x => x.id === existingId);
+          if (idx >= 0) this.existingEntries.splice(idx, 1, {
+           id: existingId,
+           study_id: this.study.metadata.id,
+           subject_index: s, visit_index: v, group_index: g,
+           data: this.entryData[s][v][g],
+           form_version: this.existingEntries[idx]?.form_version ?? 1,
+           created_at: this.existingEntries[idx]?.created_at
+         });
         } else {
           const resp = await axios.post(
             `http://127.0.0.1:8000/forms/studies/${this.study.metadata.id}/data`,
@@ -592,6 +602,7 @@ export default {
             { headers: { Authorization: `Bearer ${this.token}` } }
           );
           this.entryIds[s][v][g] = resp.data.id;
+          (this.existingEntries = this.existingEntries || []);
           this.existingEntries.push(resp.data);
           this.showDialogMessage("Data saved successfully.");
         }
