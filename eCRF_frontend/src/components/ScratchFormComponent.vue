@@ -27,22 +27,30 @@
         </div>
 
         <!-- TEMPLATE -->
-        <div v-if="activeTab === 'template'" class="template-fields">
+          <div v-if="activeTab === 'template'" class="template-fields">
           <p class="template-instruction">
             Click a model to pick properties
           </p>
+
           <div
             v-for="model in dataModels"
             :key="model.title"
-            class="available-section"
+            class="template-button"
             @click="openModelDialog(model)"
           >
-            <h4>{{ model.title }}</h4>
-            <p class="model-description">
+            <div class="template-header">
+              <i :class="modelIcon(model.title)"></i>
+              {{ prettyModelTitle(model.title) }}
+            </div>
+            <div class="template-description">
               {{ model.description || "No description available." }}
-            </p>
+            </div>
           </div>
         </div>
+
+
+
+
 
         <!-- CUSTOM -->
         <div v-if="activeTab === 'custom'" class="custom-fields">
@@ -55,7 +63,6 @@
             <i :class="field.icon"></i>
             <div class="field-info">
               <span class="field-label">{{ field.label }}</span>
-              <small class="field-desc">{{ field.description }}</small>
             </div>
           </div>
         </div>
@@ -76,7 +83,7 @@
               :key="si"
               class="form-section"
               :class="{ active: activeSection === si }"
-              @click.self="setActiveSection(si)"
+              @click="setActiveSection(si)"
               :ref="'section-' + si"
             >
               <div class="section-header">
@@ -196,7 +203,7 @@
                     <textarea
                       v-else-if="field.type === 'textarea'"
                       v-model="field.value"
-                      :rows="field.rows || 3"
+                      :rows="field.rows || 4"
                       :placeholder="field.constraints?.placeholder || field.placeholder"
                     ></textarea>
 
@@ -311,7 +318,7 @@
     <!-- ───────── Model Dialog ───────── -->
     <div v-if="showModelDialog" class="modal-overlay">
       <div class="modal model-dialog">
-        <h3>Select Properties for {{ currentModel.title }}</h3>
+        <h3>Select Properties for {{ prettyModelTitle(currentModel.title) }}</h3>
         <div class="model-prop-list">
           <div
             v-for="(prop, i) in currentModel.fields"
@@ -319,8 +326,8 @@
             class="prop-row"
           >
             <div class="prop-info">
-              <strong>{{ prop.name }}</strong> — {{ prop.label }}
-              <p class="prop-desc">{{ prop.description }}</p>
+              <strong>{{ prop.label || prettyModelTitle(prop.name) }}</strong>
+              <p v-if="prop.description" class="prop-desc">{{ prop.description }}</p>
             </div>
             <label class="prop-check">
               <input type="checkbox" :id="'prop-check-' + i" v-model="selectedProps[i]" />
@@ -663,7 +670,21 @@ export default {
   methods: {
     // ── Navigation & dialogs ──
     goBack() { this.$router.back() },
-
+    prettyModelTitle(s) {
+      return this.$formatLabel ? this.$formatLabel(s) : String(s || '')
+    },
+    modelIcon(title) {
+    const key = String(title || '')
+      .toLowerCase()
+      .replace(/[^a-z0-9]/g, '');
+    return this.icons[key] || 'fas fa-book';
+  },
+  fieldIcon(label) {
+    const key = String(label || '')
+      .toLowerCase()
+      .replace(/[^a-z0-9]/g, '');
+    return this.icons[key] || 'fas fa-dot-circle';
+  },
     openConfirmDialog(msg, cb) {
       this.confirmDialogMessage = msg;
       this.confirmCallback = cb;
@@ -842,10 +863,11 @@ export default {
 
     // ── Sections & Fields ──
     focusSection(i) {
-      this.$nextTick(() => {
-        const sectionRef = this.$refs[`section-${i}`];
-        if (sectionRef && sectionRef[0]) {
-          sectionRef[0].scrollIntoView({ behavior: 'smooth', block: 'start' });
+        this.$nextTick(() => {
+        const ref = this.$refs[`section-${i}`];
+        const el = Array.isArray(ref) ? ref[0] : ref;
+        if (el && el.scrollIntoView) {
+          el.scrollIntoView({ behavior: 'smooth', block: 'start' });
         }
       });
     },
@@ -856,26 +878,21 @@ export default {
       this.showModelDialog = true;
     },
     takeoverModel() {
-      const chosen = this.currentModel.fields
-        .filter((_, i) => this.selectedProps[i])
-        .map(f => ({
-          ...f,
-          description: f.description || "",
-          constraints: f.constraints || {}
-        }));
-      const sec = {
-        title: this.currentModel.title,
-        fields: chosen,
-        collapsed: false,
-        source: "template"
-      };
-      const idx = this.activeSection + 1;
-      this.forms[this.currentFormIndex].sections.splice(idx, 0, sec);
-      this.activeSection = idx;
-      this.adjustAssignments();
-      this.focusSection(idx);
-      this.showModelDialog = false;
-    },
+  const chosen = this.currentModel.fields
+    .filter((_, i) => this.selectedProps[i])
+    .map(f => ({ ...f, description: f.description || "", constraints: f.constraints || {} }));
+
+  const insertAt = Math.min(this.activeSection + 1, this.currentForm.sections.length);
+  const sec = { title: this.currentModel.title, fields: chosen, collapsed: false, source: "template" };
+
+  this.forms[this.currentFormIndex].sections.splice(insertAt, 0, sec);
+  this.activeSection = insertAt;
+
+  this.$nextTick(() => this.focusSection(insertAt)); // ensure DOM is ready
+  this.adjustAssignments();
+  this.showModelDialog = false;
+},
+
 
     addNewSection() {
       const sec = {
@@ -1088,35 +1105,50 @@ export default {
 
     // ── Load YAML Models ──
     async loadDataModels() {
-      try {
-        const res = await fetch("/study_schema.yaml");
-        const doc = yaml.load(await res.text());
-        this.dataModels = Object.entries(doc.classes)
-          .filter(([n]) => n !== "Study")
-          .map(([n, cls]) => ({
-            title: n,
-            description: cls.description || "",
-            fields: Object.entries(cls.attributes).map(([attr, def]) => ({
-              name: attr,
-              label: def.label || attr,
-              description: def.description || "",
-              type: this.resolveType(def),
-              options: def.enum || [],
-              constraints: { required: !!def.required },
-              placeholder: def.description || ""
-            }))
-          }));
-      } catch (e) {
-        console.error("Failed to load data models:", e);
-      }
-    },
-    resolveType(def) {
-      const r = (def.range || "").toLowerCase();
-      if (r === "date" || r === "datetime") return "date";
-      if (["integer", "decimal"].includes(r)) return "number";
-      if (def.enum) return "select";
-      return "text";
-    }
+  try {
+    const res = await fetch("/template_schema.yaml")
+    const doc = yaml.load(await res.text())
+
+    this.dataModels = Object.entries(doc.classes)
+      .filter(([n]) => n !== "Study")
+      .map(([n, cls]) => ({
+        title: n,
+        description: cls.description || "",
+
+
+        fields: Object.entries(cls.attributes).map(([attr, def]) => ({
+          name: attr,
+          label: def.label || this.prettyModelTitle(attr),
+          description: def.description || "",
+          type: this.resolveType(def),
+          options: def.enum || [],
+
+          rows: def.ui?.rows,
+          constraints: {
+            required: !!def.required,
+            ...(def.constraints || {})
+          },
+          placeholder: def.ui?.placeholder || def.description || ""
+        }))
+      }))
+  } catch (e) {
+    console.error("Failed to load data models:", e)
+  }
+},
+resolveType(def) {
+  const ui = def.ui || {}
+  const dt = String(def.datatype || '').toLowerCase()
+  const range = String(def.range || '').toLowerCase()
+
+  if (ui.widget === 'textarea' || dt === 'textarea') return 'textarea'
+  if (ui.widget === 'radio'    || dt === 'radio')    return 'radio'
+  if (ui.widget === 'dropdown' || dt === 'dropdown' || def.enum) return 'select'
+  if (range === 'date' || range === 'datetime') return 'date'
+  if (['integer','decimal','number'].includes(range)) return 'number'
+  return 'text'
+}
+
+
   }
 };
 </script>
@@ -1158,6 +1190,7 @@ export default {
   border-radius: 8px;
   max-height: calc(100vh - 60px);
   overflow-y: auto;
+  overflow-x: hidden;
 }
 
 .tabs {
@@ -1192,9 +1225,7 @@ export default {
   margin-bottom: 10px;
 }
 
-.available-section {
-  margin-bottom: 8px;
-}
+
 
 .class-item.clickable {
   cursor: pointer;
@@ -1608,4 +1639,50 @@ select {
 .df-item-text {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
 }
+/* Match Custom Fields button styles */
+.template-button {
+  display: flex;
+  flex-direction: column; /* stack name and description vertically */
+  align-items: flex-start; /* align icon+name to left */
+  justify-content: flex-start;
+  width: 100%;
+  padding: 10px 12px;
+  margin: 6px 0;
+  background-color: #f9fafb;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background-color 0.2s, box-shadow 0.2s;
+  box-sizing: border-box;
+}
+
+.template-button:hover {
+  background-color: #f3f4f6;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.05);
+}
+
+/* First row: icon + name */
+.template-header {
+  display: flex;
+  align-items: center;
+  font-weight: 600;
+  font-size: 14px;
+  color: #111827;
+  margin-bottom: 4px;
+}
+
+.template-header i {
+  margin-right: 8px;
+  font-size: 16px;
+  color: #374151;
+}
+
+/* Second row: description */
+.template-description {
+  font-size: 12px;
+  color: #6b7280;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
 </style>

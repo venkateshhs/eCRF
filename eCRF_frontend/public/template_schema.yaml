@@ -1,0 +1,841 @@
+id: https://example.org/clinical-form-template
+name: ClinicalFormTemplate
+description: >
+  Template schema for a generic eCRF covering common clinical sections.
+  Each section is a class; each field is an attribute with explicit label,
+  datatype (text, textarea, number, date, dropdown), UI widget, defaults and
+  any enums preserved from the source JSON.
+
+prefixes:
+  dlschemas: "https://concepts.datalad.org/s/"
+  dlthings: "https://concepts.datalad.org/s/things/unreleased/"
+  dlidentifiers: "https://concepts.datalad.org/s/identifiers/unreleased/"
+  dcterms: "http://purl.org/dc/terms/"
+  dcat: "http://www.w3.org/ns/dcat#"
+  prov: "http://www.w3.org/ns/prov#"
+  sio: "http://semanticscience.org/resource/"
+  ex: "http://example.org/"
+  rdf: "http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+  rdfs: "http://www.w3.org/2000/01/rdf-schema#"
+  sh: "http://www.w3.org/ns/shacl#"
+  xsd: "http://www.w3.org/2001/XMLSchema#"
+  foaf: "http://xmlns.com/foaf/0.1/"
+  schema: "http://schema.org/"
+  vcard: "http://www.w3.org/2006/vcard/ns#"
+
+classes:
+
+  DemographicInformation:
+    description: "Demographic information about the participant."
+    attributes:
+      participantId:
+        label: "Participant ID"
+        range: string
+        datatype: text
+        default: ""
+        ui:
+          widget: text
+          placeholder: "Enter participant ID"
+          icon: "fas fa-id-card"
+      firstName:
+        label: "First Name"
+        range: string
+        datatype: text
+        default: ""
+        ui:
+          widget: text
+          placeholder: "Enter first name"
+          icon: "fas fa-user"
+      lastName:
+        label: "Last Name"
+        range: string
+        datatype: text
+        default: ""
+        ui:
+          widget: text
+          placeholder: "Enter last name"
+          icon: "fas fa-user"
+      dateOfBirth:
+        label: "Date of Birth"
+        range: date
+        datatype: date
+        default: ""
+        ui:
+          widget: date
+          placeholder: "Select date of birth"
+          icon: "fas fa-calendar-alt"
+      gender:
+        label: "Gender"
+        range: string
+        datatype: dropdown
+        enum: ["Male", "Female", "Other"]
+        default: "Male"
+        ui:
+          widget: dropdown
+          icon: "fas fa-venus-mars"
+      maritalStatus:
+        label: "Marital Status"
+        range: string
+        datatype: dropdown
+        enum: ["Single", "Married", "Divorced", "Widowed", "Separated", "Other"]
+        default: "Single"
+        ui:
+          widget: dropdown
+          icon: "fas fa-ring"
+      race:
+        label: "Race"
+        range: string
+        datatype: dropdown
+        enum: ["American Indian/Alaska Native", "Asian", "Black/African American", "Native Hawaiian/Pacific Islander", "White", "Other"]
+        default: "Other"
+        ui:
+          widget: dropdown
+          icon: "fas fa-users"
+      ethnicity:
+        label: "Ethnicity"
+        range: string
+        datatype: dropdown
+        enum: ["Hispanic or Latino", "Not Hispanic or Latino", "Unknown/Not Reported"]
+        default: "Not Hispanic or Latino"
+        ui:
+          widget: dropdown
+          icon: "fas fa-flag"
+
+  ContactInformation:
+    description: "Participant contact information and emergency contacts."
+    attributes:
+      emailAddress:
+        label: "Email Address"
+        range: string
+        datatype: text
+        default: ""
+        ui:
+          widget: text
+          placeholder: "Enter email address"
+          icon: "fas fa-envelope"
+      phoneNumber:
+        label: "Phone Number"
+        range: string
+        datatype: text
+        default: ""
+        ui:
+          widget: text
+          placeholder: "Enter phone number"
+          icon: "fas fa-phone"
+      address:
+        label: "Address"
+        range: string
+        datatype: text
+        default: ""
+        ui:
+          widget: text
+          placeholder: "Enter address"
+          icon: "fas fa-map-marker-alt"
+      emergencyContactName:
+        label: "Emergency Contact Name"
+        range: string
+        datatype: text
+        default: ""
+        ui:
+          widget: text
+          placeholder: "Enter emergency contact name"
+          icon: "fas fa-user"
+      emergencyContactPhone:
+        label: "Emergency Contact Phone"
+        range: string
+        datatype: text
+        default: ""
+        ui:
+          widget: text
+          placeholder: "Enter emergency contact phone"
+          icon: "fas fa-phone-alt"
+      emergencyContactRelationship:
+        label: "Emergency Contact Relationship"
+        range: string
+        datatype: text
+        default: ""
+        ui:
+          widget: text
+          placeholder: "Enter relationship to emergency contact"
+          icon: "fas fa-user-friends"
+
+  ReproductiveHealth:
+    description: "Reproductive health details where relevant."
+    attributes:
+      pregnancyStatus:
+        label: "Pregnancy Status"
+        range: string
+        datatype: dropdown
+        enum: ["Not Pregnant", "Pregnant", "Unknown", "Not Applicable"]
+        default: "Not Applicable"
+        ui:
+          widget: dropdown
+          icon: "fas fa-baby"
+      lastMenstrualPeriod:
+        label: "Last Menstrual Period"
+        range: date
+        datatype: date
+        default: ""
+        ui:
+          widget: date
+          placeholder: "Select last menstrual period"
+          icon: "fas fa-calendar-day"
+      gravida:
+        label: "Gravida (Total Pregnancies)"
+        range: integer
+        datatype: number
+        default: 0
+        ui:
+          widget: number
+          placeholder: "Enter total number of pregnancies"
+          icon: "fas fa-venus"
+      para:
+        label: "Para (Live Births)"
+        range: integer
+        datatype: number
+        default: 0
+        ui:
+          widget: number
+          placeholder: "Enter number of live births"
+          icon: "fas fa-baby-carriage"
+
+  PresentingComplaint:
+    description: "Current presenting complaint and illness history."
+    attributes:
+      chiefComplaint:
+        label: "Chief Complaint"
+        range: string
+        datatype: text
+        default: ""
+        ui:
+          widget: text
+          placeholder: "Enter chief complaint"
+          icon: "fas fa-comment-medical"
+      historyOfPresentIllness:
+        label: "History of Present Illness"
+        range: string
+        datatype: textarea
+        default: ""
+        ui:
+          widget: textarea
+          rows: 4
+          placeholder: "Enter details of current illness"
+          icon: "fas fa-file-medical"
+
+  VitalSignsAndMeasurements:
+    description: "Vital signs and anthropometric measurements."
+    attributes:
+      heightCm:
+        label: "Height (cm)"
+        range: decimal
+        datatype: number
+        default: 0
+        ui:
+          widget: number
+          placeholder: "Enter height"
+          icon: "fas fa-ruler-vertical"
+      weightKg:
+        label: "Weight (kg)"
+        range: decimal
+        datatype: number
+        default: 0
+        ui:
+          widget: number
+          placeholder: "Enter weight"
+          icon: "fas fa-weight"
+      bmi:
+        label: "Body Mass Index (BMI) (kg/m²)"
+        range: decimal
+        datatype: number
+        default: 0
+        ui:
+          widget: number
+          placeholder: "Enter BMI"
+          icon: "fas fa-calculator"
+      bloodPressureSystolic:
+        label: "Blood Pressure (Systolic) (mmHg)"
+        range: integer
+        datatype: number
+        default: 0
+        ui:
+          widget: number
+          placeholder: "Enter systolic blood pressure"
+          icon: "fas fa-tachometer-alt"
+      bloodPressureDiastolic:
+        label: "Blood Pressure (Diastolic) (mmHg)"
+        range: integer
+        datatype: number
+        default: 0
+        ui:
+          widget: number
+          placeholder: "Enter diastolic blood pressure"
+          icon: "fas fa-tachometer-alt"
+      heartRateBpm:
+        label: "Heart Rate (bpm)"
+        range: integer
+        datatype: number
+        default: 0
+        ui:
+          widget: number
+          placeholder: "Enter heart rate"
+          icon: "fas fa-heartbeat"
+      respiratoryRate:
+        label: "Respiratory Rate (breaths/min)"
+        range: integer
+        datatype: number
+        default: 0
+        ui:
+          widget: number
+          placeholder: "Enter respiratory rate"
+          icon: "fas fa-lungs"
+      bodyTemperatureC:
+        label: "Body Temperature (°C)"
+        range: decimal
+        datatype: number
+        default: 0
+        ui:
+          widget: number
+          placeholder: "Enter body temperature"
+          icon: "fas fa-thermometer-half"
+      oxygenSaturationPercent:
+        label: "Oxygen Saturation (%)"
+        range: integer
+        datatype: number
+        default: 0
+        ui:
+          widget: number
+          placeholder: "Enter oxygen saturation"
+          icon: "fas fa-percentage"
+      bloodType:
+        label: "Blood Type"
+        range: string
+        datatype: dropdown
+        enum: ["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"]
+        default: "A+"
+        ui:
+          widget: dropdown
+          icon: "fas fa-tint"
+
+  PhysicalExamination:
+    description: "System-based physical examination findings."
+    attributes:
+      heentExam:
+        label: "HEENT Exam"
+        range: string
+        datatype: textarea
+        default: ""
+        ui:
+          widget: textarea
+          rows: 4
+          placeholder: "Enter head, eyes, ears, nose, throat exam findings"
+          icon: "fas fa-head-side-medical"
+      cardiovascularExam:
+        label: "Cardiovascular Exam"
+        range: string
+        datatype: textarea
+        default: ""
+        ui:
+          widget: textarea
+          rows: 4
+          placeholder: "Enter cardiovascular exam findings"
+          icon: "fas fa-heart"
+      respiratoryExam:
+        label: "Respiratory Exam"
+        range: string
+        datatype: textarea
+        default: ""
+        ui:
+          widget: textarea
+          rows: 4
+          placeholder: "Enter respiratory exam findings"
+          icon: "fas fa-lungs"
+      abdominalExam:
+        label: "Abdominal Exam"
+        range: string
+        datatype: textarea
+        default: ""
+        ui:
+          widget: textarea
+          rows: 4
+          placeholder: "Enter abdominal exam findings"
+          icon: "fas fa-stethoscope"
+      musculoskeletalExam:
+        label: "Musculoskeletal Exam"
+        range: string
+        datatype: textarea
+        default: ""
+        ui:
+          widget: textarea
+          rows: 4
+          placeholder: "Enter musculoskeletal exam findings"
+          icon: "fas fa-bone"
+      neurologicalExam:
+        label: "Neurological Exam"
+        range: string
+        datatype: textarea
+        default: ""
+        ui:
+          widget: textarea
+          rows: 4
+          placeholder: "Enter neurological exam findings"
+          icon: "fas fa-brain"
+      skinExam:
+        label: "Skin Exam"
+        range: string
+        datatype: textarea
+        default: ""
+        ui:
+          widget: textarea
+          rows: 4
+          placeholder: "Enter skin exam findings"
+          icon: "fas fa-band-aid"
+
+  MedicalHistory:
+    description: "Past medical history, surgeries, and hospitalizations."
+    attributes:
+      pastMedicalConditions:
+        label: "Past Medical Conditions"
+        range: string
+        datatype: textarea
+        default: ""
+        ui:
+          widget: textarea
+          rows: 4
+          placeholder: "Enter past or existing medical conditions"
+          icon: "fas fa-notes-medical"
+      pastSurgicalProcedures:
+        label: "Past Surgical Procedures"
+        range: string
+        datatype: textarea
+        default: ""
+        ui:
+          widget: textarea
+          rows: 4
+          placeholder: "Enter past surgeries or procedures"
+          icon: "fas fa-procedures"
+      pastHospitalizations:
+        label: "Past Hospitalizations"
+        range: string
+        datatype: textarea
+        default: ""
+        ui:
+          widget: textarea
+          rows: 4
+          placeholder: "Enter past hospitalizations (if any)"
+          icon: "fas fa-hospital"
+
+  FamilyHistory:
+    description: "Family medical history."
+    attributes:
+      familyMedicalHistory:
+        label: "Family Medical History"
+        range: string
+        datatype: textarea
+        default: ""
+        ui:
+          widget: textarea
+          rows: 4
+          placeholder: "Enter family medical history details"
+          icon: "fas fa-dna"
+
+  SocialHistory:
+    description: "Lifestyle and social determinants."
+    attributes:
+      smokingStatus:
+        label: "Smoking Status"
+        range: string
+        datatype: dropdown
+        enum: ["Never", "Former", "Current", "Unknown"]
+        default: "Never"
+        ui:
+          widget: dropdown
+          icon: "fas fa-smoking"
+      alcoholUse:
+        label: "Alcohol Use"
+        range: string
+        datatype: dropdown
+        enum: ["Never", "Occasional", "Regular", "Heavy", "Former"]
+        default: "Never"
+        ui:
+          widget: dropdown
+          icon: "fas fa-beer"
+      drugUse:
+        label: "Drug Use"
+        range: string
+        datatype: dropdown
+        enum: ["Never", "Occasional", "Regular", "Former"]
+        default: "Never"
+        ui:
+          widget: dropdown
+          icon: "fas fa-cannabis"
+      exerciseHabits:
+        label: "Exercise Habits"
+        range: string
+        datatype: dropdown
+        enum: ["None", "Occasional (1-2x/week)", "Regular (3-4x/week)", "Daily"]
+        default: "None"
+        ui:
+          widget: dropdown
+          icon: "fas fa-running"
+      occupation:
+        label: "Occupation"
+        range: string
+        datatype: text
+        default: ""
+        ui:
+          widget: text
+          placeholder: "Enter occupation"
+          icon: "fas fa-briefcase"
+
+  Allergies:
+    description: "Allergy history."
+    attributes:
+      drugAllergies:
+        label: "Drug Allergies"
+        range: string
+        datatype: textarea
+        default: ""
+        ui:
+          widget: textarea
+          rows: 4
+          placeholder: "Enter any drug allergies"
+          icon: "fas fa-pills"
+      foodAllergies:
+        label: "Food Allergies"
+        range: string
+        datatype: textarea
+        default: ""
+        ui:
+          widget: textarea
+          rows: 4
+          placeholder: "Enter any food allergies"
+          icon: "fas fa-apple-alt"
+      otherAllergies:
+        label: "Other Allergies"
+        range: string
+        datatype: textarea
+        default: ""
+        ui:
+          widget: textarea
+          rows: 4
+          placeholder: "Enter any other allergies (e.g. latex)"
+          icon: "fas fa-allergies"
+
+  ImmunizationHistory:
+    description: "Immunizations and vaccinations."
+    attributes:
+      vaccinationHistory:
+        label: "Vaccination History"
+        range: string
+        datatype: textarea
+        default: ""
+        ui:
+          widget: textarea
+          rows: 4
+          placeholder: "Enter immunization history details"
+          icon: "fas fa-syringe"
+
+  Medications:
+    description: "Current medications."
+    attributes:
+      currentMedications:
+        label: "Current Medications"
+        range: string
+        datatype: textarea
+        default: ""
+        ui:
+          widget: textarea
+          rows: 4
+          placeholder: "Enter current medications (name, dose, frequency)"
+          icon: "fas fa-prescription-bottle"
+
+  LaboratoryTestsHematology:
+    description: "Hematology laboratory test results."
+    attributes:
+      hemoglobinGdl:
+        label: "Hemoglobin (g/dL)"
+        range: decimal
+        datatype: number
+        default: 0
+        ui:
+          widget: number
+          placeholder: "Enter hemoglobin"
+          icon: "fas fa-tint"
+      wbcCount10e3PerUl:
+        label: "White Blood Cell Count (10³/µL)"
+        range: decimal
+        datatype: number
+        default: 0
+        ui:
+          widget: number
+          placeholder: "Enter WBC count"
+          icon: "fas fa-vial"
+      plateletCount10e3PerUl:
+        label: "Platelet Count (10³/µL)"
+        range: decimal
+        datatype: number
+        default: 0
+        ui:
+          widget: number
+          placeholder: "Enter platelet count"
+          icon: "fas fa-vials"
+      hematocritPercent:
+        label: "Hematocrit (%)"
+        range: decimal
+        datatype: number
+        default: 0
+        ui:
+          widget: number
+          placeholder: "Enter hematocrit"
+          icon: "fas fa-percentage"
+
+  LaboratoryTestsBiochemistry:
+    description: "Biochemistry laboratory test results."
+    attributes:
+      glucoseMgdl:
+        label: "Glucose (mg/dL)"
+        range: decimal
+        datatype: number
+        default: 0
+        ui:
+          widget: number
+          placeholder: "Enter glucose"
+          icon: "fas fa-tint"
+      ureaMgdl:
+        label: "Urea (mg/dL)"
+        range: decimal
+        datatype: number
+        default: 0
+        ui:
+          widget: number
+          placeholder: "Enter urea"
+          icon: "fas fa-flask"
+      creatinineMgdl:
+        label: "Creatinine (mg/dL)"
+        range: decimal
+        datatype: number
+        default: 0
+        ui:
+          widget: number
+          placeholder: "Enter creatinine"
+          icon: "fas fa-vials"
+      sodiumMmolL:
+        label: "Sodium (mmol/L)"
+        range: decimal
+        datatype: number
+        default: 0
+        ui:
+          widget: number
+          placeholder: "Enter sodium"
+          icon: "fas a-syringe"
+      potassiumMmolL:
+        label: "Potassium (mmol/L)"
+        range: decimal
+        datatype: number
+        default: 0
+        ui:
+          widget: number
+          placeholder: "Enter potassium"
+          icon: "fas fa-atom"
+      altUl:
+        label: "ALT (U/L)"
+        range: decimal
+        datatype: number
+        default: 0
+        ui:
+          widget: number
+          placeholder: "Enter ALT"
+          icon: "fas fa-microscope"
+      astUl:
+        label: "AST (U/L)"
+        range: decimal
+        datatype: number
+        default: 0
+        ui:
+          widget: number
+          placeholder: "Enter AST"
+          icon: "fas fa-notes-medical"
+      totalCholesterolMgdl:
+        label: "Total Cholesterol (mg/dL)"
+        range: decimal
+        datatype: number
+        default: 0
+        ui:
+          widget: number
+          placeholder: "Enter total cholesterol"
+          icon: "fas fa-vial"
+
+  LaboratoryTestsUrinalysis:
+    description: "Urinalysis results."
+    attributes:
+      urinalysisResults:
+        label: "Urinalysis Results"
+        range: string
+        datatype: textarea
+        default: ""
+        ui:
+          widget: textarea
+          rows: 4
+          placeholder: "Enter urinalysis results"
+          icon: "fas fa-prescription-bottle"
+
+  Imaging:
+    description: "Imaging results."
+    attributes:
+      xrayResults:
+        label: "X-Ray Results"
+        range: string
+        datatype: textarea
+        default: ""
+        ui:
+          widget: textarea
+          rows: 4
+          placeholder: "Enter X-ray results or findings"
+          icon: "fas fa-x-ray"
+      ctScanResults:
+        label: "CT Scan Results"
+        range: string
+        datatype: textarea
+        default: ""
+        ui:
+          widget: textarea
+          rows: 4
+          placeholder: "Enter CT scan results or findings"
+          icon: "fas fa-radiation"
+      mriResults:
+        label: "MRI Results"
+        range: string
+        datatype: textarea
+        default: ""
+        ui:
+          widget: textarea
+          rows: 4
+          placeholder: "Enter MRI results or findings"
+          icon: "fas fa-magnet"
+      ultrasoundResults:
+        label: "Ultrasound Results"
+        range: string
+        datatype: textarea
+        default: ""
+        ui:
+          widget: textarea
+          rows: 4
+          placeholder: "Enter ultrasound results or findings"
+          icon: "fas fa-wave-square"
+      otherImagingResults:
+        label: "Other Imaging Results"
+        range: string
+        datatype: textarea
+        default: ""
+        ui:
+          widget: textarea
+          rows: 4
+          placeholder: "Enter other imaging results"
+          icon: "fas fa-radiation-alt"
+
+  Diagnosis:
+    description: "Clinical diagnoses."
+    attributes:
+      primaryDiagnosis:
+        label: "Primary Diagnosis"
+        range: string
+        datatype: text
+        default: ""
+        ui:
+          widget: text
+          placeholder: "Enter primary diagnosis"
+          icon: "fas fa-diagnoses"
+      secondaryDiagnoses:
+        label: "Secondary Diagnoses"
+        range: string
+        datatype: textarea
+        default: ""
+        ui:
+          widget: textarea
+          rows: 4
+          placeholder: "Enter other diagnoses"
+          icon: "fas fa-notes-medical"
+
+  TreatmentPlan:
+    description: "Planned treatments and care."
+    attributes:
+      treatmentPlan:
+        label: "Treatment Plan"
+        range: string
+        datatype: textarea
+        default: ""
+        ui:
+          widget: textarea
+          rows: 4
+          placeholder: "Enter treatment or management plan"
+          icon: "fas fa-briefcase-medical"
+
+  AdverseEvents:
+    description: "Adverse events observed during the study."
+    attributes:
+      adverseEvents:
+        label: "Adverse Events"
+        range: string
+        datatype: textarea
+        default: ""
+        ui:
+          widget: textarea
+          rows: 4
+          placeholder: "Enter any adverse events"
+          icon: "fas fa-exclamation-triangle"
+      seriousAdverseEvents:
+        label: "Serious Adverse Events"
+        range: string
+        datatype: textarea
+        default: ""
+        ui:
+          widget: textarea
+          rows: 4
+          placeholder: "Enter any serious adverse events"
+          icon: "fas fa-ambulance"
+
+  OutcomeAndFollowUp:
+    description: "Outcomes and follow-up planning."
+    attributes:
+      outcomeStatus:
+        label: "Outcome Status"
+        range: string
+        datatype: dropdown
+        enum: ["Recovered", "Improved", "Stable", "Worsened", "Deceased", "Ongoing", "Not Applicable"]
+        default: "Not Applicable"
+        ui:
+          widget: dropdown
+          icon: "fas fa-clipboard-check"
+      followUpPlan:
+        label: "Follow-up Plan"
+        range: string
+        datatype: textarea
+        default: ""
+        ui:
+          widget: textarea
+          rows: 4
+          placeholder: "Enter follow-up plan (if any)"
+          icon: "fas fa-calendar-check"
+      followUpDate:
+        label: "Follow-up Date"
+        range: date
+        datatype: date
+        default: ""
+        ui:
+          widget: date
+          placeholder: "Select follow-up date"
+          icon: "fas fa-calendar-plus"
+
+  AdditionalInformation:
+    description: "Additional free-text notes."
+    attributes:
+      additionalNotes:
+        label: "Additional Notes / Comments"
+        range: string
+        datatype: textarea
+        default: ""
+        ui:
+          widget: textarea
+          rows: 4
+          placeholder: "Enter any additional notes or comments"
+          icon: "fas fa-comment-dots"

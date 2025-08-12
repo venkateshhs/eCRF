@@ -14,5 +14,28 @@ export default {
   arrowLeft: "fas fa-arrow-left",
   share:"fas fa-share-alt",
   export: "fas fa-file-export",
-  info: "fas fa-question-circle"
+  info: "fas fa-question-circle",
+  demographicinformation: "fas fa-id-card",
+  contactinformation: 'fas fa-address-book',
+  reproductivehealth: 'fas fa-baby',
+  presentingcomplaint: 'fas fa-comment-medical',
+  vitalsignsandmeasurements: 'fas fa-heartbeat',
+  physicalexamination: 'fas fa-stethoscope',
+  medicalhistory: 'fas fa-notes-medical',
+  familyhistory: 'fas fa-dna',
+  socialhistory: 'fas fa-users',
+  allergies: 'fas fa-allergies',
+  immunizationhistory: 'fas fa-syringe',
+  medications: 'fas fa-prescription-bottle',
+  laboratorytestshematology: 'fas fa-vial',
+  laboratorytestsbiochemistry: 'fas fa-flask',
+  laboratorytestsurinalysis: 'fas fa-prescription-bottle',
+  imaging: 'fas fa-x-ray',
+  diagnosis: 'fas fa-diagnoses',
+  treatmentplan: 'fas fa-briefcase-medical',
+  adverseevents: 'fas fa-exclamation-triangle',
+  outcomeandfollowup: 'fas fa-clipboard-check',
+  additionalinformation: 'fas fa-comment-dots'
+
+
 };
