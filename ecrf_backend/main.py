@@ -5,6 +5,7 @@ from database import Base, engine
 import forms
 from logger import logger
 import api
+import import_api
 
 # Initialize FastAPI app
 app = FastAPI()
@@ -23,6 +24,7 @@ app.add_middleware(
 app.include_router(users.router)
 app.include_router(forms.router)
 app.include_router(api.router)
+app.include_router(import_api.router)
 # Database initialization
 Base.metadata.create_all(bind=engine)
 

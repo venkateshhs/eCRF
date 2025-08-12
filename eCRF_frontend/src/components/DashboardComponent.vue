@@ -58,6 +58,13 @@
           >
             Open Study
           </button>
+          <button
+              v-if="isAdmin || isPI || isInvestigator"
+              @click="openImportModal"
+              class="btn-option"
+            >
+              Import Study
+        </button>
         </div>
 
         <!-- Study Dashboard Table -->
@@ -116,6 +123,11 @@
         </div>
       </div>
       <router-view/>
+      <ImportStudyModal
+      v-if="showImportModal"
+      :study-id="selectedStudyId"
+      @close="showImportModal = false"
+    />
     </main>
   </div>
 </template>
@@ -123,9 +135,11 @@
 <script>
 import axios from "axios";
 import icons from "@/assets/styles/icons";
+import ImportStudyModal from "@/components/ImportStudyModal.vue";
 
 export default {
   name: "DashboardComponent",
+  components: { ImportStudyModal },
   data() {
     return {
       sidebarCollapsed: false,
@@ -133,6 +147,8 @@ export default {
       showStudyOptions: false,
       studies: [],
       icons,
+      showImportModal: false,
+      selectedStudyId: null,
     };
   },
   watch: {
@@ -165,6 +181,10 @@ export default {
     },
   },
   methods: {
+    openImportModal() {
+      console.log("[Dashboard] Opening ImportStudyModal");
+      this.showImportModal = true;
+    },
     toggleSidebar() {
       this.sidebarCollapsed = !this.sidebarCollapsed;
     },
