@@ -27,7 +27,7 @@
         </div>
 
         <!-- TEMPLATE -->
-          <div v-if="activeTab === 'template'" class="template-fields">
+        <div v-if="activeTab === 'template'" class="template-fields">
           <p class="template-instruction">
             Click a model to pick properties
           </p>
@@ -47,10 +47,6 @@
             </div>
           </div>
         </div>
-
-
-
-
 
         <!-- CUSTOM -->
         <div v-if="activeTab === 'custom'" class="custom-fields">
@@ -83,7 +79,7 @@
               :key="si"
               class="form-section"
               :class="{ active: activeSection === si }"
-              @click="setActiveSection(si)"
+              @click="onSectionClick(si)"
               :ref="'section-' + si"
             >
               <div class="section-header">
@@ -92,26 +88,29 @@
                   <button
                     class="icon-button"
                     title="Edit Section Title"
-                    @click.prevent="openInputDialog(
+                    @click.stop.prevent="setActiveSection(si); openInputDialog(
                       'Enter new section title:',
                       section.title,
                       val => editSection(si, val)
                     )"
                   ><i :class="icons.edit"></i></button>
+
                   <button
                     class="icon-button"
                     title="Add Section Below"
-                    @click.prevent="addNewSectionBelow(si)"
+                    @click.stop.prevent="setActiveSection(si); addNewSectionBelow(si)"
                   ><i :class="icons.add"></i></button>
+
                   <button
                     class="icon-button"
                     title="Delete Section"
-                    @click.prevent="confirmDeleteSection(si)"
+                    @click.stop.prevent="setActiveSection(si); confirmDeleteSection(si)"
                   ><i :class="icons.delete"></i></button>
+
                   <button
                     class="icon-button"
                     :title="section.collapsed ? 'Expand' : 'Collapse'"
-                    @click.prevent="toggleSection(si)"
+                    @click.stop.prevent="setActiveSection(si); toggleSection(si)"
                   >
                     <i :class="section.collapsed ? icons.toggleDown : icons.toggleUp"></i>
                   </button>
@@ -147,7 +146,7 @@
                       <button
                         class="icon-button"
                         title="Edit Field Label"
-                        @click.prevent="openInputDialog(
+                        @click.stop.prevent="setActiveSection(si); openInputDialog(
                           'Enter new field label:',
                           field.label,
                           val => editField(si, fi, val)
@@ -157,19 +156,19 @@
                       <button
                         class="icon-button"
                         title="Add Similar Field"
-                        @click.prevent="addSimilarField(si, fi)"
+                        @click.stop.prevent="setActiveSection(si); addSimilarField(si, fi)"
                       ><i :class="icons.add"></i></button>
 
                       <button
                         class="icon-button"
                         title="Delete Field"
-                        @click.prevent="removeField(si, fi)"
+                        @click.stop.prevent="setActiveSection(si); removeField(si, fi)"
                       ><i :class="icons.delete"></i></button>
 
                       <button
                         class="icon-button"
                         title="Edit Constraints"
-                        @click.prevent="openConstraintsDialog(si, fi)"
+                        @click.stop.prevent="setActiveSection(si); openConstraintsDialog(si, fi)"
                       ><i :class="icons.cog"></i></button>
 
                       <!-- Options button for select/radio -->
@@ -177,7 +176,7 @@
                         v-if="field.type === 'radio' || field.type === 'select'"
                         class="edit-options-button"
                         title="Edit Options"
-                        @click.prevent="openOptionsDialog(field, si, fi)"
+                        @click.stop.prevent="setActiveSection(si); openOptionsDialog(field, si, fi)"
                       >Edit Options</button>
 
                       <!-- Date format button -->
@@ -185,7 +184,7 @@
                         v-if="field.type === 'date'"
                         class="edit-options-button"
                         title="Edit Date Format"
-                        @click.prevent="openDateFormatDialog(si, fi)"
+                        @click.stop.prevent="setActiveSection(si); openDateFormatDialog(si, fi)"
                       >Date Format</button>
                     </div>
                   </div>
@@ -227,7 +226,7 @@
                       :max-date="field.constraints?.maxDate || null"
                     />
 
-                     <FieldTime
+                    <FieldTime
                       v-else-if="field.type === 'time'"
                       v-model="field.value"
                       :format="field.constraints?.timeFormat || 'HH:mm'"
@@ -243,7 +242,6 @@
                       <option value="" disabled>Select…</option>
                       <option v-for="opt in field.options" :key="opt">{{ opt }}</option>
                     </select>
-
 
                     <FieldRadioGroup
                       v-else-if="field.type === 'radio'"
@@ -674,17 +672,28 @@ export default {
       return this.$formatLabel ? this.$formatLabel(s) : String(s || '')
     },
     modelIcon(title) {
-    const key = String(title || '')
-      .toLowerCase()
-      .replace(/[^a-z0-9]/g, '');
-    return this.icons[key] || 'fas fa-book';
-  },
-  fieldIcon(label) {
-    const key = String(label || '')
-      .toLowerCase()
-      .replace(/[^a-z0-9]/g, '');
-    return this.icons[key] || 'fas fa-dot-circle';
-  },
+      const key = String(title || '')
+        .toLowerCase()
+        .replace(/[^a-z0-9]/g, '');
+      return this.icons[key] || 'fas fa-book';
+    },
+    fieldIcon(label) {
+      const key = String(label || '')
+        .toLowerCase()
+        .replace(/[^a-z0-9]/g, '');
+      return this.icons[key] || 'fas fa-dot-circle';
+    },
+
+    // SECTION CLICK: focus; if collapsed -> expand; never collapse others
+    onSectionClick(i) {
+      this.activeSection = i;
+      const section = this.currentForm.sections[i];
+      if (section && section.collapsed) {
+        section.collapsed = false; // expand only this one if it was shrunk
+      }
+      this.focusSection(i);
+    },
+
     openConfirmDialog(msg, cb) {
       this.confirmDialogMessage = msg;
       this.confirmCallback = cb;
@@ -863,7 +872,7 @@ export default {
 
     // ── Sections & Fields ──
     focusSection(i) {
-        this.$nextTick(() => {
+      this.$nextTick(() => {
         const ref = this.$refs[`section-${i}`];
         const el = Array.isArray(ref) ? ref[0] : ref;
         if (el && el.scrollIntoView) {
@@ -878,21 +887,20 @@ export default {
       this.showModelDialog = true;
     },
     takeoverModel() {
-  const chosen = this.currentModel.fields
-    .filter((_, i) => this.selectedProps[i])
-    .map(f => ({ ...f, description: f.description || "", constraints: f.constraints || {} }));
+      const chosen = this.currentModel.fields
+        .filter((_, i) => this.selectedProps[i])
+        .map(f => ({ ...f, description: f.description || "", constraints: f.constraints || {} }));
 
-  const insertAt = Math.min(this.activeSection + 1, this.currentForm.sections.length);
-  const sec = { title: this.currentModel.title, fields: chosen, collapsed: false, source: "template" };
+      const insertAt = Math.min(this.activeSection + 1, this.currentForm.sections.length);
+      const sec = { title: this.currentModel.title, fields: chosen, collapsed: false, source: "template" };
 
-  this.forms[this.currentFormIndex].sections.splice(insertAt, 0, sec);
-  this.activeSection = insertAt;
+      this.forms[this.currentFormIndex].sections.splice(insertAt, 0, sec);
+      this.activeSection = insertAt;
 
-  this.$nextTick(() => this.focusSection(insertAt)); // ensure DOM is ready
-  this.adjustAssignments();
-  this.showModelDialog = false;
-},
-
+      this.$nextTick(() => this.focusSection(insertAt));
+      this.adjustAssignments();
+      this.showModelDialog = false;
+    },
 
     addNewSection() {
       const sec = {
@@ -944,22 +952,16 @@ export default {
       );
     },
 
+    // TOGGLE: only toggle this section; do not affect others
     toggleSection(i) {
       const section = this.forms[this.currentFormIndex].sections[i];
       section.collapsed = !section.collapsed;
-      if (!section.collapsed) {
-        this.activeSection = i;
-        this.forms[this.currentFormIndex].sections.forEach((s, idx) => {
-          if (idx !== i) s.collapsed = true;
-        });
-        this.focusSection(i);
-      }
+      // focus handled by toolbar click (setActiveSection + toggleSection) or section click logic
     },
+
+    // FOCUS ONLY: never mutate collapsed states for other sections
     setActiveSection(i) {
       this.activeSection = i;
-      this.forms[this.currentFormIndex].sections.forEach((s, idx) => {
-        s.collapsed = idx !== i;
-      });
       this.focusSection(i);
     },
 
@@ -1041,7 +1043,6 @@ export default {
     // ── Save / Download / Upload ──
     saveForm() {
       this.openGenericDialog("Saved!");
-      // hook your existing save logic as needed
     },
 
     downloadFormData() {
@@ -1105,50 +1106,45 @@ export default {
 
     // ── Load YAML Models ──
     async loadDataModels() {
-  try {
-    const res = await fetch("/template_schema.yaml")
-    const doc = yaml.load(await res.text())
+      try {
+        const res = await fetch("/template_schema.yaml")
+        const doc = yaml.load(await res.text())
 
-    this.dataModels = Object.entries(doc.classes)
-      .filter(([n]) => n !== "Study")
-      .map(([n, cls]) => ({
-        title: n,
-        description: cls.description || "",
+        this.dataModels = Object.entries(doc.classes)
+          .filter(([n]) => n !== "Study")
+          .map(([n, cls]) => ({
+            title: n,
+            description: cls.description || "",
+            fields: Object.entries(cls.attributes).map(([attr, def]) => ({
+              name: attr,
+              label: def.label || this.prettyModelTitle(attr),
+              description: def.description || "",
+              type: this.resolveType(def),
+              options: def.enum || [],
+              rows: def.ui?.rows,
+              constraints: {
+                required: !!def.required,
+                ...(def.constraints || {})
+              },
+              placeholder: def.ui?.placeholder || def.description || ""
+            }))
+          }))
+      } catch (e) {
+        console.error("Failed to load data models:", e)
+      }
+    },
+    resolveType(def) {
+      const ui = def.ui || {}
+      const dt = String(def.datatype || '').toLowerCase()
+      const range = String(def.range || '').toLowerCase()
 
-
-        fields: Object.entries(cls.attributes).map(([attr, def]) => ({
-          name: attr,
-          label: def.label || this.prettyModelTitle(attr),
-          description: def.description || "",
-          type: this.resolveType(def),
-          options: def.enum || [],
-
-          rows: def.ui?.rows,
-          constraints: {
-            required: !!def.required,
-            ...(def.constraints || {})
-          },
-          placeholder: def.ui?.placeholder || def.description || ""
-        }))
-      }))
-  } catch (e) {
-    console.error("Failed to load data models:", e)
-  }
-},
-resolveType(def) {
-  const ui = def.ui || {}
-  const dt = String(def.datatype || '').toLowerCase()
-  const range = String(def.range || '').toLowerCase()
-
-  if (ui.widget === 'textarea' || dt === 'textarea') return 'textarea'
-  if (ui.widget === 'radio'    || dt === 'radio')    return 'radio'
-  if (ui.widget === 'dropdown' || dt === 'dropdown' || def.enum) return 'select'
-  if (range === 'date' || range === 'datetime') return 'date'
-  if (['integer','decimal','number'].includes(range)) return 'number'
-  return 'text'
-}
-
-
+      if (ui.widget === 'textarea' || dt === 'textarea') return 'textarea'
+      if (ui.widget === 'radio'    || dt === 'radio')    return 'radio'
+      if (ui.widget === 'dropdown' || dt === 'dropdown' || def.enum) return 'select'
+      if (range === 'date' || range === 'datetime') return 'date'
+      if (['integer','decimal','number'].includes(range)) return 'number'
+      return 'text'
+    }
   }
 };
 </script>
@@ -1224,8 +1220,6 @@ resolveType(def) {
   font-style: italic;
   margin-bottom: 10px;
 }
-
-
 
 .class-item.clickable {
   cursor: pointer;
@@ -1639,11 +1633,12 @@ select {
 .df-item-text {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
 }
+
 /* Match Custom Fields button styles */
 .template-button {
   display: flex;
-  flex-direction: column; /* stack name and description vertically */
-  align-items: flex-start; /* align icon+name to left */
+  flex-direction: column;
+  align-items: flex-start;
   justify-content: flex-start;
   width: 100%;
   padding: 10px 12px;
@@ -1684,5 +1679,4 @@ select {
   line-height: 1.4;
   overflow-wrap: anywhere;
 }
-
 </style>
