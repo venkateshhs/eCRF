@@ -164,7 +164,6 @@ export default {
     totalGridRows() {
       return (this.subjects?.length || 0) * (this.visits?.length || 0);
     },
-
     canViewAll() {
       return this.totalGridRows > 0 && this.totalGridRows <= this.VIEW_ALL_MAX_ROWS;
     },
@@ -187,7 +186,20 @@ export default {
           this.sections.forEach((section, sIdx) => {
             const isAssigned = this.study.content.study_data.assignments?.[sIdx]?.[vIdx]?.[groupIdx] || false;
             section.fields.forEach((field, fIdx) => {
-              const value = isAssigned ? this.getValue(subjIdx, vIdx, sIdx, fIdx) || '(No data)' : '-';
+              let value;
+              if (!isAssigned) {
+                value = '-';
+              } else {
+                const raw = this.getValue(subjIdx, vIdx, sIdx, fIdx);
+                if (field.type === 'checkbox') {
+                  // Map booleans to Yes/No and keep empty as (No data)
+                  value = (raw === true) ? 'Yes'
+                        : (raw === false) ? 'No'
+                        : '(No data)';
+                } else {
+                  value = (raw == null || raw === '') ? '(No data)' : raw;
+                }
+              }
               row[`s${sIdx}_f${fIdx}`] = value;
             });
           });
@@ -459,8 +471,20 @@ export default {
           const row = { subjectId: subject.id, visit: visit.name };
           this.sections.forEach((section, sIdx) => {
             const isAssigned = this.study.content.study_data.assignments?.[sIdx]?.[vIdx]?.[groupIdx] || false;
-            section.fields.forEach((_, fIdx) => {
-              const value = isAssigned ? this.getValue(subjIdx, vIdx, sIdx, fIdx) || '(No data)' : '-';
+            section.fields.forEach((field, fIdx) => {
+              let value;
+              if (!isAssigned) {
+                value = '-';
+              } else {
+                const raw = this.getValue(subjIdx, vIdx, sIdx, fIdx);
+                if (field.type === 'checkbox') {
+                  value = (raw === true) ? 'Yes'
+                        : (raw === false) ? 'No'
+                        : '(No data)';
+                } else {
+                  value = (raw == null || raw === '') ? '(No data)' : raw;
+                }
+              }
               row[`s${sIdx}_f${fIdx}`] = value;
             });
           });
