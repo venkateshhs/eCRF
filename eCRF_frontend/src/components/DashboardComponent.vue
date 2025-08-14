@@ -56,7 +56,7 @@
             @click="toggleStudyOptions"
             class="btn-option"
           >
-            Open Study
+            Open Existing Study
           </button>
         </div>
 
