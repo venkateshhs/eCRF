@@ -142,6 +142,7 @@
                         v-model="field.value"
                       />
                     </label>
+
                     <div class="field-actions">
                       <button
                         class="icon-button"
@@ -165,27 +166,12 @@
                         @click.stop.prevent="setActiveSection(si); removeField(si, fi)"
                       ><i :class="icons.delete"></i></button>
 
+                      <!-- SINGLE SETTINGS BUTTON handles constraints + type-specific settings -->
                       <button
                         class="icon-button"
-                        title="Edit Constraints"
+                        title="Settings"
                         @click.stop.prevent="setActiveSection(si); openConstraintsDialog(si, fi)"
                       ><i :class="icons.cog"></i></button>
-
-                      <!-- Options button for select/radio -->
-                      <button
-                        v-if="field.type === 'radio' || field.type === 'select'"
-                        class="edit-options-button"
-                        title="Edit Options"
-                        @click.stop.prevent="setActiveSection(si); openOptionsDialog(field, si, fi)"
-                      >Edit Options</button>
-
-                      <!-- Date format button -->
-                      <button
-                        v-if="field.type === 'date'"
-                        class="edit-options-button"
-                        title="Edit Date Format"
-                        @click.stop.prevent="setActiveSection(si); openDateFormatDialog(si, fi)"
-                      >Date Format</button>
                     </div>
                   </div>
 
@@ -341,67 +327,7 @@
       </div>
     </div>
 
-    <!-- ───────── Options Dialog (for Radio and Dropdown) ───────── -->
-    <div v-if="showOptionsDialog" class="modal-overlay">
-      <div class="modal options-dialog">
-        <h3>{{ optionsDialogField?.name ? 'Edit Options' : 'Configure Options' }}</h3>
-        <div class="options-dialog-content">
-          <label>
-            Number of options:
-            <input
-              type="number"
-              v-model.number="optionsDialogOptionsCount"
-              min="1"
-              class="input-dialog-field"
-              @input="updateOptionsArray"
-            />
-          </label>
-          <div class="options-list">
-            <div v-for="(option, index) in optionsDialogOptions" :key="index" class="option-row">
-              <label>
-                Option {{ index + 1 }}:
-                <input
-                  type="text"
-                  v-model="optionsDialogOptions[index]"
-                  class="input-dialog-field"
-                  placeholder="Enter option label"
-                />
-              </label>
-            </div>
-          </div>
-        </div>
-        <div class="modal-actions">
-          <button @click="confirmOptionsDialog" class="btn-primary">Save</button>
-          <button @click="cancelOptionsDialog" class="btn-option">Cancel</button>
-        </div>
-      </div>
-    </div>
-
-    <!-- ───────── Date Format Dialog ───────── -->
-    <div v-if="showDateFormatDialog" class="modal-overlay">
-      <div class="modal options-dialog">
-        <h3>Select a Date Format</h3>
-        <div class="options-dialog-content">
-          <div class="df-list">
-            <label v-for="fmt in dateFormatOptions" :key="fmt" class="df-item">
-              <input
-                type="radio"
-                name="date-format"
-                :value="fmt"
-                v-model="dateFormatSelection"
-              />
-              <span class="df-item-text">{{ fmt }}</span>
-            </label>
-          </div>
-        </div>
-        <div class="modal-actions">
-          <button @click="confirmDateFormatDialog" class="btn-primary">Apply</button>
-          <button @click="cancelDateFormatDialog" class="btn-option">Cancel</button>
-        </div>
-      </div>
-    </div>
-
-    <!-- ───────── Constraints Dialog ───────── -->
+    <!-- ───────── Constraints Dialog (unified) ───────── -->
     <div v-if="showConstraintsDialog" class="modal-overlay">
       <FieldConstraintsDialog
         :currentFieldType="currentFieldType"
@@ -489,6 +415,9 @@ import FieldCheckbox from "@/components/fields/FieldCheckbox.vue";
 import FieldRadioGroup from "@/components/fields/FieldRadioGroup.vue";
 import FieldTime from "@/components/fields/FieldTime.vue";
 
+// central helpers (need the updated utils/constraints)
+import { normalizeConstraints, coerceDefaultForType } from "@/utils/constraints";
+
 export default {
   name: "ScratchFormComponent",
 
@@ -521,29 +450,6 @@ export default {
       currentModel: null,
       selectedProps: [],
 
-      // options dialog (for radio and select)
-      showOptionsDialog: false,
-      optionsDialogOptionsCount: 1,
-      optionsDialogOptions: ['Option 1'],
-      optionsDialogField: null,
-      optionsDialogEditIndices: null,
-
-      // date format dialog
-      showDateFormatDialog: false,
-      dateFormatEditIndices: null,
-      dateFormatSelection: 'dd.MM.yyyy',
-      dateFormatOptions: [
-        'dd.MM.yyyy',
-        'MM-dd-yyyy',
-        'dd-MM-yyyy',
-        'yyyy-MM-dd',
-        'MM/yyyy',
-        'MM-yyyy',
-        'yyyy/MM',
-        'yyyy-MM',
-        'yyyy'
-      ],
-
       // protocol matrix
       showMatrix: false,
       visits: [],
@@ -558,7 +464,7 @@ export default {
       genericDialogMessage: "",
       genericCallback: null,
 
-      // constraints
+      // constraints (unified)
       showConstraintsDialog: false,
       constraintsForm: {},
       currentFieldType: "",
@@ -650,12 +556,14 @@ export default {
     // fetch custom fields
     try {
       const res = await axios.get("http://127.0.0.1:8000/forms/available-fields");
-      // normalize and ensure constraints object
       this.generalFields = res.data.map((f, idx) => ({
         ...f,
         name: f.name || `${f.type}_${idx}`,
         description: f.helpText || f.placeholder || "",
-        options: (f.type === 'select' || f.type === 'radio') ? (f.options || []) : (f.options || []),
+        // give sensible defaults so field is usable immediately
+        options: (f.type === 'select' || f.type === 'radio')
+          ? (Array.isArray(f.options) && f.options.length ? f.options : ['Option 1'])
+          : (f.options || []),
         constraints: f.constraints || {}
       }));
     } catch (e) {
@@ -689,7 +597,7 @@ export default {
       this.activeSection = i;
       const section = this.currentForm.sections[i];
       if (section && section.collapsed) {
-        section.collapsed = false; // expand only this one if it was shrunk
+        section.collapsed = false;
       }
       this.focusSection(i);
     },
@@ -731,99 +639,6 @@ export default {
       this.showInputDialog = false;
     },
 
-    // ── Options Dialog (for Radio and Select) ──
-    openOptionsDialog(field, sectionIndex = null, fieldIndex = null) {
-      this.optionsDialogField = JSON.parse(JSON.stringify(field));
-      this.optionsDialogEditIndices = (sectionIndex !== null && fieldIndex !== null)
-        ? { sectionIndex, fieldIndex }
-        : null;
-
-      if (this.optionsDialogEditIndices) {
-        const currentField = this.currentForm.sections[sectionIndex].fields[fieldIndex];
-        this.optionsDialogOptionsCount = currentField.options?.length || 1;
-        this.optionsDialogOptions = currentField.options?.length ? [...currentField.options] : ['Option 1'];
-      } else {
-        this.optionsDialogOptionsCount = 1;
-        this.optionsDialogOptions = ['Option 1'];
-      }
-      this.showOptionsDialog = true;
-    },
-    updateOptionsArray() {
-      const count = Math.max(1, this.optionsDialogOptionsCount || 1);
-      const currentLength = this.optionsDialogOptions.length;
-      if (count > currentLength) {
-        this.optionsDialogOptions = [
-          ...this.optionsDialogOptions,
-          ...Array(count - currentLength).fill().map((_, i) => `Option ${currentLength + i + 1}`)
-        ];
-      } else if (count < currentLength) {
-        this.optionsDialogOptions = this.optionsDialogOptions.slice(0, count);
-      }
-      this.optionsDialogOptionsCount = count;
-    },
-    confirmOptionsDialog() {
-      if (!this.optionsDialogField || this.optionsDialogOptionsCount < 1 || this.optionsDialogOptions.some(opt => !opt || !opt.trim())) {
-        this.openGenericDialog("Please provide a valid number of options and ensure all options have non-empty labels.");
-        return;
-      }
-      const options = this.optionsDialogOptions.map(opt => opt.trim());
-      if (!this.currentForm.sections.length) {
-        this.addNewSection();
-      }
-      const sec = this.currentForm.sections[this.activeSection];
-      if (sec.collapsed) this.toggleSection(this.activeSection);
-
-      if (this.optionsDialogEditIndices) {
-        const { sectionIndex, fieldIndex } = this.optionsDialogEditIndices;
-        const field = this.currentForm.sections[sectionIndex].fields[fieldIndex];
-        field.options = [...options];
-        field.value = '';
-        field.constraints = { ...field.constraints, allowMultiple: false };
-      } else {
-        sec.fields.push({
-          name: `${this.optionsDialogField.name}_${Date.now()}`,
-          label: this.optionsDialogField.label,
-          type: this.optionsDialogField.type,
-          options: [...options],
-          value: '',
-          constraints: {
-            ...(this.optionsDialogField.constraints || {}),
-            allowMultiple: false
-          },
-          placeholder: this.optionsDialogField.description || this.optionsDialogField.placeholder
-        });
-      }
-      this.cancelOptionsDialog();
-    },
-    cancelOptionsDialog() {
-      this.showOptionsDialog = false;
-      this.optionsDialogField = null;
-      this.optionsDialogEditIndices = null;
-      this.optionsDialogOptionsCount = 1;
-      this.optionsDialogOptions = ['Option 1'];
-    },
-
-    // ── Date Format Dialog ──
-    openDateFormatDialog(sectionIndex, fieldIndex) {
-      this.dateFormatEditIndices = { sectionIndex, fieldIndex };
-      const field = this.currentForm.sections[sectionIndex].fields[fieldIndex];
-      const currentFmt = field?.constraints?.dateFormat || 'dd.MM.yyyy';
-      this.dateFormatSelection = currentFmt;
-      this.showDateFormatDialog = true;
-    },
-    confirmDateFormatDialog() {
-      if (!this.dateFormatEditIndices) return;
-      const { sectionIndex, fieldIndex } = this.dateFormatEditIndices;
-      const field = this.currentForm.sections[sectionIndex].fields[fieldIndex];
-      field.constraints = { ...(field.constraints || {}), dateFormat: this.dateFormatSelection };
-      field.placeholder = this.dateFormatSelection;
-      this.cancelDateFormatDialog();
-    },
-    cancelDateFormatDialog() {
-      this.showDateFormatDialog = false;
-      this.dateFormatEditIndices = null;
-    },
-
     // ── Protocol Matrix ──
     adjustAssignments() {
       const m = this.selectedModels.length;
@@ -858,9 +673,7 @@ export default {
       }
     },
 
-    handleProtocolClick() {
-      this.showMatrix = true;
-    },
+    handleProtocolClick() { this.showMatrix = true; },
     editTemplate() { this.showMatrix = false },
     onAssignmentUpdated({ mIdx, vIdx, gIdx, checked }) {
       this.assignments[mIdx][vIdx][gIdx] = checked;
@@ -956,7 +769,6 @@ export default {
     toggleSection(i) {
       const section = this.forms[this.currentFormIndex].sections[i];
       section.collapsed = !section.collapsed;
-      // focus handled by toolbar click (setActiveSection + toggleSection) or section click logic
     },
 
     // FOCUS ONLY: never mutate collapsed states for other sections
@@ -972,23 +784,19 @@ export default {
       const sec = this.currentForm.sections[this.activeSection];
       if (sec.collapsed) this.toggleSection(this.activeSection);
 
-      // For radio/select, use the options dialog
-      if (field.type === 'radio' || field.type === 'select') {
-        this.openOptionsDialog(field);
-        return;
-      }
-
       const base = {
         name: `${(field.name || field.type)}_${Date.now()}`,
         label: field.label,
         type: field.type,
-        options: field.options || [],
+        // ensure select/radio are usable immediately; user can refine in cog dialog
+        options: (field.type === 'select' || field.type === 'radio')
+          ? (Array.isArray(field.options) && field.options.length ? [...field.options] : ['Option 1'])
+          : (field.options || []),
         placeholder: field.description || field.placeholder || '',
         value: field.type === 'checkbox' ? false : "",
         constraints: field.constraints || {}
       };
 
-      // default date format constraints
       if (base.type === 'date') {
         base.constraints = { ...base.constraints, dateFormat: base.constraints.dateFormat || 'dd.MM.yyyy' };
         base.placeholder = base.placeholder || base.constraints.dateFormat;
@@ -1023,19 +831,109 @@ export default {
       this.currentForm.sections[si].fields.splice(fi, 1);
     },
 
+    // ── Unified Constraints Dialog ──
     openConstraintsDialog(si, fi) {
       const f = this.currentForm.sections[si].fields[fi];
       this.currentFieldIndices = { sectionIndex: si, fieldIndex: fi };
       this.currentFieldType = f.type;
-      this.constraintsForm = { ...(f.constraints || {}) };
+
+      // provide a payload that includes type-specific data
+      // options (for radio/select) and dateFormat live here too
+      this.constraintsForm = {
+        ...(f.constraints || {}),
+        type: f.type,
+        options: (f.type === 'select' || f.type === 'radio') ? (f.options || []) : undefined,
+        dateFormat: f.type === 'date'
+          ? (f.constraints?.dateFormat || 'dd.MM.yyyy')
+          : undefined,
+      };
       this.showConstraintsDialog = true;
     },
+
     confirmConstraintsDialog(c) {
       const { sectionIndex, fieldIndex } = this.currentFieldIndices;
       const f = this.currentForm.sections[sectionIndex].fields[fieldIndex];
-      f.constraints = { ...c };
+
+      // normalize/validate constraints based on type
+      const norm = normalizeConstraints(f.type, c);
+
+      // Update options when included (radio/select)
+      if ((f.type === 'select' || f.type === 'radio') && Array.isArray(c.options)) {
+        const cleaned = c.options
+          .map(o => String(o || '').trim())
+          .filter(Boolean);
+        f.options = cleaned.length ? cleaned : ['Option 1'];
+      }
+
+      // ---------- Value shape & membership (radio/select) ----------
+      if (f.type === 'radio') {
+        // radios can be single or multi based on allowMultiple
+        if (norm.allowMultiple) {
+          // ensure array shape
+          if (!Array.isArray(f.value)) f.value = [];
+          // remove any values that no longer exist
+          f.value = f.value.filter(v => f.options.includes(v));
+          // if defaultValue provided, prefer it (array)
+          if (Object.prototype.hasOwnProperty.call(norm, "defaultValue")) {
+            const dv = Array.isArray(norm.defaultValue) ? norm.defaultValue : [];
+            f.value = dv.filter(v => f.options.includes(v));
+          }
+        } else {
+          // single-select: ensure scalar string
+          if (Array.isArray(f.value)) f.value = f.value[0] || '';
+          if (!f.options.includes(f.value)) f.value = '';
+          // if defaultValue provided, prefer it (scalar)
+          if (Object.prototype.hasOwnProperty.call(norm, "defaultValue")) {
+            const dv = typeof norm.defaultValue === 'string' ? norm.defaultValue : '';
+            f.value = f.options.includes(dv) ? dv : '';
+          }
+        }
+      } else if (f.type === 'select') {
+        // dropdown is ALWAYS single-select
+        if (Array.isArray(f.value)) f.value = f.value[0] || '';
+        if (!f.options.includes(f.value)) f.value = '';
+        if (Object.prototype.hasOwnProperty.call(norm, "defaultValue")) {
+          const dv = typeof norm.defaultValue === 'string' ? norm.defaultValue : '';
+          f.value = f.options.includes(dv) ? dv : '';
+        }
+      }
+
+      // ---------- Placeholder (skip for checkbox by design) ----------
+      if (Object.prototype.hasOwnProperty.call(norm, "placeholder") && f.type !== 'checkbox') {
+        f.placeholder = norm.placeholder || "";
+      }
+
+      // ---------- Default value for other types (text/textarea/number/time/date) ----------
+      if (
+        f.type !== 'radio' &&
+        f.type !== 'select' &&
+        Object.prototype.hasOwnProperty.call(norm, "defaultValue")
+      ) {
+        const coerced = coerceDefaultForType(f.type, norm.defaultValue);
+        if (coerced !== undefined) {
+          f.value = coerced;
+        }
+      }
+
+      // ---------- Date specifics ----------
+      if (f.type === 'date' && (c.dateFormat || norm.dateFormat)) {
+        const fmt = c.dateFormat || norm.dateFormat;
+        f.placeholder = fmt;
+        norm.dateFormat = fmt;
+      }
+
+      // Persist constraints (options are field-level, not stored in constraints)
+      f.constraints = { ...norm };
+
+      // If value is still empty and constraints have defaultValue, reflect it for preview
+      if ((f.value === '' || f.value === undefined || f.value === null) &&
+          Object.prototype.hasOwnProperty.call(f.constraints, 'defaultValue')) {
+        f.value = f.constraints.defaultValue;
+      }
+
       this.showConstraintsDialog = false;
     },
+
     cancelConstraintsDialog() {
       this.showConstraintsDialog = false;
     },
@@ -1484,72 +1382,6 @@ select {
   overflow-y: auto;
 }
 
-.modal.options-dialog {
-  width: 400px;
-  padding: 20px 16px;
-}
-
-.options-dialog-content {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  margin-bottom: 20px;
-}
-
-.options-dialog-content label {
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-}
-
-.options-dialog-content input[type="number"],
-.input-dialog-field {
-  width: 100%;
-  padding: 8px;
-  border: 1px solid $border-color;
-  border-radius: 5px;
-}
-
-.options-dialog-content .checkbox-label {
-  flex-direction: row;
-  align-items: center;
-  gap: 8px;
-}
-
-.options-dialog-content input[type="checkbox"] {
-  width: 16px;
-  height: 16px;
-  margin: 0;
-  cursor: pointer;
-  border: 2px solid #ccc;
-  border-radius: 4px;
-  background-color: #fff;
-  appearance: none;
-  position: relative;
-  transition: background-color 0.2s ease, border-color 0.2s ease;
-}
-
-.options-dialog-content input[type="checkbox"]:checked {
-  background-color: #444;
-  border-color: #444;
-}
-
-.options-dialog-content input[type="checkbox"]:checked::after {
-  content: '';
-  position: absolute;
-  top: 2px;
-  left: 5px;
-  width: 4px;
-  height: 8px;
-  border: solid #fff;
-  border-width: 0 2px 2px 0;
-  transform: rotate(45deg);
-}
-
-.options-dialog-content input[type="checkbox"]:hover:not(:checked) {
-  border-color: #666;
-}
-
 .modal.model-dialog {
   width: 400px;
   max-height: 80vh;
@@ -1591,50 +1423,7 @@ select {
   margin-top: 5px;
 }
 
-.prop-row {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  margin-bottom: 12px;
-}
-
-.prop-info {
-  flex: 1;
-  margin-right: 12px;
-}
-
-.prop-name {
-  font-weight: bold;
-}
-
-.prop-desc {
-  font-size: 0.9em;
-  color: #666;
-  margin-top: 4px;
-}
-
-.prop-check {
-  flex-shrink: 0;
-  margin-top: 4px;
-}
-
-/* Date format list (vertical) */
-.dfp-wrapper { width: 100%; }
-.df-list {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-.df-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.df-item-text {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-}
-
-/* Match Custom Fields button styles */
+/* Date format list styles previously used have been removed with the old dialog */
 .template-button {
   display: flex;
   flex-direction: column;
@@ -1656,7 +1445,6 @@ select {
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.05);
 }
 
-/* First row: icon + name */
 .template-header {
   display: flex;
   align-items: center;
@@ -1672,7 +1460,6 @@ select {
   color: #374151;
 }
 
-/* Second row: description */
 .template-description {
   font-size: 12px;
   color: #6b7280;
