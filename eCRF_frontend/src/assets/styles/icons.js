@@ -35,7 +35,8 @@ export default {
   treatmentplan: 'fas fa-briefcase-medical',
   adverseevents: 'fas fa-exclamation-triangle',
   outcomeandfollowup: 'fas fa-clipboard-check',
-  additionalinformation: 'fas fa-comment-dots'
+  additionalinformation: 'fas fa-comment-dots',
+  clock: "fas fa-clock",
 
 
 };

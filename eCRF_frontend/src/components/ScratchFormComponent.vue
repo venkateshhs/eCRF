@@ -200,6 +200,8 @@
                       :min="field.constraints?.min"
                       :max="field.constraints?.max"
                       :step="field.constraints?.step"
+                      @input="enforceNumberDigitLimits(si, fi, $event)"
+                      @blur="enforceNumberDigitLimits(si, fi, $event, true)"
                     />
 
                     <!-- DATE (uses real date picker component) -->
@@ -215,9 +217,9 @@
                     <FieldTime
                       v-else-if="field.type === 'time'"
                       v-model="field.value"
-                      :format="field.constraints?.timeFormat || 'HH:mm'"
-                      :step="field.constraints?.step || null"
-                      :placeholder="field.placeholder || (field.constraints?.timeFormat || 'HH:mm')"
+                      v-bind="field.constraints"
+                      :hourCycle="field.constraints?.hourCycle || '24'"
+                      :placeholder="field.placeholder || (field.constraints?.hourCycle === '12' ? 'hh:mm a' : 'HH:mm')"
                     />
 
                     <!-- SELECT -->
@@ -811,6 +813,43 @@ export default {
     editField(si, fi, v) {
       if (v) this.currentForm.sections[si].fields[fi].label = v;
     },
+    enforceNumberDigitLimits(sectionIndex, fieldIndex, evt, onBlur = false) {
+  const field = this.currentForm.sections[sectionIndex].fields[fieldIndex];
+  const c = field.constraints || {};
+
+  // Only enforce digit length strictly when integerOnly is true.
+  if (!c.integerOnly) return;
+
+  const el = evt && evt.target ? evt.target : null;
+  let raw = el ? String(el.value ?? "") : String(field.value ?? "");
+
+  // Allow leading '-' while editing? For IDs/phones usually positive; we drop sign.
+  // Extract digits only.
+  const digits = raw.replace(/\D+/g, "");
+
+  // Apply maxDigits live: trim overflow
+  if (Number.isFinite(c.maxDigits) && c.maxDigits > 0 && digits.length > c.maxDigits) {
+    const trimmed = digits.slice(0, c.maxDigits);
+    // write back
+    field.value = trimmed === "" ? "" : Number(trimmed);
+    if (el) el.value = field.value;
+    return;
+  }
+
+  // On blur, if minDigits is set and not satisfied, we do NOT auto-pad;
+  // we simply keep the value as-is (you can validate on submit). If you prefer,
+  // you can clear the value when underflow happens:
+  if (onBlur && Number.isFinite(c.minDigits) && c.minDigits > 0) {
+    if (digits.length > 0 && digits.length < c.minDigits) {
+      // Option A: clear
+      // field.value = "";
+      // if (el) el.value = "";
+
+      // Option B (default): leave input, rely on validation elsewhere.
+      // No action.
+    }
+  }
+},
     addSimilarField(si, fi) {
       const f = this.currentForm.sections[si].fields[fi];
       const clone = {
@@ -856,7 +895,9 @@ export default {
 
       // normalize/validate constraints based on type
       const norm = normalizeConstraints(f.type, c);
-
+      if (f.type === 'time') {
+          norm.hourCycle = c.hourCycle || norm.hourCycle || '24';
+        }
       // Update options when included (radio/select)
       if ((f.type === 'select' || f.type === 'radio') && Array.isArray(c.options)) {
         const cleaned = c.options
