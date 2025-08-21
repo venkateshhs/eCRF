@@ -28,6 +28,13 @@
         <label>Help text</label>
         <input type="text" v-model="local.helpText" placeholder="Shown below the control" />
       </div>
+      <div class="row" v-if="isTime">
+          <label>Hour format</label>
+          <select v-model="local.hourCycle">
+            <option value="24">24-hour</option>
+            <option value="12">12-hour (AM/PM)</option>
+          </select>
+        </div>
 
       <!-- Default value (type-aware) -->
       <div class="row" v-if="!isDate">
@@ -79,11 +86,15 @@
           placeholder="Default number"
         />
 
-        <input
+        <!-- ADD this -->
+        <FieldTime
           v-else-if="isTime"
-          type="time"
           v-model="local.defaultValue"
+          :hourCycle="local.hourCycle || '24'"
+          :readonly="false"
+          :disabled="false"
         />
+
 
         <label class="chk" v-else-if="isCheckbox">
           <input type="checkbox" v-model="local.defaultValue" />
@@ -138,37 +149,61 @@
           <input type="number" v-model.number="local.max" />
         </div>
       </div>
+
       <div class="row">
         <label>Step</label>
         <input type="number" v-model.number="local.step" placeholder="Leave empty if not applicable" />
       </div>
+
       <div class="row">
         <label class="chk">
           <input type="checkbox" v-model="local.integerOnly" />
           Integer only
         </label>
       </div>
-      <div class="row" v-if="local.integerOnly">
-        <label>Max digits (integer)</label>
-        <input type="number" v-model.number="local.maxLengthDigits" min="1" />
+
+      <div class="row two">
+        <div>
+          <label>Min digits (integer part)</label>
+          <input type="number" v-model.number="local.minDigits" min="0" />
+        </div>
+        <div>
+          <label>Max digits (integer part)</label>
+          <input type="number" v-model.number="local.maxDigits" min="0" />
+        </div>
+      </div>
+      <div class="row note">
+        <span>
+          Digit limits apply to the integer part. In preview we enforce these when <b>Integer only</b> is checked.
+          For values that need leading zeros (e.g., phone numbers), consider using a <b>Text</b> field with a pattern.
+        </span>
       </div>
     </section>
+
 
     <!-- TIME -->
     <section class="group" v-if="isTime">
       <div class="row two">
         <div>
           <label>Min time</label>
-          <input type="time" v-model="local.minTime" />
+          <FieldTime
+           v-model="local.minTime"
+           :hourCycle="local.hourCycle || '24'"
+           :readonly="false"
+           :disabled="false"
+           :placeholder="(local.hourCycle==='12' ? 'hh:mm AM/PM' : 'HH:mm')"
+         />
         </div>
         <div>
           <label>Max time</label>
-          <input type="time" v-model="local.maxTime" />
+          <FieldTime
+           v-model="local.maxTime"
+           :hourCycle="local.hourCycle || '24'"
+           :readonly="false"
+           :disabled="false"
+           :placeholder="(local.hourCycle==='12' ? 'hh:mm AM/PM' : 'HH:mm')"
+         />
         </div>
-      </div>
-      <div class="row">
-        <label>Step (seconds)</label>
-        <input type="number" v-model.number="local.step" min="1" />
       </div>
     </section>
 
@@ -268,6 +303,7 @@
 /* eslint-disable */
 import { normalizeConstraints, coerceDefaultForType } from "@/utils/constraints";
 import DateFormatPicker from "@/components/DateFormatPicker.vue";
+import FieldTime from "@/components/fields/FieldTime.vue";
 
 const DATE_FORMATS = [
   "dd.MM.yyyy",
@@ -283,7 +319,7 @@ const DATE_FORMATS = [
 
 export default {
   name: "FieldConstraintsDialog",
-  components: { DateFormatPicker },
+  components: { DateFormatPicker,  FieldTime  },
   props: {
     currentFieldType: { type: String, default: "text" },
     constraintsForm:  { type: Object, default: () => ({}) }
@@ -291,7 +327,6 @@ export default {
   data() {
     const base = this.constraintsForm || {};
     const type = (this.currentFieldType || "text").toLowerCase();
-
     const initialOptions =
       (Array.isArray(base.options) ? base.options : []).filter(Boolean).map(String);
 
@@ -327,6 +362,7 @@ export default {
         // time
         minTime: base.minTime || "",
         maxTime: base.maxTime || "",
+        hourCycle: base.hourCycle || "24",
 
         // date
         minDate: base.minDate || "",
@@ -385,6 +421,7 @@ export default {
 
           minTime: base.minTime || "",
           maxTime: base.maxTime || "",
+          hourCycle: base.hourCycle || this.local.hourCycle,
 
           minDate: base.minDate || "",
           maxDate: base.maxDate || "",
@@ -531,10 +568,11 @@ export default {
         this.isRadio && this.local.allowMultiple ? "radio" : this.type,
         cleaned.defaultValue
       );
-
+      cleaned.hourCycle = this.local.hourCycle || "24";
       this.$emit("updateConstraints", cleaned);
     }
-  }
+  },
+
 };
 </script>
 
