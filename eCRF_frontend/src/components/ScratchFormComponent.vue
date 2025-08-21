@@ -336,6 +336,7 @@
         :constraintsForm="constraintsForm"
         @updateConstraints="confirmConstraintsDialog"
         @closeConstraintsDialog="cancelConstraintsDialog"
+        @showGenericDialog="openGenericDialog"
       />
     </div>
 
