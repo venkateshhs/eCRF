@@ -59,7 +59,7 @@ export default {
     defaultValue: { type: [String, Number, Array], default: "" },
     allowMultiple: { type: Boolean, default: false },
   },
-  emits: ["update:modelValue"],
+  emits: ["update:modelValue", "change"],
   computed: {
     isReadonly() {
       const attrReadonly =
@@ -94,11 +94,14 @@ export default {
       if (this.allowMultiple) {
         const cur = this.proxyArray.filter((v) => opts.includes(v));
         this.$emit("update:modelValue", cur);
+        this.$emit("change", cur);
       } else {
         const cur = this.proxySingle;
         if (!opts.includes(cur)) {
           const dv = this.pickSingleDefault();
-          this.$emit("update:modelValue", dv && opts.includes(dv) ? dv : "");
+          const next = dv && opts.includes(dv) ? dv : "";
+          this.$emit("update:modelValue", next);
+          this.$emit("change", next);
         }
       }
     },
@@ -141,12 +144,14 @@ export default {
         if (!hasValue(cur) || force) {
           const next = this.pickMultiDefault();
           this.$emit("update:modelValue", next);
+          this.$emit("change", next);
         }
       } else {
         const cur = this.proxySingle;
         if (!hasValue(cur) || force) {
           const next = this.pickSingleDefault();
           this.$emit("update:modelValue", next);
+          this.$emit("change", next);
         }
       }
     },
@@ -155,13 +160,16 @@ export default {
     onSelectSingle(val) {
       if (this.isReadonly) return;
       this.$emit("update:modelValue", val);
+      this.$emit("change", val);
     },
     onToggleMulti(opt, checked) {
       if (this.isReadonly) return;
       const set = new Set(this.proxyArray);
       if (checked) set.add(opt);
       else set.delete(opt);
-      this.$emit("update:modelValue", Array.from(set));
+      const next = Array.from(set);
+      this.$emit("update:modelValue", next);
+      this.$emit("change", next); //
     },
   },
 };
@@ -239,4 +247,3 @@ export default {
   opacity: 0.6;
 }
 </style>
-
