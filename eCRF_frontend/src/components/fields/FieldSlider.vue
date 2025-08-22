@@ -1,256 +1,299 @@
 <template>
-  <div class="fs">
-    <!-- SINGLE VALUE -->
-    <div v-if="!isRange" class="fs-row">
+  <div class="field-slider" :class="{ readonly }">
+    <div class="slider-header">
+      <span v-if="displayValue !== null" class="slider-value">
+        {{ displayValueText }}
+      </span>
+    </div>
+
+    <div class="slider-track-wrap" ref="wrap" @click="onTrackClick">
       <input
-        class="fs-input"
+        ref="range"
         type="range"
-        :min="min"
-        :max="max"
-        :step="step"
-        :value="singleValueSafe"
-        :disabled="isReadonly"
-        :aria-readonly="isReadonly ? 'true' : 'false'"
-        @input="onSingleInput($event)"
-        @change="onSingleChange($event)"
+        class="slider-range"
+        :min="useMin"
+        :max="useMax"
+        :step="useStep"
+        :value="rangeValue"
+        :disabled="readonly"
+        @input="onInput"
+        @change="onChange"
+        @mousedown="dragging = true"
+        @mouseup="dragging = false"
+        @touchstart="dragging = true"
+        @touchend="dragging = false"
       />
-      <span v-if="showValue" class="fs-value" :aria-live="'polite'">
-        {{ format(singleValueSafe) }}
-      </span>
-    </div>
 
-    <!-- RANGE VALUE -->
-    <div v-else class="fs-row fs-range">
-      <!-- Track with fill -->
-      <div class="fs-track">
+      <!-- Step labels (marks) -->
+      <div class="marks" v-if="hasMarks">
         <div
-          class="fs-fill"
-          :style="fillStyle"
-          aria-hidden="true"
-        ></div>
-        <input
-          class="fs-input fs-lower"
-          type="range"
-          :min="min"
-          :max="max"
-          :step="step"
-          :value="lower"
-          :disabled="isReadonly"
-          @input="onLowerInput($event)"
-          @change="onRangeCommit"
-        />
-        <input
-          class="fs-input fs-upper"
-          type="range"
-          :min="min"
-          :max="max"
-          :step="step"
-          :value="upper"
-          :disabled="isReadonly"
-          @input="onUpperInput($event)"
-          @change="onRangeCommit"
-        />
+          v-for="(m, i) in normalizedMarks"
+          :key="i"
+          class="mark"
+          :style="{ left: markPercent(m.value) + '%' }"
+        >
+          <span class="mark-tick"></span>
+          <span class="mark-label">{{ m.label }}</span>
+        </div>
       </div>
-
-      <span v-if="showValue" class="fs-value" :aria-live="'polite'">
-        {{ format(lower) }} — {{ format(upper) }}
-      </span>
     </div>
 
-    <!-- Helper / placeholder hint -->
-    <small v-if="placeholder" class="fs-help">{{ placeholder }}</small>
+    <div class="slider-footer">
+      <span class="min-label">{{ useMin }}</span>
+      <span class="max-label">{{ useMax }}</span>
+    </div>
   </div>
 </template>
 
 <script>
 export default {
   name: "FieldSlider",
-  inheritAttrs: false,
   props: {
-    modelValue: { type: [Number, String, Array], default: "" },
-    // constraints (mirrors number field + slider flags)
-    min: { type: [Number, String], default: 0 },
-    max: { type: [Number, String], default: 100 },
-    step: { type: [Number, String], default: 1 },
+    modelValue: { type: [Number, String, null], default: null }, // v-model
+    min: { type: Number, default: 1 },
+    max: { type: Number, default: 5 },
+    step: { type: Number, default: 1 },
     readonly: { type: Boolean, default: false },
-    disabled: { type: Boolean, default: false },
-    percent: { type: Boolean, default: false },   // display as %
-    isRange: { type: Boolean, default: false },   // dual-thumb
-    showValue: { type: Boolean, default: true },  // live value bubble
-    defaultValue: { type: [Number, Array, String], default: "" },
-    placeholder: { type: String, default: "" },   // optional help text
+    percent: { type: Boolean, default: false },
+    marks: { type: Array, default: () => [] } // [{ value: number, label: string }]
   },
-  emits: ["update:modelValue", "change"],
+  emits: ["update:modelValue"],
+  data() {
+    return {
+      internalValue: this.toNumberOrNull(this.modelValue),
+      dragging: false
+    };
+  },
   computed: {
-    isReadonly() {
-      const attrReadonly =
-        this.$attrs.readonly === "" ||
-        this.$attrs.readonly === true ||
-        this.$attrs.readonly === "true";
-      return this.readonly || this.disabled || attrReadonly;
+    useMin() {
+      return this.percent ? 1 : this.min;
     },
-    nmin() { return this.toNum(this.min, 0); },
-    nmax() { return this.toNum(this.max, 100); },
-    nstep(){
-      const s = this.toNum(this.step, 1);
-      return s > 0 ? s : 1;
+    useMax() {
+      return this.percent ? 100 : this.max;
     },
-    // SINGLE
-    singleValueSafe() {
-      const v = Array.isArray(this.modelValue) ? this.modelValue[0] : this.modelValue;
-      const n = this.coerceNumberOrEmpty(v);
-      if (n === "") return this.clamp(this.defaultScalar());
-      return this.clamp(n);
+    useStep() {
+      return this.percent ? 1 : (this.step > 0 ? this.step : 1);
     },
-    // RANGE
-    lower() { return this.rangeSafe()[0]; },
-    upper() { return this.rangeSafe()[1]; },
-    fillStyle() {
-      const a = ((this.lower - this.nmin) / (this.nmax - this.nmin)) * 100;
-      const b = ((this.upper - this.nmin) / (this.nmax - this.nmin)) * 100;
-      return { left: `${a}%`, width: `${Math.max(b - a, 0)}%` };
+    hasMarks() {
+      return this.normalizedMarks.length > 0;
+    },
+    normalizedMarks() {
+      const min = this.useMin, max = this.useMax, step = this.useStep;
+      const seen = new Set();
+      const out = [];
+      (this.marks || []).forEach(m => {
+        let v = Number(m?.value);
+        const label = (m?.label ?? "").toString();
+        if (!Number.isFinite(v) || !label) return;
+        // snap to step & clamp
+        v = Math.round((v - min) / step) * step + min;
+        v = Math.max(min, Math.min(max, v));
+        const key = `${v}`;
+        if (!seen.has(key)) {
+          seen.add(key);
+          out.push({ value: v, label });
+        }
+      });
+      out.sort((a, b) => a.value - b.value);
+      return out;
+    },
+    displayValue() {
+      return this.internalValue !== null && Number.isFinite(+this.internalValue)
+        ? Number(this.internalValue)
+        : null;
+    },
+    displayValueText() {
+      if (this.displayValue === null) return "";
+      return this.percent ? `${this.displayValue}%` : this.displayValue;
+    },
+    rangeValue() {
+      // the native input needs a number even if we haven't picked yet
+      return this.internalValue === null ? this.useMin : this.internalValue;
     }
   },
+  watch: {
+    modelValue(nv) {
+      const n = this.toNumberOrNull(nv);
+      if (n !== this.internalValue) this.internalValue = n;
+    },
+    min() { this.snapWithinBounds(); },
+    max() { this.snapWithinBounds(); },
+    step() { this.snapWithinBounds(); },
+    percent() { this.snapWithinBounds(); },
+    marks() {
+      console.log("[FieldSlider] marks updated:", this.marks);
+    }
+  },
+  mounted() {
+    console.log("[FieldSlider] mounted props:", {
+      percent: this.percent, min: this.min, max: this.max, step: this.step, marks: this.marks
+    });
+  },
   methods: {
-    toNum(v, d=0){ const n = Number(v); return Number.isFinite(n) ? n : d; },
-    clamp(n){
-      const x = this.toNum(n, this.nmin);
-      return Math.min(this.nmax, Math.max(this.nmin, x));
-    },
-    coerceNumberOrEmpty(v){
-      if (v === "" || v == null) return "";
+    toNumberOrNull(v) {
       const n = Number(v);
-      return Number.isFinite(n) ? n : "";
+      return Number.isFinite(n) ? n : null;
     },
-    defaultScalar(){
-      const dv = this.coerceNumberOrEmpty(this.defaultValue);
-      return dv === "" ? this.nmin : this.clamp(dv);
+    clampSnap(n) {
+      const min = this.useMin, max = this.useMax, step = this.useStep;
+      if (!Number.isFinite(n)) return null;
+      let v = Math.max(min, Math.min(max, n));
+      v = Math.round((v - min) / step) * step + min;
+      v = Math.max(min, Math.min(max, v));
+      return v;
     },
-    defaultRange(){
-      let a = this.nmin, b = this.nmax;
-      if (Array.isArray(this.defaultValue)) {
-        const d0 = this.coerceNumberOrEmpty(this.defaultValue[0]);
-        const d1 = this.coerceNumberOrEmpty(this.defaultValue[1]);
-        if (d0 !== "") a = this.clamp(d0);
-        if (d1 !== "") b = this.clamp(d1);
+    snapWithinBounds() {
+      // if we haven't chosen a value yet, keep it null; otherwise snap/clamp
+      if (this.internalValue === null) return;
+      const snapped = this.clampSnap(this.internalValue);
+      if (snapped !== this.internalValue) {
+        this.internalValue = snapped;
+        this.$emit("update:modelValue", snapped);
       }
-      if (a > b) [a,b] = [b,a];
-      return [a,b];
     },
-    rangeSafe(){
-      if (!this.isRange) return [this.singleValueSafe, this.singleValueSafe];
-      if (!Array.isArray(this.modelValue)) return this.defaultRange();
-      const a = this.coerceNumberOrEmpty(this.modelValue[0]);
-      const b = this.coerceNumberOrEmpty(this.modelValue[1]);
-      let lo = a === "" ? this.nmin : this.clamp(a);
-      let hi = b === "" ? this.nmax : this.clamp(b);
-      if (lo > hi) [lo, hi] = [hi, lo];
-      return [lo, hi];
+    onInput(e) {
+      const raw = Number(e && e.target ? e.target.value : this.internalValue);
+      const v = this.clampSnap(raw);
+      this.internalValue = v;
+      this.$emit("update:modelValue", v); // continuous update while sliding
     },
-    snapToStep(n) {
-      const offset = n - this.nmin;
-      const steps = Math.round(offset / this.nstep);
-      return this.clamp(this.nmin + steps * this.nstep);
+    onChange(e) {
+      const raw = Number(e && e.target ? e.target.value : this.internalValue);
+      const v = this.clampSnap(raw);
+      this.internalValue = v;
+      this.$emit("update:modelValue", v);
     },
-    onSingleInput(e){
-      if (this.isReadonly) return;
-      const n = this.snapToStep(this.toNum(e.target.value, this.nmin));
-      this.$emit("update:modelValue", n);
+    onTrackClick(evt) {
+      if (this.readonly) return;
+      const wrap = this.$refs.wrap;
+      const range = this.$refs.range;
+      if (!wrap || !range) return;
+
+      const rect = wrap.getBoundingClientRect();
+      const x = (evt.clientX ?? (evt.touches && evt.touches[0]?.clientX)) || 0;
+      const rel = (x - rect.left) / rect.width;
+      const min = this.useMin, max = this.useMax;
+      const guess = min + rel * (max - min);
+      const v = this.clampSnap(guess);
+
+      this.internalValue = v;
+      this.$emit("update:modelValue", v);
+
+      // also sync native input UI
+      range.value = v;
     },
-    onSingleChange(e){
-      if (this.isReadonly) return;
-      const n = this.snapToStep(this.toNum(e.target.value, this.nmin));
-      this.$emit("update:modelValue", n);
-      this.$emit("change", n);
-    },
-    onLowerInput(e){
-      if (this.isReadonly) return;
-      let lo = this.snapToStep(this.toNum(e.target.value, this.nmin));
-      let hi = this.upper;
-      if (lo > hi) lo = hi;
-      this.$emit("update:modelValue", [lo, hi]);
-    },
-    onUpperInput(e){
-      if (this.isReadonly) return;
-      let hi = this.snapToStep(this.toNum(e.target.value, this.nmax));
-      let lo = this.lower;
-      if (hi < lo) hi = lo;
-      this.$emit("update:modelValue", [lo, hi]);
-    },
-    onRangeCommit(){
-      if (this.isReadonly) return;
-      this.$emit("change", [this.lower, this.upper]);
-    },
-    format(n){
-      return this.percent ? `${n}%` : String(n);
+    markPercent(value) {
+      const min = this.useMin, max = this.useMax;
+      if (max === min) return 0;
+      return ((value - min) / (max - min)) * 100;
     }
   }
 };
 </script>
 
 <style scoped>
-.fs { display: flex; flex-direction: column; gap: 6px; }
-.fs-row { display: flex; align-items: center; gap: 10px; }
-.fs-value {
-  min-width: 64px;
-  padding: 4px 8px;
-  border-radius: 999px;
-  border: 1px solid #e5e7eb;
-  background: #f9fafb;
+.field-slider {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.slider-header {
+  display: flex;
+  justify-content: flex-end;
+  min-height: 18px;
+}
+
+.slider-value {
   font-size: 12px;
   color: #111827;
-  text-align: center;
-}
-.fs-help { color: #6b7280; font-size: 12px; }
-
-.fs-input {
-  -webkit-appearance: none;
-  appearance: none;
-  width: 100%;
-  background: transparent;
-  cursor: pointer;
-}
-.fs-input:disabled { cursor: not-allowed; opacity: .6; }
-
-/* Track */
-.fs-input::-webkit-slider-runnable-track { height: 6px; background: #e5e7eb; border-radius: 999px; }
-.fs-input::-moz-range-track { height: 6px; background: #e5e7eb; border-radius: 999px; }
-
-/* Thumb */
-.fs-input::-webkit-slider-thumb {
-  -webkit-appearance: none;
-  appearance: none;
-  width: 18px; height: 18px;
-  border-radius: 50%;
-  background: #111827;
-  border: 2px solid #fff;
-  box-shadow: 0 0 0 2px #111827;
-  margin-top: -6px;
-}
-.fs-input::-moz-range-thumb {
-  width: 18px; height: 18px;
-  border-radius: 50%;
-  background: #111827;
-  border: 2px solid #fff;
-  box-shadow: 0 0 0 2px #111827;
+  background: #eef2ff;
+  border: 1px solid #c7d2fe;
+  padding: 2px 6px;
+  border-radius: 999px;
 }
 
-/* RANGE mode */
-.fs-range { flex-direction: row; align-items: center; }
-.fs-track {
+.slider-track-wrap {
   position: relative;
+  padding: 12px 0 22px; /* bottom space for labels */
+}
+
+.slider-range {
+  -webkit-appearance: none;
+  appearance: none;
   width: 100%;
-  height: 6px;
+  height: 4px;
   background: #e5e7eb;
   border-radius: 999px;
+  outline: none;
+  cursor: pointer;
 }
-.fs-fill {
-  position: absolute; top: 0; height: 6px;
-  background: #111827;
+
+/* thumb */
+.slider-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #2563eb;
+  border: 2px solid white;
+  box-shadow: 0 1px 3px rgba(0,0,0,.2);
+  cursor: pointer;
+}
+.slider-range::-moz-range-thumb {
+  width: 16px; height: 16px; border-radius: 50%;
+  background: #2563eb; border: 2px solid white; box-shadow: 0 1px 3px rgba(0,0,0,.2);
+  cursor: pointer;
+}
+
+/* track (Firefox) */
+.slider-range::-moz-range-track {
+  height: 4px;
+  background: #e5e7eb;
+  border: none;
   border-radius: 999px;
 }
-.fs-track .fs-input {
-  position: absolute; left: 0; right: 0; top: -6px;
+
+/* marks */
+.marks {
+  position: absolute;
+  left: 0; right: 0;
+  bottom: 0; /* sit closer to the track to avoid "too low" issue */
+  height: 18px;
 }
-.fs-track .fs-upper { pointer-events: auto; }
+
+.mark {
+  position: absolute;
+  transform: translateX(-50%);
+  text-align: center;
+  white-space: nowrap;
+}
+
+.mark-tick {
+  display: block;
+  width: 2px;
+  height: 8px;
+  margin: 0 auto 2px;
+  background: #9ca3af;
+  border-radius: 2px;
+}
+
+.mark-label {
+  font-size: 11px;
+  color: #374151;
+  line-height: 1;
+}
+
+.slider-footer {
+  display: flex;
+  justify-content: space-between;
+  color: #6b7280;
+  font-size: 12px;
+}
+
+.readonly .slider-range {
+  cursor: not-allowed;
+  opacity: .7;
+}
 </style>
