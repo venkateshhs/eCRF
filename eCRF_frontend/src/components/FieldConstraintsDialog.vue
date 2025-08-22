@@ -28,13 +28,14 @@
         <label>Help text</label>
         <input type="text" v-model="local.helpText" placeholder="Shown below the control" />
       </div>
+
       <div class="row" v-if="isTime">
-          <label>Hour format</label>
-          <select v-model="local.hourCycle">
-            <option value="24">24-hour</option>
-            <option value="12">12-hour (AM/PM)</option>
-          </select>
-        </div>
+        <label>Hour format</label>
+        <select v-model="local.hourCycle">
+          <option value="24">24-hour</option>
+          <option value="12">12-hour (AM/PM)</option>
+        </select>
+      </div>
 
       <!-- Default value (type-aware) -->
       <div class="row" v-if="!isDate">
@@ -86,7 +87,6 @@
           placeholder="Default number"
         />
 
-        <!-- ADD this -->
         <FieldTime
           v-else-if="isTime"
           v-model="local.defaultValue"
@@ -94,7 +94,6 @@
           :readonly="false"
           :disabled="false"
         />
-
 
         <label class="chk" v-else-if="isCheckbox">
           <input type="checkbox" v-model="local.defaultValue" />
@@ -107,6 +106,9 @@
           v-model="local.defaultValue"
           placeholder="Default value"
         />
+
+        <!-- inline error for non-date default -->
+        <small v-if="defaultError && !isDate" class="err">{{ defaultError }}</small>
       </div>
     </section>
 
@@ -180,29 +182,28 @@
       </div>
     </section>
 
-
     <!-- TIME -->
     <section class="group" v-if="isTime">
       <div class="row two">
         <div>
           <label>Min time</label>
           <FieldTime
-           v-model="local.minTime"
-           :hourCycle="local.hourCycle || '24'"
-           :readonly="false"
-           :disabled="false"
-           :placeholder="(local.hourCycle==='12' ? 'hh:mm AM/PM' : 'HH:mm')"
-         />
+            v-model="local.minTime"
+            :hourCycle="local.hourCycle || '24'"
+            :readonly="false"
+            :disabled="false"
+            :placeholder="(local.hourCycle==='12' ? 'hh:mm AM/PM' : 'HH:mm')"
+          />
         </div>
         <div>
           <label>Max time</label>
           <FieldTime
-           v-model="local.maxTime"
-           :hourCycle="local.hourCycle || '24'"
-           :readonly="false"
-           :disabled="false"
-           :placeholder="(local.hourCycle==='12' ? 'hh:mm AM/PM' : 'HH:mm')"
-         />
+            v-model="local.maxTime"
+            :hourCycle="local.hourCycle || '24'"
+            :readonly="false"
+            :disabled="false"
+            :placeholder="(local.hourCycle==='12' ? 'hh:mm AM/PM' : 'HH:mm')"
+          />
         </div>
       </div>
     </section>
@@ -244,13 +245,14 @@
           :min-date="local.minDate || null"
           :max-date="local.maxDate || null"
         />
+        <!-- inline error for date default -->
+        <small v-if="defaultError && isDate" class="err">{{ defaultError }}</small>
       </div>
     </section>
 
     <!-- RADIO / SELECT OPTIONS -->
     <section class="group" v-if="isChoice">
       <div class="row">
-        <!-- NOTE: allowMultiple is for RADIO (multi-check behavior); SELECT is single only -->
         <label class="chk" v-if="isRadio">
           <input type="checkbox" v-model="local.allowMultiple" />
           Allow multiple selections
@@ -285,7 +287,6 @@
       </div>
     </section>
 
-    <!-- CHECKBOX -->
     <section class="group" v-if="isCheckbox">
       <div class="row note">
         <span>Checkbox has no placeholder. Use help text for guidance.</span>
@@ -293,7 +294,7 @@
     </section>
 
     <div class="modal-actions">
-      <button class="btn-primary" @click="save">Save</button>
+      <button class="btn-primary" @click="save" :disabled="isSaveDisabled">Save</button>
       <button class="btn-option" @click="$emit('closeConstraintsDialog')">Cancel</button>
     </div>
   </div>
@@ -319,7 +320,7 @@ const DATE_FORMATS = [
 
 export default {
   name: "FieldConstraintsDialog",
-  components: { DateFormatPicker,  FieldTime  },
+  components: { DateFormatPicker, FieldTime },
   props: {
     currentFieldType: { type: String, default: "text" },
     constraintsForm:  { type: Object, default: () => ({}) }
@@ -330,7 +331,6 @@ export default {
     const initialOptions =
       (Array.isArray(base.options) ? base.options : []).filter(Boolean).map(String);
 
-    // For radio multi-select, defaultValue should be an array; for others keep scalar
     const defaultValue =
       base.defaultValue !== undefined
         ? base.defaultValue
@@ -339,41 +339,34 @@ export default {
     return {
       DATE_FORMATS,
       local: {
-        // common
         required: !!base.required,
         readonly: !!base.readonly,
         helpText: base.helpText || "",
         placeholder: base.placeholder || "",
         defaultValue,
 
-        // text-like
         minLength: isFinite(base.minLength) ? Number(base.minLength) : undefined,
         maxLength: isFinite(base.maxLength) ? Number(base.maxLength) : undefined,
         pattern: base.pattern || "",
         transform: base.transform || "none",
 
-        // number
         min: isFinite(base.min) ? Number(base.min) : undefined,
         max: isFinite(base.max) ? Number(base.max) : undefined,
         step: isFinite(base.step) ? Number(base.step) : undefined,
         integerOnly: !!base.integerOnly,
         maxLengthDigits: isFinite(base.maxLengthDigits) ? Number(base.maxLengthDigits) : undefined,
 
-        // time
         minTime: base.minTime || "",
         maxTime: base.maxTime || "",
         hourCycle: base.hourCycle || "24",
 
-        // date
         minDate: base.minDate || "",
         maxDate: base.maxDate || "",
         dateFormat: base.dateFormat || "dd.MM.yyyy",
 
-        // radio-specific (multi)
         allowMultiple: !!base.allowMultiple
       },
 
-      // choice options (radio/select)
       localOptions: initialOptions.length ? initialOptions : ["Option 1"],
       optionsCount: Math.max(1, initialOptions.length || 1),
 
@@ -392,6 +385,38 @@ export default {
     isChoice()   { return this.isRadio || this.isSelect; },
     currentTypeLabel() {
       return this.type.charAt(0).toUpperCase() + this.type.slice(1);
+    },
+
+    // ==== validation ====
+    defaultError() {
+      if (!(this.local.required && this.local.readonly)) return "";
+      const t = this.type;
+      const dv = this.local.defaultValue;
+
+      if (t === "radio") {
+        const ok = this.local.allowMultiple
+          ? Array.isArray(dv) && dv.length > 0
+          : (typeof dv === "string" && dv !== "");
+        return ok ? "" : "Default value is required when the field is both Required and Readonly.";
+      }
+      if (t === "select") {
+        const ok = (typeof dv === "string" && dv !== "");
+        return ok ? "" : "Default value is required when the field is both Required and Readonly.";
+      }
+      if (t === "checkbox") {
+        const ok = !!dv; // must be true
+        return ok ? "" : "Default value (Checked) is required when the field is both Required and Readonly.";
+      }
+      if (t === "number") {
+        const ok = dv !== "" && dv !== null && dv !== undefined && !Number.isNaN(Number(dv));
+        return ok ? "" : "Default value is required when the field is both Required and Readonly.";
+      }
+      // text, textarea, time, date, etc.
+      const ok = dv !== "" && dv !== null && dv !== undefined;
+      return ok ? "" : "Default value is required when the field is both Required and Readonly.";
+    },
+    isSaveDisabled() {
+      return !!this.defaultError;
     }
   },
   watch: {
@@ -444,30 +469,25 @@ export default {
         this.local.placeholder = "";
       }
     },
-    // when toggling radio allowMultiple, coerce defaultValue shape
     "local.allowMultiple"(nv) {
       if (!this.isRadio) return;
       if (nv) {
-        // become array
         this.local.defaultValue = Array.isArray(this.local.defaultValue)
           ? this.local.defaultValue.filter((v) => this.localOptions.includes(v))
           : (this.local.defaultValue && this.localOptions.includes(this.local.defaultValue)
               ? [this.local.defaultValue]
               : []);
       } else {
-        // become scalar
         if (Array.isArray(this.local.defaultValue)) {
           this.local.defaultValue = this.local.defaultValue[0] || "";
         }
       }
     },
-    // keep defaultValue coherent with options if choice
     localOptions: {
       deep: true,
       handler() {
         if (!this.isChoice) return;
         if (this.isRadio && this.local.allowMultiple) {
-          // prune removed values
           if (Array.isArray(this.local.defaultValue)) {
             this.local.defaultValue = this.local.defaultValue.filter((v) =>
               this.localOptions.includes(v)
@@ -483,11 +503,10 @@ export default {
     }
   },
   methods: {
-    // chips helpers for multi-radio default
     addChip() {
       const v = (this.chipInput || "").trim();
       if (!v) return;
-      if (!this.localOptions.includes(v)) return; // must be from options
+      if (!this.localOptions.includes(v)) return;
       if (!Array.isArray(this.local.defaultValue)) this.local.defaultValue = [];
       if (!this.local.defaultValue.includes(v)) this.local.defaultValue.push(v);
       this.chipInput = "";
@@ -497,7 +516,6 @@ export default {
       this.local.defaultValue.splice(i, 1);
     },
 
-    // options list helpers
     syncOptionsCount() {
       const count = Math.max(1, Number(this.optionsCount || 1));
       if (count > this.localOptions.length) {
@@ -517,7 +535,6 @@ export default {
     removeLastOption() {
       if (this.localOptions.length > 1) {
         const removed = this.localOptions.pop();
-        // fix defaultValue membership
         if (Array.isArray(this.local.defaultValue)) {
           this.local.defaultValue = this.local.defaultValue.filter((v) => v !== removed);
         } else if (this.local.defaultValue === removed) {
@@ -538,10 +555,10 @@ export default {
     },
 
     save() {
-      // 1) normalize base constraints
+      if (this.isSaveDisabled) return; // guard when validation fails
+
       const cleaned = normalizeConstraints(this.type, { ...this.local });
 
-      // 2) attach options for choice types (trim + dedupe empties)
       if (this.isChoice) {
         const opts = this.localOptions
           .map((o) => String(o || "").trim())
@@ -549,7 +566,6 @@ export default {
 
         const finalOpts = opts.length ? Array.from(new Set(opts)) : ["Option 1"];
 
-        // keep defaultValue valid
         if (this.isRadio && this.local.allowMultiple) {
           const arr = Array.isArray(cleaned.defaultValue) ? cleaned.defaultValue : [];
           cleaned.defaultValue = arr.filter((v) => finalOpts.includes(v));
@@ -559,11 +575,9 @@ export default {
 
         cleaned.options = finalOpts;
 
-        // IMPORTANT: dropdown is single-select => no allowMultiple on select
         if (this.isSelect) delete cleaned.allowMultiple;
       }
 
-      // 3) final coerce of defaultValue just in case
       cleaned.defaultValue = coerceDefaultForType(
         this.isRadio && this.local.allowMultiple ? "radio" : this.type,
         cleaned.defaultValue
@@ -571,8 +585,7 @@ export default {
       cleaned.hourCycle = this.local.hourCycle || "24";
       this.$emit("updateConstraints", cleaned);
     }
-  },
-
+  }
 };
 </script>
 
@@ -598,6 +611,25 @@ input[type="text"],input[type="number"],input[type="time"],select{width:100%;pad
 .chip{background:#eef2ff;color:#111827;border:1px solid #c7d2fe;border-radius:999px;padding:2px 8px;font-size:12px}
 .chip-x{margin-left:6px;background:transparent;border:none;cursor:pointer}
 .modal-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:12px}
-.btn-primary{background:#2563eb;color:#fff;border:none;padding:8px 14px;border-radius:6px;cursor:pointer}
+.btn-primary {
+  background: #2563eb;
+  color: #fff;
+  border: none;
+  padding: 8px 14px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.2s ease, opacity 0.2s ease;
+}
+
+.btn-primary:hover:not(:disabled) {
+  background: #1d4ed8; /* darker on hover */
+}
+
+.btn-primary:disabled {
+  background: #93c5fd; /* lighter blue */
+  cursor: not-allowed;
+  opacity: 0.7;
+}
 .btn-option{background:#e5e7eb;color:#111827;border:none;padding:8px 14px;border-radius:6px;cursor:pointer}
+.err{color:#dc2626;font-size:12px;margin-top:4px}
 </style>
