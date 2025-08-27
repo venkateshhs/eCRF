@@ -7,7 +7,6 @@
 export function coerceDefaultForType(fieldType = "text", value) {
   const t = String(fieldType || "text").toLowerCase();
 
-  // Keep undefined as-is so callers can decide whether to write it
   if (value === undefined) return undefined;
 
   switch (t) {
@@ -21,17 +20,14 @@ export function coerceDefaultForType(fieldType = "text", value) {
     }
 
     case "radio":
-      // radio can be single (string) OR multi (array of strings).
       if (Array.isArray(value)) return value.map(v => String(v));
       return typeof value === "string" ? value : "";
 
     case "select":
-      // dropdown is single-select only (string)
       return typeof value === "string" ? value : "";
 
     case "date":
     case "time":
-      // treat these as strings (e.g., "2025-08-18", "13:45")
       return typeof value === "string" ? value : "";
 
     case "textarea":
@@ -50,31 +46,38 @@ export function coerceDefaultForType(fieldType = "text", value) {
  * - coerces defaultValue via coerceDefaultForType
  *
  * NOTE: For radio/select, OPTIONS ARE FIELD-LEVEL (not a constraint).
- *       We intentionally ignore `options` here; the dialog/parent will
- *       emit them and set `field.options` directly.
  */
 export function normalizeConstraints(fieldType = "text", raw = {}) {
   const c = { ...(raw || {}) };
 
-  // Strip accidental options from normalization; parent handles them
-  if (Array.isArray(c.options)) {
-    delete c.options;
-  }
+  // Options belong to the field, not constraints.
+  if (Array.isArray(c.options)) delete c.options;
 
-  // Coerce booleans first
+  // Boolean coercions
   ["required", "readonly", "allowMultiple", "integerOnly"].forEach((k) => {
     if (k in c) c[k] = !!c[k];
   });
 
-  // Coerce numeric-like fields
-  ["min", "max", "step", "maxLength", "minLength", "maxLengthDigits"].forEach((k) => {
+  // Numeric coercions
+  [
+    "min", "max", "step",
+    "maxLength", "minLength",
+    "maxLengthDigits", // legacy
+    "minDigits", "maxDigits" // new
+  ].forEach((k) => {
     if (k in c && c[k] !== "" && c[k] != null) {
       const n = Number(c[k]);
       c[k] = Number.isFinite(n) ? n : undefined;
     }
   });
 
-  // Default value is coerced type-aware
+  // Migrate legacy maxLengthDigits -> maxDigits (if present)
+  if ("maxLengthDigits" in c && c.maxLengthDigits != null) {
+    if (!("maxDigits" in c)) c.maxDigits = c.maxLengthDigits;
+    delete c.maxLengthDigits;
+  }
+
+  // Default value: type-aware
   if ("defaultValue" in c) {
     c.defaultValue = coerceDefaultForType(fieldType, c.defaultValue);
   }
@@ -114,24 +117,20 @@ export function normalizeConstraints(fieldType = "text", raw = {}) {
     delete c.placeholder;
   }
 
-  // Enforce ranges ordering
+  // Enforce numeric range order
   if ("min" in c && "max" in c && c.min != null && c.max != null) {
     if (Number.isFinite(c.min) && Number.isFinite(c.max) && c.max < c.min) {
-      const t = c.min;
-      c.min = c.max;
-      c.max = t;
+      const t = c.min; c.min = c.max; c.max = t;
     }
   }
   if (fieldType === "date" && c.minDate && c.maxDate && c.maxDate < c.minDate) {
-    const t = c.minDate;
-    c.minDate = c.maxDate;
-    c.maxDate = t;
+    const t = c.minDate; c.minDate = c.maxDate; c.maxDate = t;
   }
 
-  // Allowed keys per type (IMPORTANT: radio can be multi; select is single)
+  // Allowed keys per type
   const COMMON = ["required", "readonly", "helpText", "placeholder", "defaultValue"];
   const TEXTLIKE = ["minLength", "maxLength", "pattern", "transform"];
-  const NUMBER = ["min", "max", "step", "integerOnly", "maxLengthDigits"];
+  const NUMBER = ["min", "max", "step", "integerOnly", "minDigits", "maxDigits"]; // ← digits here
   const DATE = ["minDate", "maxDate", "dateFormat", "defaultValue"];
   const TIME = ["minTime", "maxTime", "step"];
 
@@ -152,7 +151,7 @@ export function normalizeConstraints(fieldType = "text", raw = {}) {
       allowed = [...COMMON, ...TIME];
       break;
     case "select":
-      allowed = [...COMMON]; // single-select only (no allowMultiple)
+      allowed = [...COMMON]; // single-select only
       delete c.allowMultiple;
       break;
     case "radio":
@@ -171,18 +170,17 @@ export function normalizeConstraints(fieldType = "text", raw = {}) {
     if (k in c && c[k] !== undefined) cleaned[k] = c[k];
   }
 
-  // If number + integerOnly => ensure integer step, and allow digit limit
-  if (String(fieldType).toLowerCase() === "number" && cleaned.integerOnly) {
-    if ("step" in cleaned && cleaned.step != null && !Number.isInteger(cleaned.step)) {
+  // Extra numeric invariants for digits
+  if (String(fieldType).toLowerCase() === "number") {
+    if (Number.isFinite(cleaned.minDigits) && cleaned.minDigits < 0) cleaned.minDigits = 0;
+    if (Number.isFinite(cleaned.maxDigits) && cleaned.maxDigits < 0) cleaned.maxDigits = 0;
+    if (Number.isFinite(cleaned.minDigits) && Number.isFinite(cleaned.maxDigits) && cleaned.maxDigits < cleaned.minDigits) {
+      const t = cleaned.minDigits; cleaned.minDigits = cleaned.maxDigits; cleaned.maxDigits = t;
+    }
+    // If integerOnly + non-integer step, drop it
+    if (cleaned.integerOnly && "step" in cleaned && cleaned.step != null && !Number.isInteger(cleaned.step)) {
       delete cleaned.step;
     }
-    // Support legacy 'maxLength' as 'maxLengthDigits'
-    if (!("maxLengthDigits" in cleaned) && "maxLength" in cleaned) {
-      cleaned.maxLengthDigits = cleaned.maxLength;
-      delete cleaned.maxLength;
-    }
-  } else {
-    delete cleaned.maxLengthDigits;
   }
 
   return cleaned;

@@ -7,6 +7,21 @@
 
     <!-- COMMON -->
     <section class="group">
+      <!-- Control type (only when editing a slider field) -->
+      <div class="row" v-if="isSlider">
+        <label>Control type</label>
+        <div class="choice-row">
+          <label class="chk">
+            <input type="radio" value="slider" v-model="local.mode" />
+            Slider
+          </label>
+          <label class="chk">
+            <input type="radio" value="linear" v-model="local.mode" />
+            Linear scale
+          </label>
+        </div>
+      </div>
+
       <div class="row">
         <label class="chk">
           <input type="checkbox" v-model="local.required" />
@@ -18,8 +33,8 @@
         </label>
       </div>
 
-      <!-- Placeholder (not for checkbox) -->
-      <div class="row" v-if="!isCheckbox">
+      <!-- Placeholder (not for checkbox and not for slider mode) -->
+      <div class="row" v-if="!isCheckbox && !(isSlider && local.mode==='slider')">
         <label>Placeholder</label>
         <input type="text" v-model="local.placeholder" placeholder="Shown when empty" />
       </div>
@@ -37,18 +52,17 @@
         </select>
       </div>
 
-      <!-- Default value (type-aware) -->
-      <div class="row" v-if="!isDate">
+      <!-- Default value (NEVER for slider mode) -->
+      <div class="row" v-if="!isDate && !(isSlider && local.mode==='slider')">
         <label>Default value</label>
 
-        <!-- Choice types: pick from options to avoid typos -->
-        <select v-if="isChoice && !local.allowMultiple"
-                v-model="local.defaultValue">
+        <!-- Choice types -->
+        <select v-if="isChoice && !local.allowMultiple" v-model="local.defaultValue">
           <option value="">(none)</option>
           <option v-for="(opt, i) in localOptions" :key="i" :value="opt">{{ opt }}</option>
         </select>
 
-        <!-- Multi radio: default can be multiple (array), we let user set via tags-like input -->
+        <!-- Multi radio -->
         <div v-else-if="isRadio && local.allowMultiple" class="chips">
           <div class="chip-input-row">
             <input
@@ -63,9 +77,11 @@
             </datalist>
           </div>
           <div class="chip-group">
-            <span v-for="(val, i) in (Array.isArray(local.defaultValue) ? local.defaultValue : [])"
-                  :key="i"
-                  class="chip">
+            <span
+              v-for="(val, i) in (Array.isArray(local.defaultValue) ? local.defaultValue : [])"
+              :key="i"
+              class="chip"
+            >
               {{ val }}
               <button class="chip-x" @click.prevent="removeChip(i)">×</button>
             </span>
@@ -107,7 +123,6 @@
           placeholder="Default value"
         />
 
-        <!-- inline error for non-date default -->
         <small v-if="defaultError && !isDate" class="err">{{ defaultError }}</small>
       </div>
     </section>
@@ -177,7 +192,7 @@
       <div class="row note">
         <span>
           Digit limits apply to the integer part. In preview we enforce these when <b>Integer only</b> is checked.
-          For values that need leading zeros (e.g., phone numbers), consider using a <b>Text</b> field with a pattern.
+          For values that need leading zeros, consider a <b>Text</b> field with a pattern.
         </span>
       </div>
     </section>
@@ -208,7 +223,7 @@
       </div>
     </section>
 
-    <!-- DATE (format + min/max/default using DateFormatPicker) -->
+    <!-- DATE -->
     <section class="group" v-if="isDate">
       <div class="row">
         <label>Date format</label>
@@ -245,12 +260,109 @@
           :min-date="local.minDate || null"
           :max-date="local.maxDate || null"
         />
-        <!-- inline error for date default -->
         <small v-if="defaultError && isDate" class="err">{{ defaultError }}</small>
       </div>
     </section>
 
-    <!-- RADIO / SELECT OPTIONS -->
+    <!-- SLIDER mode -->
+    <section class="group" v-if="isSlider && local.mode==='slider'">
+      <div class="row two">
+        <div>
+          <label>Min</label>
+          <input type="number" v-model.number="local.min" :disabled="local.percent" />
+        </div>
+        <div>
+          <label>Max</label>
+          <input type="number" v-model.number="local.max" :disabled="local.percent" />
+        </div>
+      </div>
+
+      <div class="row two">
+        <div>
+          <label>Step</label>
+          <input type="number" min="0.000001" step="0.000001" v-model.number="local.step" />
+        </div>
+        <div>
+          <label class="chk">
+            <input type="checkbox" v-model="local.percent" />
+            Show as percentage (1–100)
+          </label>
+        </div>
+      </div>
+
+      <div class="row note">
+        <span>No default selection for sliders. Clicking the track jumps to the nearest step.</span>
+      </div>
+
+      <!-- MARKS / LABELS (for slider) -->
+      <div class="row">
+        <label>Step labels</label>
+        <div class="options-scroll">
+          <div class="opt-row">
+            <span class="opt-index">#</span>
+            <input
+              type="number"
+              v-model.number="markEditValue"
+              :min="useMin"
+              :max="useMax"
+              :step="useStep"
+              placeholder="Step value"
+            />
+          </div>
+          <div class="opt-row">
+            <span class="opt-index">↳</span>
+            <input
+              type="text"
+              v-model="markEditLabel"
+              placeholder="Label"
+              @keydown.enter.prevent="addOrUpdateMark('slider')"
+            />
+            <button class="icon-btn" title="Add/Update" @click.prevent="addOrUpdateMark('slider')">✓</button>
+          </div>
+
+          <div class="opt-row" v-for="(m, i) in marksSorted" :key="'s'+i">
+            <span class="opt-index">{{ m.value }}</span>
+            <input type="text" :value="m.label" disabled />
+            <button class="icon-btn" title="Delete" @click.prevent="removeMark(m.value)">✕</button>
+          </div>
+        </div>
+        <small class="note">We only store labels you add; no snap behavior.</small>
+      </div>
+    </section>
+
+    <!-- LINEAR mode -->
+    <section class="group" v-if="isSlider && local.mode==='linear'">
+      <div class="row two">
+        <div>
+          <label>Min</label>
+          <input type="number" v-model.number="local.min" />
+        </div>
+        <div>
+          <label>Max</label>
+          <input type="number" v-model.number="local.max" />
+        </div>
+      </div>
+      <div class="row two">
+        <div>
+          <label>Left label</label>
+          <input type="text" v-model="local.leftLabel" placeholder="e.g., Not happy" />
+        </div>
+        <div>
+          <label>Right label</label>
+          <input type="text" v-model="local.rightLabel" placeholder="e.g., Very happy" />
+        </div>
+      </div>
+      <div class="row note" v-if="linearCount > LINEAR_MAX">
+        <span class="err">Too many points ({{ linearCount }}). Limit is {{ LINEAR_MAX }} to avoid clutter.</span>
+      </div>
+
+      <!-- NOTE: No per-point labels for linear scale by design -->
+      <div class="row note">
+        <span>Linear scale shows only endpoints (left/right). No step labels.</span>
+      </div>
+    </section>
+
+    <!-- RADIO / SELECT -->
     <section class="group" v-if="isChoice">
       <div class="row">
         <label class="chk" v-if="isRadio">
@@ -277,9 +389,7 @@
         <div class="opt-row" v-for="(opt, idx) in localOptions" :key="idx">
           <span class="opt-index">{{ idx + 1 }}.</span>
           <input type="text" v-model="localOptions[idx]" placeholder="Option label" />
-          <button class="icon-btn" title="Delete" @click.prevent="deleteOption(idx)" :disabled="localOptions.length<=1">
-            ✕
-          </button>
+          <button class="icon-btn" title="Delete" @click.prevent="deleteOption(idx)" :disabled="localOptions.length<=1">✕</button>
         </div>
       </div>
       <div class="row note" v-if="isSelect">
@@ -307,15 +417,8 @@ import DateFormatPicker from "@/components/DateFormatPicker.vue";
 import FieldTime from "@/components/fields/FieldTime.vue";
 
 const DATE_FORMATS = [
-  "dd.MM.yyyy",
-  "MM-dd-yyyy",
-  "dd-MM-yyyy",
-  "yyyy-MM-dd",
-  "MM/yyyy",
-  "MM-yyyy",
-  "yyyy/MM",
-  "yyyy-MM",
-  "yyyy"
+  "dd.MM.yyyy","MM-dd-yyyy","dd-MM-yyyy","yyyy-MM-dd",
+  "MM/yyyy","MM-yyyy","yyyy/MM","yyyy-MM","yyyy"
 ];
 
 export default {
@@ -338,39 +441,68 @@ export default {
 
     return {
       DATE_FORMATS,
+      LINEAR_MAX: 10,
       local: {
+        // shared
         required: !!base.required,
         readonly: !!base.readonly,
         helpText: base.helpText || "",
         placeholder: base.placeholder || "",
         defaultValue,
 
+        // text-like
         minLength: isFinite(base.minLength) ? Number(base.minLength) : undefined,
         maxLength: isFinite(base.maxLength) ? Number(base.maxLength) : undefined,
         pattern: base.pattern || "",
         transform: base.transform || "none",
 
-        min: isFinite(base.min) ? Number(base.min) : undefined,
-        max: isFinite(base.max) ? Number(base.max) : undefined,
-        step: isFinite(base.step) ? Number(base.step) : undefined,
+        // numeric
+        min: isFinite(base.min) ? Number(base.min) : (type === "slider" ? 1 : undefined),
+        max: isFinite(base.max) ? Number(base.max) : (type === "slider" ? 5 : undefined),
+        step: isFinite(base.step) ? Number(base.step) : (type === "slider" ? 1 : undefined),
         integerOnly: !!base.integerOnly,
-        maxLengthDigits: isFinite(base.maxLengthDigits) ? Number(base.maxLengthDigits) : undefined,
+        minDigits: isFinite(base.minDigits) ? Number(base.minDigits) : undefined,
+        maxDigits: isFinite(base.maxDigits) ? Number(base.maxDigits) : undefined,
 
+        // time/date
         minTime: base.minTime || "",
         maxTime: base.maxTime || "",
         hourCycle: base.hourCycle || "24",
-
         minDate: base.minDate || "",
         maxDate: base.maxDate || "",
         dateFormat: base.dateFormat || "dd.MM.yyyy",
 
-        allowMultiple: !!base.allowMultiple
+        // choice
+        allowMultiple: !!base.allowMultiple,
+
+        // slider modes
+        mode: base.mode === "linear" ? "linear" : "slider",
+        percent: !!base.percent,
+
+        // linear labels
+        leftLabel: base.leftLabel || "",
+        rightLabel: base.rightLabel || "",
+
+        // marks (used only for slider)
+        marks: Array.isArray(base.marks)
+          ? base.marks
+              .map(m => ({ value: Number(m?.value), label: String(m?.label ?? "") }))
+              .filter(m => Number.isFinite(m.value) && m.label)
+          : (base.marks && typeof base.marks === "object")
+            ? Object.keys(base.marks)
+                .map(k => ({ value: Number(k), label: String(base.marks[k]) }))
+                .filter(m => Number.isFinite(m.value) && m.label)
+            : []
       },
 
       localOptions: initialOptions.length ? initialOptions : ["Option 1"],
       optionsCount: Math.max(1, initialOptions.length || 1),
 
-      chipInput: ""
+      chipInput: "",
+
+      // marks editor state (slider only)
+      markEditValue: null,
+      markEditLabel: ""
     };
   },
   computed: {
@@ -383,16 +515,32 @@ export default {
     isRadio()    { return this.type === "radio"; },
     isSelect()   { return this.type === "select"; },
     isChoice()   { return this.isRadio || this.isSelect; },
+    isSlider()   { return this.type === "slider"; },
     currentTypeLabel() {
       return this.type.charAt(0).toUpperCase() + this.type.slice(1);
     },
 
-    // ==== validation ====
+    useMin(){ return Number.isFinite(this.local.min) ? this.local.min : 1; },
+    useMax(){ return Number.isFinite(this.local.max) ? this.local.max : 5; },
+    useStep(){ return (Number.isFinite(this.local.step) && this.local.step>0) ? this.local.step : 1; },
+
+    linearCount() {
+      const min = Number.isFinite(+this.local.min) ? +this.local.min : 1;
+      const max = Number.isFinite(+this.local.max) ? +this.local.max : 5;
+      return Math.max(0, max - min + 1);
+    },
+
+    marksSorted() {
+      return [...(this.local.marks || [])]
+        .sort((a, b) => a.value - b.value)
+        .filter((m, idx, arr) => idx === 0 || m.value !== arr[idx-1].value);
+    },
+
+    // validation (only when default is visible)
     defaultError() {
       if (!(this.local.required && this.local.readonly)) return "";
       const t = this.type;
       const dv = this.local.defaultValue;
-
       if (t === "radio") {
         const ok = this.local.allowMultiple
           ? Array.isArray(dv) && dv.length > 0
@@ -404,19 +552,25 @@ export default {
         return ok ? "" : "Default value is required when the field is both Required and Readonly.";
       }
       if (t === "checkbox") {
-        const ok = !!dv; // must be true
+        const ok = !!dv;
         return ok ? "" : "Default value (Checked) is required when the field is both Required and Readonly.";
       }
       if (t === "number") {
         const ok = dv !== "" && dv !== null && dv !== undefined && !Number.isNaN(Number(dv));
         return ok ? "" : "Default value is required when the field is both Required and Readonly.";
       }
-      // text, textarea, time, date, etc.
-      const ok = dv !== "" && dv !== null && dv !== undefined;
-      return ok ? "" : "Default value is required when the field is both Required and Readonly.";
+      // slider default is never shown here
+      return (dv !== "" && dv !== null && dv !== undefined) ? "" :
+        "Default value is required when the field is both Required and Readonly.";
     },
     isSaveDisabled() {
-      return !!this.defaultError;
+      if (this.isSlider && this.local.mode === "linear") {
+        return this.linearCount < 2 || this.linearCount > this.LINEAR_MAX;
+      }
+      if (!this.isDate && !(this.isSlider && this.local.mode==='slider') && (this.local.required && this.local.readonly)) {
+        return !!this.defaultError;
+      }
+      return false;
     }
   },
   watch: {
@@ -438,11 +592,12 @@ export default {
           pattern: base.pattern || "",
           transform: base.transform || "none",
 
-          min: isFinite(base.min) ? Number(base.min) : undefined,
-          max: isFinite(base.max) ? Number(base.max) : undefined,
-          step: isFinite(base.step) ? Number(base.step) : undefined,
+          min: isFinite(base.min) ? Number(base.min) : this.local.min ?? (this.isSlider ? 1 : undefined),
+          max: isFinite(base.max) ? Number(base.max) : this.local.max ?? (this.isSlider ? 5 : undefined),
+          step: isFinite(base.step) ? Number(base.step) : this.local.step ?? (this.isSlider ? 1 : undefined),
           integerOnly: !!base.integerOnly,
-          maxLengthDigits: isFinite(base.maxLengthDigits) ? Number(base.maxLengthDigits) : undefined,
+          minDigits: isFinite(base.minDigits) ? Number(base.minDigits) : this.local.minDigits,
+          maxDigits: isFinite(base.maxDigits) ? Number(base.maxDigits) : this.local.maxDigits,
 
           minTime: base.minTime || "",
           maxTime: base.maxTime || "",
@@ -452,14 +607,41 @@ export default {
           maxDate: base.maxDate || "",
           dateFormat: base.dateFormat || this.local.dateFormat,
 
-          allowMultiple: !!base.allowMultiple
+          allowMultiple: !!base.allowMultiple,
+
+          mode: base.mode === "linear" ? "linear" : "slider",
+          percent: !!base.percent,
+
+          leftLabel: base.leftLabel || "",
+          rightLabel: base.rightLabel || ""
         };
+
+        if (Array.isArray(base.marks)) {
+          this.local.marks = base.marks
+            .map(m => ({ value: Number(m?.value), label: String(m?.label ?? "") }))
+            .filter(m => Number.isFinite(m.value) && m.label);
+        } else if (base.marks && typeof base.marks === "object") {
+          this.local.marks = Object.keys(base.marks)
+            .map(k => ({ value: Number(k), label: String(base.marks[k]) }))
+            .filter(m => Number.isFinite(m.value) && m.label);
+        } else {
+          this.local.marks = [];
+        }
 
         if (Array.isArray(base.options)) {
           const cleaned = base.options.filter(Boolean).map(String);
           this.localOptions = cleaned.length ? cleaned : ["Option 1"];
           this.optionsCount = this.localOptions.length;
         }
+      }
+    },
+    "local.percent"(on) {
+      if (this.isSlider && this.local.mode === "slider" && on) {
+        this.local.min = 1;
+        this.local.max = 100;
+        if (!Number.isFinite(this.local.step) || this.local.step <= 0) this.local.step = 1;
+        // keep only labels within 1..100
+        this.local.marks = (this.local.marks || []).filter(m => m.value >= 1 && m.value <= 100);
       }
     },
     currentFieldType(val) {
@@ -503,6 +685,34 @@ export default {
     }
   },
   methods: {
+    // marks editor (slider only)
+    addOrUpdateMark(kind) {
+      if (kind !== 'slider') return; // guard: linear has no per-point labels
+      let v = Number(this.markEditValue);
+      const lbl = String(this.markEditLabel || "").trim();
+      if (!Number.isFinite(v) || !lbl) return;
+
+      const min = this.useMin;
+      const max = this.useMax;
+      const step = this.useStep;
+
+      // snap to step & clamp
+      v = Math.max(min, Math.min(max, v));
+      v = Math.round((v - min) / step) * step + min;
+      v = Math.max(min, Math.min(max, v));
+
+      const i = (this.local.marks || []).findIndex(m => m.value === v);
+      if (i >= 0) this.local.marks.splice(i, 1, { value: v, label: lbl });
+      else (this.local.marks || (this.local.marks = [])).push({ value: v, label: lbl });
+
+      this.markEditLabel = "";
+      this.markEditValue = null;
+    },
+    removeMark(v) {
+      const i = (this.local.marks || []).findIndex(m => m.value === v);
+      if (i >= 0) this.local.marks.splice(i, 1);
+    },
+
     addChip() {
       const v = (this.chipInput || "").trim();
       if (!v) return;
@@ -555,35 +765,92 @@ export default {
     },
 
     save() {
-      if (this.isSaveDisabled) return; // guard when validation fails
+      if (this.isSaveDisabled) return;
 
+      // Non-slider types
+      if (!this.isSlider) {
       const cleaned = normalizeConstraints(this.type, { ...this.local });
-
       if (this.isChoice) {
-        const opts = this.localOptions
-          .map((o) => String(o || "").trim())
-          .filter((o) => !!o);
-
+        const opts = this.localOptions.map(o => String(o || "").trim()).filter(Boolean);
         const finalOpts = opts.length ? Array.from(new Set(opts)) : ["Option 1"];
 
         if (this.isRadio && this.local.allowMultiple) {
           const arr = Array.isArray(cleaned.defaultValue) ? cleaned.defaultValue : [];
-          cleaned.defaultValue = arr.filter((v) => finalOpts.includes(v));
+          cleaned.defaultValue = arr.filter(v => finalOpts.includes(v));
         } else {
           if (!finalOpts.includes(cleaned.defaultValue)) cleaned.defaultValue = "";
         }
 
         cleaned.options = finalOpts;
-
         if (this.isSelect) delete cleaned.allowMultiple;
       }
-
       cleaned.defaultValue = coerceDefaultForType(
         this.isRadio && this.local.allowMultiple ? "radio" : this.type,
         cleaned.defaultValue
       );
       cleaned.hourCycle = this.local.hourCycle || "24";
+      console.log("[FCD] save non-slider constraints:", cleaned);
       this.$emit("updateConstraints", cleaned);
+      return;
+    }
+
+    // SLIDER -> Slider mode
+    if (this.local.mode === "slider") {
+      const min = this.local.percent ? 1 : this.useMin;
+      const max = this.local.percent ? 100 : this.useMax;
+      const step = this.local.percent ? 1 : this.useStep;
+
+      const marks = (this.local.marks || [])
+        .map(m => {
+          let v = Number(m.value);
+          if (!Number.isFinite(v)) return null;
+          v = Math.round((v - min) / step) * step + min;
+          v = Math.max(min, Math.min(max, v));
+          return { value: v, label: String(m.label || "") };
+        })
+        .filter(m => m && m.label)
+        .filter((m, idx, arr) => arr.findIndex(x => x.value === m.value) === idx)
+        .sort((a, b) => a.value - b.value);
+
+      const cleaned = {
+        mode: "slider",
+        required: !!this.local.required,
+        readonly: !!this.local.readonly,
+        helpText: this.local.helpText || "",
+        percent: !!this.local.percent,
+        min, max, step,
+        marks
+      };
+
+      console.log("[FCD] save slider constraints:", cleaned);
+      this.$emit("updateConstraints", cleaned);
+      return;
+    }
+
+    // SLIDER -> Linear mode (no step labels)
+    const LIM = this.LINEAR_MAX;
+    let linMin = this.useMin;
+    let linMax = this.useMax;
+    if (linMax - linMin + 1 > LIM) {
+      linMax = linMin + (LIM - 1);
+    }
+    if (linMax < linMin) linMax = linMin + 1;
+
+    const cleaned = {
+      mode: "linear",
+      required: !!this.local.required,
+      readonly: !!this.local.readonly,
+      helpText: this.local.helpText || "",
+      min: linMin,
+      max: linMax,
+      leftLabel: this.local.leftLabel || "",
+      rightLabel: this.local.rightLabel || ""
+      // no marks in linear mode
+    };
+
+    console.log("[FCD] save linear constraints:", cleaned);
+    this.$emit("updateConstraints", cleaned);
+
     }
   }
 };
@@ -596,6 +863,7 @@ export default {
 .group{border:1px solid #e5e7eb;border-radius:8px;padding:12px;margin-top:10px}
 .row{display:flex;flex-direction:column;gap:6px;margin-bottom:10px}
 .row.two{display:grid;gap:10px;grid-template-columns:1fr 1fr}
+.choice-row{display:flex;gap:16px}
 label{font-size:12px;color:#374151}
 input[type="text"],input[type="number"],input[type="time"],select{width:100%;padding:8px;border:1px solid #d1d5db;border-radius:6px;font-size:14px;box-sizing:border-box}
 .chk{display:inline-flex;align-items:center;gap:8px}
@@ -611,25 +879,9 @@ input[type="text"],input[type="number"],input[type="time"],select{width:100%;pad
 .chip{background:#eef2ff;color:#111827;border:1px solid #c7d2fe;border-radius:999px;padding:2px 8px;font-size:12px}
 .chip-x{margin-left:6px;background:transparent;border:none;cursor:pointer}
 .modal-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:12px}
-.btn-primary {
-  background: #2563eb;
-  color: #fff;
-  border: none;
-  padding: 8px 14px;
-  border-radius: 6px;
-  cursor: pointer;
-  transition: background 0.2s ease, opacity 0.2s ease;
-}
-
-.btn-primary:hover:not(:disabled) {
-  background: #1d4ed8; /* darker on hover */
-}
-
-.btn-primary:disabled {
-  background: #93c5fd; /* lighter blue */
-  cursor: not-allowed;
-  opacity: 0.7;
-}
+.btn-primary{background:#2563eb;color:#fff;border:none;padding:8px 14px;border-radius:6px;cursor:pointer;transition:background .2s ease,opacity .2s ease}
+.btn-primary:hover:not(:disabled){background:#1d4ed8}
+.btn-primary:disabled{background:#93c5fd;cursor:not-allowed;opacity:.7}
 .btn-option{background:#e5e7eb;color:#111827;border:none;padding:8px 14px;border-radius:6px;cursor:pointer}
 .err{color:#dc2626;font-size:12px;margin-top:4px}
 </style>

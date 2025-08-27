@@ -237,6 +237,32 @@
                       :options="field.options"
                       v-model="field.value"
                     />
+                     <!-- SLIDER or LINEAR based on constraints.mode -->
+                        <FieldSlider
+                          v-else-if="field.type === 'slider' && (field.constraints?.mode || 'slider') === 'slider'"
+                          v-model="field.value"
+                          :min="field.constraints?.min ?? 1"
+                          :max="field.constraints?.max ?? 5"
+                          :step="field.constraints?.step ?? 1"
+                          :readonly="!!field.constraints?.readonly"
+                          :percent="!!field.constraints?.percent"
+                          :marks="field.constraints?.marks || []"
+                        />
+
+                        <FieldLinearScale
+                          v-else-if="field.type === 'slider' && field.constraints?.mode === 'linear'"
+                          v-model="field.value"
+                          :min="field.constraints?.min ?? 1"
+                          :max="field.constraints?.max ?? 5"
+                          :left-label="field.constraints?.leftLabel || ''"
+                          :right-label="field.constraints?.rightLabel || ''"
+                          :readonly="!!field.constraints?.readonly"
+                        />
+
+
+
+
+
 
                     <!-- BUTTON -->
                     <button
@@ -295,7 +321,7 @@
             @click.prevent="handleProtocolClick"
             class="btn-option protocol-btn"
           >
-            Protocol Matrix
+            Schedule of Assessment
           </button>
         </div>
       </div>
@@ -404,7 +430,6 @@
     </div>
   </div>
 </template>
-
 <script>
 import axios from "axios";
 import yaml from "js-yaml";
@@ -417,13 +442,12 @@ import DateFormatPicker from "./DateFormatPicker.vue";
 import FieldCheckbox from "@/components/fields/FieldCheckbox.vue";
 import FieldRadioGroup from "@/components/fields/FieldRadioGroup.vue";
 import FieldTime from "@/components/fields/FieldTime.vue";
-
-// central helpers (need the updated utils/constraints)
+import FieldSlider from "@/components/fields/FieldSlider.vue";
+import FieldLinearScale from "@/components/fields/FieldLinearScale.vue";
 import { normalizeConstraints, coerceDefaultForType } from "@/utils/constraints";
 
 export default {
   name: "ScratchFormComponent",
-
   components: {
     ShaclComponents,
     ProtocolMatrix,
@@ -432,107 +456,66 @@ export default {
     DateFormatPicker,
     FieldCheckbox,
     FieldRadioGroup,
-    FieldTime
+    FieldTime,
+    FieldSlider,
+    FieldLinearScale
   },
-
   data() {
     return {
-      // sections & form state
       forms: JSON.parse(localStorage.getItem("scratchForms") || "[]"),
       currentFormIndex: 0,
       activeSection: 0,
-
-      // tabs / available fields
       activeTab: "template",
       generalFields: [],
       dataModels: [],
       shaclComponents: [],
-
-      // model dialog
       showModelDialog: false,
       currentModel: null,
       selectedProps: [],
-
-      // protocol matrix
       showMatrix: false,
       visits: [],
       groups: [],
       assignments: [],
-
-      // confirm / generic dialogs
       showConfirmDialog: false,
       confirmDialogMessage: "",
       confirmCallback: null,
       showGenericDialog: false,
       genericDialogMessage: "",
       genericCallback: null,
-
-      // constraints (unified)
       showConstraintsDialog: false,
       constraintsForm: {},
       currentFieldType: "",
       currentFieldIndices: {},
-
-      // preview
       showPreviewDialog: false,
-
-      // upload
       showUploadDialog: false,
-
-      // input
       showInputDialog: false,
       inputDialogMessage: "",
       inputDialogValue: "",
       inputDialogCallback: null
     };
   },
-
   computed: {
     icons()         { return icons; },
     studyDetails()  { return this.$store.state.studyDetails || {}; },
     currentForm()   { return this.forms[this.currentFormIndex] || { sections: [] }; },
     selectedModels(){
-      return this.currentForm.sections.map(sec => ({
-        title:  sec.title,
-        fields: sec.fields
-      }));
+      return this.currentForm.sections.map(sec => ({ title: sec.title, fields: sec.fields }));
     }
   },
-
   watch: {
-    visits: {
-      handler() { this.adjustAssignments(); },
-      immediate: true,
-      deep: true
-    },
-    groups: {
-      handler() { this.adjustAssignments(); },
-      immediate: true,
-      deep: true
-    },
-    selectedModels: {
-      handler() { this.adjustAssignments(); },
-      immediate: true,
-      deep: true
-    },
+    visits: { handler() { this.adjustAssignments(); }, immediate: true, deep: true },
+    groups: { handler() { this.adjustAssignments(); }, immediate: true, deep: true },
+    selectedModels: { handler() { this.adjustAssignments(); }, immediate: true, deep: true },
     forms: {
       deep: true,
-      handler(f) {
-        localStorage.setItem("scratchForms", JSON.stringify(f));
-      }
+      handler(f) { localStorage.setItem("scratchForms", JSON.stringify(f)); }
     }
   },
-
   async mounted() {
-    // New vs Edit
     if (this.studyDetails.study_metadata?.id) {
       const stored = localStorage.getItem("scratchForms");
       if (stored) {
-        try {
-          this.forms = JSON.parse(stored);
-        } catch {
-          this.forms = [{ sections: [] }];
-        }
+        try { this.forms = JSON.parse(stored); } catch { this.forms = [{ sections: [] }]; }
       } else if (Array.isArray(this.studyDetails.forms)) {
         this.forms = JSON.parse(JSON.stringify(this.studyDetails.forms));
         localStorage.setItem("scratchForms", JSON.stringify(this.forms));
@@ -545,25 +528,16 @@ export default {
       this.forms = [{ sections: [] }];
     }
 
-    // visits/groups
-    this.visits = Array.isArray(this.studyDetails.visits)
-      ? JSON.parse(JSON.stringify(this.studyDetails.visits))
-      : [];
-    this.groups = Array.isArray(this.studyDetails.groups)
-      ? JSON.parse(JSON.stringify(this.studyDetails.groups))
-      : [];
-
-    // Initialize assignments
+    this.visits = Array.isArray(this.studyDetails.visits) ? JSON.parse(JSON.stringify(this.studyDetails.visits)) : [];
+    this.groups  = Array.isArray(this.studyDetails.groups)  ? JSON.parse(JSON.stringify(this.studyDetails.groups))  : [];
     this.adjustAssignments();
 
-    // fetch custom fields
     try {
       const res = await axios.get("http://127.0.0.1:8000/forms/available-fields");
       this.generalFields = res.data.map((f, idx) => ({
         ...f,
         name: f.name || `${f.type}_${idx}`,
         description: f.helpText || f.placeholder || "",
-        // give sensible defaults so field is usable immediately
         options: (f.type === 'select' || f.type === 'radio')
           ? (Array.isArray(f.options) && f.options.length ? f.options : ['Option 1'])
           : (f.options || []),
@@ -575,125 +549,73 @@ export default {
 
     await this.loadDataModels();
   },
-
   methods: {
-    // ── Navigation & dialogs ──
     goBack() { this.$router.back() },
-    prettyModelTitle(s) {
-      return this.$formatLabel ? this.$formatLabel(s) : String(s || '')
-    },
+    prettyModelTitle(s) { return this.$formatLabel ? this.$formatLabel(s) : String(s || '') },
     modelIcon(title) {
-      const key = String(title || '')
-        .toLowerCase()
-        .replace(/[^a-z0-9]/g, '');
+      const key = String(title || '').toLowerCase().replace(/[^a-z0-9]/g, '');
       return this.icons[key] || 'fas fa-book';
     },
     fieldIcon(label) {
-      const key = String(label || '')
-        .toLowerCase()
-        .replace(/[^a-z0-9]/g, '');
+      const key = String(label || '').toLowerCase().replace(/[^a-z0-9]/g, '');
       return this.icons[key] || 'fas fa-dot-circle';
     },
 
-    // SECTION CLICK: focus; if collapsed -> expand; never collapse others
     onSectionClick(i) {
       this.activeSection = i;
       const section = this.currentForm.sections[i];
-      if (section && section.collapsed) {
-        section.collapsed = false;
-      }
+      if (section && section.collapsed) section.collapsed = false;
       this.focusSection(i);
     },
 
-    openConfirmDialog(msg, cb) {
-      this.confirmDialogMessage = msg;
-      this.confirmCallback = cb;
-      this.showConfirmDialog = true;
-    },
-    confirmDialogYes() {
-      this.showConfirmDialog = false;
-      if (this.confirmCallback) this.confirmCallback();
-    },
-    closeConfirmDialog() {
-      this.showConfirmDialog = false;
-    },
+    openConfirmDialog(msg, cb) { this.confirmDialogMessage = msg; this.confirmCallback = cb; this.showConfirmDialog = true; },
+    confirmDialogYes() { this.showConfirmDialog = false; if (this.confirmCallback) this.confirmCallback(); },
+    closeConfirmDialog() { this.showConfirmDialog = false; },
+    openGenericDialog(msg, cb) { this.genericDialogMessage = msg; this.genericCallback = cb; this.showGenericDialog = true; },
+    closeGenericDialog() { this.showGenericDialog = false; if (this.genericCallback) this.genericCallback(); },
 
-    openGenericDialog(msg, cb) {
-      this.genericDialogMessage = msg;
-      this.genericCallback = cb;
-      this.showGenericDialog = true;
-    },
-    closeGenericDialog() {
-      this.showGenericDialog = false;
-      if (this.genericCallback) this.genericCallback();
-    },
+    openInputDialog(msg, def, cb) { this.inputDialogMessage = msg; this.inputDialogValue = def; this.inputDialogCallback = cb; this.showInputDialog = true; },
+    confirmInputDialog() { this.showInputDialog = false; if (this.inputDialogCallback) this.inputDialogCallback(this.inputDialogValue); },
+    cancelInputDialog() { this.showInputDialog = false; },
 
-    openInputDialog(msg, def, cb) {
-      this.inputDialogMessage = msg;
-      this.inputDialogValue = def;
-      this.inputDialogCallback = cb;
-      this.showInputDialog = true;
-    },
-    confirmInputDialog() {
-      this.showInputDialog = false;
-      if (this.inputDialogCallback) this.inputDialogCallback(this.inputDialogValue);
-    },
-    cancelInputDialog() {
-      this.showInputDialog = false;
-    },
-
-    // ── Protocol Matrix ──
     adjustAssignments() {
       const m = this.selectedModels.length;
       const v = this.visits.length;
       const g = this.groups.length;
-
-      if (m === 0 || v === 0 || g === 0) {
-        this.assignments = [];
-        return;
-      }
-
+      if (m === 0 || v === 0 || g === 0) { this.assignments = []; return; }
       if (this.studyDetails.study_metadata?.id && Array.isArray(this.studyDetails.assignments)) {
-        const oldAssignments = this.studyDetails.assignments;
-        const newAssignments = [];
+        const old = this.studyDetails.assignments;
+        const fresh = [];
         for (let mi = 0; mi < m; mi++) {
-          newAssignments[mi] = [];
+          fresh[mi] = [];
           for (let vi = 0; vi < v; vi++) {
-            newAssignments[mi][vi] = [];
+            fresh[mi][vi] = [];
             for (let gi = 0; gi < g; gi++) {
-              const oldValue = oldAssignments[mi]?.[vi]?.[gi];
-              newAssignments[mi][vi][gi] = typeof oldValue === 'boolean' ? oldValue : false;
+              const ov = old[mi]?.[vi]?.[gi];
+              fresh[mi][vi][gi] = typeof ov === 'boolean' ? ov : false;
             }
           }
         }
-        this.assignments = newAssignments;
+        this.assignments = fresh;
       } else {
         this.assignments = Array.from({ length: m }, () =>
-          Array.from({ length: v }, () =>
-            Array.from({ length: g }, () => false)
-          )
+          Array.from({ length: v }, () => Array.from({ length: g }, () => false))
         );
       }
     },
 
     handleProtocolClick() { this.showMatrix = true; },
-    editTemplate() { this.showMatrix = false },
+    editTemplate() { this.showMatrix = false; },
     onAssignmentUpdated({ mIdx, vIdx, gIdx, checked }) {
       this.assignments[mIdx][vIdx][gIdx] = checked;
-      this.$store.commit("setStudyDetails", {
-        ...this.studyDetails,
-        assignments: this.assignments
-      });
+      this.$store.commit("setStudyDetails", { ...this.studyDetails, assignments: this.assignments });
     },
 
-    // ── Sections & Fields ──
     focusSection(i) {
       this.$nextTick(() => {
         const ref = this.$refs[`section-${i}`];
         const el = Array.isArray(ref) ? ref[0] : ref;
-        if (el && el.scrollIntoView) {
-          el.scrollIntoView({ behavior: 'smooth', block: 'start' });
-        }
+        if (el?.scrollIntoView) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
       });
     },
 
@@ -706,41 +628,33 @@ export default {
       const chosen = this.currentModel.fields
         .filter((_, i) => this.selectedProps[i])
         .map(f => ({ ...f, description: f.description || "", constraints: f.constraints || {} }));
-
       const insertAt = Math.min(this.activeSection + 1, this.currentForm.sections.length);
       const sec = { title: this.currentModel.title, fields: chosen, collapsed: false, source: "template" };
-
       this.forms[this.currentFormIndex].sections.splice(insertAt, 0, sec);
       this.activeSection = insertAt;
-
       this.$nextTick(() => this.focusSection(insertAt));
       this.adjustAssignments();
       this.showModelDialog = false;
     },
 
     addNewSection() {
-      const sec = {
-        title: `Section ${this.currentForm.sections.length + 1}`,
-        fields: [],
-        collapsed: false,
-        source: "manual"
-      };
+      const sec = { title: `Section ${this.currentForm.sections.length + 1}`, fields: [], collapsed: false, source: "manual" };
       this.forms[this.currentFormIndex].sections.push(sec);
       this.activeSection = this.currentForm.sections.length - 1;
       this.adjustAssignments();
       this.focusSection(this.activeSection);
     },
     addNewSectionBelow(i) {
-      const currentSection = this.currentForm.sections[i];
+      const current = this.currentForm.sections[i];
       const sec = {
-        title: `${currentSection.title} (Copy)`,
-        fields: currentSection.fields.map(field => ({
+        title: `${current.title} (Copy)`,
+        fields: current.fields.map(field => ({
           ...field,
           name: `${field.name}_${Date.now()}`,
           constraints: field.constraints || {}
         })),
         collapsed: false,
-        source: currentSection.source
+        source: current.source
       };
       const idx = i + 1;
       this.forms[this.currentFormIndex].sections.splice(idx, 0, sec);
@@ -758,32 +672,21 @@ export default {
     },
 
     confirmClearForm() {
-      this.openConfirmDialog(
-        "Do you want to clear all sections?",
-        () => {
-          this.forms[this.currentFormIndex].sections = [];
-          this.activeSection = 0;
-          this.adjustAssignments();
-        }
-      );
+      this.openConfirmDialog("Do you want to clear all sections?", () => {
+        this.forms[this.currentFormIndex].sections = [];
+        this.activeSection = 0;
+        this.adjustAssignments();
+      });
     },
 
-    // TOGGLE: only toggle this section; do not affect others
     toggleSection(i) {
       const section = this.forms[this.currentFormIndex].sections[i];
       section.collapsed = !section.collapsed;
     },
-
-    // FOCUS ONLY: never mutate collapsed states for other sections
-    setActiveSection(i) {
-      this.activeSection = i;
-      this.focusSection(i);
-    },
+    setActiveSection(i) { this.activeSection = i; this.focusSection(i); },
 
     addFieldToActiveSection(field) {
-      if (!this.currentForm.sections.length) {
-        this.addNewSection();
-      }
+      if (!this.currentForm.sections.length) this.addNewSection();
       const sec = this.currentForm.sections[this.activeSection];
       if (sec.collapsed) this.toggleSection(this.activeSection);
 
@@ -791,7 +694,6 @@ export default {
         name: `${(field.name || field.type)}_${Date.now()}`,
         label: field.label,
         type: field.type,
-        // ensure select/radio are usable immediately; user can refine in cog dialog
         options: (field.type === 'select' || field.type === 'radio')
           ? (Array.isArray(field.options) && field.options.length ? [...field.options] : ['Option 1'])
           : (field.options || []),
@@ -800,6 +702,20 @@ export default {
         constraints: field.constraints || {}
       };
 
+      // SLIDER defaults — 1..100, integer, no default value
+      if (base.type === 'slider') {
+        base.value = null; // no default
+        base.constraints = {
+          ...(base.constraints || {}),
+          mode: 'slider',
+          percent: false,
+          min: 1,
+          max: 100,
+          step: 1
+        };
+      }
+
+      // Date defaults
       if (base.type === 'date') {
         base.constraints = { ...base.constraints, dateFormat: base.constraints.dateFormat || 'dd.MM.yyyy' };
         base.placeholder = base.placeholder || base.constraints.dateFormat;
@@ -808,49 +724,29 @@ export default {
       sec.fields.push(base);
     },
 
-    editSection(i, v) {
-      if (v) this.currentForm.sections[i].title = v;
-    },
-    editField(si, fi, v) {
-      if (v) this.currentForm.sections[si].fields[fi].label = v;
-    },
+    editSection(i, v) { if (v) this.currentForm.sections[i].title = v; },
+    editField(si, fi, v) { if (v) this.currentForm.sections[si].fields[fi].label = v; },
+
     enforceNumberDigitLimits(sectionIndex, fieldIndex, evt, onBlur = false) {
-  const field = this.currentForm.sections[sectionIndex].fields[fieldIndex];
-  const c = field.constraints || {};
+      const field = this.currentForm.sections[sectionIndex].fields[fieldIndex];
+      const c = field.constraints || {};
+      if (!c.integerOnly) return;
+      const el = evt?.target || null;
+      let raw = el ? String(el.value ?? "") : String(field.value ?? "");
+      const digits = raw.replace(/\D+/g, "");
+      if (Number.isFinite(c.maxDigits) && c.maxDigits > 0 && digits.length > c.maxDigits) {
+        const trimmed = digits.slice(0, c.maxDigits);
+        field.value = trimmed === "" ? "" : Number(trimmed);
+        if (el) el.value = field.value;
+        return;
+      }
+      if (onBlur && Number.isFinite(c.minDigits) && c.minDigits > 0) {
+        if (digits.length > 0 && digits.length < c.minDigits) {
+          // leave as-is; validate elsewhere
+        }
+      }
+    },
 
-  // Only enforce digit length strictly when integerOnly is true.
-  if (!c.integerOnly) return;
-
-  const el = evt && evt.target ? evt.target : null;
-  let raw = el ? String(el.value ?? "") : String(field.value ?? "");
-
-  // Allow leading '-' while editing? For IDs/phones usually positive; we drop sign.
-  // Extract digits only.
-  const digits = raw.replace(/\D+/g, "");
-
-  // Apply maxDigits live: trim overflow
-  if (Number.isFinite(c.maxDigits) && c.maxDigits > 0 && digits.length > c.maxDigits) {
-    const trimmed = digits.slice(0, c.maxDigits);
-    // write back
-    field.value = trimmed === "" ? "" : Number(trimmed);
-    if (el) el.value = field.value;
-    return;
-  }
-
-  // On blur, if minDigits is set and not satisfied, we do NOT auto-pad;
-  // we simply keep the value as-is (you can validate on submit). If you prefer,
-  // you can clear the value when underflow happens:
-  if (onBlur && Number.isFinite(c.minDigits) && c.minDigits > 0) {
-    if (digits.length > 0 && digits.length < c.minDigits) {
-      // Option A: clear
-      // field.value = "";
-      // if (el) el.value = "";
-
-      // Option B (default): leave input, rely on validation elsewhere.
-      // No action.
-    }
-  }
-},
     addSimilarField(si, fi) {
       const f = this.currentForm.sections[si].fields[fi];
       const clone = {
@@ -859,53 +755,48 @@ export default {
         options: f.options ? [...f.options] : [],
         constraints: f.constraints || {},
         value:
-          f.type === 'radio' && f.constraints?.allowMultiple
-            ? []
-            : (f.type === 'radio' || f.type === 'select')
-              ? ''
-              : f.value
+          f.type === 'radio' && f.constraints?.allowMultiple ? [] :
+          (f.type === 'radio' || f.type === 'select') ? '' : f.value
       };
       this.currentForm.sections[si].fields.splice(fi + 1, 0, clone);
     },
-    removeField(si, fi) {
-      this.currentForm.sections[si].fields.splice(fi, 1);
-    },
+    removeField(si, fi) { this.currentForm.sections[si].fields.splice(fi, 1); },
 
-    // ── Unified Constraints Dialog ──
     openConstraintsDialog(si, fi) {
       const f = this.currentForm.sections[si].fields[fi];
       this.currentFieldIndices = { sectionIndex: si, fieldIndex: fi };
-      this.currentFieldType = f.type;
+      this.currentFieldType = f.type === 'slider' ? 'slider' : f.type;
 
-      // provide a payload that includes type-specific data
-      // options (for radio/select) and dateFormat live here too
       this.constraintsForm = {
         ...(f.constraints || {}),
-        type: f.type,
+        type: this.currentFieldType,
         options: (f.type === 'select' || f.type === 'radio') ? (f.options || []) : undefined,
         dateFormat: f.type === 'date'
           ? (f.constraints?.dateFormat || 'dd.MM.yyyy')
           : undefined,
+        ...(f.type === 'slider' ? {
+          mode: f.constraints?.mode === 'linear' ? 'linear' : 'slider',
+          min: Number.isFinite(f.constraints?.min) ? f.constraints.min : 1,
+          max: Number.isFinite(f.constraints?.max) ? f.constraints.max : 100,
+          step: Number.isFinite(f.constraints?.step) ? f.constraints.step : 1,
+          percent: !!f.constraints?.percent
+        } : {})
       };
       this.showConstraintsDialog = true;
     },
-
     confirmConstraintsDialog(c) {
-      const { sectionIndex, fieldIndex } = this.currentFieldIndices;
-      const f = this.currentForm.sections[sectionIndex].fields[fieldIndex];
+  const { sectionIndex, fieldIndex } = this.currentFieldIndices;
+  const f = this.currentForm.sections[sectionIndex].fields[fieldIndex];
+  const originalType = f.type;
 
-      // normalize/validate constraints based on type
-      const norm = normalizeConstraints(f.type, c);
-      if (f.type === 'time') {
-          norm.hourCycle = c.hourCycle || norm.hourCycle || '24';
-        }
-      // Update options when included (radio/select)
-      if ((f.type === 'select' || f.type === 'radio') && Array.isArray(c.options)) {
-        const cleaned = c.options
-          .map(o => String(o || '').trim())
-          .filter(Boolean);
-        f.options = cleaned.length ? cleaned : ['Option 1'];
-      }
+  // Non-slider
+  if (originalType !== 'slider') {
+    const norm = normalizeConstraints(originalType, c);
+
+    if ((f.type === 'select' || f.type === 'radio') && Array.isArray(c.options)) {
+      const cleaned = c.options.map(o => String(o || '').trim()).filter(Boolean);
+      f.options = cleaned.length ? cleaned : ['Option 1'];
+    }
 
       // ---------- Value shape & membership (radio/select) ----------
       if (f.type === 'radio') {
@@ -941,49 +832,90 @@ export default {
       }
 
       // ---------- Placeholder (skip for checkbox by design) ----------
-      if (Object.prototype.hasOwnProperty.call(norm, "placeholder") && f.type !== 'checkbox') {
-        f.placeholder = norm.placeholder || "";
-      }
+    if (Object.prototype.hasOwnProperty.call(norm, "placeholder") && f.type !== 'checkbox') {
+      f.placeholder = norm.placeholder || "";
+    }
 
-      // ---------- Default value for other types (text/textarea/number/time/date) ----------
-      if (
-        f.type !== 'radio' &&
-        f.type !== 'select' &&
-        Object.prototype.hasOwnProperty.call(norm, "defaultValue")
-      ) {
-        const coerced = coerceDefaultForType(f.type, norm.defaultValue);
-        if (coerced !== undefined) {
-          f.value = coerced;
-        }
-      }
+    if (
+      f.type !== 'radio' &&
+      f.type !== 'select' &&
+      f.type !== 'slider' &&
+      Object.prototype.hasOwnProperty.call(norm, "defaultValue")
+    ) {
+      const coerced = coerceDefaultForType(f.type, norm.defaultValue);
+      if (coerced !== undefined) f.value = coerced;
+    }
 
-      // ---------- Date specifics ----------
-      if (f.type === 'date' && (c.dateFormat || norm.dateFormat)) {
-        const fmt = c.dateFormat || norm.dateFormat;
-        f.placeholder = fmt;
-        norm.dateFormat = fmt;
-      }
+    if (f.type === 'date' && (c.dateFormat || norm.dateFormat)) {
+      const fmt = c.dateFormat || norm.dateFormat;
+      f.placeholder = fmt;
+      norm.dateFormat = fmt;
+    }
 
-      // Persist constraints (options are field-level, not stored in constraints)
-      f.constraints = { ...norm };
+    f.constraints = { ...norm };
+    if (
+      (f.value === '' || f.value === undefined || f.value === null) &&
+      Object.prototype.hasOwnProperty.call(f.constraints, 'defaultValue')
+    ) {
+      f.value = f.constraints.defaultValue;
+    }
+    console.log("[SFC] saved NON-slider constraints:", { si: sectionIndex, fi: fieldIndex, constraints: f.constraints });
+    this.showConstraintsDialog = false;
+    return;
+  }
 
-      // If value is still empty and constraints have defaultValue, reflect it for preview
-      if ((f.value === '' || f.value === undefined || f.value === null) &&
-          Object.prototype.hasOwnProperty.call(f.constraints, 'defaultValue')) {
-        f.value = f.constraints.defaultValue;
-      }
+  // Slider -> Linear mode (no marks)
+  if (c.mode === 'linear') {
+    console.log("[SFC] incoming LINEAR slider constraints:", c);
+    let min = Number.isFinite(+c.min) ? Math.round(+c.min) : 1;
+    let max = Number.isFinite(+c.max) ? Math.round(+c.max) : 5;
+    if (max <= min) max = min + 1;
+    if (max - min + 1 > 10) max = min + 9;
 
-      this.showConstraintsDialog = false;
-    },
+    f.constraints = {
+      mode: 'linear',
+      required: !!c.required,
+      readonly: !!c.readonly,
+      helpText: c.helpText || '',
+      min, max,
+      leftLabel: c.leftLabel || '',
+      rightLabel: c.rightLabel || ''
+      // no marks intentionally
+    };
+    f.value = null; // no default
+    console.log("[SFC] saved LINEAR slider constraints:", { si: sectionIndex, fi: fieldIndex, constraints: f.constraints });
+    this.showConstraintsDialog = false;
+    return;
+  }
 
-    cancelConstraintsDialog() {
-      this.showConstraintsDialog = false;
-    },
+  // Slider -> Slider mode (KEEP MARKS)
+  console.log("[SFC] incoming SLIDER constraints:", c);
+  let min = Number.isFinite(+c.min) ? +c.min : 1;
+  let max = Number.isFinite(+c.max) ? +c.max : (c.percent ? 100 : 5);
+  if (max <= min) max = min + 1;
+  let step = Number.isFinite(+c.step) && +c.step > 0 ? +c.step : (c.percent ? 1 : 1);
 
-    // ── Save / Download / Upload ──
-    saveForm() {
-      this.openGenericDialog("Saved!");
-    },
+  f.constraints = {
+    mode: 'slider',
+    required: !!c.required,
+    readonly: !!c.readonly,
+    helpText: c.helpText || '',
+    percent: !!c.percent,
+    min, max, step,
+    // ← IMPORTANT: keep marks so FieldSlider can render them
+    marks: Array.isArray(c.marks) ? c.marks : []
+  };
+
+  const v = Number(f.value);
+  f.value = Number.isFinite(v) && v >= min && v <= max ? v : null;
+  console.log("[SFC] saved SLIDER constraints:", { si: sectionIndex, fi: fieldIndex, constraints: f.constraints });
+  this.showConstraintsDialog = false;
+},
+
+
+    cancelConstraintsDialog() { this.showConstraintsDialog = false; },
+
+    saveForm() { this.openGenericDialog("Saved!"); },
 
     downloadFormData() {
       const payload = {
@@ -998,24 +930,15 @@ export default {
       const blob = new Blob([str], { type: "application/json" });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
-      a.href = url;
-      a.download = name;
-      a.click();
+      a.href = url; a.download = name; a.click();
       URL.revokeObjectURL(url);
     },
 
-    openUploadDialog() {
-      this.showUploadDialog = true;
-    },
-    closeUploadDialog() {
-      this.showUploadDialog = false;
-    },
+    openUploadDialog() { this.showUploadDialog = true; },
+    closeUploadDialog() { this.showUploadDialog = false; },
     handleFileChange(e) {
       const file = e.target.files[0];
-      if (!file) {
-        this.openGenericDialog("No file selected.");
-        return;
-      }
+      if (!file) return this.openGenericDialog("No file selected.");
       const reader = new FileReader();
       reader.onload = evt => {
         try {
@@ -1030,26 +953,20 @@ export default {
             }));
             this.currentForm.sections = pd.sections;
             this.adjustAssignments();
-          } else {
-            throw new Error("Bad format");
-          }
+          } else throw new Error("Bad format");
         } catch (err) {
           console.error(err);
-          this.openGenericDialog(
-            "Invalid file. Expect `{ \"sections\": [...] }`."
-          );
+          this.openGenericDialog("Invalid file. Expect `{ \"sections\": [...] }`.");
         }
       };
       reader.readAsText(file);
       this.showUploadDialog = false;
     },
 
-    // ── Load YAML Models ──
     async loadDataModels() {
       try {
         const res = await fetch("/template_schema.yaml")
         const doc = yaml.load(await res.text())
-
         this.dataModels = Object.entries(doc.classes)
           .filter(([n]) => n !== "Study")
           .map(([n, cls]) => ({
@@ -1062,22 +979,16 @@ export default {
               type: this.resolveType(def),
               options: def.enum || [],
               rows: def.ui?.rows,
-              constraints: {
-                required: !!def.required,
-                ...(def.constraints || {})
-              },
+              constraints: { required: !!def.required, ...(def.constraints || {}) },
               placeholder: def.ui?.placeholder || def.description || ""
             }))
           }))
-      } catch (e) {
-        console.error("Failed to load data models:", e)
-      }
+      } catch (e) { console.error("Failed to load data models:", e) }
     },
     resolveType(def) {
       const ui = def.ui || {}
       const dt = String(def.datatype || '').toLowerCase()
       const range = String(def.range || '').toLowerCase()
-
       if (ui.widget === 'textarea' || dt === 'textarea') return 'textarea'
       if (ui.widget === 'radio'    || dt === 'radio')    return 'radio'
       if (ui.widget === 'dropdown' || dt === 'dropdown' || def.enum) return 'select'
@@ -1088,6 +999,7 @@ export default {
   }
 };
 </script>
+
 
 <style lang="scss" scoped>
 @import "@/assets/styles/_base.scss";

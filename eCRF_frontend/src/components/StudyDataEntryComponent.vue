@@ -97,9 +97,20 @@
     <div v-else class="entry-form-wrapper">
       <!-- 3.b BREADCRUMB (Exact Subject/Visit/Group) -->
       <div class="bread-crumb">
-        <strong>Study:</strong> {{ study.metadata.study_name }}
-        <strong>Subject:</strong> {{ study.content.study_data.subjects[currentSubjectIndex].id }}
-        <strong>Visit:</strong> {{ visitList[currentVisitIndex].name }}
+        <div class="crumb-left">
+          <strong>Study:</strong> {{ study.metadata.study_name }}
+          <strong>Subject:</strong> {{ study.content.study_data.subjects[currentSubjectIndex].id }}
+          <strong>Visit:</strong> {{ visitList[currentVisitIndex].name }}
+        </div>
+        <!-- Legend trigger (far right) -->
+        <button
+          type="button"
+          class="legend-btn"
+          @click="openLegendDialog"
+          :title="'Legend / What does * mean?'"
+        >
+          <i :class="icons.help || 'fas fa-question-circle'"></i>
+        </button>
       </div>
 
       <!-- 3.c ENTRY FORM FIELDS -->
@@ -121,12 +132,22 @@
               :key="fIdx"
               class="form-field"
             >
-              <label :for="fieldId(mIdx, fIdx)">
-                {{ field.label }}
-                <span
-                  v-if="field.constraints?.required"
-                  class="required"
-                >*</span>
+              <label :for="fieldId(mIdx, fIdx)" class="field-label">
+                <span>{{ field.label }}</span>
+                <span v-if="field.constraints?.required" class="required">*</span>
+
+                <!-- Inline help text (italics) -->
+                <em v-if="field.constraints?.helpText" class="help-inline">
+                  {{ field.constraints.helpText }}
+                </em>
+
+                <!-- Constraint helper trigger (click -> small dialog).
+                     Only shows when there are constraints beyond 'required' and 'helpText'. -->
+                <i
+                  v-if="hasConstraints(field)"
+                  class="fas fa-question-circle helper-icon"
+                  @click="openConstraintDialog(field)"
+                ></i>
               </label>
 
               <!-- TEXT INPUT -->
@@ -141,6 +162,8 @@
                 :minlength="field.constraints?.minLength"
                 :maxlength="field.constraints?.maxLength"
                 :pattern="field.constraints?.pattern"
+                @blur="onFieldBlur(mIdx, fIdx)"
+                @input="clearError(mIdx, fIdx)"
               />
 
               <!-- TEXTAREA -->
@@ -155,6 +178,8 @@
                 :maxlength="field.constraints?.maxLength"
                 :pattern="field.constraints?.pattern"
                 rows="4"
+                @blur="onFieldBlur(mIdx, fIdx)"
+                @input="clearError(mIdx, fIdx)"
               ></textarea>
 
               <!-- NUMBER INPUT -->
@@ -169,6 +194,8 @@
                 :min="field.constraints?.min"
                 :max="field.constraints?.max"
                 :step="field.constraints?.step"
+                @blur="validateField(mIdx, fIdx)"
+                @input="clearError(mIdx, fIdx)"
               />
 
               <!-- CHECKBOX -->
@@ -176,15 +203,21 @@
                 v-else-if="field.type === 'checkbox'"
                 :id="fieldId(mIdx, fIdx)"
                 v-model="entryData[currentSubjectIndex][currentVisitIndex][currentGroupIndex][mIdx][fIdx]"
+                v-bind="selectedModels[mIdx].fields[fIdx].constraints"
+                @change="validateField(mIdx, fIdx)"
               />
 
-              <!-- RADIO GROUP -->
+              <!-- RADIO GROUP (single select) -->
               <FieldRadioGroup
                 v-else-if="field.type === 'radio'"
                 :id="fieldId(mIdx, fIdx)"
                 :name="fieldId(mIdx, fIdx)"
                 :options="field.options || []"
                 v-model="entryData[currentSubjectIndex][currentVisitIndex][currentGroupIndex][mIdx][fIdx]"
+                :default-value="field.constraints?.defaultValue"
+                v-bind="selectedModels[mIdx].fields[fIdx].constraints"
+                @change="validateField(mIdx, fIdx)"
+                @update:modelValue="() => { clearError(mIdx, fIdx); validateField(mIdx, fIdx); }"
               />
 
               <!-- DATE (with format) -->
@@ -196,6 +229,9 @@
                 :placeholder="field.placeholder || (field.constraints?.dateFormat || 'dd.MM.yyyy')"
                 :min-date="field.constraints?.minDate || null"
                 :max-date="field.constraints?.maxDate || null"
+                :readonly="!!field.constraints?.readonly"
+                @change="validateField(mIdx, fIdx)"
+                @blur="validateField(mIdx, fIdx)"
               />
 
               <!-- TIME -->
@@ -203,25 +239,24 @@
                 v-else-if="field.type === 'time'"
                 :id="fieldId(mIdx, fIdx)"
                 v-model="entryData[currentSubjectIndex][currentVisitIndex][currentGroupIndex][mIdx][fIdx]"
-                :format="field.constraints?.timeFormat || 'HH:mm'"
-                :step="field.constraints?.step"
                 :placeholder="field.placeholder || (field.constraints?.timeFormat || 'HH:mm')"
+                v-bind="selectedModels[mIdx].fields[fIdx].constraints"
+                @change="validateField(mIdx, fIdx)"
+                @blur="validateField(mIdx, fIdx)"
               />
 
-              <!-- SELECT -->
-              <select
+              <!-- SELECT (single or multiple) — REPLACED NATIVE SELECT -->
+              <FieldSelect
                 v-else-if="field.type === 'select'"
                 :id="fieldId(mIdx, fIdx)"
                 v-model="entryData[currentSubjectIndex][currentVisitIndex][currentGroupIndex][mIdx][fIdx]"
-                :required="!!field.constraints?.required"
-              >
-                <option value="" disabled>Select…</option>
-                <option
-                  v-for="opt in field.options"
-                  :key="opt"
-                  :value="opt"
-                >{{ opt }}</option>
-              </select>
+                :options="field.options || []"
+                :multiple="!!field.constraints?.allowMultiple"
+                :readonly="!!field.constraints?.readonly"
+                :default-value="field.constraints?.defaultValue"
+                :placeholder="'Select…'"
+                @update:modelValue="() => validateField(mIdx, fIdx)"
+              />
 
               <!-- FALLBACK TEXT -->
               <input
@@ -232,6 +267,8 @@
                 :placeholder="field.placeholder"
                 :required="!!field.constraints?.required"
                 :readonly="!!field.constraints?.readonly"
+                @blur="onFieldBlur(mIdx, fIdx)"
+                @input="clearError(mIdx, fIdx)"
               />
 
               <!-- ERROR MESSAGE -->
@@ -246,8 +283,21 @@
 
           <!-- Save Data Button -->
           <div class="form-actions">
-            <button @click="submitData" class="btn-save">
+            <button
+              @click="submitData"
+              class="btn-save"
+              :disabled="hasValidationErrors"
+              :title="hasValidationErrors ? 'Fix validation errors before saving' : 'Save Data'"
+            >
               Save Data
+            </button>
+            <button
+              type="button"
+              class="btn-clear"
+              @click="clearCurrentSection"
+              title="Clear all selections/inputs in this section"
+            >
+              Clear
             </button>
           </div>
         </div>
@@ -303,6 +353,34 @@
       </div>
     </div>
 
+    <!-- Small Constraints Dialog (click from ? icon) -->
+    <div v-if="showConstraintDialog" class="mini-overlay" @click.self="closeConstraintDialog">
+      <div class="mini-dialog" role="dialog" aria-modal="true">
+        <div class="mini-head">
+          <h4 class="mini-title">{{ constraintDialogFieldName }}</h4>
+          <button class="mini-close" @click="closeConstraintDialog" aria-label="Close">
+            ✕
+          </button>
+        </div>
+        <ul class="mini-list">
+          <li v-for="(line, idx) in constraintDialogItems" :key="idx">{{ line }}</li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- Mini Legend Dialog: explains the red asterisk -->
+    <div v-if="showLegendDialog" class="mini-overlay" @click.self="closeLegendDialog">
+      <div class="mini-dialog" role="dialog" aria-modal="true">
+        <div class="mini-head">
+          <h4 class="mini-title">Legend</h4>
+          <button class="mini-close" @click="closeLegendDialog" aria-label="Close">✕</button>
+        </div>
+        <ul class="mini-list">
+          <li><strong class="required">*</strong> indicates a <em>required</em> field.</li>
+        </ul>
+      </div>
+    </div>
+
     <!-- Custom Dialog for Notifications -->
     <CustomDialog
       :message="dialogMessage"
@@ -324,6 +402,10 @@ import DateFormatPicker from "@/components/DateFormatPicker.vue";
 import FieldCheckbox from "@/components/fields/FieldCheckbox.vue";
 import FieldRadioGroup from "@/components/fields/FieldRadioGroup.vue";
 import FieldTime from "@/components/fields/FieldTime.vue";
+import FieldSelect from "@/components/fields/FieldSelect.vue"; // <-- added
+
+// Ajv helpers (JSON Schema validation)
+import { createAjv, validateFieldValue } from "@/utils/jsonschemaValidation";
 
 export default {
   name: "StudyDataEntryComponent",
@@ -333,6 +415,7 @@ export default {
     FieldCheckbox,
     FieldRadioGroup,
     FieldTime,
+    FieldSelect, // <-- added
   },
   data() {
     return {
@@ -343,7 +426,7 @@ export default {
       currentVisitIndex: null,
       currentGroupIndex: 0,
       entryData: [],
-      validationErrors: {},
+      validationErrors: {}, // { "s-v-g-m-f": "message" }
       icons,
       showShareDialog: false,
       shareParams: { subjectIndex: null, visitIndex: null, groupIndex: null },
@@ -354,6 +437,16 @@ export default {
       dialogMessage: "",
       existingEntries: [],
       entryIds: [],
+      // Ajv instance
+      ajv: null,
+
+      // Small constraints dialog state
+      showConstraintDialog: false,
+      constraintDialogFieldName: "",
+      constraintDialogItems: [],
+
+      // Legend dialog state
+      showLegendDialog: false,
     };
   },
 
@@ -392,15 +485,179 @@ export default {
         .map((_, mIdx) => mIdx)
         .filter((mIdx) => !!this.assignments[mIdx]?.[v]?.[g]);
     },
+    hasValidationErrors() {
+      return Object.keys(this.validationErrors).length > 0;
+    },
   },
 
   async created() {
+    // init Ajv once
+    this.ajv = createAjv();
+
     const studyId = this.$route.params.id;
     await this.loadStudy(studyId);
     await this.loadExistingEntries(studyId);
   },
 
   methods: {
+    // ----- legend dialog controls -----
+    openLegendDialog() {
+      this.showLegendDialog = true;
+    },
+    closeLegendDialog() {
+      this.showLegendDialog = false;
+    },
+
+    // ----- constraint helper (dialog) -----
+    hasConstraints(field) {
+      // Only show if there are constraints OTHER than 'required' and 'helpText'
+      const c = field?.constraints || {};
+      const keys = Object.keys(c).filter(
+        (k) => k !== "required" && k !== "helpText"
+      );
+      return keys.length > 0;
+    },
+    buildConstraintList(field) {
+      const c = field?.constraints || {};
+      const parts = [];
+
+      // Intentionally exclude "Required" and "Help"
+      if (c.readonly) parts.push("Read-only");
+
+      if (field.type === "text" || field.type === "textarea") {
+        if (typeof c.minLength === "number") parts.push(`Min length: ${c.minLength}`);
+        if (typeof c.maxLength === "number") parts.push(`Max length: ${c.maxLength}`);
+        if (c.pattern) parts.push(`Pattern: ${c.pattern}`);
+        if (c.transform && c.transform !== "none") {
+          const t = c.transform.charAt(0).toUpperCase() + c.transform.slice(1);
+          parts.push(`Transform on save: ${t}`);
+        }
+      }
+
+      if (field.type === "number") {
+        if (typeof c.min === "number") parts.push(`Min: ${c.min}`);
+        if (typeof c.max === "number") parts.push(`Max: ${c.max}`);
+        if (typeof c.step === "number") parts.push(`Step: ${c.step}`);
+        if (typeof c.minDigits === "number") parts.push(`Min digits: ${c.minDigits}`);
+        if (typeof c.maxDigits === "number") parts.push(`Max digits: ${c.maxDigits}`);
+        if (c.integerOnly) parts.push("Integer only");
+      }
+
+      if (field.type === "date") {
+        if (c.dateFormat) parts.push(`Date format: ${c.dateFormat}`);
+        if (c.minDate) parts.push(`Min date: ${c.minDate}`);
+        if (c.maxDate) parts.push(`Max date: ${c.maxDate}`);
+      }
+
+      if (field.type === "time") {
+        if (c.minTime) parts.push(`Min time: ${c.minTime}`);
+        if (c.maxTime) parts.push(`Max time: ${c.maxTime}`);
+        if (typeof c.step === "number") parts.push(`Step (sec): ${c.step}`);
+      }
+
+      if (field.type === "select" && c.allowMultiple) {
+        parts.push("Multiple selection: allowed");
+      }
+
+      return parts.length ? parts : ["No constraints."];
+    },
+    openConstraintDialog(field) {
+      this.constraintDialogFieldName = field?.label || "Field";
+      this.constraintDialogItems = this.buildConstraintList(field);
+      this.showConstraintDialog = true;
+    },
+    closeConstraintDialog() {
+      this.showConstraintDialog = false;
+      this.constraintDialogFieldName = "";
+      this.constraintDialogItems = [];
+    },
+
+    // ----- transforms (data-level) -----
+    applyTransform(transform, value) {
+      const v = value == null ? "" : String(value);
+      switch (String(transform || "none").toLowerCase()) {
+        case "uppercase":
+          return v.toUpperCase();
+        case "lowercase":
+          return v.toLowerCase();
+        case "capitalize":
+          return v.replace(/\b\w+/g, (w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase());
+        default:
+          return v;
+      }
+    },
+    onFieldBlur(mIdx, fIdx) {
+      // if transform is configured, apply it on blur (for text/textarea)
+      const def = this.selectedModels[mIdx].fields[fIdx] || {};
+      const cons = def.constraints || {};
+      if (def.type === "text" || def.type === "textarea") {
+        const cur =
+          this.entryData[this.currentSubjectIndex][this.currentVisitIndex][
+            this.currentGroupIndex
+          ][mIdx][fIdx];
+        const transformed = this.applyTransform(cons.transform, cur);
+        if (transformed !== cur) {
+          this.$set
+            ? this.$set(
+                this.entryData[this.currentSubjectIndex][this.currentVisitIndex][this.currentGroupIndex][mIdx],
+                fIdx,
+                transformed
+              )
+            : (this.entryData[this.currentSubjectIndex][this.currentVisitIndex][this.currentGroupIndex][mIdx][fIdx] =
+                transformed);
+        }
+      }
+      // Always validate after blur
+      this.validateField(mIdx, fIdx);
+    },
+    applyTransformsForSection() {
+      // Ensure data is canonicalized before final validation / save
+      this.assignedModelIndices.forEach((mIdx) => {
+        this.selectedModels[mIdx].fields.forEach((def, fIdx) => {
+          if (!def) return;
+          const cons = def.constraints || {};
+          if (def.type === "text" || def.type === "textarea") {
+            const cur =
+              this.entryData[this.currentSubjectIndex][this.currentVisitIndex][
+                this.currentGroupIndex
+              ][mIdx][fIdx];
+            const transformed = this.applyTransform(cons.transform, cur);
+            if (transformed !== cur) {
+              this.entryData[this.currentSubjectIndex][this.currentVisitIndex][this.currentGroupIndex][mIdx][fIdx] =
+                transformed;
+            }
+          }
+        });
+      });
+    },
+
+    // ----- helpers for error state (Vue 3-safe; no this.$set) -----
+    errorKey(mIdx, fIdx) {
+      return [
+        this.currentSubjectIndex,
+        this.currentVisitIndex,
+        this.currentGroupIndex,
+        mIdx,
+        fIdx,
+      ].join("-");
+    },
+    setError(mIdx, fIdx, msg) {
+      const k = this.errorKey(mIdx, fIdx);
+      this.validationErrors = { ...this.validationErrors, [k]: msg };
+    },
+    clearError(mIdx, fIdx) {
+      const k = this.errorKey(mIdx, fIdx);
+      if (k in this.validationErrors) {
+        const next = { ...this.validationErrors };
+        delete next[k];
+        this.validationErrors = next;
+      }
+    },
+    fieldErrors(mIdx, fIdx) {
+      return this.validationErrors[this.errorKey(mIdx, fIdx)] || "";
+    },
+
+    // ----- navigation / loading -----
     goToDashboard() {
       this.$router.push({ name: "Dashboard", query: { openStudies: "true" } });
     },
@@ -428,29 +685,90 @@ export default {
         console.error("Failed to load existing entries", err);
       }
     },
+
+    defaultForField(f, { ignoreDefaults = false } = {}) {
+      const c = f?.constraints || {};
+      const t = String(f?.type || "").toLowerCase();
+      const allowMulti = !!c.allowMultiple;
+
+      // Respect stored defaults only when NOT clearing
+      if (!ignoreDefaults && Object.prototype.hasOwnProperty.call(c, "defaultValue")) {
+        return c.defaultValue;
+      }
+      if (!ignoreDefaults && Object.prototype.hasOwnProperty.call(f, "value")) {
+        return f.value;
+      }
+
+      // "Empty" shape for clear/reset of user input
+      switch (t) {
+        case "checkbox":
+          return false;
+        case "radio":
+        case "select":
+          return allowMulti ? [] : "";
+        case "number":
+          return "";
+        case "date":
+        case "time":
+        case "text":
+        case "textarea":
+        default:
+          return "";
+      }
+    },
+
+    // REPLACE ONLY this method in StudyDataEntryComponent.vue
+    clearCurrentSection() {
+      const s = this.currentSubjectIndex;
+      const v = this.currentVisitIndex;
+      const g = this.currentGroupIndex;
+
+      // Only touch editable fields; keep readonly as-is
+      this.assignedModelIndices.forEach((mIdx) => {
+        const section = this.selectedModels[mIdx];
+        section.fields.forEach((f, fIdx) => {
+          const cons = f?.constraints || {};
+          if (cons.readonly) {
+            // don't change readonly values
+            this.clearError(mIdx, fIdx);
+            return;
+          }
+          // reset to the stored default (or field.value fallback),
+          // NOT to empty — so preselected defaults remain.
+          const next = this.defaultForField(f, { ignoreDefaults: false });
+          this.entryData[s][v][g][mIdx][fIdx] = next;
+
+          // clear any validation error for this field
+          this.clearError(mIdx, fIdx);
+        });
+      });
+    },
+
     initializeEntryData() {
       const nS = this.numberOfSubjects,
-        nV = this.visitList.length,
-        nG = this.groupList.length;
+            nV = this.visitList.length,
+            nG = this.groupList.length;
+
       this.entryData = Array.from({ length: nS }, () =>
         Array.from({ length: nV }, () =>
           Array.from({ length: nG }, () =>
             this.selectedModels.map((sect) =>
-              sect.fields.map((f) => {
-                // sensible defaults per field type
-                if (f.type === "checkbox") return false;
-                return "";
-              })
+              sect.fields.map((f) => this.defaultForField(f))
             )
           )
         )
       );
+
       this.entryIds = Array.from({ length: nS }, () =>
         Array.from({ length: nV }, () =>
           Array.from({ length: nG }, () => null)
         )
       );
+
+      // Clear any stale errors
+      this.validationErrors = {};
     },
+
     populateFromExisting() {
       this.initializeEntryData();
       (Array.isArray(this.existingEntries) ? this.existingEntries : []).forEach((e) => {
@@ -476,6 +794,8 @@ export default {
       );
       this.currentGroupIndex = idx >= 0 ? idx : 0;
       this.showSelection = false;
+      // reset errors for a fresh page
+      this.validationErrors = {};
     },
     backToSelection() {
       this.showSelection = true;
@@ -492,115 +812,128 @@ export default {
     fieldId(mIdx, fIdx) {
       return `s${this.currentSubjectIndex}_v${this.currentVisitIndex}_g${this.currentGroupIndex}_m${mIdx}_f${fIdx}`;
     },
-    errorKey(mIdx, fIdx) {
-      return [
-        this.currentSubjectIndex,
-        this.currentVisitIndex,
-        this.currentGroupIndex,
-        mIdx,
-        fIdx,
-      ].join("-");
-    },
-    fieldErrors(mIdx, fIdx) {
-      const key = this.errorKey(mIdx, fIdx);
-      return this.validationErrors[key] || "";
-    },
+
+    // ----- Ajv-based validation -----
     validateField(mIdx, fIdx) {
-      const def = this.selectedModels[mIdx].fields[fIdx];
+      const def = this.selectedModels[mIdx].fields[fIdx] || {};
       const val =
         this.entryData[this.currentSubjectIndex][this.currentVisitIndex][
           this.currentGroupIndex
         ][mIdx][fIdx];
       const cons = def.constraints || {};
-      const key = this.errorKey(mIdx, fIdx);
-      delete this.validationErrors[key];
+      const label = def.label || "This field";
 
+      // clear prior error
+      this.clearError(mIdx, fIdx);
+
+      // Required emptiness check (consistent UX)
       if (cons.required) {
-        // required = must have a value
-        const empty =
-          val == null ||
-          (typeof val === "string" && val.trim() === "");
+        let empty = false;
+        if (def.type === "checkbox") {
+          empty = val !== true; // must be checked
+        } else if (Array.isArray(val)) {
+          empty = val.length === 0;
+        } else {
+          empty = val == null || (typeof val === "string" && val.trim() === "");
+        }
         if (empty) {
-          this.$set(this.validationErrors, key, `${def.label} is required.`);
+          this.setError(mIdx, fIdx, `${label} is required.`);
           return false;
         }
       }
 
-      if (def.type === "number") {
-        const num = Number(val);
-        if (isNaN(num)) {
-          this.$set(this.validationErrors, key, `${def.label} must be a number.`);
-          return false;
-        }
-        if (cons.min != null && num < cons.min) {
-          this.$set(this.validationErrors, key, `${def.label} ≥ ${cons.min}`);
-          return false;
-        }
-        if (cons.max != null && num > cons.max) {
-          this.$set(this.validationErrors, key, `${def.label} ≤ ${cons.max}`);
-          return false;
+      // JSON Schema validation
+      const { valid, message } = validateFieldValue(this.ajv, def, val);
+      if (!valid) {
+        this.setError(mIdx, fIdx, message || `${label} is invalid.`);
+        return false;
+      }
+
+      // Cross-constraint ordering checks (dates/times against min/max)
+      if (def.type === "date" && val) {
+        const fmt = cons.dateFormat || "dd.MM.yyyy";
+        const parse = (s) => {
+          const map = {
+            "dd.MM.yyyy": /^(\d{2})\.(\d{2})\.(\d{4})$/,
+            "MM-dd-yyyy": /^(\d{2})-(\d{2})-(\d{4})$/,
+            "dd-MM-yyyy": /^(\d{2})-(\d{2})-(\d{4})$/,
+            "yyyy-MM-dd": /^(\d{4})-(\d{2})-(\d{2})$/,
+            "MM/yyyy": /^(\d{2})\/(\d{4})$/,
+            "MM-yyyy": /^(\d{2})-(\d{4})$/,
+            "yyyy/MM": /^(\d{4})\/(\d{2})$/,
+            "yyyy-MM": /^(\d{4})-(\d{2})$/,
+            "yyyy": /^(\d{4})$/,
+          };
+          const rx = map[fmt];
+          if (!rx) return null;
+          const m = rx.exec(String(s));
+          if (!m) return null;
+          let y, M, d;
+          if (fmt === "dd.MM.yyyy") { d=+m[1]; M=+m[2]; y=+m[3]; }
+          else if (fmt === "MM-dd-yyyy") { M=+m[1]; d=+m[2]; y=+m[3]; }
+          else if (fmt === "dd-MM-yyyy") { d=+m[1]; M=+m[2]; y=+m[3]; }
+          else if (fmt === "yyyy-MM-dd") { y=+m[1]; M=+m[2]; d=+m[3]; }
+          else if (fmt === "MM/yyyy" || fmt === "MM-yyyy") { M=+m[1]; y=+m[2]; d=1; }
+          else if (fmt === "yyyy/MM" || fmt === "yyyy-MM") { y=+m[1]; M=+m[2]; d=1; }
+          else if (fmt === "yyyy") { y=+m[1]; M=1; d=1; }
+          return new Date(y, M-1, d);
+        };
+        const d = parse(val);
+        if (d) {
+          if (cons.minDate) {
+            const md = parse(cons.minDate);
+            if (md && d < md) {
+              this.setError(mIdx, fIdx, `${label} must be ≥ ${cons.minDate}.`);
+              return false;
+            }
+          }
+          if (cons.maxDate) {
+            const xd = parse(cons.maxDate);
+            if (xd && d > xd) {
+              this.setError(mIdx, fIdx, `${label} must be ≤ ${cons.maxDate}.`);
+              return false;
+            }
+          }
         }
       }
 
-      if (def.type === "text" || def.type === "textarea") {
-        const str = String(val || "");
-        if (cons.minLength != null && str.length < cons.minLength) {
-          this.$set(
-            this.validationErrors,
-            key,
-            `${def.label} needs ≥ ${cons.minLength} chars.`
-          );
-          return false;
-        }
-        if (cons.maxLength != null && str.length > cons.maxLength) {
-          this.$set(
-            this.validationErrors,
-            key,
-            `${def.label} allows ≤ ${cons.maxLength} chars.`
-          );
-          return false;
-        }
-        if (cons.pattern && !new RegExp(cons.pattern).test(str)) {
-          this.$set(
-            this.validationErrors,
-            key,
-            `${def.label} does not match pattern.`
-          );
-          return false;
+      if (def.type === "time" && val) {
+        const toSec = (s) => {
+          const mm = /^(\d{2}):(\d{2})(?::(\d{2}))?$/.exec(String(s));
+          if (!mm) return null;
+          const h = +mm[1], mi = +mm[2], se = mm[3] ? +mm[3] : 0;
+          return h * 3600 + mi * 60 + se;
+        };
+        const secs = toSec(val);
+        if (secs != null) {
+          if (cons.minTime) {
+            const m = toSec(cons.minTime);
+            if (m != null && secs < m) {
+              this.setError(mIdx, fIdx, `${label} must be ≥ ${cons.minTime}.`);
+              return false;
+            }
+          }
+          if (cons.maxTime) {
+            const x = toSec(cons.maxTime);
+            if (x != null && secs > x) {
+              this.setError(mIdx, fIdx, `${label} must be ≤ ${cons.maxTime}.`);
+              return false;
+            }
+          }
         }
       }
+
       return true;
     },
 
-    openShareDialog(sIdx, vIdx, gIdx) {
-      this.shareParams = { subjectIndex: sIdx, visitIndex: vIdx, groupIndex: gIdx };
-      this.generatedLink = "";
-      this.showShareDialog = true;
-    },
-    async createShareLink() {
-      const { subjectIndex, visitIndex, groupIndex } = this.shareParams;
-      const payload = {
-        study_id: this.study.metadata.id,
-        subject_index: subjectIndex,
-        visit_index: visitIndex,
-        group_index: groupIndex,
-        permission: this.shareConfig.permission,
-        max_uses: this.shareConfig.maxUses,
-        expires_in_days: this.shareConfig.expiresInDays,
-      };
-      try {
-        const resp = await axios.post(
-          "http://localhost:8000/forms/share-link/",
-          payload,
-          { headers: { Authorization: `Bearer ${this.token}` } }
-        );
-        this.generatedLink = resp.data.link;
-      } catch (err) {
-        if (err.response?.status === 403) this.permissionError = true;
-      }
-    },
-
     validateCurrentSection() {
+      // Clear section errors before revalidating
+      this.assignedModelIndices.forEach((mIdx) => {
+        this.selectedModels[mIdx].fields.forEach((_, fIdx) => {
+          this.clearError(mIdx, fIdx);
+        });
+      });
+
       let ok = true;
       this.assignedModelIndices.forEach((mIdx) => {
         this.selectedModels[mIdx].fields.forEach((_, fIdx) => {
@@ -611,10 +944,16 @@ export default {
     },
 
     async submitData() {
-      if (!this.validateCurrentSection()) {
+      // Canonicalize transforms before validation/save
+      this.applyTransformsForSection();
+
+      // Block saving if errors exist or validation fails now
+      const ok = this.validateCurrentSection();
+      if (!ok || this.hasValidationErrors) {
         this.showDialogMessage("Please fix validation errors before saving.");
         return;
       }
+
       const s = this.currentSubjectIndex,
         v = this.currentVisitIndex,
         g = this.currentGroupIndex,
@@ -659,6 +998,36 @@ export default {
       }
     },
 
+    // ----- share link dialog -----
+    openShareDialog(sIdx, vIdx, gIdx) {
+      this.shareParams = { subjectIndex: sIdx, visitIndex: vIdx, groupIndex: gIdx };
+      this.generatedLink = "";
+      this.showShareDialog = true;
+    },
+    async createShareLink() {
+      const { subjectIndex, visitIndex, groupIndex } = this.shareParams;
+      const payload = {
+        study_id: this.study.metadata.id,
+        subject_index: subjectIndex,
+        visit_index: visitIndex,
+        group_index: groupIndex,
+        permission: this.shareConfig.permission,
+        max_uses: this.shareConfig.maxUses,
+        expires_in_days: this.shareConfig.expiresInDays,
+      };
+      try {
+        const resp = await axios.post(
+          "http://localhost:8000/forms/share-link/",
+          payload,
+          { headers: { Authorization: `Bearer ${this.token}` } }
+        );
+        this.generatedLink = resp.data.link;
+      } catch (err) {
+        if (err.response?.status === 403) this.permissionError = true;
+      }
+    },
+
+    // ----- UX dialog helpers -----
     showDialogMessage(message) {
       this.dialogMessage = message;
       this.showDialog = true;
@@ -668,6 +1037,7 @@ export default {
       this.dialogMessage = "";
     },
 
+    // ----- status colors for selection matrix -----
     statusFor(sIdx, vIdx) {
       const subj = this.study.content.study_data.subjects[sIdx];
       const name = (subj.group || "").trim().toLowerCase();
@@ -702,6 +1072,7 @@ export default {
 </script>
 
 <style scoped>
+/* unchanged styles */
 .selection-matrix {
   width: 100%;
   border-collapse: collapse;
@@ -720,343 +1091,109 @@ export default {
   font-weight: 600;
   color: #1f2937;
 }
-.subject-cell {
-  background: #f9fafb;
-  font-weight: 500;
-  color: #374151;
-  width: 20%;
-}
-.visit-cell {
-  width: 40%;
-}
-/* base button */
-.select-btn {
-  color: #fff;
-  border: none;
-  padding: 6px 12px;
-  border-radius: 6px;
-  cursor: pointer;
-  font-size: 14px;
-  transition: opacity 0.2s;
-  display: block;
-  margin: 0 auto;
-}
+.subject-cell { background: #f9fafb; font-weight: 500; color: #374151; width: 20%; }
+.visit-cell { width: 40%; }
+.select-btn { color: #fff; border: none; padding: 6px 12px; border-radius: 6px; cursor: pointer; font-size: 14px; transition: opacity 0.2s; display: block; margin: 0 auto; }
+.select-btn.status-none { background: #e5e7eb; color: #1f2937; }
+.select-btn.status-partial { background: #fbbf24; }
+.select-btn.status-complete { background: #16a34a; }
+.select-btn:hover { opacity: 0.8; }
 
-.select-btn.status-none {
-  background: #e5e7eb;
-  color: #1f2937;
-}
-.select-btn.status-partial {
-  background: #fbbf24;
-}
-.select-btn.status-complete {
-  background: #16a34a;
-}
+.study-data-container { max-width: 960px; margin: 24px auto; padding: 24px; background: #ffffff; border-radius: 8px; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
 
-.select-btn:hover {
-  opacity: 0.8;
-}
+.back-buttons-container { margin-bottom: 16px; }
+.btn-back { background: #d1d5db; color: #1f2937; border: none; padding: 8px 16px; border-radius: 6px; font-size: 14px; font-weight: 500; cursor: pointer; transition: background 0.2s; display: flex; align-items: center; gap: 6px; }
+.btn-back:hover { background: #9ca3af; }
+.btn-back i { font-size: 14px; }
 
-.study-data-container {
-  max-width: 960px;
-  margin: 24px auto;
-  padding: 24px;
-  background: #ffffff;
-  border-radius: 8px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-}
+.study-header-container { margin-bottom: 24px; }
+.study-header { text-align: center; margin-bottom: 16px; }
+.study-name { font-size: 24px; font-weight: 600; color: #1f2937; margin-bottom: 8px; }
+.study-description { font-size: 16px; color: #4b5563; margin-bottom: 8px; }
+.study-meta { font-size: 14px; color: #6b7280; }
+hr { margin: 12px 0; border: 0; border-top: 1px solid #e5e7eb; }
 
-/* Back Buttons (Always at Top Left) */
-.back-buttons-container {
-  margin-bottom: 16px;
-}
-.btn-back {
-  background: #d1d5db;
-  color: #1f2937;
-  border: none;
-  padding: 8px 16px;
-  border-radius: 6px;
-  font-size: 14px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: background 0.2s;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-.btn-back:hover {
-  background: #9ca3af;
-}
-.btn-back i {
-  font-size: 14px;
-}
+.details-panel { margin-bottom: 16px; }
+.details-controls { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; }
+.details-toggle-btn { background: none; border: none; color: #374151; font-size: 14px; font-weight: 500; cursor: pointer; display: flex; align-items: center; gap: 6px; }
+.details-toggle-btn i { font-size: 14px; }
+.share-icon { background: none; border: none; color: #6b7280; cursor: pointer; font-size: 16px; padding: 6px; line-height: 1; }
+.share-icon i { font-family: 'Font Awesome 5 Free' !important; font-weight: 900; font-style: normal; display: inline-block; }
+.share-icon:hover { color: #374151; }
+.details-content { background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 6px; padding: 16px; }
+.details-block { margin-bottom: 16px; }
+.details-block strong { display: block; font-size: 14px; color: #1f2937; margin-bottom: 6px; }
+.details-block ul { margin: 0 0 12px 16px; padding: 0; }
+.details-block li { font-size: 14px; color: #374151; }
 
-/* 1. STUDY HEADER AND DETAILS PANEL */
-.study-header-container {
-  margin-bottom: 24px;
+.bread-crumb { background: #f9fafb; padding: 12px 16px; border: 1px solid #e5e7eb; border-radius: 6px; margin-bottom: 24px; font-size: 14px; color: #374151;
+  display: flex; align-items: center; justify-content: space-between;
 }
-.study-header {
-  text-align: center;
-  margin-bottom: 16px;
-}
-.study-name {
-  font-size: 24px;
-  font-weight: 600;
-  color: #1f2937;
-  margin-bottom: 8px;
-}
-.study-description {
-  font-size: 16px;
-  color: #4b5563;
-  margin-bottom: 8px;
-}
-.study-meta {
-  font-size: 14px;
-  color: #6b7280;
-}
-hr {
-  margin: 12px 0;
-  border: 0;
-  border-top: 1px solid #e5e7eb;
-}
+.crumb-left { display: flex; gap: 10px; flex-wrap: wrap; }
+.legend-btn { background: transparent; border: none; cursor: pointer; padding: 2px 6px; line-height: 1; color: #6b7280; }
+.legend-btn:hover { color: #374151; }
 
-.details-panel {
-  margin-bottom: 16px;
-}
-.details-controls {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin-bottom: 8px;
-}
-.details-toggle-btn {
-  background: none;
-  border: none;
-  color: #374151;
-  font-size: 14px;
-  font-weight: 500;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-.details-toggle-btn i {
-  font-size: 14px;
-}
-.share-icon {
-  background: none;
-  border: none;
-  color: #6b7280;
-  cursor: pointer;
-  font-size: 16px;
-  padding: 6px;
-  line-height: 1;
-}
-.share-icon i {
-  font-family: 'Font Awesome 5 Free' !important;
-  font-weight: 900;
-  font-style: normal;
-  display: inline-block;
-}
-.share-icon:hover {
-  color: #374151;
-}
-.details-content {
-  background: #f9fafb;
-  border: 1px solid #e5e7eb;
-  border-radius: 6px;
-  padding: 16px;
-}
-.details-block {
-  margin-bottom: 16px;
-}
-.details-block strong {
-  display: block;
-  font-size: 14px;
-  color: #1f2937;
-  margin-bottom: 6px;
-}
-.details-block ul {
-  margin: 0 0 12px 16px;
-  padding: 0;
-}
-.details-block li {
-  font-size: 14px;
-  color: #374151;
-}
+.entry-form-section h2 { font-size: 18px; font-weight: 600; color: #1f2937; margin-bottom: 16px; }
+.section-block { margin-bottom: 16px; padding: 16px; border: 1px solid #e5e7eb; border-radius: 6px; background: #ffffff; }
+.section-block h3 { margin: 0 0 12px 0; font-size: 16px; font-weight: 600; color: #1f2937; }
+.form-field { margin-bottom: 16px; }
+.field-label { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.helper-icon { font-size: 14px; color: #6b7280; cursor: pointer; }
+.helper-icon:hover { color: #374151; }
+.form-field label { display: block; margin-bottom: 6px; font-size: 14px; font-weight: 500; color: #1f2937; }
+.required { color: #dc2626; margin-left: 4px; }
+.help-inline { font-style: italic; color: #6b7280; margin-left: 8px; }
 
-/* 3. DATA-ENTRY SECTION */
-.bread-crumb {
-  background: #f9fafb;
-  padding: 12px 16px;
-  border: 1px solid #e5e7eb;
-  border-radius: 6px;
-  margin-bottom: 24px;
-  font-size: 14px;
-  color: #374151;
-}
-
-.entry-form-section h2 {
-  font-size: 18px;
-  font-weight: 600;
-  color: #1f2937;
-  margin-bottom: 16px;
-}
-.section-block {
-  margin-bottom: 16px;
-  padding: 16px;
-  border: 1px solid #e5e7eb;
-  border-radius: 6px;
-  background: #ffffff;
-}
-.section-block h3 {
-  margin: 0 0 12px 0;
-  font-size: 16px;
-  font-weight: 600;
-  color: #1f2937;
-}
-.form-field {
-  margin-bottom: 16px;
-}
-.form-field label {
-  display: block;
-  margin-bottom: 6px;
-  font-size: 14px;
-  font-weight: 500;
-  color: #1f2937;
-}
-.required {
-  color: #dc2626;
-  margin-left: 4px;
-}
 input[type="text"],
 textarea,
 input[type="number"],
 input[type="date"],
-select {
-  width: 100%;
-  padding: 8px;
-  border: 1px solid #d1d5db;
-  border-radius: 6px;
-  box-sizing: border-box;
-  font-size: 14px;
-  color: #1f2937;
-}
+select { width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 6px; box-sizing: border-box; font-size: 14px; color: #1f2937; }
 input:focus,
 textarea:focus,
-select:focus {
-  outline: none;
-  border-color: #6b7280;
-  box-shadow: 0 0 0 3px rgba(107, 114, 128, 0.1);
-}
-.error-message {
-  color: #dc2626;
-  font-size: 12px;
-  margin-top: 4px;
-}
-.no-assigned {
-  font-style: italic;
-  color: #6b7280;
-  margin-top: 12px;
-}
-.form-actions {
-  text-align: right;
-  margin-top: 16px;
-}
-.btn-save {
-  background: #16a34a;
-  color: #ffffff;
+select:focus { outline: none; border-color: #6b7280; box-shadow: 0 0 0 3px rgba(107, 114, 128, 0.1); }
+.error-message { color: #dc2626; font-size: 12px; margin-top: 4px; }
+.no-assigned { font-style: italic; color: #6b7280; margin-top: 12px; }
+.form-actions { text-align: right; margin-top: 16px; }
+.btn-save { background: #16a34a; color: #ffffff; border: none; padding: 8px 16px; border-radius: 6px; font-size: 14px; cursor: pointer; transition: background 0.2s; }
+.btn-save[disabled] { opacity: 0.5; cursor: not-allowed; }
+.btn-save:hover:not([disabled]) { background: #15803d; }
+
+.loading { text-align: center; padding: 50px; font-size: 16px; color: #6b7280; }
+
+.dialog-overlay { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.5); display: flex; align-items: center; justify-content: center; z-index: 1000; }
+.dialog { background: #ffffff; padding: 1.5rem; border-radius: 8px; width: 320px; max-width: 90%; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15); }
+.dialog h3 { margin: 0 0 1rem 0; font-size: 1.25rem; font-weight: 600; color: #1f2937; }
+.dialog label { display: block; margin-bottom: 0.75rem; font-size: 0.9rem; color: #374151; }
+.dialog label select,
+.dialog label input { width: 100%; margin-top: 0.25rem; padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 6px; font-size: 0.9rem; }
+.dialog-actions { display: flex; justify-content: flex-end; gap: 0.5rem; margin-top: 1rem; }
+.dialog-actions button:first-child { background: #e5e7eb; color: #1f2937; }
+.dialog-actions button:last-child { background: #e5e7eb; color: #1f2937; }
+.dialog-actions button { padding: 0.5rem 1rem; border: none; border-radius: 6px; cursor: pointer; font-size: 0.9rem; }
+.dialog-actions button:hover { background: #d1d5db; }
+.dialog p a { display: block; word-break: break-all; margin-top: 1rem; color: #374151; text-decoration: none; }
+.dialog p a:hover { text-decoration: underline; }
+
+.mini-overlay { position: fixed; inset: 0; background: rgba(17, 24, 39, 0.35); display: flex; align-items: center; justify-content: center; z-index: 1200; }
+.mini-dialog { width: 360px; max-width: 92%; background: #fff; border-radius: 10px; box-shadow: 0 10px 30px rgba(0,0,0,0.25); padding: 12px 12px 10px; }
+.mini-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+.mini-title { margin: 0; font-size: 16px; font-weight: 600; color: #111827; }
+.mini-close { background: transparent; border: none; font-size: 16px; line-height: 1; cursor: pointer; color: #6b7280; }
+.mini-close:hover { color: #111827; }
+.mini-list { margin: 0; padding-left: 18px; color: #374151; font-size: 14px; }
+.mini-list li { margin: 4px 0; }
+
+.btn-clear {
+  background: #e5e7eb;
+  color: #1f2937;
   border: none;
   padding: 8px 16px;
   border-radius: 6px;
   font-size: 14px;
   cursor: pointer;
+  margin-left: 8px;
   transition: background 0.2s;
 }
-.btn-save:hover {
-  background: #15803d;
-}
-
-/* Loading State */
-.loading {
-  text-align: center;
-  padding: 50px;
-  font-size: 16px;
-  color: #6b7280;
-}
-
-/* Modal overlays */
-.dialog-overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.5);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 1000;
-}
-.dialog {
-  background: #ffffff;
-  padding: 1.5rem;
-  border-radius: 8px;
-  width: 320px;
-  max-width: 90%;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-}
-.dialog h3 {
-  margin: 0 0 1rem 0;
-  font-size: 1.25rem;
-  font-weight: 600;
-  color: #1f2937;
-}
-.dialog label {
-  display: block;
-  margin-bottom: 0.75rem;
-  font-size: 0.9rem;
-  color: #374151;
-}
-.dialog label select,
-.dialog label input {
-  width: 100%;
-  margin-top: 0.25rem;
-  padding: 0.5rem;
-  border: 1px solid #d1d5db;
-  border-radius: 6px;
-  font-size: 0.9rem;
-}
-.dialog-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 0.5rem;
-  margin-top: 1rem;
-}
-.dialog-actions button:first-child {
-  background: #e5e7eb;
-  color: #1f2937;
-}
-.dialog-actions button:last-child {
-  background: #e5e7eb;
-  color: #1f2937;
-}
-.dialog-actions button {
-  padding: 0.5rem 1rem;
-  border: none;
-  border-radius: 6px;
-  cursor: pointer;
-  font-size: 0.9rem;
-}
-.dialog-actions button:hover {
-  background: #d1d5db;
-}
-.dialog p a {
-  display: block;
-  word-break: break-all;
-  margin-top: 1rem;
-  color: #374151;
-  text-decoration: none;
-}
-.dialog p a:hover {
-  text-decoration: underline;
-}
+.btn-clear:hover { background: #d1d5db; }
 </style>
