@@ -1,4 +1,3 @@
-// src/utils/jsonschemaValidation.js
 /* eslint-disable */
 import Ajv from "ajv";
 
@@ -79,7 +78,6 @@ function digitsCountOfNumber(val) {
 export function createAjv() {
   const ajv = new Ajv({
     allErrors: true,
-    // Ajv v6 ignores "strict" option; safe to leave out or keep.
   });
 
   // Built-in formats we need
@@ -113,7 +111,7 @@ export function createAjv() {
     ajv.addFormat(name, rx);
   });
 
-  // ----- Custom keywords (v6: addKeyword(name, def)) -----
+  // ----- Custom keywords -----
 
   // maxDigits
   const maxDigitsValidate = function (max, data) {
@@ -261,6 +259,42 @@ export function createAjv() {
     validate: maxDateByFormatValidate,
   });
 
+  // stepAlign (numeric step with floating-point tolerance)
+  const stepAlignValidate = function (schemaObj, data) {
+    if (data == null || data === "") return true;
+    const base = Number(schemaObj?.base);
+    const step = Number(schemaObj?.step);
+    if (!Number.isFinite(step) || step <= 0) return true;
+    const r = (Number(data) - (Number.isFinite(base) ? base : 0)) / step;
+    const diff = Math.abs(r - Math.round(r));
+    const EPS = 1e-9;
+    const ok = diff <= EPS;
+    if (!ok) {
+      stepAlignValidate.errors = [
+        {
+          keyword: "stepAlign",
+          params: { base, step },
+          message: `should align to step ${step}${Number.isFinite(base) ? ` starting at ${base}` : ""}`
+        }
+      ];
+    }
+    return ok;
+  };
+  ajv.addKeyword("stepAlign", {
+    type: "number",
+    errors: true,
+    metaSchema: {
+      type: "object",
+      properties: {
+        base: { type: ["number", "null"] },
+        step: { type: "number", minimum: 0 }
+      },
+      required: ["step"],
+      additionalProperties: false
+    },
+    validate: stepAlignValidate,
+  });
+
   return ajv;
 }
 
@@ -323,6 +357,28 @@ function buildSchemaForField(fieldDef) {
       maxTime: c.maxTime || undefined,
       timeStep: Number.isFinite(c.step) ? c.step : undefined,
     };
+  } else if (type === "slider") {
+    const mode = String(c.mode || "slider").toLowerCase() === "linear" ? "linear" : "slider";
+    if (mode === "slider") {
+      const min = c.percent ? 1 : (Number.isFinite(c.min) ? c.min : 1);
+      const max = c.percent ? 100 : (Number.isFinite(c.max) ? c.max : 5);
+      const step = Number.isFinite(c.step) && c.step > 0 ? c.step : 1;
+      schema = {
+        type: "number",
+        minimum: min,
+        maximum: max,
+        stepAlign: { base: min, step }
+      };
+    } else {
+      const min = Number.isFinite(c.min) ? Math.round(c.min) : 1;
+      const max = Number.isFinite(c.max) ? Math.round(c.max) : Math.max(min + 1, 5);
+      schema = {
+        type: "integer",
+        minimum: min,
+        maximum: max
+        // (no per-point labels for linear scale)
+      };
+    }
   } else {
     schema = { type: "string" };
   }
@@ -343,6 +399,9 @@ export function validateFieldValue(ajv, fieldDef, value) {
     if (t === "number" && (value === "" || value == null)) {
       return { valid: !fieldDef?.constraints?.required };
     }
+    if (t === "slider" && (value === "" || value == null)) {
+      return { valid: !fieldDef?.constraints?.required };
+    }
 
     const validate = ajv.compile(schema);
     const ok = validate(value);
@@ -352,6 +411,7 @@ export function validateFieldValue(ajv, fieldDef, value) {
     if (!err) return { valid: false, message: "Invalid value." };
 
     switch (err.keyword) {
+      case "stepAlign":
       case "maxDigits":
       case "minDigits":
       case "minTime":

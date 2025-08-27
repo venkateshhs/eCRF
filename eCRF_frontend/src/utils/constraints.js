@@ -10,6 +10,10 @@ export function coerceDefaultForType(fieldType = "text", value) {
   if (value === undefined) return undefined;
 
   switch (t) {
+    case "slider":
+      // No default for slider or linear scale (both are type "slider")
+      return undefined;
+
     case "checkbox":
       return !!value;
 
@@ -53,8 +57,8 @@ export function normalizeConstraints(fieldType = "text", raw = {}) {
   // Options belong to the field, not constraints.
   if (Array.isArray(c.options)) delete c.options;
 
-  // Boolean coercions
-  ["required", "readonly", "allowMultiple", "integerOnly"].forEach((k) => {
+  // Boolean coercions (add slider toggles)
+  ["required", "readonly", "allowMultiple", "integerOnly", "percent", "showTicks"].forEach((k) => {
     if (k in c) c[k] = !!c[k];
   });
 
@@ -117,7 +121,7 @@ export function normalizeConstraints(fieldType = "text", raw = {}) {
     delete c.placeholder;
   }
 
-  // Enforce numeric range order
+  // Enforce numeric range order for generic numeric
   if ("min" in c && "max" in c && c.min != null && c.max != null) {
     if (Number.isFinite(c.min) && Number.isFinite(c.max) && c.max < c.min) {
       const t = c.min; c.min = c.max; c.max = t;
@@ -127,10 +131,96 @@ export function normalizeConstraints(fieldType = "text", raw = {}) {
     const t = c.minDate; c.minDate = c.maxDate; c.maxDate = t;
   }
 
-  // Allowed keys per type
+  // ---------- Slider / Linear scale normalization ----------
+  if (String(fieldType).toLowerCase() === "slider") {
+    // mode: 'slider' | 'linear'
+    const mode = (String(c.mode || "slider").toLowerCase() === "linear") ? "linear" : "slider";
+    c.mode = mode;
+
+    // helper for snapping marks to step and within range
+    const snap = (v, base, step) => {
+      if (!Number.isFinite(v)) return null;
+      if (!Number.isFinite(step) || step <= 0) return v;
+      // reduce floating point noise
+      const r = Math.round((v - base) / step);
+      return Number((base + r * step).toFixed(6));
+    };
+    const normalizeMarks = (marks, min, max, step) => {
+      let arr = [];
+      if (Array.isArray(marks)) arr = marks;
+      else if (marks && typeof marks === "object") {
+        arr = Object.keys(marks).map(k => ({ value: Number(k), label: String(marks[k]) }));
+      }
+      arr = arr
+        .map(m => ({ value: Number(m?.value), label: String(m?.label || "").trim() }))
+        .filter(m => Number.isFinite(m.value) && !!m.label)
+        .map(m => {
+          let v = snap(m.value, min, step);
+          if (!Number.isFinite(v)) v = m.value;
+          if (v < min) v = min;
+          if (v > max) v = max;
+          return { value: v, label: m.label };
+        });
+
+      // dedupe by value, keep first label, sort asc
+      const byVal = new Map();
+      arr.forEach(m => { if (!byVal.has(m.value)) byVal.set(m.value, m.label); });
+      return [...byVal.entries()]
+        .map(([value, label]) => ({ value, label }))
+        .sort((a, b) => a.value - b.value);
+    };
+
+    if (mode === "slider") {
+      // percent mode forces 1..100 with integer step >= 1
+      if (c.percent) {
+        c.min = 1;
+        c.max = 100;
+        c.step = Math.max(1, Number.isFinite(c.step) && c.step > 0 ? Math.round(c.step) : 1);
+      } else {
+        c.min = Number.isFinite(c.min) ? c.min : 1;
+        c.max = Number.isFinite(c.max) ? c.max : 5;
+        if (c.max <= c.min) c.max = c.min + 1;
+        c.step = Number.isFinite(c.step) && c.step > 0 ? c.step : 1;
+      }
+
+      // normalize marks (keep for slider mode)
+      if ("marks" in c) {
+        c.marks = normalizeMarks(c.marks, c.min, c.max, c.step);
+      }
+
+      // NEVER store placeholder/default for slider UI
+      delete c.placeholder;
+      delete c.defaultValue;
+    } else {
+      // LINEAR SCALE: integers only, no percent/step, NO point labels
+      c.min = Number.isFinite(c.min) ? Math.round(c.min) : 1;
+      c.max = Number.isFinite(c.max) ? Math.round(c.max) : 5;
+      if (c.max <= c.min) c.max = c.min + 1;
+
+      delete c.percent;
+      delete c.step;
+      delete c.marks; // per requirement: no point labels on linear
+      delete c.placeholder;
+      delete c.defaultValue;
+    }
+
+    // Allowed keys for slider type
+    const COMMON_SLIDER = ["required", "readonly", "helpText"];
+    const allowed = mode === "slider"
+      ? [...COMMON_SLIDER, "mode", "percent", "min", "max", "step", "marks", "showTicks"]
+      : [...COMMON_SLIDER, "mode", "min", "max", "leftLabel", "rightLabel"];
+
+    const cleaned = {};
+    for (const k of allowed) {
+      if (k in c && c[k] !== undefined) cleaned[k] = c[k];
+    }
+    return cleaned;
+  }
+
+  // ---------- Non-slider types ----------
   const COMMON = ["required", "readonly", "helpText", "placeholder", "defaultValue"];
   const TEXTLIKE = ["minLength", "maxLength", "pattern", "transform"];
-  const NUMBER = ["min", "max", "step", "integerOnly", "minDigits", "maxDigits"]; // ← digits here
+  const NUMBER = ["min", "max", "step", "integerOnly", "minDigits", "maxDigits"];
   const DATE = ["minDate", "maxDate", "dateFormat", "defaultValue"];
   const TIME = ["minTime", "maxTime", "step"];
 
@@ -170,7 +260,7 @@ export function normalizeConstraints(fieldType = "text", raw = {}) {
     if (k in c && c[k] !== undefined) cleaned[k] = c[k];
   }
 
-  // Extra numeric invariants for digits
+  // Extra numeric invariants for number type
   if (String(fieldType).toLowerCase() === "number") {
     if (Number.isFinite(cleaned.minDigits) && cleaned.minDigits < 0) cleaned.minDigits = 0;
     if (Number.isFinite(cleaned.maxDigits) && cleaned.maxDigits < 0) cleaned.maxDigits = 0;

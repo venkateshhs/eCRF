@@ -258,6 +258,26 @@
                 @update:modelValue="() => validateField(mIdx, fIdx)"
               />
 
+              <!-- SLIDER (mode=slider) -->
+              <FieldSlider
+                v-else-if="field.type === 'slider' && (field.constraints?.mode || 'slider') === 'slider'"
+                :id="fieldId(mIdx, fIdx)"
+                v-model="entryData[currentSubjectIndex][currentVisitIndex][currentGroupIndex][mIdx][fIdx]"
+                v-bind="getSliderProps(field)"
+                @update:modelValue="() => { clearError(mIdx, fIdx); validateField(mIdx, fIdx); }"
+                @change="validateField(mIdx, fIdx)"
+              />
+
+              <!-- LINEAR SCALE (mode=linear) -->
+              <FieldLinearScale
+                v-else-if="field.type === 'slider' && field.constraints?.mode === 'linear'"
+                :id="fieldId(mIdx, fIdx)"
+                v-model="entryData[currentSubjectIndex][currentVisitIndex][currentGroupIndex][mIdx][fIdx]"
+                v-bind="getLinearProps(field)"
+                @update:modelValue="() => { clearError(mIdx, fIdx); validateField(mIdx, fIdx); }"
+                @change="validateField(mIdx, fIdx)"
+              />
+
               <!-- FALLBACK TEXT -->
               <input
                 v-else
@@ -402,9 +422,10 @@ import DateFormatPicker from "@/components/DateFormatPicker.vue";
 import FieldCheckbox from "@/components/fields/FieldCheckbox.vue";
 import FieldRadioGroup from "@/components/fields/FieldRadioGroup.vue";
 import FieldTime from "@/components/fields/FieldTime.vue";
-import FieldSelect from "@/components/fields/FieldSelect.vue"; // <-- added
+import FieldSelect from "@/components/fields/FieldSelect.vue";
+import FieldSlider from "@/components/fields/FieldSlider.vue";
+import FieldLinearScale from "@/components/fields/FieldLinearScale.vue";
 
-// Ajv helpers (JSON Schema validation)
 import { createAjv, validateFieldValue } from "@/utils/jsonschemaValidation";
 
 export default {
@@ -415,7 +436,9 @@ export default {
     FieldCheckbox,
     FieldRadioGroup,
     FieldTime,
-    FieldSelect, // <-- added
+    FieldSelect,
+    FieldSlider,
+    FieldLinearScale
   },
   data() {
     return {
@@ -426,7 +449,7 @@ export default {
       currentVisitIndex: null,
       currentGroupIndex: 0,
       entryData: [],
-      validationErrors: {}, // { "s-v-g-m-f": "message" }
+      validationErrors: {},
       icons,
       showShareDialog: false,
       shareParams: { subjectIndex: null, visitIndex: null, groupIndex: null },
@@ -500,6 +523,55 @@ export default {
   },
 
   methods: {
+    getSliderProps(field) {
+      const c = field?.constraints || {};
+      const min = c.percent ? 1 : (Number.isFinite(+c.min) ? +c.min : 1);
+      const max = c.percent ? 100 : (Number.isFinite(+c.max) ? +c.max : (c.percent ? 100 : 5));
+      const step = Number.isFinite(+c.step) && +c.step > 0 ? +c.step : 1;
+      const marks = Array.isArray(c.marks) ? c.marks : [];
+
+      const props = {
+        min, max, step,
+        readonly: !!c.readonly,
+        percent: !!c.percent,
+        showTicks: !!c.showTicks,
+        marks
+      };
+
+      // Helpful debug (once per render; okay while diagnosing labels)
+      try {
+        // eslint-disable-next-line no-console
+        console.log(
+          "[StudyDataEntry] Slider props for",
+          field.label,
+          JSON.parse(JSON.stringify(props))
+        );
+      } catch (_) {/* ignore */}
+      return props;
+    },
+    getLinearProps(field) {
+      const c = field?.constraints || {};
+      const min = Number.isFinite(+c.min) ? Math.round(+c.min) : 1;
+      let max = Number.isFinite(+c.max) ? Math.round(+c.max) : 5;
+      if (max <= min) max = min + 1;
+      const props = {
+        min, max,
+        leftLabel: c.leftLabel || "",
+        rightLabel: c.rightLabel || "",
+        readonly: !!c.readonly
+        // NOTE: no point labels in linear mode per requirements
+      };
+      try {
+        // eslint-disable-next-line no-console
+        console.log(
+          "[StudyDataEntry] Linear props for",
+          field.label,
+          JSON.parse(JSON.stringify(props))
+        );
+      } catch (_) {/* ignore */}
+      return props;
+    },
+
     // ----- legend dialog controls -----
     openLegendDialog() {
       this.showLegendDialog = true;
@@ -523,6 +595,27 @@ export default {
 
       // Intentionally exclude "Required" and "Help"
       if (c.readonly) parts.push("Read-only");
+
+      if (field.type === "slider") {
+        const mode = (c.mode || "slider").toLowerCase();
+        if (mode === "slider") {
+          parts.push(`Slider ${c.percent ? "(1–100%)" : ""}`);
+          if (Number.isFinite(c.min)) parts.push(`Min: ${c.min}`);
+          if (Number.isFinite(c.max)) parts.push(`Max: ${c.max}`);
+          if (Number.isFinite(c.step)) parts.push(`Step: ${c.step}`);
+          if (c.showTicks) parts.push("Show tick marks");
+          if (Array.isArray(c.marks) && c.marks.length) {
+            parts.push(`Labels: ${c.marks.map(m => `${m.value}="${m.label}"`).join(", ")}`);
+          }
+        } else {
+          parts.push("Linear scale");
+          parts.push(`Range: ${c.min ?? 1}–${c.max ?? 5} (integers)`);
+          if (c.leftLabel) parts.push(`Left: “${c.leftLabel}”`);
+          if (c.rightLabel) parts.push(`Right: “${c.rightLabel}”`);
+          // (no point labels shown for linear)
+        }
+        return parts.length ? parts : ["No constraints."];
+      }
 
       if (field.type === "text" || field.type === "textarea") {
         if (typeof c.minLength === "number") parts.push(`Min length: ${c.minLength}`);
@@ -631,7 +724,7 @@ export default {
       });
     },
 
-    // ----- helpers for error state (Vue 3-safe; no this.$set) -----
+    // ----- helpers for error state -----
     errorKey(mIdx, fIdx) {
       return [
         this.currentSubjectIndex,
@@ -669,6 +762,18 @@ export default {
         );
         this.study = resp.data;
         this.initializeEntryData();
+
+        // Debug: log any slider constraints present at load-time
+        try {
+          (this.selectedModels || []).forEach((sect) => {
+            (sect.fields || []).forEach((f) => {
+              if (f.type === 'slider') {
+                // eslint-disable-next-line no-console
+                console.log("[StudyDataEntry] Loaded slider constraints:", f.label, JSON.parse(JSON.stringify(f.constraints || {})));
+              }
+            });
+          });
+        } catch (_) {/* ignore */}
       } catch (err) {
         this.showDialogMessage("Failed to load study details.");
       }
@@ -691,7 +796,9 @@ export default {
       const t = String(f?.type || "").toLowerCase();
       const allowMulti = !!c.allowMultiple;
 
-      // Respect stored defaults only when NOT clearing
+      // SLIDER: never prefill
+      if (t === "slider") return null;
+
       if (!ignoreDefaults && Object.prototype.hasOwnProperty.call(c, "defaultValue")) {
         return c.defaultValue;
       }
@@ -717,28 +824,21 @@ export default {
       }
     },
 
-    // REPLACE ONLY this method in StudyDataEntryComponent.vue
     clearCurrentSection() {
       const s = this.currentSubjectIndex;
       const v = this.currentVisitIndex;
       const g = this.currentGroupIndex;
 
-      // Only touch editable fields; keep readonly as-is
       this.assignedModelIndices.forEach((mIdx) => {
         const section = this.selectedModels[mIdx];
         section.fields.forEach((f, fIdx) => {
           const cons = f?.constraints || {};
           if (cons.readonly) {
-            // don't change readonly values
             this.clearError(mIdx, fIdx);
             return;
           }
-          // reset to the stored default (or field.value fallback),
-          // NOT to empty — so preselected defaults remain.
           const next = this.defaultForField(f, { ignoreDefaults: false });
           this.entryData[s][v][g][mIdx][fIdx] = next;
-
-          // clear any validation error for this field
           this.clearError(mIdx, fIdx);
         });
       });
@@ -765,7 +865,6 @@ export default {
         )
       );
 
-      // Clear any stale errors
       this.validationErrors = {};
     },
 
@@ -794,7 +893,6 @@ export default {
       );
       this.currentGroupIndex = idx >= 0 ? idx : 0;
       this.showSelection = false;
-      // reset errors for a fresh page
       this.validationErrors = {};
     },
     backToSelection() {
@@ -813,20 +911,21 @@ export default {
       return `s${this.currentSubjectIndex}_v${this.currentVisitIndex}_g${this.currentGroupIndex}_m${mIdx}_f${fIdx}`;
     },
 
-    // ----- Ajv-based validation -----
+    // ----- Validation -----
     validateField(mIdx, fIdx) {
       const def = this.selectedModels[mIdx].fields[fIdx] || {};
+      const cons = def.constraints || {};
+      const label = def.label || "This field";
+
       const val =
         this.entryData[this.currentSubjectIndex][this.currentVisitIndex][
           this.currentGroupIndex
         ][mIdx][fIdx];
-      const cons = def.constraints || {};
-      const label = def.label || "This field";
 
       // clear prior error
       this.clearError(mIdx, fIdx);
 
-      // Required emptiness check (consistent UX)
+      // Required emptiness check
       if (cons.required) {
         let empty = false;
         if (def.type === "checkbox") {
@@ -834,7 +933,7 @@ export default {
         } else if (Array.isArray(val)) {
           empty = val.length === 0;
         } else {
-          empty = val == null || (typeof val === "string" && val.trim() === "");
+          empty = (val == null || (typeof val === "string" && val.trim() === ""));
         }
         if (empty) {
           this.setError(mIdx, fIdx, `${label} is required.`);
@@ -842,14 +941,55 @@ export default {
         }
       }
 
-      // JSON Schema validation
+      // SLIDER: custom validation (skip Ajv here)
+      if (def.type === "slider") {
+        const mode = (cons.mode || "slider").toLowerCase();
+        if (val == null || val === "") {
+          // if required & empty we already handled; otherwise allow empty
+          return !cons.required;
+        }
+
+        const n = Number(val);
+        if (!Number.isFinite(n)) {
+          this.setError(mIdx, fIdx, `${label} must be a number.`);
+          return false;
+        }
+
+        if (mode === "slider") {
+          const min = cons.percent ? 1 : (Number.isFinite(+cons.min) ? +cons.min : 1);
+          const max = cons.percent ? 100 : (Number.isFinite(+cons.max) ? +cons.max : (cons.percent ? 100 : 5));
+          const step = Number.isFinite(+cons.step) && +cons.step > 0 ? +cons.step : 1;
+
+          if (n < min || n > max) {
+            this.setError(mIdx, fIdx, `${label} must be between ${min} and ${max}.`);
+            return false;
+          }
+          // if step is integer-like, enforce nearest integer stepping when step >= 1
+          if (step >= 1 && Math.abs((n - min) / step - Math.round((n - min) / step)) > 1e-9) {
+            this.setError(mIdx, fIdx, `${label} must align to step ${step}.`);
+            return false;
+          }
+          return true;
+        } else {
+          // linear scale: enforce integer in range
+          const min = Number.isFinite(+cons.min) ? Math.round(+cons.min) : 1;
+          const max = Number.isFinite(+cons.max) ? Math.round(+cons.max) : 5;
+          if (n < min || n > max || Math.round(n) !== n) {
+            this.setError(mIdx, fIdx, `${label} must be an integer between ${min} and ${max}.`);
+            return false;
+          }
+          return true;
+        }
+      }
+
+      // JSON Schema validation for other types
       const { valid, message } = validateFieldValue(this.ajv, def, val);
       if (!valid) {
         this.setError(mIdx, fIdx, message || `${label} is invalid.`);
         return false;
       }
 
-      // Cross-constraint ordering checks (dates/times against min/max)
+      // date/time min/max checks (unchanged)
       if (def.type === "date" && val) {
         const fmt = cons.dateFormat || "dd.MM.yyyy";
         const parse = (s) => {
@@ -862,7 +1002,7 @@ export default {
             "MM-yyyy": /^(\d{2})-(\d{4})$/,
             "yyyy/MM": /^(\d{4})\/(\d{2})$/,
             "yyyy-MM": /^(\d{4})-(\d{2})$/,
-            "yyyy": /^(\d{4})$/,
+            "yyyy": /^(\d{4})$/
           };
           const rx = map[fmt];
           if (!rx) return null;
@@ -927,7 +1067,6 @@ export default {
     },
 
     validateCurrentSection() {
-      // Clear section errors before revalidating
       this.assignedModelIndices.forEach((mIdx) => {
         this.selectedModels[mIdx].fields.forEach((_, fIdx) => {
           this.clearError(mIdx, fIdx);
@@ -944,10 +1083,8 @@ export default {
     },
 
     async submitData() {
-      // Canonicalize transforms before validation/save
       this.applyTransformsForSection();
 
-      // Block saving if errors exist or validation fails now
       const ok = this.validateCurrentSection();
       if (!ok || this.hasValidationErrors) {
         this.showDialogMessage("Please fix validation errors before saving.");
@@ -1126,9 +1263,7 @@ hr { margin: 12px 0; border: 0; border-top: 1px solid #e5e7eb; }
 .details-block ul { margin: 0 0 12px 16px; padding: 0; }
 .details-block li { font-size: 14px; color: #374151; }
 
-.bread-crumb { background: #f9fafb; padding: 12px 16px; border: 1px solid #e5e7eb; border-radius: 6px; margin-bottom: 24px; font-size: 14px; color: #374151;
-  display: flex; align-items: center; justify-content: space-between;
-}
+.bread-crumb { background: #f9fafb; padding: 12px 16px; border: 1px solid #e5e7eb; border-radius: 6px; margin-bottom: 24px; font-size: 14px; color: #374151; display: flex; align-items: center; justify-content: space-between; }
 .crumb-left { display: flex; gap: 10px; flex-wrap: wrap; }
 .legend-btn { background: transparent; border: none; cursor: pointer; padding: 2px 6px; line-height: 1; color: #6b7280; }
 .legend-btn:hover { color: #374151; }
