@@ -237,32 +237,28 @@
                       :options="field.options"
                       v-model="field.value"
                     />
-                     <!-- SLIDER or LINEAR based on constraints.mode -->
-                        <FieldSlider
-                          v-else-if="field.type === 'slider' && (field.constraints?.mode || 'slider') === 'slider'"
-                          v-model="field.value"
-                          :min="field.constraints?.min ?? 1"
-                          :max="field.constraints?.max ?? 5"
-                          :step="field.constraints?.step ?? 1"
-                          :readonly="!!field.constraints?.readonly"
-                          :percent="!!field.constraints?.percent"
-                          :marks="field.constraints?.marks || []"
-                        />
 
-                        <FieldLinearScale
-                          v-else-if="field.type === 'slider' && field.constraints?.mode === 'linear'"
-                          v-model="field.value"
-                          :min="field.constraints?.min ?? 1"
-                          :max="field.constraints?.max ?? 5"
-                          :left-label="field.constraints?.leftLabel || ''"
-                          :right-label="field.constraints?.rightLabel || ''"
-                          :readonly="!!field.constraints?.readonly"
-                        />
+                    <!-- SLIDER or LINEAR based on constraints.mode -->
+                    <FieldSlider
+                      v-else-if="field.type === 'slider' && (field.constraints?.mode || 'slider') === 'slider'"
+                      v-model="field.value"
+                      :min="field.constraints?.min ?? 1"
+                      :max="field.constraints?.max ?? 5"
+                      :step="field.constraints?.step ?? 1"
+                      :readonly="!!field.constraints?.readonly"
+                      :percent="!!field.constraints?.percent"
+                      :marks="field.constraints?.marks || []"
+                    />
 
-
-
-
-
+                    <FieldLinearScale
+                      v-else-if="field.type === 'slider' && field.constraints?.mode === 'linear'"
+                      v-model="field.value"
+                      :min="field.constraints?.min ?? 1"
+                      :max="field.constraints?.max ?? 5"
+                      :left-label="field.constraints?.leftLabel || ''"
+                      :right-label="field.constraints?.rightLabel || ''"
+                      :readonly="!!field.constraints?.readonly"
+                    />
 
                     <!-- BUTTON -->
                     <button
@@ -430,6 +426,7 @@
     </div>
   </div>
 </template>
+
 <script>
 import axios from "axios";
 import yaml from "js-yaml";
@@ -785,133 +782,132 @@ export default {
       this.showConstraintsDialog = true;
     },
     confirmConstraintsDialog(c) {
-  const { sectionIndex, fieldIndex } = this.currentFieldIndices;
-  const f = this.currentForm.sections[sectionIndex].fields[fieldIndex];
-  const originalType = f.type;
+      const { sectionIndex, fieldIndex } = this.currentFieldIndices;
+      const f = this.currentForm.sections[sectionIndex].fields[fieldIndex];
+      const originalType = f.type;
 
-  // Non-slider
-  if (originalType !== 'slider') {
-    const norm = normalizeConstraints(originalType, c);
+      // Non-slider
+      if (originalType !== 'slider') {
+        const norm = normalizeConstraints(originalType, c);
 
-    if ((f.type === 'select' || f.type === 'radio') && Array.isArray(c.options)) {
-      const cleaned = c.options.map(o => String(o || '').trim()).filter(Boolean);
-      f.options = cleaned.length ? cleaned : ['Option 1'];
-    }
+        if ((f.type === 'select' || f.type === 'radio') && Array.isArray(c.options)) {
+          const cleaned = c.options.map(o => String(o || '').trim()).filter(Boolean);
+          f.options = cleaned.length ? cleaned : ['Option 1'];
+        }
 
-      // ---------- Value shape & membership (radio/select) ----------
-      if (f.type === 'radio') {
-        // radios can be single or multi based on allowMultiple
-        if (norm.allowMultiple) {
-          // ensure array shape
-          if (!Array.isArray(f.value)) f.value = [];
-          // remove any values that no longer exist
-          f.value = f.value.filter(v => f.options.includes(v));
-          // if defaultValue provided, prefer it (array)
-          if (Object.prototype.hasOwnProperty.call(norm, "defaultValue")) {
-            const dv = Array.isArray(norm.defaultValue) ? norm.defaultValue : [];
-            f.value = dv.filter(v => f.options.includes(v));
+        // ---------- Value shape & membership (radio/select) ----------
+        if (f.type === 'radio') {
+          // radios can be single or multi based on allowMultiple
+          if (norm.allowMultiple) {
+            // ensure array shape
+            if (!Array.isArray(f.value)) f.value = [];
+            // remove any values that no longer exist
+            f.value = f.value.filter(v => f.options.includes(v));
+            // if defaultValue provided, prefer it (array)
+            if (Object.prototype.hasOwnProperty.call(norm, "defaultValue")) {
+              const dv = Array.isArray(norm.defaultValue) ? norm.defaultValue : [];
+              f.value = dv.filter(v => f.options.includes(v));
+            }
+          } else {
+            // single-select: ensure scalar string
+            if (Array.isArray(f.value)) f.value = f.value[0] || '';
+            if (!f.options.includes(f.value)) f.value = '';
+            // if defaultValue provided, prefer it (scalar)
+            if (Object.prototype.hasOwnProperty.call(norm, "defaultValue")) {
+              const dv = typeof norm.defaultValue === 'string' ? norm.defaultValue : '';
+              f.value = f.options.includes(dv) ? dv : '';
+            }
           }
-        } else {
-          // single-select: ensure scalar string
+        } else if (f.type === 'select') {
+          // dropdown is ALWAYS single-select
           if (Array.isArray(f.value)) f.value = f.value[0] || '';
           if (!f.options.includes(f.value)) f.value = '';
-          // if defaultValue provided, prefer it (scalar)
           if (Object.prototype.hasOwnProperty.call(norm, "defaultValue")) {
             const dv = typeof norm.defaultValue === 'string' ? norm.defaultValue : '';
             f.value = f.options.includes(dv) ? dv : '';
           }
         }
-      } else if (f.type === 'select') {
-        // dropdown is ALWAYS single-select
-        if (Array.isArray(f.value)) f.value = f.value[0] || '';
-        if (!f.options.includes(f.value)) f.value = '';
-        if (Object.prototype.hasOwnProperty.call(norm, "defaultValue")) {
-          const dv = typeof norm.defaultValue === 'string' ? norm.defaultValue : '';
-          f.value = f.options.includes(dv) ? dv : '';
+
+        // ---------- Placeholder (skip for checkbox by design) ----------
+        if (Object.prototype.hasOwnProperty.call(norm, "placeholder") && f.type !== 'checkbox') {
+          f.placeholder = norm.placeholder || "";
         }
+
+        if (
+          f.type !== 'radio' &&
+          f.type !== 'select' &&
+          f.type !== 'slider' &&
+          Object.prototype.hasOwnProperty.call(norm, "defaultValue")
+        ) {
+          const coerced = coerceDefaultForType(f.type, norm.defaultValue);
+          if (coerced !== undefined) f.value = coerced;
+        }
+
+        if (f.type === 'date' && (c.dateFormat || norm.dateFormat)) {
+          const fmt = c.dateFormat || norm.dateFormat;
+          f.placeholder = fmt;
+          norm.dateFormat = fmt;
+        }
+
+        f.constraints = { ...norm };
+        if (
+          (f.value === '' || f.value === undefined || f.value === null) &&
+          Object.prototype.hasOwnProperty.call(f.constraints, 'defaultValue')
+        ) {
+          f.value = f.constraints.defaultValue;
+        }
+        console.log("[SFC] saved NON-slider constraints:", { si: sectionIndex, fi: fieldIndex, constraints: f.constraints });
+        this.showConstraintsDialog = false;
+        return;
       }
 
-      // ---------- Placeholder (skip for checkbox by design) ----------
-    if (Object.prototype.hasOwnProperty.call(norm, "placeholder") && f.type !== 'checkbox') {
-      f.placeholder = norm.placeholder || "";
-    }
+      // Slider -> Linear mode (no marks)
+      if (c.mode === 'linear') {
+        console.log("[SFC] incoming LINEAR slider constraints:", c);
+        let min = Number.isFinite(+c.min) ? Math.round(+c.min) : 1;
+        let max = Number.isFinite(+c.max) ? Math.round(+c.max) : 5;
+        if (max <= min) max = min + 1;
+        if (max - min + 1 > 10) max = min + 9;
 
-    if (
-      f.type !== 'radio' &&
-      f.type !== 'select' &&
-      f.type !== 'slider' &&
-      Object.prototype.hasOwnProperty.call(norm, "defaultValue")
-    ) {
-      const coerced = coerceDefaultForType(f.type, norm.defaultValue);
-      if (coerced !== undefined) f.value = coerced;
-    }
+        f.constraints = {
+          mode: 'linear',
+          required: !!c.required,
+          readonly: !!c.readonly,
+          helpText: c.helpText || '',
+          min, max,
+          leftLabel: c.leftLabel || '',
+          rightLabel: c.rightLabel || ''
+          // no marks intentionally
+        };
+        f.value = null; // no default
+        console.log("[SFC] saved LINEAR slider constraints:", { si: sectionIndex, fi: fieldIndex, constraints: f.constraints });
+        this.showConstraintsDialog = false;
+        return;
+      }
 
-    if (f.type === 'date' && (c.dateFormat || norm.dateFormat)) {
-      const fmt = c.dateFormat || norm.dateFormat;
-      f.placeholder = fmt;
-      norm.dateFormat = fmt;
-    }
+      // Slider -> Slider mode (KEEP MARKS)
+      console.log("[SFC] incoming SLIDER constraints:", c);
+      let min = Number.isFinite(+c.min) ? +c.min : 1;
+      let max = Number.isFinite(+c.max) ? +c.max : (c.percent ? 100 : 5);
+      if (max <= min) max = min + 1;
+      let step = Number.isFinite(+c.step) && +c.step > 0 ? +c.step : (c.percent ? 1 : 1);
 
-    f.constraints = { ...norm };
-    if (
-      (f.value === '' || f.value === undefined || f.value === null) &&
-      Object.prototype.hasOwnProperty.call(f.constraints, 'defaultValue')
-    ) {
-      f.value = f.constraints.defaultValue;
-    }
-    console.log("[SFC] saved NON-slider constraints:", { si: sectionIndex, fi: fieldIndex, constraints: f.constraints });
-    this.showConstraintsDialog = false;
-    return;
-  }
+      f.constraints = {
+        mode: 'slider',
+        required: !!c.required,
+        readonly: !!c.readonly,
+        helpText: c.helpText || '',
+        percent: !!c.percent,
+        min, max, step,
+        // ← IMPORTANT: keep marks so FieldSlider can render them
+        marks: Array.isArray(c.marks) ? c.marks : []
+      };
 
-  // Slider -> Linear mode (no marks)
-  if (c.mode === 'linear') {
-    console.log("[SFC] incoming LINEAR slider constraints:", c);
-    let min = Number.isFinite(+c.min) ? Math.round(+c.min) : 1;
-    let max = Number.isFinite(+c.max) ? Math.round(+c.max) : 5;
-    if (max <= min) max = min + 1;
-    if (max - min + 1 > 10) max = min + 9;
-
-    f.constraints = {
-      mode: 'linear',
-      required: !!c.required,
-      readonly: !!c.readonly,
-      helpText: c.helpText || '',
-      min, max,
-      leftLabel: c.leftLabel || '',
-      rightLabel: c.rightLabel || ''
-      // no marks intentionally
-    };
-    f.value = null; // no default
-    console.log("[SFC] saved LINEAR slider constraints:", { si: sectionIndex, fi: fieldIndex, constraints: f.constraints });
-    this.showConstraintsDialog = false;
-    return;
-  }
-
-  // Slider -> Slider mode (KEEP MARKS)
-  console.log("[SFC] incoming SLIDER constraints:", c);
-  let min = Number.isFinite(+c.min) ? +c.min : 1;
-  let max = Number.isFinite(+c.max) ? +c.max : (c.percent ? 100 : 5);
-  if (max <= min) max = min + 1;
-  let step = Number.isFinite(+c.step) && +c.step > 0 ? +c.step : (c.percent ? 1 : 1);
-
-  f.constraints = {
-    mode: 'slider',
-    required: !!c.required,
-    readonly: !!c.readonly,
-    helpText: c.helpText || '',
-    percent: !!c.percent,
-    min, max, step,
-    // ← IMPORTANT: keep marks so FieldSlider can render them
-    marks: Array.isArray(c.marks) ? c.marks : []
-  };
-
-  const v = Number(f.value);
-  f.value = Number.isFinite(v) && v >= min && v <= max ? v : null;
-  console.log("[SFC] saved SLIDER constraints:", { si: sectionIndex, fi: fieldIndex, constraints: f.constraints });
-  this.showConstraintsDialog = false;
-},
-
+      const v = Number(f.value);
+      f.value = Number.isFinite(v) && v >= min && v <= max ? v : null;
+      console.log("[SFC] saved SLIDER constraints:", { si: sectionIndex, fi: fieldIndex, constraints: f.constraints });
+      this.showConstraintsDialog = false;
+    },
 
     cancelConstraintsDialog() { this.showConstraintsDialog = false; },
 
@@ -999,7 +995,6 @@ export default {
   }
 };
 </script>
-
 
 <style lang="scss" scoped>
 @import "@/assets/styles/_base.scss";
@@ -1124,6 +1119,7 @@ export default {
   border-bottom: 1px solid $border-color;
   background: #f5f5f5;
   margin-bottom: 10px;
+  border-radius: 8px;
 }
 
 .form-section.active {
@@ -1135,13 +1131,74 @@ export default {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  margin-bottom: 12px;
 }
 
+.section-content {
+  display: flex;           /* vertical list */
+  flex-direction: column;
+  gap: 14px;               /* spacing between field cards */
+}
+
+/* Field "cards" */
+.form-group {
+  background: #ffffff;
+  border: 1px solid $border-color;
+  border-radius: 10px;
+  padding: 12px;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.05s ease;
+}
+.form-group:hover {
+  border-color: rgba(0,0,0,0.12);
+  box-shadow: 0 6px 12px rgba(0,0,0,0.06);
+}
+.form-group:focus-within {
+  border-color: rgba($primary-color, 0.6);
+  box-shadow: 0 0 0 3px rgba($primary-color, 0.12);
+}
+
+/* Header inside each card */
+.field-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.field-header > label {
+  font-weight: 600;
+  color: #111827;
+  line-height: 1.25;
+}
+
+/* Small icon-only buttons for field actions */
+.icon-button {
+  border: none;
+  background: transparent;
+  padding: 6px;
+  border-radius: 8px;
+  cursor: pointer;
+  line-height: 0;
+  transition: background 0.15s ease, transform 0.02s ease;
+}
+.icon-button:hover { background: rgba(0,0,0,0.06); }
+.icon-button:active { transform: scale(0.98); }
+.icon-button i { font-size: 14px; color: #374151; }
+
+/* Compact actions row */
 .field-actions {
   display: flex;
-  gap: 10px;
+  gap: 6px;
 }
 
+/* Input area in the card */
+.field-box {
+  margin-top: 6px;
+}
+
+/* Radios & checkboxes styling preserved */
 .field-header .checkbox-label {
   display: flex;
   align-items: center;
@@ -1181,10 +1238,6 @@ export default {
 
 .field-header .checkbox-label input[type="checkbox"]:hover:not(:checked) {
   border-color: #666;
-}
-
-.field-box {
-  margin-top: 10px;
 }
 
 .field-box .radio-group {
@@ -1249,36 +1302,27 @@ export default {
   border-color: #666;
 }
 
-.field-box .field-actions {
-  display: flex;
-  gap: 10px;
-  margin-top: 10px;
-}
-
-.edit-options-button {
-  background: $secondary-color;
-  border: 1px solid $border-color;
-  border-radius: 4px;
-  padding: 4px 8px;
-  font-size: 12px;
-  cursor: pointer;
-  transition: background 0.2s;
-}
-
-.edit-options-button:hover {
-  background: $primary-color;
-  color: white;
-  border-color: $primary-color;
-}
-
+/* Inputs in cards */
 input,
 textarea,
 select {
   width: 100%;
-  padding: 8px;
+  padding: 10px;
   border: 1px solid $border-color;
-  border-radius: 5px;
+  border-radius: 8px;
   margin-top: 5px;
+  background: #fff;
+}
+
+textarea {
+  resize: vertical;
+}
+
+/* Help text inside cards */
+.help-text {
+  display: inline-block;
+  margin-top: 6px;
+  color: #6b7280;
 }
 
 /* FORM ACTIONS */
@@ -1377,7 +1421,7 @@ select {
   margin-top: 5px;
 }
 
-/* Date format list styles previously used have been removed with the old dialog */
+/* Template buttons */
 .template-button {
   display: flex;
   flex-direction: column;
