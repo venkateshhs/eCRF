@@ -239,7 +239,8 @@
                 v-else-if="field.type === 'select'"
                 :id="fieldId(mIdx, fIdx)"
                 v-model="entryData[currentSubjectIndex][currentVisitIndex][currentGroupIndex][mIdx][fIdx]"
-                :options="field.options || []"
+                :options="field.options || []
+                "
                 :multiple="!!field.constraints?.allowMultiple"
                 :readonly="!!field.constraints?.readonly"
                 :default-value="field.constraints?.defaultValue"
@@ -265,6 +266,18 @@
                 v-bind="getLinearProps(field)"
                 @update:modelValue="() => { clearError(mIdx, fIdx); validateField(mIdx, fIdx); }"
                 @change="validateField(mIdx, fIdx)"
+              />
+
+              <!-- FILE UPLOAD / LINK (runtime) -->
+              <FieldFileUpload
+                v-else-if="field.type === 'file'"
+                :id="fieldId(mIdx, fIdx)"
+                v-model="entryData[currentSubjectIndex][currentVisitIndex][currentGroupIndex][mIdx][fIdx]"
+                :constraints="field.constraints || {}"
+                :readonly="!!field.constraints?.readonly"
+                :required="!!field.constraints?.required"
+                stage="runtime"
+                @input="() => { clearError(mIdx, fIdx); validateField(mIdx, fIdx); }"
               />
 
               <!-- FALLBACK TEXT -->
@@ -436,6 +449,7 @@ import FieldTime from "@/components/fields/FieldTime.vue";
 import FieldSelect from "@/components/fields/FieldSelect.vue";
 import FieldSlider from "@/components/fields/FieldSlider.vue";
 import FieldLinearScale from "@/components/fields/FieldLinearScale.vue";
+import FieldFileUpload from "@/components/fields/FieldFileUpload.vue";
 
 import { createAjv, validateFieldValue } from "@/utils/jsonschemaValidation";
 
@@ -450,6 +464,7 @@ export default {
     FieldSelect,
     FieldSlider,
     FieldLinearScale,
+    FieldFileUpload,
   },
   data() {
     return {
@@ -556,7 +571,6 @@ export default {
       const step = Number.isFinite(+c.step) && +c.step > 0 ? +c.step : 1;
       const marks = Array.isArray(c.marks) ? c.marks : [];
       const props = { min, max, step, readonly: !!c.readonly, percent: !!c.percent, showTicks: !!c.showTicks, marks };
-      // eslint-disable-next-line no-console
       console.log("[Entry] getSliderProps", { label: field.label, props });
       return props;
     },
@@ -566,7 +580,6 @@ export default {
       let max = Number.isFinite(+c.max) ? Math.round(+c.max) : 5;
       if (max <= min) max = min + 1;
       const props = { min, max, leftLabel: c.leftLabel || "", rightLabel: c.rightLabel || "", readonly: !!c.readonly };
-      // eslint-disable-next-line no-console
       console.log("[Entry] getLinearProps", { label: field.label, props });
       return props;
     },
@@ -577,7 +590,6 @@ export default {
 
     // ----- constraint helper (dialog) -----
     hasConstraints(field) {
-      // Only show if there are constraints OTHER than 'required' and 'helpText'
       const c = field?.constraints || {};
       const keys = Object.keys(c).filter((k) => k !== "required" && k !== "helpText");
       return keys.length > 0;
@@ -586,7 +598,6 @@ export default {
       const c = field?.constraints || {};
       const parts = [];
 
-      // Intentionally exclude "Required" and "Help"
       if (c.readonly) parts.push("Read-only");
 
       if (field.type === "slider") {
@@ -605,7 +616,6 @@ export default {
           parts.push(`Range: ${c.min ?? 1}–${c.max ?? 5} (integers)`);
           if (c.leftLabel) parts.push(`Left: “${c.leftLabel}”`);
           if (c.rightLabel) parts.push(`Right: “${c.rightLabel}”`);
-          // (no point labels shown for linear)
         }
         return parts.length ? parts : ["No constraints."];
       }
@@ -645,6 +655,18 @@ export default {
         parts.push("Multiple selection: allowed");
       }
 
+      if (field.type === "file") {
+        const allowed = Array.isArray(c.allowedFormats) && c.allowedFormats.length ? c.allowedFormats.join(", ") : "—";
+        const sizeMB = Number.isFinite(c.maxSizeMB) && c.maxSizeMB > 0 ? c.maxSizeMB : 100;
+        const storage = (c.storagePreference === "url") ? "Link via URL" : "Local upload";
+        parts.push(`Storage: ${storage}`);
+        parts.push(`Allowed: ${allowed}`);
+        parts.push(`Max size: ${sizeMB} MB`);
+        if (Array.isArray(c.modalities) && c.modalities.length) {
+          parts.push(`Modalities: ${c.modalities.join(", ")}`);
+        }
+      }
+
       return parts.length ? parts : ["No constraints."];
     },
     openConstraintDialog(field) {
@@ -669,7 +691,6 @@ export default {
       }
     },
     onFieldBlur(mIdx, fIdx) {
-      // if transform is configured, apply it on blur (for text/textarea)
       const def = this.selectedModels[mIdx].fields[fIdx] || {};
       const cons = def.constraints || {};
       if (def.type === "text" || def.type === "textarea") {
@@ -679,11 +700,9 @@ export default {
           this.entryData[this.currentSubjectIndex][this.currentVisitIndex][this.currentGroupIndex][mIdx][fIdx] = transformed;
         }
       }
-      // Always validate after blur
       this.validateField(mIdx, fIdx);
     },
     applyTransformsForSection() {
-      // Ensure data is canonicalized before final validation / save
       this.assignedModelIndices.forEach((mIdx) => {
         this.selectedModels[mIdx].fields.forEach((def, fIdx) => {
           if (!def) return;
@@ -728,7 +747,6 @@ export default {
         );
         this.study = resp.data;
         this.initializeEntryData();
-        // eslint-disable-next-line no-console
         console.log("[Entry] Study loaded", { id: studyId, models: (this.selectedModels || []).length });
       } catch (err) {
         this.showDialogMessage("Failed to load study details.");
@@ -742,10 +760,8 @@ export default {
         );
         this.existingEntries = Array.isArray(resp.data) ? resp.data : (resp.data?.entries || []);
         this.populateFromExisting();
-        // eslint-disable-next-line no-console
         console.log("[Entry] Existing entries", { count: (this.existingEntries || []).length });
       } catch (err) {
-        // eslint-disable-next-line no-console
         console.error("Failed to load existing entries", err);
       }
     },
@@ -756,8 +772,8 @@ export default {
       const t = String(f?.type || "").toLowerCase();
       const allowMulti = !!c.allowMultiple;
 
-      // SLIDER: never prefill
       if (t === "slider") return null;
+      if (t === "file") return null;
 
       if (!ignoreDefaults && Object.prototype.hasOwnProperty.call(c, "defaultValue")) return c.defaultValue;
       if (!ignoreDefaults && Object.prototype.hasOwnProperty.call(f, "value")) return f.value;
@@ -786,7 +802,6 @@ export default {
           }
           const next = this.defaultForField(f, { ignoreDefaults: false });
           this.entryData[s][v][g][mIdx][fIdx] = next;
-          // reset skip on clear
           this.skipFlags[s][v][g][mIdx][fIdx] = false;
           this.clearError(mIdx, fIdx);
         });
@@ -805,7 +820,6 @@ export default {
         )
       );
 
-      // skip flags
       this.skipFlags = Array.from({ length: nS }, () =>
         Array.from({ length: nV }, () =>
           Array.from({ length: nG }, () =>
@@ -834,7 +848,6 @@ export default {
           }
         }
       });
-      // eslint-disable-next-line no-console
       console.log("[Entry] Populated matrix from existing");
     },
 
@@ -849,7 +862,6 @@ export default {
       this.currentGroupIndex = idx >= 0 ? idx : 0;
       this.showSelection = false;
       this.validationErrors = {};
-      // eslint-disable-next-line no-console
       console.log("[Entry] Selected cell", { sIdx, vIdx, gIdx: this.currentGroupIndex });
     },
     backToSelection() {
@@ -875,7 +887,6 @@ export default {
       const s = this.currentSubjectIndex, v = this.currentVisitIndex, g = this.currentGroupIndex;
       if (!this.skipFlags[s] || !this.skipFlags[s][v] || !this.skipFlags[s][v][g]) return;
       this.skipFlags[s][v][g][mIdx][fIdx] = !!on;
-      // eslint-disable-next-line no-console
       console.log("[Entry] setSkipForField", { s, v, g, mIdx, fIdx, on });
     },
 
@@ -890,45 +901,49 @@ export default {
       const val = this.entryData[s][v][g][mIdx][fIdx];
       let isSkipped = !!this.skipFlags[s][v][g][mIdx][fIdx];
 
-      // helper to check "emptiness" per type
       const isEmpty = () => {
         if (def.type === "checkbox") return val !== true;
+        if (def.type === "file") {
+          if (!val || typeof val !== "object") return true;
+          const src = val.source;
+          if (src === "url") {
+            const u = val.url != null ? String(val.url).trim() : "";
+            return u === "";
+          }
+          if (src === "local") {
+            const name = (val.name || val.filename || "").toString().trim();
+            const sizeNum = typeof val.size === "number" ? val.size : Number(val.size);
+            return !(name && Number.isFinite(sizeNum) && sizeNum > 0);
+          }
+          return true;
+        }
         if (Array.isArray(val)) return val.length === 0;
         return (val == null || (typeof val === "string" && val.trim() === ""));
       };
 
-      // eslint-disable-next-line no-console
       console.log("[Entry] validateField", {
         s, v, g, mIdx, fIdx, type: def.type, required: !!cons.required, isSkipped, val
       });
 
-      // Always clear any previous error at the top
       this.clearError(mIdx, fIdx);
 
-      // If field is skipped:
-      // - Empty → bypass all validation AND ensure any old errors are cleared.
-      // - Non-empty → auto-unskip and proceed with normal validation.
       if (isSkipped) {
         if (isEmpty()) {
-          // eslint-disable-next-line no-console
           console.log("[Entry] Bypass validation because skipped+empty", { mIdx, fIdx });
           return true;
         }
-        // eslint-disable-next-line no-console
         console.log("[Entry] Auto-unskip because user entered a value", { mIdx, fIdx });
         this.setSkipForField(mIdx, fIdx, false);
         isSkipped = false;
       }
 
-      // Required emptiness check (only when not skipped)
       if (cons.required && isEmpty()) {
         this.setError(mIdx, fIdx, `${label} is required.`);
         return false;
       }
 
-      // SLIDER custom
       if (def.type === "slider") {
-        if (val == null || val === "") return true; // non-required empty handled already
+        if (val == null || val === "") return true;
         const mode = (cons.mode || "slider").toLowerCase();
         const n = Number(val);
         if (!Number.isFinite(n)) {
@@ -962,14 +977,12 @@ export default {
         }
       }
 
-      // Other types via Ajv (only if not empty or required)
       const { valid, message } = validateFieldValue(this.ajv, def, val);
       if (!valid) {
         this.setError(mIdx, fIdx, message || `${label} is invalid.`);
         return false;
       }
 
-      // extra date/time checks
       if (def.type === "date" && val) {
         const fmt = cons.dateFormat || "dd.MM.yyyy";
         const parse = (s) => {
@@ -1045,7 +1058,6 @@ export default {
           ok = ok && r;
         });
       });
-      // eslint-disable-next-line no-console
       console.log("[Entry] validateCurrentSection ->", ok, { errors: this.validationErrors });
       return ok;
     },
@@ -1063,6 +1075,16 @@ export default {
           const val = this.entryData[s][v][g][mIdx][fIdx];
           const empty =
             (f.type === "checkbox" ? val !== true :
+             f.type === "file" ? (() => {
+               if (!val || typeof val !== "object") return true;
+               if (val.source === "url") return !(val.url && String(val.url).trim());
+               if (val.source === "local") {
+                 const name = (val.name || val.filename || "").toString().trim();
+                 const sizeNum = typeof val.size === "number" ? val.size : Number(val.size);
+                 return !(name && Number.isFinite(sizeNum) && sizeNum > 0);
+               }
+               return true;
+             })() :
              Array.isArray(val) ? val.length === 0 :
              (val == null || (typeof val === "string" && val.trim() === "")));
           if (empty) {
@@ -1077,7 +1099,6 @@ export default {
           }
         });
       });
-      // eslint-disable-next-line no-console
       console.log("[Entry] computeRequiredFailures ->", items);
       return items;
     },
@@ -1087,7 +1108,6 @@ export default {
 
       const ok = this.validateCurrentSection();
 
-      // Filter out blocking, but ignore skipped fields (extra safety)
       const blocking = Object.entries(this.validationErrors)
         .filter(([k, msg]) => {
           if (!msg) return false;
@@ -1096,28 +1116,25 @@ export default {
           const { s, v, g, m, f } = idx;
           const isSkipped = !!(this.skipFlags[s]?.[v]?.[g]?.[m]?.[f]);
           if (isSkipped) return false;
-          return !/ is required\.$/.test(msg); // only non-required errors block
+          return !/ is required\.$/.test(msg);
         });
 
       if (!ok && blocking.length) {
         this.showDialogMessage("Please fix validation errors before saving.");
-        // eslint-disable-next-line no-console
         console.log("[Entry] Blocking errors present", blocking);
         return;
       }
 
       const requiredFailures = this.computeRequiredFailures();
       if (requiredFailures.length) {
-        // open skip dialog
+        const map = new Map(requiredFailures.map(it => [it.key, it]));
         this.skipCandidates = requiredFailures;
         this.skipSelections = requiredFailures.reduce((acc, it) => { acc[it.key] = false; return acc; }, {});
         this.showSkipDialog = true;
-        // eslint-disable-next-line no-console
-        console.log("[Entry] Opening skip dialog");
+        console.log("[Entry] Opening skip dialog", { count: map.size });
         return;
       }
 
-      // proceed save
       const s = this.currentSubjectIndex, v = this.currentVisitIndex, g = this.currentGroupIndex;
       const payload = {
         study_id: this.study.metadata.id,
@@ -1129,7 +1146,6 @@ export default {
       };
       const existingId = this.entryIds[s][v][g];
 
-      // eslint-disable-next-line no-console
       console.log("[Entry] Saving payload", { existingId, payload });
 
       try {
@@ -1153,7 +1169,6 @@ export default {
           const newId = resp?.data?.id;
           this.entryIds[s][v][g] = newId;
 
-          // Be defensive in case backend omits skipped_required_flags
           const saved = {
             id: newId,
             study_id: this.study.metadata.id,
@@ -1169,7 +1184,6 @@ export default {
           this.showDialogMessage("Data saved successfully.");
         }
       } catch (err) {
-        // eslint-disable-next-line no-console
         console.error(err);
         this.showDialogMessage("Failed to save data. Check console for details.");
       }
@@ -1179,21 +1193,18 @@ export default {
     confirmSkipSelection() {
       const s = this.currentSubjectIndex, v = this.currentVisitIndex, g = this.currentGroupIndex;
 
-      // apply selected skips and clear any existing error messages for them
       this.skipCandidates.forEach((it) => {
         const on = !!this.skipSelections[it.key];
         this.skipFlags[s][v][g][it.sectionIndex][it.fieldIndex] = on;
         if (on) {
           this.clearError(it.sectionIndex, it.fieldIndex);
         }
-        // eslint-disable-next-line no-console
         console.log("[Entry] confirmSkipSelection set", {
           s, v, g, m: it.sectionIndex, f: it.fieldIndex, on
         });
       });
       this.showSkipDialog = false;
 
-      // re-run save (will bypass validation for skipped+empty)
       this.submitData();
     },
     cancelSkipSelection() {
@@ -1242,7 +1253,6 @@ export default {
 
     // ---------- status colors for matrix ----------
     statusFor(sIdx, vIdx) {
-      // find group index for subject
       const subj = this.study.content.study_data.subjects[sIdx];
       const name = (subj.group || "").trim().toLowerCase();
       const gi = this.groupList.findIndex((g) => (g.name || "").trim().toLowerCase() === name);
@@ -1253,11 +1263,9 @@ export default {
       );
       if (!e) return "none";
 
-      // RED if any skipped required flags present
       const hasSkip = !!(e.skipped_required_flags && e.skipped_required_flags.some(row => Array.isArray(row) && row.some(Boolean)));
       if (hasSkip) return "skipped";
 
-      // else compute partial vs complete by filled values
       const assigned = this.assignments.map((_, i) => i).filter((i) => this.assignments[i]?.[vIdx]?.[gIdx]);
       const flat = assigned.flatMap((i) => e.data[i] || []);
       const total = flat.length;
