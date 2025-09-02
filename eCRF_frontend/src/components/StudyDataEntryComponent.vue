@@ -16,11 +16,10 @@
         <h1 class="study-name">{{ study.metadata.study_name }}</h1>
         <p class="study-description">{{ study.metadata.study_description }}</p>
         <p class="study-meta">
-          Subjects: {{ numberOfSubjects }} |
-          Visits: {{ visitList.length }} |
-          Groups: {{ groupList.length }}
+          Subjects: {{ numberOfSubjects }} | Visits: {{ visitList.length }} | Groups: {{ groupList.length }}
         </p>
       </div>
+
       <div class="details-panel">
         <div class="details-controls">
           <button @click="toggleDetails" class="details-toggle-btn">
@@ -36,14 +35,12 @@
             <i :class="icons.share"></i>
           </button>
         </div>
+
         <div v-if="showDetails" class="details-content">
           <div class="details-block">
             <strong>Study Info:</strong>
             <ul>
-              <li
-                v-for="[key, val] in Object.entries(study.content.study_data.study)"
-                :key="key"
-              >
+              <li v-for="[key, val] in Object.entries(study.content.study_data.study)" :key="key">
                 {{ key }}: {{ val }}
               </li>
             </ul>
@@ -51,10 +48,7 @@
           <div v-if="!showSelection" class="details-block">
             <strong>Visit Info:</strong>
             <ul>
-              <li
-                v-for="[key, val] in Object.entries(visitList[currentVisitIndex] || {})"
-                :key="key"
-              >
+              <li v-for="[key, val] in Object.entries(visitList[currentVisitIndex] || {})" :key="key">
                 {{ key }}: {{ val }}
               </li>
             </ul>
@@ -79,7 +73,11 @@
         <tbody>
           <tr v-for="(subject, sIdx) in study.content.study_data.subjects" :key="'subject-' + sIdx">
             <td class="subject-cell">{{ subject.id }}</td>
-            <td v-for="combo in visitCombos" :key="'visit-td-' + sIdx + '-' + combo.visitIndex" class="visit-cell">
+            <td
+              v-for="combo in visitCombos"
+              :key="'visit-td-' + sIdx + '-' + combo.visitIndex"
+              class="visit-cell"
+            >
               <button
                 class="select-btn"
                 :class="[ statusClass(sIdx, combo.visitIndex), { 'visit-2-btn': combo.visitIndex === 1 } ]"
@@ -103,12 +101,7 @@
           <strong>Visit:</strong> {{ visitList[currentVisitIndex].name }}
         </div>
         <!-- Legend trigger (far right) -->
-        <button
-          type="button"
-          class="legend-btn"
-          @click="openLegendDialog"
-          :title="'Legend / What does * mean?'"
-        >
+        <button type="button" class="legend-btn" @click="openLegendDialog" :title="'Legend / What does * mean?'">
           <i :class="icons.help || 'fas fa-question-circle'"></i>
         </button>
       </div>
@@ -121,11 +114,7 @@
         </h2>
 
         <div v-if="assignedModelIndices.length">
-          <div
-            v-for="mIdx in assignedModelIndices"
-            :key="mIdx"
-            class="section-block"
-          >
+          <div v-for="mIdx in assignedModelIndices" :key="mIdx" class="section-block">
             <h3>{{ selectedModels[mIdx].title }}</h3>
             <div
               v-for="(field, fIdx) in selectedModels[mIdx].fields"
@@ -291,32 +280,32 @@
                 @input="clearError(mIdx, fIdx)"
               />
 
-              <!-- ERROR MESSAGE -->
-              <div
-                v-if="fieldErrors(mIdx, fIdx)"
-                class="error-message"
-              >
+              <!-- ERROR MESSAGE + pill if skipped -->
+              <div v-if="fieldErrors(mIdx, fIdx)" class="error-message">
                 {{ fieldErrors(mIdx, fIdx) }}
+                <span
+                  v-if="isFieldSkipped(mIdx,fIdx)"
+                  class="skip-pill"
+                  title="Required validation skipped for this field"
+                >Skipped</span>
+              </div>
+              <div v-else-if="isFieldSkipped(mIdx,fIdx)" class="error-message">
+                <span class="skip-pill" title="Required validation skipped for this field">Skipped</span>
               </div>
             </div>
           </div>
 
-          <!-- Save Data Button -->
+          <!-- Actions -->
           <div class="form-actions">
             <button
               @click="submitData"
               class="btn-save"
-              :disabled="hasValidationErrors"
-              :title="hasValidationErrors ? 'Fix validation errors before saving' : 'Save Data'"
+              :disabled="blockingErrorsPresent"
+              :title="blockingErrorsPresent ? 'Fix validation errors before saving' : 'Save Data'"
             >
               Save Data
             </button>
-            <button
-              type="button"
-              class="btn-clear"
-              @click="clearCurrentSection"
-              title="Clear all selections/inputs in this section"
-            >
+            <button type="button" class="btn-clear" @click="clearCurrentSection" title="Clear all inputs">
               Clear
             </button>
           </div>
@@ -332,7 +321,11 @@
     <div v-if="showShareDialog" class="dialog-overlay">
       <div class="dialog">
         <h3>Generate Share Link</h3>
-        <p>Sharing for Subject {{ shareParams.subjectIndex != null ? study.content.study_data.subjects[shareParams.subjectIndex]?.id : 'N/A' }}, Visit {{ visitList[shareParams.visitIndex]?.name }}</p>
+        <p>
+          Sharing for Subject
+          {{ shareParams.subjectIndex != null ? study.content.study_data.subjects[shareParams.subjectIndex]?.id : 'N/A' }},
+          Visit {{ visitList[shareParams.visitIndex]?.name }}
+        </p>
         <label>
           Permission:
           <select v-model="shareConfig.permission">
@@ -346,11 +339,7 @@
         </label>
         <label>
           Expires in (days):
-          <input
-            type="number"
-            v-model.number="shareConfig.expiresInDays"
-            min="1"
-          />
+          <input type="number" v-model.number="shareConfig.expiresInDays" min="1" />
         </label>
         <div class="dialog-actions">
           <button @click="createShareLink">Generate</button>
@@ -378,9 +367,7 @@
       <div class="mini-dialog" role="dialog" aria-modal="true">
         <div class="mini-head">
           <h4 class="mini-title">{{ constraintDialogFieldName }}</h4>
-          <button class="mini-close" @click="closeConstraintDialog" aria-label="Close">
-            ✕
-          </button>
+          <button class="mini-close" @click="closeConstraintDialog" aria-label="Close">✕</button>
         </div>
         <ul class="mini-list">
           <li v-for="(line, idx) in constraintDialogItems" :key="idx">{{ line }}</li>
@@ -401,12 +388,36 @@
       </div>
     </div>
 
-    <!-- Custom Dialog for Notifications -->
-    <CustomDialog
-      :message="dialogMessage"
-      :isVisible="showDialog"
-      @close="closeDialog"
-    />
+    <!-- Old dialog (still for non-required blocking errors) -->
+    <CustomDialog :message="dialogMessage" :isVisible="showDialog" @close="closeDialog" />
+
+    <!-- Skip-Required Dialog -->
+    <div v-if="showSkipDialog" class="dialog-overlay">
+      <div class="dialog dialog-wide">
+        <h3>Fix validation before saving</h3>
+        <p>The fields below are required but empty. You can fill them now or choose to <em>Skip for now</em> to save the rest.</p>
+
+        <div class="skip-list">
+          <div class="skip-row" v-for="item in skipCandidates" :key="item.key">
+            <div class="skip-left">
+              <div class="skip-title"><strong>{{ item.sectionTitle }}</strong> / {{ item.fieldLabel }}</div>
+            </div>
+            <div class="skip-right">
+              <label class="skip-chk">
+                <input type="checkbox" v-model="skipSelections[item.key]" />
+                Skip for now
+              </label>
+              <button class="btn-jump" @click="jumpToField(item)">Go to field</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="dialog-actions">
+          <button @click="confirmSkipSelection" class="btn-primary">Skip selected & Save</button>
+          <button @click="cancelSkipSelection" class="btn-option">Cancel</button>
+        </div>
+      </div>
+    </div>
   </div>
 
   <div v-else class="loading">
@@ -438,7 +449,7 @@ export default {
     FieldTime,
     FieldSelect,
     FieldSlider,
-    FieldLinearScale
+    FieldLinearScale,
   },
   data() {
     return {
@@ -448,19 +459,27 @@ export default {
       currentSubjectIndex: null,
       currentVisitIndex: null,
       currentGroupIndex: 0,
+
       entryData: [],
+      skipFlags: [], // mirrors entryData shape; booleans per field
       validationErrors: {},
+
       icons,
       showShareDialog: false,
       shareParams: { subjectIndex: null, visitIndex: null, groupIndex: null },
       shareConfig: { permission: "view", maxUses: 1, expiresInDays: 7 },
       generatedLink: "",
       permissionError: false,
+
+      // dialogs
       showDialog: false,
       dialogMessage: "",
+      showSkipDialog: false,
+      skipCandidates: [],
+      skipSelections: {},
+
       existingEntries: [],
       entryIds: [],
-      // Ajv instance
       ajv: null,
 
       // Small constraints dialog state
@@ -474,47 +493,42 @@ export default {
   },
 
   computed: {
-    token() {
-      return this.$store.state.token;
-    },
-    visitList() {
-      return this.study?.content?.study_data?.visits || [];
-    },
-    groupList() {
-      return this.study?.content?.study_data?.groups || [];
-    },
-    selectedModels() {
-      return this.study?.content?.study_data?.selectedModels || [];
-    },
-    assignments() {
-      return this.study?.content?.study_data?.assignments || [];
-    },
+    token() { return this.$store.state.token; },
+    visitList() { return this.study?.content?.study_data?.visits || []; },
+    groupList() { return this.study?.content?.study_data?.groups || []; },
+    selectedModels() { return this.study?.content?.study_data?.selectedModels || []; },
+    assignments() { return this.study?.content?.study_data?.assignments || []; },
     numberOfSubjects() {
       const sd = this.study?.content?.study_data;
-      return sd?.subjectCount != null
-        ? sd.subjectCount
-        : sd.subjects?.length || 0;
+      return sd?.subjectCount != null ? sd.subjectCount : sd.subjects?.length || 0;
     },
     visitCombos() {
-      return this.visitList.map((visit, vIdx) => ({
-        visitIndex: vIdx,
-        label: `Visit: ${visit.name}`,
-      }));
+      return this.visitList.map((visit, vIdx) => ({ visitIndex: vIdx, label: `Visit: ${visit.name}` }));
     },
     assignedModelIndices() {
-      const v = this.currentVisitIndex;
-      const g = this.currentGroupIndex;
-      return this.selectedModels
-        .map((_, mIdx) => mIdx)
-        .filter((mIdx) => !!this.assignments[mIdx]?.[v]?.[g]);
+      const v = this.currentVisitIndex, g = this.currentGroupIndex;
+      return this.selectedModels.map((_, mIdx) => mIdx).filter((mIdx) => !!this.assignments[mIdx]?.[v]?.[g]);
     },
-    hasValidationErrors() {
-      return Object.keys(this.validationErrors).length > 0;
+
+    // Only block Save if there are *non-required* validation issues,
+    // and ignore any errors on fields that are currently skipped.
+    blockingErrorsPresent() {
+      const keys = Object.keys(this.validationErrors || {});
+      for (const k of keys) {
+        const msg = this.validationErrors[k];
+        if (!msg) continue;
+        const idx = this.parseKey(k);
+        if (!idx) continue;
+        const { s, v, g, m, f } = idx;
+        const isSkipped = !!(this.skipFlags[s]?.[v]?.[g]?.[m]?.[f]);
+        if (isSkipped) continue; // ignore skipped fields entirely
+        if (!/ is required\.$/.test(msg)) return true; // a blocking error
+      }
+      return false;
     },
   },
 
   async created() {
-    // init Ajv once
     this.ajv = createAjv();
 
     const studyId = this.$route.params.id;
@@ -523,30 +537,27 @@ export default {
   },
 
   methods: {
+    // ---------- key helpers ----------
+    errorKey(mIdx, fIdx) {
+      return [this.currentSubjectIndex, this.currentVisitIndex, this.currentGroupIndex, mIdx, fIdx].join("-");
+    },
+    parseKey(k) {
+      const parts = String(k).split("-").map((x) => parseInt(x, 10));
+      if (parts.length !== 5 || parts.some((n) => Number.isNaN(n))) return null;
+      const [s, v, g, m, f] = parts;
+      return { s, v, g, m, f };
+    },
+
+    // ---------- slider props ----------
     getSliderProps(field) {
       const c = field?.constraints || {};
       const min = c.percent ? 1 : (Number.isFinite(+c.min) ? +c.min : 1);
       const max = c.percent ? 100 : (Number.isFinite(+c.max) ? +c.max : (c.percent ? 100 : 5));
       const step = Number.isFinite(+c.step) && +c.step > 0 ? +c.step : 1;
       const marks = Array.isArray(c.marks) ? c.marks : [];
-
-      const props = {
-        min, max, step,
-        readonly: !!c.readonly,
-        percent: !!c.percent,
-        showTicks: !!c.showTicks,
-        marks
-      };
-
-      // Helpful debug (once per render; okay while diagnosing labels)
-      try {
-        // eslint-disable-next-line no-console
-        console.log(
-          "[StudyDataEntry] Slider props for",
-          field.label,
-          JSON.parse(JSON.stringify(props))
-        );
-      } catch (_) {/* ignore */}
+      const props = { min, max, step, readonly: !!c.readonly, percent: !!c.percent, showTicks: !!c.showTicks, marks };
+      // eslint-disable-next-line no-console
+      console.log("[Entry] getSliderProps", { label: field.label, props });
       return props;
     },
     getLinearProps(field) {
@@ -554,39 +565,21 @@ export default {
       const min = Number.isFinite(+c.min) ? Math.round(+c.min) : 1;
       let max = Number.isFinite(+c.max) ? Math.round(+c.max) : 5;
       if (max <= min) max = min + 1;
-      const props = {
-        min, max,
-        leftLabel: c.leftLabel || "",
-        rightLabel: c.rightLabel || "",
-        readonly: !!c.readonly
-        // NOTE: no point labels in linear mode per requirements
-      };
-      try {
-        // eslint-disable-next-line no-console
-        console.log(
-          "[StudyDataEntry] Linear props for",
-          field.label,
-          JSON.parse(JSON.stringify(props))
-        );
-      } catch (_) {/* ignore */}
+      const props = { min, max, leftLabel: c.leftLabel || "", rightLabel: c.rightLabel || "", readonly: !!c.readonly };
+      // eslint-disable-next-line no-console
+      console.log("[Entry] getLinearProps", { label: field.label, props });
       return props;
     },
 
-    // ----- legend dialog controls -----
-    openLegendDialog() {
-      this.showLegendDialog = true;
-    },
-    closeLegendDialog() {
-      this.showLegendDialog = false;
-    },
+    // ---------- legend ----------
+    openLegendDialog() { this.showLegendDialog = true; },
+    closeLegendDialog() { this.showLegendDialog = false; },
 
     // ----- constraint helper (dialog) -----
     hasConstraints(field) {
       // Only show if there are constraints OTHER than 'required' and 'helpText'
       const c = field?.constraints || {};
-      const keys = Object.keys(c).filter(
-        (k) => k !== "required" && k !== "helpText"
-      );
+      const keys = Object.keys(c).filter((k) => k !== "required" && k !== "helpText");
       return keys.length > 0;
     },
     buildConstraintList(field) {
@@ -622,7 +615,7 @@ export default {
         if (typeof c.maxLength === "number") parts.push(`Max length: ${c.maxLength}`);
         if (c.pattern) parts.push(`Pattern: ${c.pattern}`);
         if (c.transform && c.transform !== "none") {
-          const t = c.transform.charAt(0).toUpperCase() + c.transform.slice(1);
+          const t = c.transform.charAt(0).toUpperCase() + c.transform.slice(1).toLowerCase();
           parts.push(`Transform on save: ${t}`);
         }
       }
@@ -669,14 +662,10 @@ export default {
     applyTransform(transform, value) {
       const v = value == null ? "" : String(value);
       switch (String(transform || "none").toLowerCase()) {
-        case "uppercase":
-          return v.toUpperCase();
-        case "lowercase":
-          return v.toLowerCase();
-        case "capitalize":
-          return v.replace(/\b\w+/g, (w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase());
-        default:
-          return v;
+        case "uppercase": return v.toUpperCase();
+        case "lowercase": return v.toLowerCase();
+        case "capitalize": return v.replace(/\b\w+/g, (w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase());
+        default: return v;
       }
     },
     onFieldBlur(mIdx, fIdx) {
@@ -684,20 +673,10 @@ export default {
       const def = this.selectedModels[mIdx].fields[fIdx] || {};
       const cons = def.constraints || {};
       if (def.type === "text" || def.type === "textarea") {
-        const cur =
-          this.entryData[this.currentSubjectIndex][this.currentVisitIndex][
-            this.currentGroupIndex
-          ][mIdx][fIdx];
+        const cur = this.entryData[this.currentSubjectIndex][this.currentVisitIndex][this.currentGroupIndex][mIdx][fIdx];
         const transformed = this.applyTransform(cons.transform, cur);
         if (transformed !== cur) {
-          this.$set
-            ? this.$set(
-                this.entryData[this.currentSubjectIndex][this.currentVisitIndex][this.currentGroupIndex][mIdx],
-                fIdx,
-                transformed
-              )
-            : (this.entryData[this.currentSubjectIndex][this.currentVisitIndex][this.currentGroupIndex][mIdx][fIdx] =
-                transformed);
+          this.entryData[this.currentSubjectIndex][this.currentVisitIndex][this.currentGroupIndex][mIdx][fIdx] = transformed;
         }
       }
       // Always validate after blur
@@ -710,30 +689,17 @@ export default {
           if (!def) return;
           const cons = def.constraints || {};
           if (def.type === "text" || def.type === "textarea") {
-            const cur =
-              this.entryData[this.currentSubjectIndex][this.currentVisitIndex][
-                this.currentGroupIndex
-              ][mIdx][fIdx];
-            const transformed = this.applyTransform(cons.transform, cur);
-            if (transformed !== cur) {
-              this.entryData[this.currentSubjectIndex][this.currentVisitIndex][this.currentGroupIndex][mIdx][fIdx] =
-                transformed;
+            const cur = this.entryData[this.currentSubjectIndex][this.currentVisitIndex][this.currentGroupIndex][mIdx][fIdx];
+            const t = this.applyTransform(cons.transform, cur);
+            if (t !== cur) {
+              this.entryData[this.currentSubjectIndex][this.currentVisitIndex][this.currentGroupIndex][mIdx][fIdx] = t;
             }
           }
         });
       });
     },
 
-    // ----- helpers for error state -----
-    errorKey(mIdx, fIdx) {
-      return [
-        this.currentSubjectIndex,
-        this.currentVisitIndex,
-        this.currentGroupIndex,
-        mIdx,
-        fIdx,
-      ].join("-");
-    },
+    // ---------- error helpers ----------
     setError(mIdx, fIdx, msg) {
       const k = this.errorKey(mIdx, fIdx);
       this.validationErrors = { ...this.validationErrors, [k]: msg };
@@ -762,18 +728,8 @@ export default {
         );
         this.study = resp.data;
         this.initializeEntryData();
-
-        // Debug: log any slider constraints present at load-time
-        try {
-          (this.selectedModels || []).forEach((sect) => {
-            (sect.fields || []).forEach((f) => {
-              if (f.type === 'slider') {
-                // eslint-disable-next-line no-console
-                console.log("[StudyDataEntry] Loaded slider constraints:", f.label, JSON.parse(JSON.stringify(f.constraints || {})));
-              }
-            });
-          });
-        } catch (_) {/* ignore */}
+        // eslint-disable-next-line no-console
+        console.log("[Entry] Study loaded", { id: studyId, models: (this.selectedModels || []).length });
       } catch (err) {
         this.showDialogMessage("Failed to load study details.");
       }
@@ -786,11 +742,15 @@ export default {
         );
         this.existingEntries = Array.isArray(resp.data) ? resp.data : (resp.data?.entries || []);
         this.populateFromExisting();
+        // eslint-disable-next-line no-console
+        console.log("[Entry] Existing entries", { count: (this.existingEntries || []).length });
       } catch (err) {
+        // eslint-disable-next-line no-console
         console.error("Failed to load existing entries", err);
       }
     },
 
+    // ---------- defaults, clear ----------
     defaultForField(f, { ignoreDefaults = false } = {}) {
       const c = f?.constraints || {};
       const t = String(f?.type || "").toLowerCase();
@@ -799,36 +759,23 @@ export default {
       // SLIDER: never prefill
       if (t === "slider") return null;
 
-      if (!ignoreDefaults && Object.prototype.hasOwnProperty.call(c, "defaultValue")) {
-        return c.defaultValue;
-      }
-      if (!ignoreDefaults && Object.prototype.hasOwnProperty.call(f, "value")) {
-        return f.value;
-      }
+      if (!ignoreDefaults && Object.prototype.hasOwnProperty.call(c, "defaultValue")) return c.defaultValue;
+      if (!ignoreDefaults && Object.prototype.hasOwnProperty.call(f, "value")) return f.value;
 
-      // "Empty" shape for clear/reset of user input
       switch (t) {
-        case "checkbox":
-          return false;
+        case "checkbox": return false;
         case "radio":
-        case "select":
-          return allowMulti ? [] : "";
-        case "number":
-          return "";
+        case "select": return allowMulti ? [] : "";
+        case "number": return "";
         case "date":
         case "time":
         case "text":
         case "textarea":
-        default:
-          return "";
+        default: return "";
       }
     },
-
     clearCurrentSection() {
-      const s = this.currentSubjectIndex;
-      const v = this.currentVisitIndex;
-      const g = this.currentGroupIndex;
-
+      const s = this.currentSubjectIndex, v = this.currentVisitIndex, g = this.currentGroupIndex;
       this.assignedModelIndices.forEach((mIdx) => {
         const section = this.selectedModels[mIdx];
         section.fields.forEach((f, fIdx) => {
@@ -839,48 +786,56 @@ export default {
           }
           const next = this.defaultForField(f, { ignoreDefaults: false });
           this.entryData[s][v][g][mIdx][fIdx] = next;
+          // reset skip on clear
+          this.skipFlags[s][v][g][mIdx][fIdx] = false;
           this.clearError(mIdx, fIdx);
         });
       });
     },
-
     initializeEntryData() {
-      const nS = this.numberOfSubjects,
-            nV = this.visitList.length,
-            nG = this.groupList.length;
+      const nS = this.numberOfSubjects;
+      const nV = this.visitList.length;
+      const nG = this.groupList.length;
 
       this.entryData = Array.from({ length: nS }, () =>
         Array.from({ length: nV }, () =>
           Array.from({ length: nG }, () =>
-            this.selectedModels.map((sect) =>
-              sect.fields.map((f) => this.defaultForField(f))
-            )
+            this.selectedModels.map((sect) => sect.fields.map((f) => this.defaultForField(f)))
+          )
+        )
+      );
+
+      // skip flags
+      this.skipFlags = Array.from({ length: nS }, () =>
+        Array.from({ length: nV }, () =>
+          Array.from({ length: nG }, () =>
+            this.selectedModels.map((sect) => sect.fields.map(() => false))
           )
         )
       );
 
       this.entryIds = Array.from({ length: nS }, () =>
-        Array.from({ length: nV }, () =>
-          Array.from({ length: nG }, () => null)
-        )
+        Array.from({ length: nV }, () => Array.from({ length: nG }, () => null))
       );
 
       this.validationErrors = {};
     },
-
     populateFromExisting() {
       this.initializeEntryData();
       (Array.isArray(this.existingEntries) ? this.existingEntries : []).forEach((e) => {
         const { subject_index: s, visit_index: v, group_index: g, data, id } = e;
-        if (
-          this.entryData[s] &&
-          this.entryData[s][v] &&
-          this.entryData[s][v][g]
-        ) {
+        if (this.entryData[s] && this.entryData[s][v] && this.entryData[s][v][g]) {
           this.entryData[s][v][g] = data;
           this.entryIds[s][v][g] = id;
+
+          const storedSkips = e.skipped_required_flags || e.skips;
+          if (storedSkips) {
+            this.skipFlags[s][v][g] = storedSkips;
+          }
         }
       });
+      // eslint-disable-next-line no-console
+      console.log("[Entry] Populated matrix from existing");
     },
 
     selectCell(sIdx, vIdx) {
@@ -894,6 +849,8 @@ export default {
       this.currentGroupIndex = idx >= 0 ? idx : 0;
       this.showSelection = false;
       this.validationErrors = {};
+      // eslint-disable-next-line no-console
+      console.log("[Entry] Selected cell", { sIdx, vIdx, gIdx: this.currentGroupIndex });
     },
     backToSelection() {
       this.showSelection = true;
@@ -903,75 +860,98 @@ export default {
       this.currentGroupIndex = 0;
       this.validationErrors = {};
     },
-    toggleDetails() {
-      this.showDetails = !this.showDetails;
-    },
+    toggleDetails() { this.showDetails = !this.showDetails; },
 
     fieldId(mIdx, fIdx) {
       return `s${this.currentSubjectIndex}_v${this.currentVisitIndex}_g${this.currentGroupIndex}_m${mIdx}_f${fIdx}`;
     },
 
-    // ----- Validation -----
+    // ---------- skip helpers ----------
+    isFieldSkipped(mIdx, fIdx) {
+      const s = this.currentSubjectIndex, v = this.currentVisitIndex, g = this.currentGroupIndex;
+      return !!(this.skipFlags[s]?.[v]?.[g]?.[mIdx]?.[fIdx]);
+    },
+    setSkipForField(mIdx, fIdx, on) {
+      const s = this.currentSubjectIndex, v = this.currentVisitIndex, g = this.currentGroupIndex;
+      if (!this.skipFlags[s] || !this.skipFlags[s][v] || !this.skipFlags[s][v][g]) return;
+      this.skipFlags[s][v][g][mIdx][fIdx] = !!on;
+      // eslint-disable-next-line no-console
+      console.log("[Entry] setSkipForField", { s, v, g, mIdx, fIdx, on });
+    },
+
+    // ---------- validation ----------
     validateField(mIdx, fIdx) {
       const def = this.selectedModels[mIdx].fields[fIdx] || {};
       const cons = def.constraints || {};
       const label = def.label || "This field";
 
-      const val =
-        this.entryData[this.currentSubjectIndex][this.currentVisitIndex][
-          this.currentGroupIndex
-        ][mIdx][fIdx];
+      const s = this.currentSubjectIndex, v = this.currentVisitIndex, g = this.currentGroupIndex;
 
-      // clear prior error
+      const val = this.entryData[s][v][g][mIdx][fIdx];
+      let isSkipped = !!this.skipFlags[s][v][g][mIdx][fIdx];
+
+      // helper to check "emptiness" per type
+      const isEmpty = () => {
+        if (def.type === "checkbox") return val !== true;
+        if (Array.isArray(val)) return val.length === 0;
+        return (val == null || (typeof val === "string" && val.trim() === ""));
+      };
+
+      // eslint-disable-next-line no-console
+      console.log("[Entry] validateField", {
+        s, v, g, mIdx, fIdx, type: def.type, required: !!cons.required, isSkipped, val
+      });
+
+      // Always clear any previous error at the top
       this.clearError(mIdx, fIdx);
 
-      // Required emptiness check
-      if (cons.required) {
-        let empty = false;
-        if (def.type === "checkbox") {
-          empty = val !== true; // must be checked
-        } else if (Array.isArray(val)) {
-          empty = val.length === 0;
-        } else {
-          empty = (val == null || (typeof val === "string" && val.trim() === ""));
+      // If field is skipped:
+      // - Empty → bypass all validation AND ensure any old errors are cleared.
+      // - Non-empty → auto-unskip and proceed with normal validation.
+      if (isSkipped) {
+        if (isEmpty()) {
+          // eslint-disable-next-line no-console
+          console.log("[Entry] Bypass validation because skipped+empty", { mIdx, fIdx });
+          return true;
         }
-        if (empty) {
-          this.setError(mIdx, fIdx, `${label} is required.`);
-          return false;
-        }
+        // eslint-disable-next-line no-console
+        console.log("[Entry] Auto-unskip because user entered a value", { mIdx, fIdx });
+        this.setSkipForField(mIdx, fIdx, false);
+        isSkipped = false;
       }
 
-      // SLIDER: custom validation (skip Ajv here)
-      if (def.type === "slider") {
-        const mode = (cons.mode || "slider").toLowerCase();
-        if (val == null || val === "") {
-          // if required & empty we already handled; otherwise allow empty
-          return !cons.required;
-        }
+      // Required emptiness check (only when not skipped)
+      if (cons.required && isEmpty()) {
+        this.setError(mIdx, fIdx, `${label} is required.`);
+        return false;
+      }
 
+      // SLIDER custom
+      if (def.type === "slider") {
+        if (val == null || val === "") return true; // non-required empty handled already
+        const mode = (cons.mode || "slider").toLowerCase();
         const n = Number(val);
         if (!Number.isFinite(n)) {
           this.setError(mIdx, fIdx, `${label} must be a number.`);
           return false;
         }
-
         if (mode === "slider") {
           const min = cons.percent ? 1 : (Number.isFinite(+cons.min) ? +cons.min : 1);
           const max = cons.percent ? 100 : (Number.isFinite(+cons.max) ? +cons.max : (cons.percent ? 100 : 5));
           const step = Number.isFinite(+cons.step) && +cons.step > 0 ? +cons.step : 1;
-
           if (n < min || n > max) {
             this.setError(mIdx, fIdx, `${label} must be between ${min} and ${max}.`);
             return false;
           }
-          // if step is integer-like, enforce nearest integer stepping when step >= 1
-          if (step >= 1 && Math.abs((n - min) / step - Math.round((n - min) / step)) > 1e-9) {
-            this.setError(mIdx, fIdx, `${label} must align to step ${step}.`);
-            return false;
+          if (step >= 1) {
+            const k = (n - min) / step;
+            if (Math.abs(k - Math.round(k)) > 1e-9) {
+              this.setError(mIdx, fIdx, `${label} must align to step ${step}.`);
+              return false;
+            }
           }
           return true;
         } else {
-          // linear scale: enforce integer in range
           const min = Number.isFinite(+cons.min) ? Math.round(+cons.min) : 1;
           const max = Number.isFinite(+cons.max) ? Math.round(+cons.max) : 5;
           if (n < min || n > max || Math.round(n) !== n) {
@@ -982,14 +962,14 @@ export default {
         }
       }
 
-      // JSON Schema validation for other types
+      // Other types via Ajv (only if not empty or required)
       const { valid, message } = validateFieldValue(this.ajv, def, val);
       if (!valid) {
         this.setError(mIdx, fIdx, message || `${label} is invalid.`);
         return false;
       }
 
-      // date/time min/max checks (unchanged)
+      // extra date/time checks
       if (def.type === "date" && val) {
         const fmt = cons.dateFormat || "dd.MM.yyyy";
         const parse = (s) => {
@@ -1002,9 +982,9 @@ export default {
             "MM-yyyy": /^(\d{2})-(\d{4})$/,
             "yyyy/MM": /^(\d{4})\/(\d{2})$/,
             "yyyy-MM": /^(\d{4})-(\d{2})$/,
-            "yyyy": /^(\d{4})$/
+            "yyyy": /^(\d{4})$/,
           };
-          const rx = map[fmt];
+          const rx = map[fmt] || map[fmt.replace(".", "\\.")];
           if (!rx) return null;
           const m = rx.exec(String(s));
           if (!m) return null;
@@ -1022,17 +1002,11 @@ export default {
         if (d) {
           if (cons.minDate) {
             const md = parse(cons.minDate);
-            if (md && d < md) {
-              this.setError(mIdx, fIdx, `${label} must be ≥ ${cons.minDate}.`);
-              return false;
-            }
+            if (md && d < md) { this.setError(mIdx, fIdx, `${def.label || "This field"} must be ≥ ${cons.minDate}.`); return false; }
           }
           if (cons.maxDate) {
             const xd = parse(cons.maxDate);
-            if (xd && d > xd) {
-              this.setError(mIdx, fIdx, `${label} must be ≤ ${cons.maxDate}.`);
-              return false;
-            }
+            if (xd && d > xd) { this.setError(mIdx, fIdx, `${def.label || "This field"} must be ≤ ${cons.maxDate}.`); return false; }
           }
         }
       }
@@ -1048,94 +1022,192 @@ export default {
         if (secs != null) {
           if (cons.minTime) {
             const m = toSec(cons.minTime);
-            if (m != null && secs < m) {
-              this.setError(mIdx, fIdx, `${label} must be ≥ ${cons.minTime}.`);
-              return false;
-            }
+            if (m != null && secs < m) { this.setError(mIdx, fIdx, `${def.label || "This field"} must be ≥ ${cons.minTime}.`); return false; }
           }
           if (cons.maxTime) {
             const x = toSec(cons.maxTime);
-            if (x != null && secs > x) {
-              this.setError(mIdx, fIdx, `${label} must be ≤ ${cons.maxTime}.`);
-              return false;
-            }
+            if (x != null && secs > x) { this.setError(mIdx, fIdx, `${def.label || "This field"} must be ≤ ${cons.maxTime}.`); return false; }
           }
         }
       }
-
       return true;
     },
 
     validateCurrentSection() {
       this.assignedModelIndices.forEach((mIdx) => {
-        this.selectedModels[mIdx].fields.forEach((_, fIdx) => {
-          this.clearError(mIdx, fIdx);
-        });
+        this.selectedModels[mIdx].fields.forEach((_, fIdx) => { this.clearError(mIdx, fIdx); });
       });
 
       let ok = true;
       this.assignedModelIndices.forEach((mIdx) => {
         this.selectedModels[mIdx].fields.forEach((_, fIdx) => {
-          if (!this.validateField(mIdx, fIdx)) ok = false;
+          const r = this.validateField(mIdx, fIdx);
+          ok = ok && r;
         });
       });
+      // eslint-disable-next-line no-console
+      console.log("[Entry] validateCurrentSection ->", ok, { errors: this.validationErrors });
       return ok;
+    },
+
+    // collect required failures (not skipped)
+    computeRequiredFailures() {
+      const s = this.currentSubjectIndex, v = this.currentVisitIndex, g = this.currentGroupIndex;
+      const items = [];
+      this.assignedModelIndices.forEach((mIdx) => {
+        const section = this.selectedModels[mIdx];
+        (section.fields || []).forEach((f, fIdx) => {
+          const c = f?.constraints || {};
+          if (!c.required) return;
+          if (this.skipFlags[s][v][g][mIdx][fIdx]) return;
+          const val = this.entryData[s][v][g][mIdx][fIdx];
+          const empty =
+            (f.type === "checkbox" ? val !== true :
+             Array.isArray(val) ? val.length === 0 :
+             (val == null || (typeof val === "string" && val.trim() === "")));
+          if (empty) {
+            items.push({
+              key: this.errorKey(mIdx, fIdx),
+              id: this.fieldId(mIdx, fIdx),
+              sectionIndex: mIdx,
+              fieldIndex: fIdx,
+              sectionTitle: section.title || `Section ${mIdx + 1}`,
+              fieldLabel: f.label || `Field ${fIdx + 1}`,
+            });
+          }
+        });
+      });
+      // eslint-disable-next-line no-console
+      console.log("[Entry] computeRequiredFailures ->", items);
+      return items;
     },
 
     async submitData() {
       this.applyTransformsForSection();
 
       const ok = this.validateCurrentSection();
-      if (!ok || this.hasValidationErrors) {
+
+      // Filter out blocking, but ignore skipped fields (extra safety)
+      const blocking = Object.entries(this.validationErrors)
+        .filter(([k, msg]) => {
+          if (!msg) return false;
+          const idx = this.parseKey(k);
+          if (!idx) return true;
+          const { s, v, g, m, f } = idx;
+          const isSkipped = !!(this.skipFlags[s]?.[v]?.[g]?.[m]?.[f]);
+          if (isSkipped) return false;
+          return !/ is required\.$/.test(msg); // only non-required errors block
+        });
+
+      if (!ok && blocking.length) {
         this.showDialogMessage("Please fix validation errors before saving.");
+        // eslint-disable-next-line no-console
+        console.log("[Entry] Blocking errors present", blocking);
         return;
       }
 
-      const s = this.currentSubjectIndex,
-        v = this.currentVisitIndex,
-        g = this.currentGroupIndex,
-        payload = {
-          study_id: this.study.metadata.id,
-          subject_index: s,
-          visit_index: v,
-          group_index: g,
-          data: this.entryData[s][v][g],
-        },
-        existingId = this.entryIds[s][v][g];
+      const requiredFailures = this.computeRequiredFailures();
+      if (requiredFailures.length) {
+        // open skip dialog
+        this.skipCandidates = requiredFailures;
+        this.skipSelections = requiredFailures.reduce((acc, it) => { acc[it.key] = false; return acc; }, {});
+        this.showSkipDialog = true;
+        // eslint-disable-next-line no-console
+        console.log("[Entry] Opening skip dialog");
+        return;
+      }
+
+      // proceed save
+      const s = this.currentSubjectIndex, v = this.currentVisitIndex, g = this.currentGroupIndex;
+      const payload = {
+        study_id: this.study.metadata.id,
+        subject_index: s,
+        visit_index: v,
+        group_index: g,
+        data: this.entryData[s][v][g],
+        skipped_required_flags: this.skipFlags[s][v][g],
+      };
+      const existingId = this.entryIds[s][v][g];
+
+      // eslint-disable-next-line no-console
+      console.log("[Entry] Saving payload", { existingId, payload });
+
       try {
         if (existingId) {
-          await axios.put(
+          const resp = await axios.put(
             `http://127.0.0.1:8000/forms/studies/${this.study.metadata.id}/data_entries/${existingId}`,
             payload,
             { headers: { Authorization: `Bearer ${this.token}` } }
           );
           this.showDialogMessage("Data updated successfully.");
           const idx = this.existingEntries.findIndex(x => x.id === existingId);
-          if (idx >= 0) this.existingEntries.splice(idx, 1, {
-            id: existingId,
-            study_id: this.study.metadata.id,
-            subject_index: s, visit_index: v, group_index: g,
-            data: this.entryData[s][v][g],
-            form_version: this.existingEntries[idx]?.form_version ?? 1,
-            created_at: this.existingEntries[idx]?.created_at
-          });
+          if (idx >= 0) {
+            this.existingEntries.splice(idx, 1, resp.data);
+          }
         } else {
           const resp = await axios.post(
             `http://127.0.0.1:8000/forms/studies/${this.study.metadata.id}/data`,
             payload,
             { headers: { Authorization: `Bearer ${this.token}` } }
           );
-          this.entryIds[s][v][g] = resp.data.id;
-          (this.existingEntries = this.existingEntries || []);
-          this.existingEntries.push(resp.data);
+          const newId = resp?.data?.id;
+          this.entryIds[s][v][g] = newId;
+
+          // Be defensive in case backend omits skipped_required_flags
+          const saved = {
+            id: newId,
+            study_id: this.study.metadata.id,
+            subject_index: s,
+            visit_index: v,
+            group_index: g,
+            data: this.entryData[s][v][g],
+            skipped_required_flags: resp?.data?.skipped_required_flags ?? this.skipFlags[s][v][g],
+            form_version: resp?.data?.form_version ?? 1,
+            created_at: resp?.data?.created_at ?? new Date().toISOString(),
+          };
+          (this.existingEntries = this.existingEntries || []).push(saved);
           this.showDialogMessage("Data saved successfully.");
         }
       } catch (err) {
+        // eslint-disable-next-line no-console
+        console.error(err);
         this.showDialogMessage("Failed to save data. Check console for details.");
       }
     },
 
-    // ----- share link dialog -----
+    // skip dialog actions
+    confirmSkipSelection() {
+      const s = this.currentSubjectIndex, v = this.currentVisitIndex, g = this.currentGroupIndex;
+
+      // apply selected skips and clear any existing error messages for them
+      this.skipCandidates.forEach((it) => {
+        const on = !!this.skipSelections[it.key];
+        this.skipFlags[s][v][g][it.sectionIndex][it.fieldIndex] = on;
+        if (on) {
+          this.clearError(it.sectionIndex, it.fieldIndex);
+        }
+        // eslint-disable-next-line no-console
+        console.log("[Entry] confirmSkipSelection set", {
+          s, v, g, m: it.sectionIndex, f: it.fieldIndex, on
+        });
+      });
+      this.showSkipDialog = false;
+
+      // re-run save (will bypass validation for skipped+empty)
+      this.submitData();
+    },
+    cancelSkipSelection() {
+      this.showSkipDialog = false;
+    },
+    jumpToField(item) {
+      this.showSkipDialog = false;
+      this.$nextTick(() => {
+        const el = document.getElementById(item.id);
+        if (el && typeof el.focus === "function") el.focus();
+      });
+    },
+
+    // share link
     openShareDialog(sIdx, vIdx, gIdx) {
       this.shareParams = { subjectIndex: sIdx, visitIndex: vIdx, groupIndex: gIdx };
       this.generatedLink = "";
@@ -1153,47 +1225,40 @@ export default {
         expires_in_days: this.shareConfig.expiresInDays,
       };
       try {
-        const resp = await axios.post(
-          "http://localhost:8000/forms/share-link/",
-          payload,
-          { headers: { Authorization: `Bearer ${this.token}` } }
-        );
+        const resp = await axios.post("http://localhost:8000/forms/share-link/", {
+          ...payload
+        }, {
+          headers: { Authorization: `Bearer ${this.token}` },
+        });
         this.generatedLink = resp.data.link;
       } catch (err) {
         if (err.response?.status === 403) this.permissionError = true;
       }
     },
 
-    // ----- UX dialog helpers -----
-    showDialogMessage(message) {
-      this.dialogMessage = message;
-      this.showDialog = true;
-    },
-    closeDialog() {
-      this.showDialog = false;
-      this.dialogMessage = "";
-    },
+    // dialogs
+    showDialogMessage(message) { this.dialogMessage = message; this.showDialog = true; },
+    closeDialog() { this.showDialog = false; this.dialogMessage = ""; },
 
-    // ----- status colors for selection matrix -----
+    // ---------- status colors for matrix ----------
     statusFor(sIdx, vIdx) {
+      // find group index for subject
       const subj = this.study.content.study_data.subjects[sIdx];
       const name = (subj.group || "").trim().toLowerCase();
-      const gi = this.groupList.findIndex(
-        (g) => (g.name || "").trim().toLowerCase() === name
-      );
+      const gi = this.groupList.findIndex((g) => (g.name || "").trim().toLowerCase() === name);
       const gIdx = gi >= 0 ? gi : 0;
 
       const e = (Array.isArray(this.existingEntries) ? this.existingEntries : []).find(
-        (x) =>
-          x.subject_index === sIdx &&
-          x.visit_index === vIdx &&
-          x.group_index === gIdx
+        (x) => x.subject_index === sIdx && x.visit_index === vIdx && x.group_index === gIdx
       );
       if (!e) return "none";
 
-      const assigned = this.assignments
-        .map((_, i) => i)
-        .filter((i) => this.assignments[i]?.[vIdx]?.[gIdx]);
+      // RED if any skipped required flags present
+      const hasSkip = !!(e.skipped_required_flags && e.skipped_required_flags.some(row => Array.isArray(row) && row.some(Boolean)));
+      if (hasSkip) return "skipped";
+
+      // else compute partial vs complete by filled values
+      const assigned = this.assignments.map((_, i) => i).filter((i) => this.assignments[i]?.[vIdx]?.[gIdx]);
       const flat = assigned.flatMap((i) => e.data[i] || []);
       const total = flat.length;
       const filled = flat.filter((v) => v != null && v !== "").length;
@@ -1202,47 +1267,37 @@ export default {
       return "partial";
     },
     statusClass(sIdx, vIdx) {
-      return `status-${this.statusFor(sIdx, vIdx)}`;
+      const s = this.statusFor(sIdx, vIdx);
+      return s === "skipped" ? "status-skipped" : `status-${s}`;
     },
   },
 };
 </script>
 
 <style scoped>
-/* unchanged styles */
-.selection-matrix {
-  width: 100%;
-  border-collapse: collapse;
-  margin-bottom: 32px;
-  table-layout: fixed;
-}
-.selection-matrix th,
-.selection-matrix td {
-  border: 1px solid #e5e7eb;
-  padding: 12px;
-  text-align: center;
-  vertical-align: middle;
-}
-.selection-matrix th {
-  background: #f9fafb;
-  font-weight: 600;
-  color: #1f2937;
-}
+/* matrix */
+.selection-matrix { width: 100%; border-collapse: collapse; margin-bottom: 32px; table-layout: fixed; }
+.selection-matrix th, .selection-matrix td { border: 1px solid #e5e7eb; padding: 12px; text-align: center; vertical-align: middle; }
+.selection-matrix th { background: #f9fafb; font-weight: 600; color: #1f2937; }
 .subject-cell { background: #f9fafb; font-weight: 500; color: #374151; width: 20%; }
 .visit-cell { width: 40%; }
 .select-btn { color: #fff; border: none; padding: 6px 12px; border-radius: 6px; cursor: pointer; font-size: 14px; transition: opacity 0.2s; display: block; margin: 0 auto; }
-.select-btn.status-none { background: #e5e7eb; color: #1f2937; }
-.select-btn.status-partial { background: #fbbf24; }
-.select-btn.status-complete { background: #16a34a; }
+.select-btn.status-none { background: #e5e7eb; color: #1f2937; }       /* gray */
+.select-btn.status-partial { background: #fbbf24; }                    /* yellow */
+.select-btn.status-complete { background: #16a34a; }                   /* green */
+.select-btn.status-skipped { background: #ef4444; }                    /* red */
 .select-btn:hover { opacity: 0.8; }
 
+/* container */
 .study-data-container { max-width: 960px; margin: 24px auto; padding: 24px; background: #ffffff; border-radius: 8px; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
 
+/* back buttons */
 .back-buttons-container { margin-bottom: 16px; }
 .btn-back { background: #d1d5db; color: #1f2937; border: none; padding: 8px 16px; border-radius: 6px; font-size: 14px; font-weight: 500; cursor: pointer; transition: background 0.2s; display: flex; align-items: center; gap: 6px; }
 .btn-back:hover { background: #9ca3af; }
 .btn-back i { font-size: 14px; }
 
+/* header */
 .study-header-container { margin-bottom: 24px; }
 .study-header { text-align: center; margin-bottom: 16px; }
 .study-name { font-size: 24px; font-weight: 600; color: #1f2937; margin-bottom: 8px; }
@@ -1250,6 +1305,7 @@ export default {
 .study-meta { font-size: 14px; color: #6b7280; }
 hr { margin: 12px 0; border: 0; border-top: 1px solid #e5e7eb; }
 
+/* details panel */
 .details-panel { margin-bottom: 16px; }
 .details-controls { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; }
 .details-toggle-btn { background: none; border: none; color: #374151; font-size: 14px; font-weight: 500; cursor: pointer; display: flex; align-items: center; gap: 6px; }
@@ -1263,11 +1319,13 @@ hr { margin: 12px 0; border: 0; border-top: 1px solid #e5e7eb; }
 .details-block ul { margin: 0 0 12px 16px; padding: 0; }
 .details-block li { font-size: 14px; color: #374151; }
 
+/* breadcrumb */
 .bread-crumb { background: #f9fafb; padding: 12px 16px; border: 1px solid #e5e7eb; border-radius: 6px; margin-bottom: 24px; font-size: 14px; color: #374151; display: flex; align-items: center; justify-content: space-between; }
 .crumb-left { display: flex; gap: 10px; flex-wrap: wrap; }
 .legend-btn { background: transparent; border: none; cursor: pointer; padding: 2px 6px; line-height: 1; color: #6b7280; }
 .legend-btn:hover { color: #374151; }
 
+/* section + fields */
 .entry-form-section h2 { font-size: 18px; font-weight: 600; color: #1f2937; margin-bottom: 16px; }
 .section-block { margin-bottom: 16px; padding: 16px; border: 1px solid #e5e7eb; border-radius: 6px; background: #ffffff; }
 .section-block h3 { margin: 0 0 12px 0; font-size: 16px; font-weight: 600; color: #1f2937; }
@@ -1279,29 +1337,34 @@ hr { margin: 12px 0; border: 0; border-top: 1px solid #e5e7eb; }
 .required { color: #dc2626; margin-left: 4px; }
 .help-inline { font-style: italic; color: #6b7280; margin-left: 8px; }
 
-input[type="text"],
-textarea,
-input[type="number"],
-input[type="date"],
-select { width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 6px; box-sizing: border-box; font-size: 14px; color: #1f2937; }
-input:focus,
-textarea:focus,
-select:focus { outline: none; border-color: #6b7280; box-shadow: 0 0 0 3px rgba(107, 114, 128, 0.1); }
+/* inputs */
+input[type="text"], textarea, input[type="number"], input[type="date"], select {
+  width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 6px; box-sizing: border-box; font-size: 14px; color: #1f2937;
+}
+input:focus, textarea:focus, select:focus { outline: none; border-color: #6b7280; box-shadow: 0 0 0 3px rgba(107, 114, 128, 0.1); }
+
+/* errors */
 .error-message { color: #dc2626; font-size: 12px; margin-top: 4px; }
+
+/* empty state */
 .no-assigned { font-style: italic; color: #6b7280; margin-top: 12px; }
+
+/* actions */
 .form-actions { text-align: right; margin-top: 16px; }
 .btn-save { background: #16a34a; color: #ffffff; border: none; padding: 8px 16px; border-radius: 6px; font-size: 14px; cursor: pointer; transition: background 0.2s; }
 .btn-save[disabled] { opacity: 0.5; cursor: not-allowed; }
 .btn-save:hover:not([disabled]) { background: #15803d; }
 
-.loading { text-align: center; padding: 50px; font-size: 16px; color: #6b7280; }
+.btn-clear { background: #e5e7eb; color: #1f2937; border: none; padding: 8px 16px; border-radius: 6px; font-size: 14px; cursor: pointer; margin-left: 8px; transition: background 0.2s; }
+.btn-clear:hover { background: #d1d5db; }
 
-.dialog-overlay { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.5); display: flex; align-items: center; justify-content: center; z-index: 1000; }
+/* overlay+dialogs */
+.loading { text-align: center; padding: 50px; font-size: 16px; color: #6b7280; }
+.dialog-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 1000; }
 .dialog { background: #ffffff; padding: 1.5rem; border-radius: 8px; width: 320px; max-width: 90%; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15); }
 .dialog h3 { margin: 0 0 1rem 0; font-size: 1.25rem; font-weight: 600; color: #1f2937; }
 .dialog label { display: block; margin-bottom: 0.75rem; font-size: 0.9rem; color: #374151; }
-.dialog label select,
-.dialog label input { width: 100%; margin-top: 0.25rem; padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 6px; font-size: 0.9rem; }
+.dialog label select, .dialog label input { width: 100%; margin-top: 0.25rem; padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 6px; font-size: 0.9rem; }
 .dialog-actions { display: flex; justify-content: flex-end; gap: 0.5rem; margin-top: 1rem; }
 .dialog-actions button:first-child { background: #e5e7eb; color: #1f2937; }
 .dialog-actions button:last-child { background: #e5e7eb; color: #1f2937; }
@@ -1310,7 +1373,8 @@ select:focus { outline: none; border-color: #6b7280; box-shadow: 0 0 0 3px rgba(
 .dialog p a { display: block; word-break: break-all; margin-top: 1rem; color: #374151; text-decoration: none; }
 .dialog p a:hover { text-decoration: underline; }
 
-.mini-overlay { position: fixed; inset: 0; background: rgba(17, 24, 39, 0.35); display: flex; align-items: center; justify-content: center; z-index: 1200; }
+/* mini dialog */
+.mini-overlay { position: fixed; inset: 0; background: rgba(17,24,39,0.35); display: flex; align-items: center; justify-content: center; z-index: 1200; }
 .mini-dialog { width: 360px; max-width: 92%; background: #fff; border-radius: 10px; box-shadow: 0 10px 30px rgba(0,0,0,0.25); padding: 12px 12px 10px; }
 .mini-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
 .mini-title { margin: 0; font-size: 16px; font-weight: 600; color: #111827; }
@@ -1319,16 +1383,30 @@ select:focus { outline: none; border-color: #6b7280; box-shadow: 0 0 0 3px rgba(
 .mini-list { margin: 0; padding-left: 18px; color: #374151; font-size: 14px; }
 .mini-list li { margin: 4px 0; }
 
-.btn-clear {
-  background: #e5e7eb;
-  color: #1f2937;
-  border: none;
-  padding: 8px 16px;
-  border-radius: 6px;
-  font-size: 14px;
-  cursor: pointer;
-  margin-left: 8px;
-  transition: background 0.2s;
+/* skip dialog */
+.dialog-wide { width: 680px; max-width: 95%; }
+.skip-list { max-height: 360px; overflow: auto; border: 1px dashed #e5e7eb; padding: 8px; border-radius: 8px; margin: 10px 0; }
+.skip-row { display: flex; align-items: center; justify-content: space-between; padding: 8px; border-bottom: 1px solid #f3f4f6; gap: 12px; }
+.skip-row:last-child { border-bottom: none; }
+.skip-left { min-width: 0; }
+.skip-title { font-size: 14px; color: #111827; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.skip-right { display: flex; align-items: center; gap: 8px; }
+.skip-chk { display: inline-flex; align-items: center; gap: 8px; }
+.btn-jump { background: #e5e7eb; color: #111827; border: none; padding: 6px 10px; border-radius: 6px; cursor: pointer; }
+.btn-jump:hover { background: #d1d5db; }
+
+.btn-primary { background: #2563eb; color: #fff; border: none; padding: 8px 14px; border-radius: 6px; cursor: pointer; }
+.btn-option { background: #e5e7eb; color: #111827; border: none; padding: 8px 14px; border-radius: 6px; cursor: pointer; }
+
+/* tiny pill near error */
+.skip-pill {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 6px;
+  font-size: 11px;
+  border-radius: 999px;
+  background: #fff7ed;
+  color: #9a3412;
+  border: 1px solid #fed7aa;
 }
-.btn-clear:hover { background: #d1d5db; }
 </style>
