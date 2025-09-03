@@ -16,7 +16,7 @@
           </label>
           <label class="chk">
             <input type="radio" value="linear" v-model="local.mode" />
-            Linear scale
+            Likert scale
           </label>
         </div>
       </div>
@@ -420,7 +420,7 @@
         <span class="err">Too many points ({{ linearCount }}). Limit is {{ LINEAR_MAX }} to avoid clutter.</span>
       </div>
       <div class="row note">
-        <span>Linear scale shows only endpoints (left/right). No step labels.</span>
+        <span>Likert scale shows only endpoints (left/right). No step labels.</span>
       </div>
     </section>
 
