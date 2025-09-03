@@ -60,14 +60,8 @@
   {
     "type": "file",
     "label": "File Upload",
-    "icon": "fas fa-file-upload",
+    "icon": "fas fa-paperclip",
     "default": null
-  },
-  {
-    "type": "button",
-    "label": "Button",
-    "icon": "fas fa-mouse-pointer",
-    "default": "Click Me"
   },
   {
   "type": "slider",

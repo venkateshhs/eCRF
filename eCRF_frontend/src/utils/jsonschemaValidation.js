@@ -16,6 +16,9 @@ const DATE_FORMATS = [
   "yyyy",
 ];
 
+const KB = 1024;
+const MB = 1024 * KB;
+
 function parseDateByFormat(str, fmt) {
   const s = String(str || "");
   let m;
@@ -74,6 +77,45 @@ function digitsCountOfNumber(val) {
   return s.replace(/[^0-9]/g, "").length;
 }
 
+// Match a local file's meta against accepts list
+function fileMetaMatchesAccept(meta, accepts) {
+  const name = String(meta?.name || meta?.filename || "").toLowerCase();
+  const mime = String(meta?.type || meta?.contentType || "").toLowerCase();
+  const checks = (accepts || []).map(a => String(a || "").trim().toLowerCase()).filter(Boolean);
+  if (!checks.length) return true;
+  return checks.some(a => {
+    if (a.endsWith("/*")) {
+      const base = a.slice(0, -2);
+      return mime.startsWith(base + "/");
+    }
+    if (a.startsWith(".")) {
+      return name.endsWith(a);
+    }
+    if (a.includes("/")) {
+      return mime === a;
+    }
+    return name.endsWith("." + a.replace(/^\./, ""));
+  });
+}
+
+// Match a URL pathname against accepts list (best-effort by extension)
+function urlMatchesAccept(urlStr, accepts) {
+  try {
+    const u = new URL(String(urlStr));
+    const path = (u.pathname || "").toLowerCase();
+    const checks = (accepts || []).map(a => String(a || "").trim().toLowerCase()).filter(Boolean);
+    if (!checks.length) return true;
+    return checks.some(a => {
+      if (a.endsWith("/*")) return true;
+      if (a.startsWith(".")) return path.endsWith(a);
+      if (a.includes("/")) return true;
+      return path.endsWith("." + a.replace(/^\./, ""));
+    });
+  } catch {
+    return false;
+  }
+}
+
 // ---------- AJV factory (v6 signature for addKeyword) ----------
 export function createAjv() {
   const ajv = new Ajv({
@@ -82,6 +124,9 @@ export function createAjv() {
 
   // Built-in formats we need
   ajv.addFormat("time", rxTime);
+
+  // Allow only http(s) for link-upload
+  ajv.addFormat("http-url", /^(https?:\/\/).+/i);
 
   // Custom date formats: "date:<fmt>"
   DATE_FORMATS.forEach((fmt) => {
@@ -295,6 +340,66 @@ export function createAjv() {
     validate: stepAlignValidate,
   });
 
+  // fileMatchesAccept (local file meta)
+  const fileMatchesAcceptValidate = function (accepts, data) {
+    if (!data || typeof data !== "object") return true;
+    if (!Array.isArray(accepts)) return true;
+    const meta = data.file && typeof data.file === "object" ? data.file : data;
+    const ok = fileMetaMatchesAccept(meta, accepts);
+    if (!ok) {
+      fileMatchesAcceptValidate.errors = [
+        { keyword: "fileMatchesAccept", params: {}, message: "type not allowed" },
+      ];
+    }
+    return ok;
+  };
+  ajv.addKeyword("fileMatchesAccept", {
+    type: "object",
+    errors: true,
+    metaSchema: { type: "array", items: { type: "string" } },
+    validate: fileMatchesAcceptValidate,
+  });
+
+  // urlMatchesAccept (best-effort by extension)
+  const urlMatchesAcceptValidate = function (accepts, data) {
+    if (!data || typeof data !== "string") return true;
+    if (!Array.isArray(accepts)) return true;
+    const ok = urlMatchesAccept(data, accepts);
+    if (!ok) {
+      urlMatchesAcceptValidate.errors = [
+        { keyword: "urlMatchesAccept", params: {}, message: "URL not in allowed formats" },
+      ];
+    }
+    return ok;
+  };
+  ajv.addKeyword("urlMatchesAccept", {
+    type: "string",
+    errors: true,
+    metaSchema: { type: "array", items: { type: "string" } },
+    validate: urlMatchesAcceptValidate,
+  });
+
+  // maxFileBytes (local meta.size limit)
+  const maxFileBytesValidate = function (limit, data) {
+    if (!data || typeof data !== "object") return true;
+    const meta = data.file && typeof data.file === "object" ? data.file : data;
+    const sz = (typeof meta?.size === "number") ? meta.size : Number(meta?.size);
+    if (!Number.isFinite(sz)) return true;
+    const ok = sz <= limit;
+    if (!ok) {
+      maxFileBytesValidate.errors = [
+        { keyword: "maxFileBytes", params: { limit }, message: `exceeds max size (${Math.round(limit / MB)} MB)` },
+      ];
+    }
+    return ok;
+  };
+  ajv.addKeyword("maxFileBytes", {
+    type: "object",
+    errors: true,
+    metaSchema: { type: "number", minimum: 1 },
+    validate: maxFileBytesValidate,
+  });
+
   return ajv;
 }
 
@@ -376,12 +481,71 @@ function buildSchemaForField(fieldDef) {
         type: "integer",
         minimum: min,
         maximum: max
-        // (no per-point labels for linear scale)
       };
+    }
+  } else if (type === "file") {
+    const accepts = Array.isArray(c.allowedFormats) ? c.allowedFormats : [];
+    const maxBytes = (Number.isFinite(c.maxSizeMB) && c.maxSizeMB > 0 ? c.maxSizeMB : 100) * MB;
+
+    const urlSchema = {
+      type: "object",
+      required: ["source", "url"],
+      properties: {
+        source: { const: "url" },
+        url: { type: "string", format: "http-url", urlMatchesAccept: accepts },
+        filename: { type: "string" },
+        contentType: { type: "string" }
+      },
+      additionalProperties: true
+    };
+
+    // accept both number and numeric-string for size; allow nested file meta too
+    const localBaseProps = {
+      source: { const: "local" },
+      name: { type: "string" },
+      size: { anyOf: [{ type: "number", minimum: 0 }, { type: "string", pattern: "^[0-9]+$" }] },
+      type: { type: "string" },
+      lastModified: { anyOf: [{ type: "number" }, { type: "string", pattern: "^[0-9]+$" }] }
+    };
+
+    const localSchemaFlat = {
+      type: "object",
+      required: ["source", "name", "size"],
+      properties: localBaseProps,
+      additionalProperties: true,
+      fileMatchesAccept: accepts,
+      maxFileBytes: maxBytes
+    };
+
+    const localSchemaNested = {
+      type: "object",
+      required: ["source", "file"],
+      properties: {
+        source: { const: "local" },
+        file: {
+          type: "object",
+          required: ["name", "size"],
+          properties: localBaseProps,
+          additionalProperties: true
+        }
+      },
+      additionalProperties: true,
+      fileMatchesAccept: accepts,
+      maxFileBytes: maxBytes
+    };
+
+    const pref = String(c.storagePreference || "local").toLowerCase();
+    if (pref === "url") {
+      schema = urlSchema;
+    } else if (pref === "local") {
+      schema = { oneOf: [localSchemaFlat, localSchemaNested] };
+    } else {
+      schema = { oneOf: [urlSchema, localSchemaFlat, localSchemaNested] };
     }
   } else {
     schema = { type: "string" };
   }
+
 
   Object.keys(schema).forEach((k) => schema[k] === undefined && delete schema[k]);
   return schema;
@@ -402,6 +566,9 @@ export function validateFieldValue(ajv, fieldDef, value) {
     if (t === "slider" && (value === "" || value == null)) {
       return { valid: !fieldDef?.constraints?.required };
     }
+    if (t === "file" && (value === "" || value == null)) {
+      return { valid: !fieldDef?.constraints?.required };
+    }
 
     const validate = ajv.compile(schema);
     const ok = validate(value);
@@ -419,10 +586,14 @@ export function validateFieldValue(ajv, fieldDef, value) {
       case "timeStep":
       case "minDateByFormat":
       case "maxDateByFormat":
+      case "fileMatchesAccept":
+      case "urlMatchesAccept":
+      case "maxFileBytes":
         return { valid: false, message: err.message || "Invalid value." };
       case "format":
         if (t === "time") return { valid: false, message: "Use HH:mm or HH:mm:ss" };
         if (t === "date") return { valid: false, message: `Use format ${fieldDef?.constraints?.dateFormat || "dd.MM.yyyy"}` };
+        if (t === "file") return { valid: false, message: "Use a valid http(s) URL." };
         return { valid: false, message: "Bad format." };
       case "enum":
         return { valid: false, message: "Choose a valid option." };
@@ -438,6 +609,8 @@ export function validateFieldValue(ajv, fieldDef, value) {
         return { valid: false, message: `Allows ≤ ${schema.maxLength} characters.` };
       case "pattern":
         return { valid: false, message: "Does not match required pattern." };
+      case "required":
+        return { valid: false, message: "This field is required." };
       default:
         return { valid: false, message: err.message || "Invalid value." };
     }

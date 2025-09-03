@@ -14,6 +14,10 @@
         <div v-if="showLegend" class="legend-content" @click.stop>
           <p><strong>-</strong>: No section is assigned to this subject's group for this visit.</p>
           <p><strong>(No data)</strong>: Section is assigned, but no data has been entered. Use the data entry form to add data.</p>
+          <p>
+            <span class="legend-swatch cell-skipped"></span>
+            <strong>Red cell</strong>: Required field was <em>skipped</em> when saving.
+          </p>
           <p>Data is displayed for each subject under the visit and section assigned to their group.</p>
         </div>
       </div>
@@ -89,7 +93,9 @@
               <td>{{ row.visit }}</td>
               <template v-for="(section, sIdx) in sections" :key="'row-sec-'+rowIdx+'-s'+sIdx">
                 <template v-for="(field, fIdx) in section.fields" :key="'cell-'+rowIdx+'-s'+sIdx+'-f'+fIdx">
-                  <td>{{ row[`s${sIdx}_f${fIdx}`] }}</td>
+                  <td :class="cellClass(row.__sIdx, row.__vIdx, sIdx, fIdx)">
+                    {{ row[`s${sIdx}_f${fIdx}`] }}
+                  </td>
                 </template>
               </template>
             </tr>
@@ -140,9 +146,9 @@ export default {
 
       // paging
       currentPage: 1,
-      pageSize: 50, // default 50 now
+      pageSize: 50,
       VIEW_ALL_MAX_ROWS: 1000,
-      viewAll: false, // toggle "view all" when small datasets
+      viewAll: false,
       isLoadingEntries: false,
     };
   },
@@ -168,11 +174,9 @@ export default {
       return this.totalGridRows > 0 && this.totalGridRows <= this.VIEW_ALL_MAX_ROWS;
     },
 
-    // Create the full (subjects × visits) grid for the *current* visible window.
-    // We still build rows locally so your header/filters/export logic remains unchanged.
+    // Build rows for the current visible window.
     filteredData() {
       let data = [];
-      // Which subject indices and visit indices are we showing right now?
       const { subjectIdxPageSet, visitIdxPageSet } = this.currentWindowIndexSets();
 
       this.subjects.forEach((subject, subjIdx) => {
@@ -182,17 +186,16 @@ export default {
         this.visits.forEach((visit, vIdx) => {
           if (!visitIdxPageSet.has(vIdx)) return;
 
-          const row = { subjectId: subject.id, visit: visit.name };
+          const row = { subjectId: subject.id, visit: visit.name, __sIdx: subjIdx, __vIdx: vIdx };
           this.sections.forEach((section, sIdx) => {
-            const isAssigned = this.study.content.study_data.assignments?.[sIdx]?.[vIdx]?.[groupIdx] || false;
+            const assigned = this.isAssigned(sIdx, vIdx, groupIdx);
             section.fields.forEach((field, fIdx) => {
               let value;
-              if (!isAssigned) {
+              if (!assigned) {
                 value = '-';
               } else {
                 const raw = this.getValue(subjIdx, vIdx, sIdx, fIdx);
                 if (field.type === 'checkbox') {
-                  // Map booleans to Yes/No and keep empty as (No data)
                   value = (raw === true) ? 'Yes'
                         : (raw === false) ? 'No'
                         : '(No data)';
@@ -225,11 +228,13 @@ export default {
       // Sorting
       if (this.sortConfig.key) {
         const key = this.sortConfig.key;
+        // eslint-disable-next-line no-unused-labels
+        aconst_dir: 1;
         const dir = this.sortConfig.direction === 'asc' ? 1 : -1;
         data.sort((a, b) => {
           let valA = a[key] ?? '';
           let valB = b[key] ?? '';
-          // keep '-' and '(No data)' last-ish
+          // keep '-' and '(No data)' near the end
           if (valA === '-' && valB !== '-') return 1 * dir;
           if (valB === '-' && valA !== '-') return -1 * dir;
           if (valA === '(No data)' && valB !== '(No data)') return 1 * dir;
@@ -245,16 +250,12 @@ export default {
       return data;
     },
 
-    // When not viewing all: #pages based on pageSize and the raw grid size (subjects × visits)
     totalPages() {
       if (this.viewAll) return 1;
-
-      // totalRowsInWindow equals rows on this page before content filters; we want whole grid pages:
       const wholeGridPages = Math.ceil(this.totalGridRows / this.pageSize);
       return Math.max(1, wholeGridPages);
     },
 
-    // What we render is already the page-window rows (filtered & sorted).
     paginatedData() {
       return this.filteredData;
     },
@@ -263,7 +264,7 @@ export default {
     pageSize() {
       if (this.viewAll) return;
       this.currentPage = 1;
-      this.fetchPageEntries(); // update entries for new window
+      this.fetchPageEntries();
     },
     currentPage() {
       if (this.viewAll) return;
@@ -273,11 +274,8 @@ export default {
       this.currentPage = 1;
       this.fetchPageEntries();
     },
-    // If columns filters change, we keep the same entry window.
-    // (Optional: you could re-window when subjectId/visit filter changes.)
     filters: {
       handler() {
-        // subjectId/visit filters affect row inclusion; we could re-window:
         if (!this.viewAll) this.fetchPageEntries();
       },
       deep: true,
@@ -302,8 +300,7 @@ export default {
           });
         });
 
-        // Initial entries load for first page (or all if small)
-        if (this.canViewAll) this.viewAll = false; // default off; user can toggle it
+        if (this.canViewAll) this.viewAll = false;
         await this.fetchPageEntries();
       } catch (err) {
         console.error('Failed to load dashboard data:', err);
@@ -316,8 +313,6 @@ export default {
     },
 
     currentWindowIndexSets() {
-      // We build a "window" of subjects and visits for the current page.
-      // Layout: subjects vary slowest, visits fastest. We slice the Cartesian product.
       const S = this.subjects.length;
       const V = this.visits.length;
 
@@ -355,7 +350,6 @@ export default {
 
       const { subjectIdxPageSet, visitIdxPageSet } = this.currentWindowIndexSets();
 
-      // Build CSV param lists for server filtering
       const subject_indexes = this.viewAll
         ? null
         : Array.from(subjectIdxPageSet).sort((a, b) => a - b).join(',');
@@ -364,10 +358,7 @@ export default {
         : Array.from(visitIdxPageSet).sort((a, b) => a - b).join(',');
 
       const params = new URLSearchParams();
-      if (this.viewAll || this.canViewAll) {
-        // load everything when viewAll toggled, or dataset is tiny and user filtered a bit
-        if (this.viewAll) params.append('all', 'true');
-      }
+      if (this.viewAll) params.append('all', 'true');
       if (subject_indexes) params.append('subject_indexes', subject_indexes);
       if (visit_indexes) params.append('visit_indexes', visit_indexes);
 
@@ -377,6 +368,7 @@ export default {
           `http://localhost:8000/forms/studies/${studyId}/data_entries` + (params.toString() ? `?${params.toString()}` : ''),
           { headers: { Authorization: `Bearer ${this.token}` } }
         );
+        // entries include: id, subject_index, visit_index, group_index, data, skipped_required_flags, form_version, created_at
         this.entries = resp.data.entries || [];
         this.totalEntries = resp.data.total ?? this.entries.length;
       } catch (err) {
@@ -393,30 +385,54 @@ export default {
     toggleExportMenu() {
       this.showExportMenu = !this.showExportMenu;
     },
+
+    // --- helpers to resolve & read data ---
     resolveGroup(subjIdx) {
       const subjGroup = (this.subjects[subjIdx]?.group || '').trim().toLowerCase();
       const grpList = this.study?.content?.study_data?.groups || [];
       const idx = grpList.findIndex(g => (g.name || '').trim().toLowerCase() === subjGroup);
       return idx >= 0 ? idx : 0;
     },
-    getValue(subjIdx, visitIdx, sectionIdx, fieldIdx) {
-      const groupIdx = this.resolveGroup(subjIdx);
-      const entry = this.entries.find(e =>
+    isAssigned(sectionIdx, visitIdx, groupIdx) {
+      return !!(this.study?.content?.study_data?.assignments?.[sectionIdx]?.[visitIdx]?.[groupIdx]);
+    },
+    findEntry(subjIdx, visitIdx, groupIdx) {
+      return this.entries.find(e =>
         e.subject_index === subjIdx &&
         e.visit_index === visitIdx &&
         e.group_index === groupIdx
-      );
+      ) || null;
+    },
+    getValue(subjIdx, visitIdx, sectionIdx, fieldIdx) {
+      const groupIdx = this.resolveGroup(subjIdx);
+      const entry = this.findEntry(subjIdx, visitIdx, groupIdx);
       if (!entry || !Array.isArray(entry.data)) return '';
       const section = entry.data[sectionIdx] || [];
       return section[fieldIdx] != null ? section[fieldIdx] : '';
     },
+    isCellSkipped(subjIdx, visitIdx, sectionIdx, fieldIdx) {
+      const groupIdx = this.resolveGroup(subjIdx);
+      if (!this.isAssigned(sectionIdx, visitIdx, groupIdx)) return false;
+      const entry = this.findEntry(subjIdx, visitIdx, groupIdx);
+      if (!entry) return false;
+      const flags = entry.skipped_required_flags;
+      return !!(Array.isArray(flags) &&
+                Array.isArray(flags[sectionIdx]) &&
+                flags[sectionIdx][fieldIdx] === true);
+    },
+    cellClass(subjIdx, visitIdx, sectionIdx, fieldIdx) {
+      return {
+        'cell-skipped': this.isCellSkipped(subjIdx, visitIdx, sectionIdx, fieldIdx),
+      };
+    },
+
+    // Sorting
     sortTable(key) {
       if (this.sortConfig.key === key) {
         this.sortConfig.direction = this.sortConfig.direction === 'asc' ? 'desc' : 'asc';
       } else {
         this.sortConfig = { key, direction: 'asc' };
       }
-      // No refetch needed; sorting is local over current window
     },
     sortIcon(key) {
       return this.sortConfig.key === key && this.sortConfig.direction === 'desc'
@@ -442,8 +458,6 @@ export default {
       this.showExportMenu = false;
     },
     async ensureAllEntriesForExport() {
-      // Build a full grid with values. If we're not in "viewAll" and data is large,
-      // we fetch all entries once (server all=true) only for export.
       const studyId = this.$route.params.id;
 
       let entriesForExport = this.entries;
@@ -470,10 +484,10 @@ export default {
         this.visits.forEach((visit, vIdx) => {
           const row = { subjectId: subject.id, visit: visit.name };
           this.sections.forEach((section, sIdx) => {
-            const isAssigned = this.study.content.study_data.assignments?.[sIdx]?.[vIdx]?.[groupIdx] || false;
+            const assigned = this.isAssigned(sIdx, vIdx, groupIdx);
             section.fields.forEach((field, fIdx) => {
               let value;
-              if (!isAssigned) {
+              if (!assigned) {
                 value = '-';
               } else {
                 const raw = this.getValue(subjIdx, vIdx, sIdx, fIdx);
@@ -593,13 +607,23 @@ export default {
   box-shadow: 0 2px 6px rgba(0,0,0,0.1);
   z-index: 20;
   padding: 12px;
-  min-width: 200px;
+  min-width: 240px;
 }
 .export-menu button {
   display: block; width: 100%; padding: 8px 16px; background: none; border: none;
   text-align: left; font-size: 0.9rem; cursor: pointer;
 }
 .export-menu button:hover { background: #f3f4f6; }
+
+.legend-swatch {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  margin-right: 6px;
+  border: 1px solid #ef4444;
+  vertical-align: -2px;
+  background: #fee2e2;
+}
 
 .table-controls {
   display: flex; justify-content: space-between; align-items: center; margin: 8px 0;
@@ -624,6 +648,14 @@ export default {
 }
 .dashboard-table tbody td:not(:first-child):not(:nth-child(2)) { background: #ffffff; color: #4b5563; }
 .dashboard-table tbody tr:hover td { background: #f1f5f9; }
+
+/* Skipped cell (aligns with 'status-skipped' red) */
+.cell-skipped {
+  background: #fee2e2 !important; /* red-200 */
+  color: #991b1b;                 /* red-800 */
+  border-color: #ef4444 !important; /* red-500 */
+  font-weight: 600;
+}
 
 .loading { text-align: center; padding: 24px; color: #6b7280; }
 .no-data { text-align: center; padding: 16px; color: #6b7280; font-style: italic; }

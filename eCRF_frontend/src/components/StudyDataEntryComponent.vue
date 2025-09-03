@@ -1,6 +1,6 @@
 <template>
   <div class="study-data-container" v-if="study">
-    <!-- Back Buttons (Always at Top Left) -->
+    <!-- Back Buttons -->
     <div class="back-buttons-container">
       <button v-if="showSelection" @click="goToDashboard" class="btn-back">
         <i :class="icons.back"></i> Back to Dashboard
@@ -10,7 +10,7 @@
       </button>
     </div>
 
-    <!-- 1. STUDY DETAILS AND DETAILS PANEL (Below Back Buttons) -->
+    <!-- Header -->
     <div class="study-header-container">
       <div class="study-header">
         <h1 class="study-name">{{ study.metadata.study_name }}</h1>
@@ -58,7 +58,7 @@
       <hr />
     </div>
 
-    <!-- 2. SELECTION MATRIX: Subject × Visit -->
+    <!-- Selection -->
     <div v-if="showSelection">
       <h2>Select Subject × Visit</h2>
       <table class="selection-matrix">
@@ -91,22 +91,19 @@
       </table>
     </div>
 
-    <!-- 3. DATA-ENTRY FORM: Shown Once a Cell Is Chosen -->
+    <!-- Entry Form -->
     <div v-else class="entry-form-wrapper">
-      <!-- 3.b BREADCRUMB (Exact Subject/Visit/Group) -->
       <div class="bread-crumb">
         <div class="crumb-left">
           <strong>Study:</strong> {{ study.metadata.study_name }}
           <strong>Subject:</strong> {{ study.content.study_data.subjects[currentSubjectIndex].id }}
           <strong>Visit:</strong> {{ visitList[currentVisitIndex].name }}
         </div>
-        <!-- Legend trigger (far right) -->
         <button type="button" class="legend-btn" @click="openLegendDialog" :title="'Legend / What does * mean?'">
           <i :class="icons.help || 'fas fa-question-circle'"></i>
         </button>
       </div>
 
-      <!-- 3.c ENTRY FORM FIELDS -->
       <div class="entry-form-section">
         <h2>
           Enter Data for Subject: {{ study.content.study_data.subjects[currentSubjectIndex].id }},
@@ -116,6 +113,7 @@
         <div v-if="assignedModelIndices.length">
           <div v-for="mIdx in assignedModelIndices" :key="mIdx" class="section-block">
             <h3>{{ selectedModels[mIdx].title }}</h3>
+
             <div
               v-for="(field, fIdx) in selectedModels[mIdx].fields"
               :key="fIdx"
@@ -124,14 +122,9 @@
               <label :for="fieldId(mIdx, fIdx)" class="field-label">
                 <span>{{ field.label }}</span>
                 <span v-if="field.constraints?.required" class="required">*</span>
-
-                <!-- Inline help text (italics) -->
                 <em v-if="field.constraints?.helpText" class="help-inline">
                   {{ field.constraints.helpText }}
                 </em>
-
-                <!-- Constraint helper trigger (click -> small dialog).
-                     Only shows when there are constraints beyond 'required' and 'helpText'. -->
                 <i
                   v-if="hasConstraints(field)"
                   class="fas fa-question-circle helper-icon"
@@ -139,7 +132,7 @@
                 ></i>
               </label>
 
-              <!-- TEXT INPUT -->
+              <!-- TEXT -->
               <input
                 v-if="field.type === 'text'"
                 :id="fieldId(mIdx, fIdx)"
@@ -171,7 +164,7 @@
                 @input="clearError(mIdx, fIdx)"
               ></textarea>
 
-              <!-- NUMBER INPUT -->
+              <!-- NUMBER -->
               <input
                 v-else-if="field.type === 'number'"
                 :id="fieldId(mIdx, fIdx)"
@@ -196,7 +189,7 @@
                 @change="validateField(mIdx, fIdx)"
               />
 
-              <!-- RADIO GROUP (single select) -->
+              <!-- RADIO -->
               <FieldRadioGroup
                 v-else-if="field.type === 'radio'"
                 :id="fieldId(mIdx, fIdx)"
@@ -209,7 +202,7 @@
                 @update:modelValue="() => { clearError(mIdx, fIdx); validateField(mIdx, fIdx); }"
               />
 
-              <!-- DATE (with format) -->
+              <!-- DATE -->
               <DateFormatPicker
                 v-else-if="field.type === 'date'"
                 :id="fieldId(mIdx, fIdx)"
@@ -234,13 +227,12 @@
                 @blur="validateField(mIdx, fIdx)"
               />
 
-              <!-- SELECT (single or multiple) — REPLACED NATIVE SELECT -->
+              <!-- SELECT -->
               <FieldSelect
                 v-else-if="field.type === 'select'"
                 :id="fieldId(mIdx, fIdx)"
                 v-model="entryData[currentSubjectIndex][currentVisitIndex][currentGroupIndex][mIdx][fIdx]"
-                :options="field.options || []
-                "
+                :options="field.options || []"
                 :multiple="!!field.constraints?.allowMultiple"
                 :readonly="!!field.constraints?.readonly"
                 :default-value="field.constraints?.defaultValue"
@@ -258,7 +250,7 @@
                 @change="validateField(mIdx, fIdx)"
               />
 
-              <!-- LINEAR SCALE (mode=linear) -->
+              <!-- LINEAR SCALE -->
               <FieldLinearScale
                 v-else-if="field.type === 'slider' && field.constraints?.mode === 'linear'"
                 :id="fieldId(mIdx, fIdx)"
@@ -268,19 +260,20 @@
                 @change="validateField(mIdx, fIdx)"
               />
 
-              <!-- FILE UPLOAD / LINK (runtime) -->
+              <!-- FILE -->
               <FieldFileUpload
                 v-else-if="field.type === 'file'"
                 :id="fieldId(mIdx, fIdx)"
-                v-model="entryData[currentSubjectIndex][currentVisitIndex][currentGroupIndex][mIdx][fIdx]"
+                :value="entryData[currentSubjectIndex][currentVisitIndex][currentGroupIndex][mIdx][fIdx]"
                 :constraints="field.constraints || {}"
                 :readonly="!!field.constraints?.readonly"
                 :required="!!field.constraints?.required"
                 stage="runtime"
-                @input="() => { clearError(mIdx, fIdx); validateField(mIdx, fIdx); }"
+                @input="(meta) => setEntryValue(mIdx, fIdx, meta)"
+                @file-selected="(file) => onRawFileSelected(mIdx, fIdx, file)"
               />
 
-              <!-- FALLBACK TEXT -->
+              <!-- FALLBACK -->
               <input
                 v-else
                 :id="fieldId(mIdx, fIdx)"
@@ -293,7 +286,7 @@
                 @input="clearError(mIdx, fIdx)"
               />
 
-              <!-- ERROR MESSAGE + pill if skipped -->
+              <!-- ERROR -->
               <div v-if="fieldErrors(mIdx, fIdx)" class="error-message">
                 {{ fieldErrors(mIdx, fIdx) }}
                 <span
@@ -306,6 +299,7 @@
                 <span class="skip-pill" title="Required validation skipped for this field">Skipped</span>
               </div>
             </div>
+
           </div>
 
           <!-- Actions -->
@@ -330,7 +324,7 @@
       </div>
     </div>
 
-    <!-- Share-link modal -->
+    <!-- dialogs (unchanged) -->
     <div v-if="showShareDialog" class="dialog-overlay">
       <div class="dialog">
         <h3>Generate Share Link</h3>
@@ -364,7 +358,6 @@
       </div>
     </div>
 
-    <!-- Permission-denied modal -->
     <div v-if="permissionError" class="dialog-overlay">
       <div class="dialog">
         <h3>Permission Denied</h3>
@@ -375,7 +368,6 @@
       </div>
     </div>
 
-    <!-- Small Constraints Dialog (click from ? icon) -->
     <div v-if="showConstraintDialog" class="mini-overlay" @click.self="closeConstraintDialog">
       <div class="mini-dialog" role="dialog" aria-modal="true">
         <div class="mini-head">
@@ -388,7 +380,6 @@
       </div>
     </div>
 
-    <!-- Mini Legend Dialog: explains the red asterisk -->
     <div v-if="showLegendDialog" class="mini-overlay" @click.self="closeLegendDialog">
       <div class="mini-dialog" role="dialog" aria-modal="true">
         <div class="mini-head">
@@ -401,10 +392,8 @@
       </div>
     </div>
 
-    <!-- Old dialog (still for non-required blocking errors) -->
     <CustomDialog :message="dialogMessage" :isVisible="showDialog" @close="closeDialog" />
 
-    <!-- Skip-Required Dialog -->
     <div v-if="showSkipDialog" class="dialog-overlay">
       <div class="dialog dialog-wide">
         <h3>Fix validation before saving</h3>
@@ -439,6 +428,7 @@
 </template>
 
 <script>
+/* eslint-disable */
 import axios from "axios";
 import icons from "@/assets/styles/icons";
 import CustomDialog from "@/components/CustomDialog.vue";
@@ -476,7 +466,7 @@ export default {
       currentGroupIndex: 0,
 
       entryData: [],
-      skipFlags: [], // mirrors entryData shape; booleans per field
+      skipFlags: [],
       validationErrors: {},
 
       icons,
@@ -486,7 +476,6 @@ export default {
       generatedLink: "",
       permissionError: false,
 
-      // dialogs
       showDialog: false,
       dialogMessage: "",
       showSkipDialog: false,
@@ -497,13 +486,13 @@ export default {
       entryIds: [],
       ajv: null,
 
-      // Small constraints dialog state
       showConstraintDialog: false,
       constraintDialogFieldName: "",
       constraintDialogItems: [],
 
-      // Legend dialog state
       showLegendDialog: false,
+
+      pendingFiles: {},
     };
   },
 
@@ -524,9 +513,6 @@ export default {
       const v = this.currentVisitIndex, g = this.currentGroupIndex;
       return this.selectedModels.map((_, mIdx) => mIdx).filter((mIdx) => !!this.assignments[mIdx]?.[v]?.[g]);
     },
-
-    // Only block Save if there are *non-required* validation issues,
-    // and ignore any errors on fields that are currently skipped.
     blockingErrorsPresent() {
       const keys = Object.keys(this.validationErrors || {});
       for (const k of keys) {
@@ -536,8 +522,8 @@ export default {
         if (!idx) continue;
         const { s, v, g, m, f } = idx;
         const isSkipped = !!(this.skipFlags[s]?.[v]?.[g]?.[m]?.[f]);
-        if (isSkipped) continue; // ignore skipped fields entirely
-        if (!/ is required\.$/.test(msg)) return true; // a blocking error
+        if (isSkipped) continue;
+        if (!/ is required\.$/.test(msg)) return true;
       }
       return false;
     },
@@ -545,14 +531,32 @@ export default {
 
   async created() {
     this.ajv = createAjv();
-
     const studyId = this.$route.params.id;
     await this.loadStudy(studyId);
     await this.loadExistingEntries(studyId);
   },
 
   methods: {
-    // ---------- key helpers ----------
+    // --- tiny helpers for Vue 3 reactivity on deep arrays ---
+    setDeepValue(s, v, g, m, f, val) {
+      this.entryData[s][v][g][m][f] = val;
+      // Optional nudge: replace inner row to ensure watchers pick it up if needed
+      this.entryData[s][v][g][m] = [...this.entryData[s][v][g][m]];
+    },
+    setDeepSkip(s, v, g, m, f, on) {
+      this.skipFlags[s][v][g][m][f] = !!on;
+      this.skipFlags[s][v][g][m] = [...this.skipFlags[s][v][g][m]];
+    },
+
+    // ---------- deep set for file (reactive!) ----------
+    setEntryValue(mIdx, fIdx, val) {
+      const s = this.currentSubjectIndex, v = this.currentVisitIndex, g = this.currentGroupIndex;
+      console.log("[Entry] setEntryValue", { s, v, g, mIdx, fIdx, val });
+      this.setDeepValue(s, v, g, mIdx, fIdx, val);
+      this.clearError(mIdx, fIdx);
+      this.validateField(mIdx, fIdx);
+    },
+
     errorKey(mIdx, fIdx) {
       return [this.currentSubjectIndex, this.currentVisitIndex, this.currentGroupIndex, mIdx, fIdx].join("-");
     },
@@ -563,32 +567,39 @@ export default {
       return { s, v, g, m, f };
     },
 
-    // ---------- slider props ----------
+       onRawFileSelected(mIdx, fIdx, fileOrFiles) {
+      // derive the stable per-field key (subject/visit/group/section/field)
+      const key = this.errorKey(mIdx, fIdx);
+      const arr = Array.isArray(fileOrFiles)
+        ? fileOrFiles
+        : (fileOrFiles ? [fileOrFiles] : []);
+      console.log("[Entry] onRawFileSelected", { key, count: arr.length });
+      const cur = Array.isArray(this.pendingFiles[key])
+        ? this.pendingFiles[key]
+        : (this.pendingFiles[key] ? [this.pendingFiles[key]] : []);
+      // reassign to preserve Vue 3 reactivity when adding props
+      this.pendingFiles = { ...this.pendingFiles, [key]: [...cur, ...arr] };
+    },
+
     getSliderProps(field) {
       const c = field?.constraints || {};
       const min = c.percent ? 1 : (Number.isFinite(+c.min) ? +c.min : 1);
       const max = c.percent ? 100 : (Number.isFinite(+c.max) ? +c.max : (c.percent ? 100 : 5));
       const step = Number.isFinite(+c.step) && +c.step > 0 ? +c.step : 1;
       const marks = Array.isArray(c.marks) ? c.marks : [];
-      const props = { min, max, step, readonly: !!c.readonly, percent: !!c.percent, showTicks: !!c.showTicks, marks };
-      console.log("[Entry] getSliderProps", { label: field.label, props });
-      return props;
+      return { min, max, step, readonly: !!c.readonly, percent: !!c.percent, showTicks: !!c.showTicks, marks };
     },
     getLinearProps(field) {
       const c = field?.constraints || {};
       const min = Number.isFinite(+c.min) ? Math.round(+c.min) : 1;
       let max = Number.isFinite(+c.max) ? Math.round(+c.max) : 5;
       if (max <= min) max = min + 1;
-      const props = { min, max, leftLabel: c.leftLabel || "", rightLabel: c.rightLabel || "", readonly: !!c.readonly };
-      console.log("[Entry] getLinearProps", { label: field.label, props });
-      return props;
+      return { min, max, leftLabel: c.leftLabel || "", rightLabel: c.rightLabel || "", readonly: !!c.readonly };
     },
 
-    // ---------- legend ----------
     openLegendDialog() { this.showLegendDialog = true; },
     closeLegendDialog() { this.showLegendDialog = false; },
 
-    // ----- constraint helper (dialog) -----
     hasConstraints(field) {
       const c = field?.constraints || {};
       const keys = Object.keys(c).filter((k) => k !== "required" && k !== "helpText");
@@ -597,9 +608,7 @@ export default {
     buildConstraintList(field) {
       const c = field?.constraints || {};
       const parts = [];
-
       if (c.readonly) parts.push("Read-only");
-
       if (field.type === "slider") {
         const mode = (c.mode || "slider").toLowerCase();
         if (mode === "slider") {
@@ -619,7 +628,6 @@ export default {
         }
         return parts.length ? parts : ["No constraints."];
       }
-
       if (field.type === "text" || field.type === "textarea") {
         if (typeof c.minLength === "number") parts.push(`Min length: ${c.minLength}`);
         if (typeof c.maxLength === "number") parts.push(`Max length: ${c.maxLength}`);
@@ -629,7 +637,6 @@ export default {
           parts.push(`Transform on save: ${t}`);
         }
       }
-
       if (field.type === "number") {
         if (typeof c.min === "number") parts.push(`Min: ${c.min}`);
         if (typeof c.max === "number") parts.push(`Max: ${c.max}`);
@@ -638,23 +645,19 @@ export default {
         if (typeof c.maxDigits === "number") parts.push(`Max digits: ${c.maxDigits}`);
         if (c.integerOnly) parts.push("Integer only");
       }
-
       if (field.type === "date") {
         if (c.dateFormat) parts.push(`Date format: ${c.dateFormat}`);
         if (c.minDate) parts.push(`Min date: ${c.minDate}`);
         if (c.maxDate) parts.push(`Max date: ${c.maxDate}`);
       }
-
       if (field.type === "time") {
         if (c.minTime) parts.push(`Min time: ${c.minTime}`);
         if (c.maxTime) parts.push(`Max time: ${c.maxTime}`);
         if (typeof c.step === "number") parts.push(`Step (sec): ${c.step}`);
       }
-
       if (field.type === "select" && c.allowMultiple) {
         parts.push("Multiple selection: allowed");
       }
-
       if (field.type === "file") {
         const allowed = Array.isArray(c.allowedFormats) && c.allowedFormats.length ? c.allowedFormats.join(", ") : "—";
         const sizeMB = Number.isFinite(c.maxSizeMB) && c.maxSizeMB > 0 ? c.maxSizeMB : 100;
@@ -662,11 +665,11 @@ export default {
         parts.push(`Storage: ${storage}`);
         parts.push(`Allowed: ${allowed}`);
         parts.push(`Max size: ${sizeMB} MB`);
+        if (c.allowMultipleFiles) parts.push("Multiple files: allowed");
         if (Array.isArray(c.modalities) && c.modalities.length) {
           parts.push(`Modalities: ${c.modalities.join(", ")}`);
         }
       }
-
       return parts.length ? parts : ["No constraints."];
     },
     openConstraintDialog(field) {
@@ -680,7 +683,6 @@ export default {
       this.constraintDialogItems = [];
     },
 
-    // ----- transforms (data-level) -----
     applyTransform(transform, value) {
       const v = value == null ? "" : String(value);
       switch (String(transform || "none").toLowerCase()) {
@@ -697,7 +699,7 @@ export default {
         const cur = this.entryData[this.currentSubjectIndex][this.currentVisitIndex][this.currentGroupIndex][mIdx][fIdx];
         const transformed = this.applyTransform(cons.transform, cur);
         if (transformed !== cur) {
-          this.entryData[this.currentSubjectIndex][this.currentVisitIndex][this.currentGroupIndex][mIdx][fIdx] = transformed;
+          this.setDeepValue(this.currentSubjectIndex, this.currentVisitIndex, this.currentGroupIndex, mIdx, fIdx, transformed);
         }
       }
       this.validateField(mIdx, fIdx);
@@ -711,14 +713,13 @@ export default {
             const cur = this.entryData[this.currentSubjectIndex][this.currentVisitIndex][this.currentGroupIndex][mIdx][fIdx];
             const t = this.applyTransform(cons.transform, cur);
             if (t !== cur) {
-              this.entryData[this.currentSubjectIndex][this.currentVisitIndex][this.currentGroupIndex][mIdx][fIdx] = t;
+              this.setDeepValue(this.currentSubjectIndex, this.currentVisitIndex, this.currentGroupIndex, mIdx, fIdx, t);
             }
           }
         });
       });
     },
 
-    // ---------- error helpers ----------
     setError(mIdx, fIdx, msg) {
       const k = this.errorKey(mIdx, fIdx);
       this.validationErrors = { ...this.validationErrors, [k]: msg };
@@ -735,7 +736,6 @@ export default {
       return this.validationErrors[this.errorKey(mIdx, fIdx)] || "";
     },
 
-    // ----- navigation / loading -----
     goToDashboard() {
       this.$router.push({ name: "Dashboard", query: { openStudies: "true" } });
     },
@@ -749,6 +749,7 @@ export default {
         this.initializeEntryData();
         console.log("[Entry] Study loaded", { id: studyId, models: (this.selectedModels || []).length });
       } catch (err) {
+        console.error("[Entry] loadStudy error", err);
         this.showDialogMessage("Failed to load study details.");
       }
     },
@@ -766,18 +767,14 @@ export default {
       }
     },
 
-    // ---------- defaults, clear ----------
     defaultForField(f, { ignoreDefaults = false } = {}) {
       const c = f?.constraints || {};
       const t = String(f?.type || "").toLowerCase();
       const allowMulti = !!c.allowMultiple;
-
       if (t === "slider") return null;
-      if (t === "file") return null;
-
+      if (t === "file") return c.allowMultipleFiles ? [] : null;
       if (!ignoreDefaults && Object.prototype.hasOwnProperty.call(c, "defaultValue")) return c.defaultValue;
       if (!ignoreDefaults && Object.prototype.hasOwnProperty.call(f, "value")) return f.value;
-
       switch (t) {
         case "checkbox": return false;
         case "radio":
@@ -801,8 +798,8 @@ export default {
             return;
           }
           const next = this.defaultForField(f, { ignoreDefaults: false });
-          this.entryData[s][v][g][mIdx][fIdx] = next;
-          this.skipFlags[s][v][g][mIdx][fIdx] = false;
+          this.setDeepValue(s, v, g, mIdx, fIdx, next);
+          this.setDeepSkip(s, v, g, mIdx, fIdx, false);
           this.clearError(mIdx, fIdx);
         });
       });
@@ -833,6 +830,7 @@ export default {
       );
 
       this.validationErrors = {};
+      console.log("[Entry] initializeEntryData matrix ready");
     },
     populateFromExisting() {
       this.initializeEntryData();
@@ -878,7 +876,6 @@ export default {
       return `s${this.currentSubjectIndex}_v${this.currentVisitIndex}_g${this.currentGroupIndex}_m${mIdx}_f${fIdx}`;
     },
 
-    // ---------- skip helpers ----------
     isFieldSkipped(mIdx, fIdx) {
       const s = this.currentSubjectIndex, v = this.currentVisitIndex, g = this.currentGroupIndex;
       return !!(this.skipFlags[s]?.[v]?.[g]?.[mIdx]?.[fIdx]);
@@ -886,59 +883,59 @@ export default {
     setSkipForField(mIdx, fIdx, on) {
       const s = this.currentSubjectIndex, v = this.currentVisitIndex, g = this.currentGroupIndex;
       if (!this.skipFlags[s] || !this.skipFlags[s][v] || !this.skipFlags[s][v][g]) return;
-      this.skipFlags[s][v][g][mIdx][fIdx] = !!on;
-      console.log("[Entry] setSkipForField", { s, v, g, mIdx, fIdx, on });
+      this.setDeepSkip(s, v, g, mIdx, fIdx, on);
     },
 
-    // ---------- validation ----------
+    // ---------- VALIDATION ----------
     validateField(mIdx, fIdx) {
       const def = this.selectedModels[mIdx].fields[fIdx] || {};
       const cons = def.constraints || {};
       const label = def.label || "This field";
-
       const s = this.currentSubjectIndex, v = this.currentVisitIndex, g = this.currentGroupIndex;
-
       const val = this.entryData[s][v][g][mIdx][fIdx];
+      const allowMultiFiles = !!cons.allowMultipleFiles;
       let isSkipped = !!this.skipFlags[s][v][g][mIdx][fIdx];
 
       const isEmpty = () => {
         if (def.type === "checkbox") return val !== true;
         if (def.type === "file") {
-          if (!val || typeof val !== "object") return true;
-          const src = val.source;
-          if (src === "url") {
-            const u = val.url != null ? String(val.url).trim() : "";
-            return u === "";
+          if (allowMultiFiles) {
+            const arr = Array.isArray(val) ? val : [];
+            return arr.length === 0;
+          } else {
+            if (!val) return true;
+            const src = val.source || (val.file && val.file.source) || "local";
+            if (src === "url") {
+              const url = (val.url || "").trim();
+              return !url;
+            }
+            if (src === "local") {
+              const meta = (val.file && typeof val.file === "object") ? val.file : val;
+              const sizeNum = Number(meta.size);
+              return !meta.name || !Number.isFinite(sizeNum) || sizeNum <= 0;
+            }
+            return true;
           }
-          if (src === "local") {
-            const name = (val.name || val.filename || "").toString().trim();
-            const sizeNum = typeof val.size === "number" ? val.size : Number(val.size);
-            return !(name && Number.isFinite(sizeNum) && sizeNum > 0);
-          }
-          return true;
         }
         if (Array.isArray(val)) return val.length === 0;
         return (val == null || (typeof val === "string" && val.trim() === ""));
       };
 
-      console.log("[Entry] validateField", {
-        s, v, g, mIdx, fIdx, type: def.type, required: !!cons.required, isSkipped, val
+      console.log("[Validate] field", {
+        label, key: this.errorKey(mIdx, fIdx), type: def.type, cons, value: val
       });
 
       this.clearError(mIdx, fIdx);
 
       if (isSkipped) {
-        if (isEmpty()) {
-          console.log("[Entry] Bypass validation because skipped+empty", { mIdx, fIdx });
-          return true;
-        }
-        console.log("[Entry] Auto-unskip because user entered a value", { mIdx, fIdx });
+        if (isEmpty()) return true;
         this.setSkipForField(mIdx, fIdx, false);
         isSkipped = false;
       }
 
       if (cons.required && isEmpty()) {
         this.setError(mIdx, fIdx, `${label} is required.`);
+        console.warn("[Validate] required failed", { label, mIdx, fIdx });
         return false;
       }
 
@@ -977,10 +974,13 @@ export default {
         }
       }
 
-      const { valid, message } = validateFieldValue(this.ajv, def, val);
-      if (!valid) {
-        this.setError(mIdx, fIdx, message || `${label} is invalid.`);
-        return false;
+      if (def.type !== "file") {
+        const { valid, message } = validateFieldValue(this.ajv, def, val);
+        if (!valid) {
+          this.setError(mIdx, fIdx, message || `${label} is invalid.`);
+          console.warn("[Validate] schema failed", { label, message });
+          return false;
+        }
       }
 
       if (def.type === "date" && val) {
@@ -1006,8 +1006,8 @@ export default {
           else if (fmt === "MM-dd-yyyy") { M=+m[1]; d=+m[2]; y=+m[3]; }
           else if (fmt === "dd-MM-yyyy") { d=+m[1]; M=+m[2]; y=+m[3]; }
           else if (fmt === "yyyy-MM-dd") { y=+m[1]; M=+m[2]; d=+m[3]; }
-          else if (fmt === "MM/yyyy" || fmt === "MM-yyyy") { M=+m[1]; y=+m[2]; d=1; }
-          else if (fmt === "yyyy/MM" || fmt === "yyyy-MM") { y=+m[1]; M=+m[2]; d=1; }
+          else if (fmt === "MM/yyyy" || "MM-yyyy") { M=+m[1]; y=+m[2]; d=1; }
+          else if (fmt === "yyyy/MM" || "yyyy-MM") { y=+m[1]; M=+m[2]; d=1; }
           else if (fmt === "yyyy") { y=+m[1]; M=1; d=1; }
           return new Date(y, M-1, d);
         };
@@ -1058,11 +1058,9 @@ export default {
           ok = ok && r;
         });
       });
-      console.log("[Entry] validateCurrentSection ->", ok, { errors: this.validationErrors });
       return ok;
     },
 
-    // collect required failures (not skipped)
     computeRequiredFailures() {
       const s = this.currentSubjectIndex, v = this.currentVisitIndex, g = this.currentGroupIndex;
       const items = [];
@@ -1075,18 +1073,9 @@ export default {
           const val = this.entryData[s][v][g][mIdx][fIdx];
           const empty =
             (f.type === "checkbox" ? val !== true :
-             f.type === "file" ? (() => {
-               if (!val || typeof val !== "object") return true;
-               if (val.source === "url") return !(val.url && String(val.url).trim());
-               if (val.source === "local") {
-                 const name = (val.name || val.filename || "").toString().trim();
-                 const sizeNum = typeof val.size === "number" ? val.size : Number(val.size);
-                 return !(name && Number.isFinite(sizeNum) && sizeNum > 0);
-               }
-               return true;
-             })() :
-             Array.isArray(val) ? val.length === 0 :
-             (val == null || (typeof val === "string" && val.trim() === "")));
+            f.type === "file"? (c.allowMultipleFiles? !(Array.isArray(val) && val.length > 0): (!val || (val.source === "url"? !(val.url && String(val.url).trim()): !(val.name && Number.isFinite(Number(val.size)))))):
+            Array.isArray(val) ? val.length === 0 :
+            (val == null || (typeof val === "string" && val.trim() === "")));
           if (empty) {
             items.push({
               key: this.errorKey(mIdx, fIdx),
@@ -1099,15 +1088,164 @@ export default {
           }
         });
       });
-      console.log("[Entry] computeRequiredFailures ->", items);
       return items;
+    },
+
+    // ---------- FILE UPLOADS ----------
+    async uploadPendingFilesForCurrentSection() {
+      const s = this.currentSubjectIndex, v = this.currentVisitIndex, g = this.currentGroupIndex;
+      const studyId = this.study?.metadata?.id;
+
+      for (const mIdx of this.assignedModelIndices) {
+        const section = this.selectedModels[mIdx];
+        for (let fIdx = 0; fIdx < (section.fields || []).length; fIdx++) {
+          const def = section.fields[fIdx] || {};
+          if (def.type !== "file") continue;
+
+          const key = this.errorKey(mIdx, fIdx);
+          const cons = def.constraints || {};
+         const allowMulti = !!cons.allowMultipleFiles;
+         const val = this.entryData[s][v][g][mIdx][fIdx];
+         if (!val && !allowMulti) continue;
+
+          const modalities = Array.isArray(def?.constraints?.modalities) ? def.constraints.modalities : [];
+          const modalitiesJson = JSON.stringify(modalities || []);
+
+          const pendingArr = Array.isArray(this.pendingFiles[key]) ? this.pendingFiles[key] : (this.pendingFiles[key] ? [this.pendingFiles[key]] : []);
+
+          // Helper to find matching raw File for a meta
+          const matchFile = (meta) => pendingArr.find(f =>
+            f && meta && f.name === meta.name && Number(f.size) === Number(meta.size) && (!!f.lastModified ? f.lastModified === meta.lastModified : true)
+          );
+
+          if (allowMulti) {
+            const items = Array.isArray(val) ? [...val] : [];
+            // Upload local metas
+            for (let i = 0; i < items.length; i++) {
+              const it = items[i];
+              if (!it || it.dbId) continue;
+              if (it.source === "local") {
+                const file = matchFile(it);
+                if (!file) continue;
+                console.log("[Upload] POST /files (multi)", { key, name: file.name, size: file.size, modalities });
+                const fd = new FormData();
+                fd.append("uploaded_file", file);
+                fd.append("description", def.label || "");
+                fd.append("storage_option", "local");
+                fd.append("subject_index", String(s));
+                fd.append("visit_index", String(v));
+                fd.append("group_index", String(g));
+                fd.append("modalities_json", modalitiesJson);
+                const resp = await axios.post(
+                  `http://127.0.0.1:8000/forms/studies/${studyId}/files`,
+                  fd,
+                  { headers: { Authorization: `Bearer ${this.token}`, "Content-Type": "multipart/form-data" } }
+                );
+                const saved = resp?.data || {};
+                items[i] = {
+                  ...it,
+                  dbId: saved.id,
+                  file_path: saved.file_path,
+                  storage_option: saved.storage_option || "local",
+                  file_name: saved.file_name || it.name,
+                };
+              } else if (it.source === "url" && it.url) {
+                try {
+                  console.log("[Upload] POST /files/url (multi)", { key, url: it.url, modalities });
+                  const fd = new FormData();
+                  fd.append("url", it.url);
+                  fd.append("description", def.label || "");
+                  fd.append("storage_option", "url");
+                  fd.append("subject_index", String(s));
+                  fd.append("visit_index", String(v));
+                  fd.append("group_index", String(g));
+                  fd.append("modalities_json", modalitiesJson);
+                  const resp = await axios.post(
+                    `http://127.0.0.1:8000/forms/studies/${studyId}/files/url`,
+                    fd,
+                    { headers: { Authorization: `Bearer ${this.token}` } }
+                  );
+                  const saved = resp?.data || {};
+                  items[i] = {
+                    ...it,
+                    dbId: saved.id,
+                    file_path: saved.file_path,
+                    storage_option: "url",
+                    file_name: saved.file_name || "",
+                  };
+                } catch (e) {
+                  console.warn("URL record create failed; keeping raw URL.", e);
+                }
+              }
+            }
+            this.setDeepValue(s, v, g, mIdx, fIdx, items);
+            delete this.pendingFiles[key];
+          } else {
+            // Single-file behavior (unchanged)
+            if (!val) continue;
+            if (val.source === "local" && (pendingArr[0] instanceof File)) {
+              const file = pendingArr[0];
+              console.log("[Upload] POST /files", { key, name: file.name, size: file.size, modalities });
+              const fd = new FormData();
+              fd.append("uploaded_file", file);
+              fd.append("description", def.label || "");
+              fd.append("storage_option", "local");
+              fd.append("subject_index", String(s));
+              fd.append("visit_index", String(v));
+              fd.append("group_index", String(g));
+              fd.append("modalities_json", modalitiesJson);
+              const resp = await axios.post(
+                `http://127.0.0.1:8000/forms/studies/${studyId}/files`,
+                fd,
+                { headers: { Authorization: `Bearer ${this.token}`, "Content-Type": "multipart/form-data" } }
+              );
+              const saved = resp?.data || {};
+              this.setDeepValue(s, v, g, mIdx, fIdx, {
+                ...val,
+                dbId: saved.id,
+                file_path: saved.file_path,
+                storage_option: saved.storage_option || "local",
+                file_name: saved.file_name || val.name,
+              });
+              delete this.pendingFiles[key];
+            }
+            if (val.source === "url" && val.url) {
+              try {
+                console.log("[Upload] POST /files/url", { key, url: val.url, modalities });
+                const fd = new FormData();
+                fd.append("url", val.url);
+                fd.append("description", def.label || "");
+                fd.append("storage_option", "url");
+                fd.append("subject_index", String(s));
+                fd.append("visit_index", String(v));
+                fd.append("group_index", String(g));
+                fd.append("modalities_json", modalitiesJson);
+                const resp = await axios.post(
+                  `http://127.0.0.1:8000/forms/studies/${studyId}/files/url`,
+                  fd,
+                  { headers: { Authorization: `Bearer ${this.token}` } }
+                );
+                const saved = resp?.data || {};
+                this.setDeepValue(s, v, g, mIdx, fIdx, {
+                  ...val,
+                  dbId: saved.id,
+                  file_path: saved.file_path,
+                  storage_option: "url",
+                  file_name: saved.file_name || ""
+                });
+              } catch (e) {
+                console.warn("URL record create failed; continuing with raw URL only.", e);
+              }
+            }
+          }
+        }
+      }
     },
 
     async submitData() {
       this.applyTransformsForSection();
 
       const ok = this.validateCurrentSection();
-
       const blocking = Object.entries(this.validationErrors)
         .filter(([k, msg]) => {
           if (!msg) return false;
@@ -1120,18 +1258,24 @@ export default {
         });
 
       if (!ok && blocking.length) {
+        console.warn("[Entry] blocking validation errors", this.validationErrors);
         this.showDialogMessage("Please fix validation errors before saving.");
-        console.log("[Entry] Blocking errors present", blocking);
         return;
       }
 
       const requiredFailures = this.computeRequiredFailures();
       if (requiredFailures.length) {
-        const map = new Map(requiredFailures.map(it => [it.key, it]));
         this.skipCandidates = requiredFailures;
         this.skipSelections = requiredFailures.reduce((acc, it) => { acc[it.key] = false; return acc; }, {});
         this.showSkipDialog = true;
-        console.log("[Entry] Opening skip dialog", { count: map.size });
+        return;
+      }
+
+      try {
+        await this.uploadPendingFilesForCurrentSection();
+      } catch (e) {
+        console.error("File upload/register failed:", e);
+        this.showDialogMessage("File upload failed. Please try again.");
         return;
       }
 
@@ -1146,8 +1290,6 @@ export default {
       };
       const existingId = this.entryIds[s][v][g];
 
-      console.log("[Entry] Saving payload", { existingId, payload });
-
       try {
         if (existingId) {
           const resp = await axios.put(
@@ -1155,11 +1297,10 @@ export default {
             payload,
             { headers: { Authorization: `Bearer ${this.token}` } }
           );
+          console.log("[Entry] updated", { id: existingId });
           this.showDialogMessage("Data updated successfully.");
           const idx = this.existingEntries.findIndex(x => x.id === existingId);
-          if (idx >= 0) {
-            this.existingEntries.splice(idx, 1, resp.data);
-          }
+          if (idx >= 0) this.existingEntries.splice(idx, 1, resp.data);
         } else {
           const resp = await axios.post(
             `http://127.0.0.1:8000/forms/studies/${this.study.metadata.id}/data`,
@@ -1168,7 +1309,6 @@ export default {
           );
           const newId = resp?.data?.id;
           this.entryIds[s][v][g] = newId;
-
           const saved = {
             id: newId,
             study_id: this.study.metadata.id,
@@ -1181,6 +1321,7 @@ export default {
             created_at: resp?.data?.created_at ?? new Date().toISOString(),
           };
           (this.existingEntries = this.existingEntries || []).push(saved);
+          console.log("[Entry] created", { id: newId });
           this.showDialogMessage("Data saved successfully.");
         }
       } catch (err) {
@@ -1189,27 +1330,20 @@ export default {
       }
     },
 
-    // skip dialog actions
     confirmSkipSelection() {
       const s = this.currentSubjectIndex, v = this.currentVisitIndex, g = this.currentGroupIndex;
-
       this.skipCandidates.forEach((it) => {
         const on = !!this.skipSelections[it.key];
-        this.skipFlags[s][v][g][it.sectionIndex][it.fieldIndex] = on;
-        if (on) {
-          this.clearError(it.sectionIndex, it.fieldIndex);
-        }
+        this.setDeepSkip(s, v, g, it.sectionIndex, it.fieldIndex, on);
+        if (on) this.clearError(it.sectionIndex, it.fieldIndex);
         console.log("[Entry] confirmSkipSelection set", {
           s, v, g, m: it.sectionIndex, f: it.fieldIndex, on
         });
       });
       this.showSkipDialog = false;
-
       this.submitData();
     },
-    cancelSkipSelection() {
-      this.showSkipDialog = false;
-    },
+    cancelSkipSelection() { this.showSkipDialog = false; },
     jumpToField(item) {
       this.showSkipDialog = false;
       this.$nextTick(() => {
@@ -1218,7 +1352,6 @@ export default {
       });
     },
 
-    // share link
     openShareDialog(sIdx, vIdx, gIdx) {
       this.shareParams = { subjectIndex: sIdx, visitIndex: vIdx, groupIndex: gIdx };
       this.generatedLink = "";
@@ -1247,11 +1380,9 @@ export default {
       }
     },
 
-    // dialogs
     showDialogMessage(message) { this.dialogMessage = message; this.showDialog = true; },
     closeDialog() { this.showDialog = false; this.dialogMessage = ""; },
 
-    // ---------- status colors for matrix ----------
     statusFor(sIdx, vIdx) {
       const subj = this.study.content.study_data.subjects[sIdx];
       const name = (subj.group || "").trim().toLowerCase();
@@ -1281,6 +1412,7 @@ export default {
   },
 };
 </script>
+
 
 <style scoped>
 /* matrix */

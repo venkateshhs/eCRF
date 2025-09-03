@@ -37,6 +37,9 @@ export default {
   outcomeandfollowup: 'fas fa-clipboard-check',
   additionalinformation: 'fas fa-comment-dots',
   clock: "fas fa-clock",
+  paperclip: 'fas fa-paperclip',
+  link: 'fas fa-link',
+  trash: 'fas fa-trash',
 
 
 };

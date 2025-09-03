@@ -7,7 +7,6 @@
 
     <!-- COMMON -->
     <section class="group">
-      <!-- Control type (only when editing a slider field) -->
       <div class="row" v-if="isSlider">
         <label>Control type</label>
         <div class="choice-row">
@@ -33,8 +32,7 @@
         </label>
       </div>
 
-      <!-- Placeholder (not for checkbox and not for slider mode) -->
-      <div class="row" v-if="!isCheckbox && !(isSlider && local.mode==='slider')">
+      <div class="row" v-if="!isCheckbox && !(isSlider && local.mode==='slider') && !isFile">
         <label>Placeholder</label>
         <input type="text" v-model="local.placeholder" placeholder="Shown when empty" />
       </div>
@@ -52,17 +50,14 @@
         </select>
       </div>
 
-      <!-- Default value (NEVER for slider mode) -->
-      <div class="row" v-if="!isDate && !(isSlider && local.mode==='slider')">
+      <div class="row" v-if="!isDate && !(isSlider && local.mode==='slider') && !isFile">
         <label>Default value</label>
 
-        <!-- Choice types -->
         <select v-if="isChoice && !local.allowMultiple" v-model="local.defaultValue">
           <option value="">(none)</option>
           <option v-for="(opt, i) in localOptions" :key="i" :value="opt">{{ opt }}</option>
         </select>
 
-        <!-- Multi radio -->
         <div v-else-if="isRadio && local.allowMultiple" class="chips">
           <div class="chip-input-row">
             <input
@@ -264,6 +259,76 @@
       </div>
     </section>
 
+    <!-- FILE -->
+    <section class="group" v-if="isFile">
+      <div class="row">
+        <label>Allowed formats</label>
+        <input
+          type="text"
+          v-model="allowedFormatsText"
+          placeholder="Examples: .pdf, .csv, .tsv, image/*, application/zip"
+        />
+        <small class="note">
+          Comma-separated list. Client validates on upload; re-validate server-side if needed.
+        </small>
+      </div>
+
+      <div class="row two">
+        <div>
+          <label>Max size (MB)</label>
+          <input type="number" min="1" step="1" v-model.number="local.maxSizeMB" />
+        </div>
+        <div>
+          <label>Storage behavior</label>
+          <select v-model="local.storagePreference">
+            <option value="local">Local storage (upload)</option>
+            <option value="url">Link via URL</option>
+          </select>
+          <small class="note">This decides which input appears in the form.</small>
+        </div>
+      </div>
+      <div class="row">
+        <label class="chk">
+          <input type="checkbox" v-model="local.allowMultipleFiles" />
+          Allow multiple files
+        </label>
+      </div>
+
+      <div class="row">
+        <label>Modalities (BIDS)</label>
+        <div class="chips">
+          <div class="chip-group">
+            <label
+              v-for="mod in allModalities"
+              :key="mod"
+              class="chip selectable"
+            >
+              <input type="checkbox" :value="mod" v-model="local.modalities" />
+              {{ mod }}
+              <button
+                v-if="!builtInSet.has(mod)"
+                class="chip-x"
+                @click.prevent="removeCustomModByName(mod)"
+                title="Remove custom modality"
+              >×</button>
+            </label>
+          </div>
+
+          <div class="chip-input-row add-mod-row">
+            <input
+              type="text"
+              v-model="customMod"
+              placeholder="Custom modality (Enter or +)"
+              @keydown.enter.prevent="addCustomMod"
+            />
+            <button type="button" class="btn-option add-mod-btn" @click="addCustomMod">+</button>
+          </div>
+
+          <small class="note">Used to help organize and name files in BIDS folders.</small>
+        </div>
+      </div>
+    </section>
+
     <!-- SLIDER mode -->
     <section class="group" v-if="isSlider && local.mode==='slider'">
       <div class="row two">
@@ -294,7 +359,6 @@
         <span>No default selection for sliders. Clicking the track jumps to the nearest step.</span>
       </div>
 
-      <!-- MARKS / LABELS (for slider) -->
       <div class="row">
         <label>Step labels</label>
         <div class="options-scroll">
@@ -355,8 +419,6 @@
       <div class="row note" v-if="linearCount > LINEAR_MAX">
         <span class="err">Too many points ({{ linearCount }}). Limit is {{ LINEAR_MAX }} to avoid clutter.</span>
       </div>
-
-      <!-- NOTE: No per-point labels for linear scale by design -->
       <div class="row note">
         <span>Linear scale shows only endpoints (left/right). No step labels.</span>
       </div>
@@ -421,6 +483,15 @@ const DATE_FORMATS = [
   "MM/yyyy","MM-yyyy","yyyy/MM","yyyy-MM","yyyy"
 ];
 
+// MRI included
+const BIDS_MODALITIES = Object.freeze([
+  "MRI","T1w","T2w","bold","dwi","FLAIR","PD","inplaneT2",
+  "fmap","fieldmap","epi","phasediff","magnitude",
+  "MEG","EEG","iEEG","NIRS","PET","ASL",
+  "beh","events","physio","scans",
+  "func","anat","fmap","swi"
+]);
+
 export default {
   name: "FieldConstraintsDialog",
   components: { DateFormatPicker, FieldTime },
@@ -439,9 +510,17 @@ export default {
         ? base.defaultValue
         : (type === "checkbox" ? false : type === "radio" && base.allowMultiple ? [] : "");
 
+    const allowedFormats = Array.isArray(base.allowedFormats)
+      ? base.allowedFormats.map(String).map(s => s.trim()).filter(Boolean)
+      : [];
+    const allowedFormatsText = allowedFormats.join(", ");
+
     return {
       DATE_FORMATS,
       LINEAR_MAX: 10,
+      BIDS_MODALITIES,
+      customMod: "",
+      allowedFormatsText,
       local: {
         // shared
         required: !!base.required,
@@ -475,7 +554,7 @@ export default {
         // choice
         allowMultiple: !!base.allowMultiple,
 
-        // slider modes
+        // slider
         mode: base.mode === "linear" ? "linear" : "slider",
         percent: !!base.percent,
 
@@ -483,7 +562,7 @@ export default {
         leftLabel: base.leftLabel || "",
         rightLabel: base.rightLabel || "",
 
-        // marks (used only for slider)
+        // marks
         marks: Array.isArray(base.marks)
           ? base.marks
               .map(m => ({ value: Number(m?.value), label: String(m?.label ?? "") }))
@@ -492,15 +571,22 @@ export default {
             ? Object.keys(base.marks)
                 .map(k => ({ value: Number(k), label: String(base.marks[k]) }))
                 .filter(m => Number.isFinite(m.value) && m.label)
-            : []
+            : [],
+
+        // file
+        allowedFormats,
+        maxSizeMB: isFinite(base.maxSizeMB) ? Number(base.maxSizeMB) : 100,
+        storagePreference: (base.storagePreference === "url") ? "url" : "local",
+        allowMultipleFiles: !!base.allowMultipleFiles,
+        modalities: Array.isArray(base.modalities)
+          ? base.modalities.filter(Boolean).map(String)
+          : []
       },
 
       localOptions: initialOptions.length ? initialOptions : ["Option 1"],
       optionsCount: Math.max(1, initialOptions.length || 1),
 
       chipInput: "",
-
-      // marks editor state (slider only)
       markEditValue: null,
       markEditLabel: ""
     };
@@ -516,6 +602,7 @@ export default {
     isSelect()   { return this.type === "select"; },
     isChoice()   { return this.isRadio || this.isSelect; },
     isSlider()   { return this.type === "slider"; },
+    isFile()     { return this.type === "file"; },
     currentTypeLabel() {
       return this.type.charAt(0).toUpperCase() + this.type.slice(1);
     },
@@ -536,7 +623,6 @@ export default {
         .filter((m, idx, arr) => idx === 0 || m.value !== arr[idx-1].value);
     },
 
-    // validation (only when default is visible)
     defaultError() {
       if (!(this.local.required && this.local.readonly)) return "";
       const t = this.type;
@@ -559,18 +645,30 @@ export default {
         const ok = dv !== "" && dv !== null && dv !== undefined && !Number.isNaN(Number(dv));
         return ok ? "" : "Default value is required when the field is both Required and Readonly.";
       }
-      // slider default is never shown here
       return (dv !== "" && dv !== null && dv !== undefined) ? "" :
         "Default value is required when the field is both Required and Readonly.";
     },
+
     isSaveDisabled() {
       if (this.isSlider && this.local.mode === "linear") {
         return this.linearCount < 2 || this.linearCount > this.LINEAR_MAX;
+      }
+      if (this.isFile) {
+        if (this.local.maxSizeMB !== undefined && !(this.local.maxSizeMB > 0)) return true;
       }
       if (!this.isDate && !(this.isSlider && this.local.mode==='slider') && (this.local.required && this.local.readonly)) {
         return !!this.defaultError;
       }
       return false;
+    },
+
+    builtInSet() {
+      return new Set(BIDS_MODALITIES);
+    },
+    allModalities() {
+      // union of built-ins and current selections, keeping order (built-ins first)
+      const extras = (this.local.modalities || []).filter(m => !!m && !this.builtInSet.has(m));
+      return [...BIDS_MODALITIES, ...Array.from(new Set(extras))];
     }
   },
   watch: {
@@ -578,14 +676,19 @@ export default {
       deep: true,
       handler(nv) {
         const base = nv || {};
+        const allowedFormats = Array.isArray(base.allowedFormats)
+          ? base.allowedFormats.map(String).map(s => s.trim()).filter(Boolean)
+          : [];
+        this.allowedFormatsText = allowedFormats.join(", ");
         this.local = {
           ...this.local,
           required: !!base.required,
           readonly: !!base.readonly,
           helpText: base.helpText || "",
           placeholder: base.placeholder || "",
-          defaultValue:
-            base.defaultValue !== undefined ? base.defaultValue : this.local.defaultValue,
+          defaultValue: base.defaultValue !== undefined
+            ? base.defaultValue
+            : this.local.defaultValue,
 
           minLength: isFinite(base.minLength) ? Number(base.minLength) : undefined,
           maxLength: isFinite(base.maxLength) ? Number(base.maxLength) : undefined,
@@ -613,20 +716,23 @@ export default {
           percent: !!base.percent,
 
           leftLabel: base.leftLabel || "",
-          rightLabel: base.rightLabel || ""
-        };
+          rightLabel: base.rightLabel || "",
 
-        if (Array.isArray(base.marks)) {
-          this.local.marks = base.marks
-            .map(m => ({ value: Number(m?.value), label: String(m?.label ?? "") }))
-            .filter(m => Number.isFinite(m.value) && m.label);
-        } else if (base.marks && typeof base.marks === "object") {
-          this.local.marks = Object.keys(base.marks)
-            .map(k => ({ value: Number(k), label: String(base.marks[k]) }))
-            .filter(m => Number.isFinite(m.value) && m.label);
-        } else {
-          this.local.marks = [];
-        }
+          marks: Array.isArray(base.marks)
+            ? base.marks
+                .map(m => ({ value: Number(m?.value), label: String(m?.label ?? "") }))
+                .filter(m => Number.isFinite(m.value) && m.label)
+            : [],
+
+          // file
+          allowedFormats,
+          maxSizeMB: isFinite(base.maxSizeMB) ? Number(base.maxSizeMB) : undefined,
+          storagePreference: (base.storagePreference === "url") ? "url" : "local",
+          allowMultipleFiles: !!base.allowMultipleFiles,
+          modalities: Array.isArray(base.modalities)
+            ? base.modalities.filter(Boolean).map(String)
+            : []
+        };
 
         if (Array.isArray(base.options)) {
           const cleaned = base.options.filter(Boolean).map(String);
@@ -640,7 +746,6 @@ export default {
         this.local.min = 1;
         this.local.max = 100;
         if (!Number.isFinite(this.local.step) || this.local.step <= 0) this.local.step = 1;
-        // keep only labels within 1..100
         this.local.marks = (this.local.marks || []).filter(m => m.value >= 1 && m.value <= 100);
       }
     },
@@ -685,9 +790,9 @@ export default {
     }
   },
   methods: {
-    // marks editor (slider only)
+    // Slider marks
     addOrUpdateMark(kind) {
-      if (kind !== 'slider') return; // guard: linear has no per-point labels
+      if (kind !== 'slider') return;
       let v = Number(this.markEditValue);
       const lbl = String(this.markEditLabel || "").trim();
       if (!Number.isFinite(v) || !lbl) return;
@@ -696,7 +801,6 @@ export default {
       const max = this.useMax;
       const step = this.useStep;
 
-      // snap to step & clamp
       v = Math.max(min, Math.min(max, v));
       v = Math.round((v - min) / step) * step + min;
       v = Math.max(min, Math.min(max, v));
@@ -713,6 +817,7 @@ export default {
       if (i >= 0) this.local.marks.splice(i, 1);
     },
 
+    // Radio multi default chips
     addChip() {
       const v = (this.chipInput || "").trim();
       if (!v) return;
@@ -726,6 +831,7 @@ export default {
       this.local.defaultValue.splice(i, 1);
     },
 
+    // Choice options
     syncOptionsCount() {
       const count = Math.max(1, Number(this.optionsCount || 1));
       if (count > this.localOptions.length) {
@@ -764,93 +870,127 @@ export default {
       this.optionsCount = this.localOptions.length;
     },
 
+    // Custom modalities
+    addCustomMod() {
+      const v = (this.customMod || "").trim();
+      if (!v) return;
+      const exists = (this.local.modalities || []).some(m => (m || "").toLowerCase() === v.toLowerCase());
+      if (!exists) {
+        if (!Array.isArray(this.local.modalities)) this.local.modalities = [];
+        this.local.modalities.push(v); // add as CHECKED
+      }
+      this.customMod = "";
+    },
+    removeCustomModByName(name) {
+      this.local.modalities = (this.local.modalities || []).filter(m => m !== name);
+    },
+
+    // File formats
+    parseAllowedFormats(text) {
+      return String(text || "")
+        .split(",")
+        .map(s => s.trim())
+        .filter(Boolean);
+    },
+
+    // Save
     save() {
       if (this.isSaveDisabled) return;
 
-      // Non-slider types
-      if (!this.isSlider) {
-      const cleaned = normalizeConstraints(this.type, { ...this.local });
-      if (this.isChoice) {
-        const opts = this.localOptions.map(o => String(o || "").trim()).filter(Boolean);
-        const finalOpts = opts.length ? Array.from(new Set(opts)) : ["Option 1"];
-
-        if (this.isRadio && this.local.allowMultiple) {
-          const arr = Array.isArray(cleaned.defaultValue) ? cleaned.defaultValue : [];
-          cleaned.defaultValue = arr.filter(v => finalOpts.includes(v));
-        } else {
-          if (!finalOpts.includes(cleaned.defaultValue)) cleaned.defaultValue = "";
+      if (this.isFile) {
+          const cleaned = {
+            required: !!this.local.required,
+            readonly: !!this.local.readonly,
+            helpText: this.local.helpText || "",
+            allowedFormats: this.parseAllowedFormats(this.allowedFormatsText),
+            maxSizeMB: Number.isFinite(this.local.maxSizeMB) && this.local.maxSizeMB > 0
+              ? Number(this.local.maxSizeMB)
+              : 100, // fallback to 100 MB
+            storagePreference: (this.local.storagePreference === "url") ? "url" : "local",
+            allowMultipleFiles: !!this.local.allowMultipleFiles,
+            modalities: Array.isArray(this.local.modalities)
+              ? Array.from(new Set(this.local.modalities.filter(Boolean).map(String)))
+              : []
+          };
+          this.$emit("updateConstraints", cleaned);
+          return;
         }
 
-        cleaned.options = finalOpts;
-        if (this.isSelect) delete cleaned.allowMultiple;
+
+      if (!this.isSlider) {
+        const cleaned = normalizeConstraints(this.type, { ...this.local });
+        if (this.isChoice) {
+          const opts = this.localOptions.map(o => String(o || "").trim()).filter(Boolean);
+          const finalOpts = opts.length ? Array.from(new Set(opts)) : ["Option 1"];
+
+          if (this.isRadio && this.local.allowMultiple) {
+            const arr = Array.isArray(cleaned.defaultValue) ? cleaned.defaultValue : [];
+            cleaned.defaultValue = arr.filter(v => finalOpts.includes(v));
+          } else {
+            if (!finalOpts.includes(cleaned.defaultValue)) cleaned.defaultValue = "";
+          }
+          cleaned.options = finalOpts;
+          if (this.isSelect) delete cleaned.allowMultiple;
+        }
+        cleaned.defaultValue = coerceDefaultForType(
+          this.isRadio && this.local.allowMultiple ? "radio" : this.type,
+          cleaned.defaultValue
+        );
+        cleaned.hourCycle = this.local.hourCycle || "24";
+
+        this.$emit("updateConstraints", cleaned);
+        return;
       }
-      cleaned.defaultValue = coerceDefaultForType(
-        this.isRadio && this.local.allowMultiple ? "radio" : this.type,
-        cleaned.defaultValue
-      );
-      cleaned.hourCycle = this.local.hourCycle || "24";
-      console.log("[FCD] save non-slider constraints:", cleaned);
-      this.$emit("updateConstraints", cleaned);
-      return;
-    }
 
-    // SLIDER -> Slider mode
-    if (this.local.mode === "slider") {
-      const min = this.local.percent ? 1 : this.useMin;
-      const max = this.local.percent ? 100 : this.useMax;
-      const step = this.local.percent ? 1 : this.useStep;
+      if (this.local.mode === "slider") {
+        const min = this.local.percent ? 1 : this.useMin;
+        const max = this.local.percent ? 100 : this.useMax;
+        const step = this.local.percent ? 1 : this.useStep;
 
-      const marks = (this.local.marks || [])
-        .map(m => {
-          let v = Number(m.value);
-          if (!Number.isFinite(v)) return null;
-          v = Math.round((v - min) / step) * step + min;
-          v = Math.max(min, Math.min(max, v));
-          return { value: v, label: String(m.label || "") };
-        })
-        .filter(m => m && m.label)
-        .filter((m, idx, arr) => arr.findIndex(x => x.value === m.value) === idx)
-        .sort((a, b) => a.value - b.value);
+        const marks = (this.local.marks || [])
+          .map(m => {
+            let v = Number(m.value);
+            if (!Number.isFinite(v)) return null;
+            v = Math.round((v - min) / step) * step + min;
+            v = Math.max(min, Math.min(max, v));
+            return { value: v, label: String(m.label || "") };
+          })
+          .filter(m => m && m.label)
+          .filter((m, idx, arr) => arr.findIndex(x => x.value === m.value) === idx)
+          .sort((a, b) => a.value - b.value);
+
+        const cleaned = {
+          mode: "slider",
+          required: !!this.local.required,
+          readonly: !!this.local.readonly,
+          helpText: this.local.helpText || "",
+          percent: !!this.local.percent,
+          min, max, step,
+          marks
+        };
+        this.$emit("updateConstraints", cleaned);
+        return;
+      }
+
+      const LIM = this.LINEAR_MAX;
+      let linMin = this.useMin;
+      let linMax = this.useMax;
+      if (linMax - linMin + 1 > LIM) {
+        linMax = linMin + (LIM - 1);
+      }
+      if (linMax < linMin) linMax = linMin + 1;
 
       const cleaned = {
-        mode: "slider",
+        mode: "linear",
         required: !!this.local.required,
         readonly: !!this.local.readonly,
         helpText: this.local.helpText || "",
-        percent: !!this.local.percent,
-        min, max, step,
-        marks
+        min: linMin,
+        max: linMax,
+        leftLabel: this.local.leftLabel || "",
+        rightLabel: this.local.rightLabel || ""
       };
-
-      console.log("[FCD] save slider constraints:", cleaned);
       this.$emit("updateConstraints", cleaned);
-      return;
-    }
-
-    // SLIDER -> Linear mode (no step labels)
-    const LIM = this.LINEAR_MAX;
-    let linMin = this.useMin;
-    let linMax = this.useMax;
-    if (linMax - linMin + 1 > LIM) {
-      linMax = linMin + (LIM - 1);
-    }
-    if (linMax < linMin) linMax = linMin + 1;
-
-    const cleaned = {
-      mode: "linear",
-      required: !!this.local.required,
-      readonly: !!this.local.readonly,
-      helpText: this.local.helpText || "",
-      min: linMin,
-      max: linMax,
-      leftLabel: this.local.leftLabel || "",
-      rightLabel: this.local.rightLabel || ""
-      // no marks in linear mode
-    };
-
-    console.log("[FCD] save linear constraints:", cleaned);
-    this.$emit("updateConstraints", cleaned);
-
     }
   }
 };
@@ -875,9 +1015,12 @@ input[type="text"],input[type="number"],input[type="time"],select{width:100%;pad
 .quick{display:flex;gap:6px}
 .chips{display:flex;flex-direction:column;gap:6px}
 .chip-input-row input{width:100%}
-.chip-group{display:flex;flex-wrap:wrap;gap:6px}
-.chip{background:#eef2ff;color:#111827;border:1px solid #c7d2fe;border-radius:999px;padding:2px 8px;font-size:12px}
-.chip-x{margin-left:6px;background:transparent;border:none;cursor:pointer}
+.add-mod-row{display:grid;grid-template-columns:1fr 40px;gap:6px}
+.add-mod-btn{padding:8px;border-radius:6px}
+.chip-group{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
+.chip{background:#eef2ff;color:#111827;border:1px solid #c7d2fe;border-radius:999px;padding:2px 10px;font-size:12px;display:inline-flex;align-items:center;gap:6px}
+.chip.selectable input{margin-right:6px}
+.chip-x{background:transparent;border:none;cursor:pointer}
 .modal-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:12px}
 .btn-primary{background:#2563eb;color:#fff;border:none;padding:8px 14px;border-radius:6px;cursor:pointer;transition:background .2s ease,opacity .2s ease}
 .btn-primary:hover:not(:disabled){background:#1d4ed8}

@@ -1,6 +1,8 @@
 import os
 import shutil
 from typing import List, Dict, Optional
+from urllib.parse import urlparse
+
 from fastapi import Request
 from fastapi import APIRouter, HTTPException, Depends, Query, UploadFile, File, Form, Body
 from pathlib import Path
@@ -9,6 +11,7 @@ import yaml
 from datetime import datetime, timedelta
 from database import get_db
 import schemas, crud, models
+from bids_exporter import upsert_bids_dataset, write_entry_to_bids, stage_file_for_modalities
 from logger import logger
 from models import User
 from users import get_current_user, oauth2_scheme
@@ -16,25 +19,17 @@ import secrets
 from sqlalchemy.orm import Session
 from models import StudyTemplateVersion
 
+
 router = APIRouter(prefix="/forms", tags=["forms"])
 
 TEMPLATE_DIR = Path("shacl/templates")  # Path to your templates directory
-BASE_DIR = Path(__file__).resolve().parent.parent / "ecrf_backend" /"data_models" / "clinical_study_model"
+BASE_DIR = Path(__file__).resolve().parent.parent / "ecrf_backend" / "data_models" / "clinical_study_model"
 
 
-# @router.get("/study-types")
-# def get_study_types():
-#     file_path = Path(__file__).parent / "shacl" / "study_type" / "study_type.json"
-#     print(file_path)
-#     try:
-#         with file_path.open("r") as file:
-#             data = json.load(file)
-#             print(data)
-#             return JSONResponse(content=data)
-#     except FileNotFoundError:
-#         return JSONResponse(content={"error": "File not found"}, status_code=404)
-#     except json.JSONDecodeError:
-#         return JSONResponse(content={"error": "Invalid JSON format"}, status_code=400)
+def _assert_owner_or_admin(meta: models.StudyMetadata, user) -> None:
+    if meta.created_by != user.id and getattr(user.profile, "role", None) != "Administrator":
+        raise HTTPException(status_code=403, detail="Not authorized")
+
 
 @router.get("/templates")
 def list_templates():
@@ -53,12 +48,9 @@ def get_shacl_template(template_name: str = Query(None)):
     """
     if not template_name:
         raise HTTPException(status_code=400, detail="No template selected.")
-
     template_path = TEMPLATE_DIR / template_name
-
     if not template_path.exists():
         raise HTTPException(status_code=404, detail="Template not found.")
-
     with open(template_path, "r") as template_file:
         try:
             template = json.load(template_file)
@@ -67,18 +59,14 @@ def get_shacl_template(template_name: str = Query(None)):
             raise HTTPException(status_code=500, detail="Error reading template file.")
 
 
-
 @router.get("/available-fields")
 async def get_available_fields():
     try:
-        # Load the JSON file dynamically from the templates directory
         available_fields_file = TEMPLATE_DIR / "available-fields.json"
         if not available_fields_file.exists():
             raise HTTPException(status_code=404, detail="Available fields file not found.")
-
         with open(available_fields_file, "r") as file:
             data = json.load(file)
-
         return data
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error loading available fields: {str(e)}")
@@ -87,178 +75,24 @@ async def get_available_fields():
 @router.get("/specialized-fields")
 async def get_specialized_fields():
     try:
-        # Load the JSON file dynamically from the templates directory
         available_fields_file = TEMPLATE_DIR / "specialized-fields.json"
         if not available_fields_file.exists():
             raise HTTPException(status_code=404, detail="Available fields file not found.")
-
         with open(available_fields_file, "r") as file:
             data = json.load(file)
-
         return data
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error loading available fields: {str(e)}")
 
 
-"""
-# Currently not used since we are not saving forms separately, rather saving the study as a whole
-@router.post("/save-form")
-def save_form(
-        form_data: dict,
-        db: Session = Depends(get_db),
-        user: User = Depends(get_current_user)
-):
-
-    new_form = Form(user_id=user.id, **form_data)
-    db.add(new_form)
-    db.commit()
-    db.refresh(new_form)
-    return {"message": "Form saved successfully", "form_id": new_form.id}
-
-
-@router.get("/saved-forms")
-def load_saved_forms(
-    db: Session = Depends(get_db),
-    user: User = Depends(get_current_user)
-):
-
-    forms = db.query(Form).filter(Form.user_id == user.id).all()
-    if not forms:
-        raise HTTPException(status_code=404, detail="No saved forms found")
-    return forms
-"""
-
-
-
 def load_yaml_file(file_path):
-    """Utility function to load a YAML file and return as dictionary."""
     try:
         with open(file_path, "r", encoding="utf-8") as file:
             return yaml.safe_load(file)
     except Exception as e:
         print(f"Error reading {file_path}: {e}")
         return None
-"""
-This code block has been commented becuase we are no longer rendering the study models from the yaml file since its not necessary to "label" each study. User can select each study
-by selecting from the drop down and then constructing the study from the form generation. This way users have the full freedom to create a study.
 
-
-@router.get("/models")
-def get_study_models(user: User = Depends(get_current_user)):
-   
-    logger.info(f"User {user.username} is accessing study models.")
-
-    # Debug BASE_DIR
-    print(f"\n Debug: Checking BASE_DIR: {BASE_DIR}")
-
-    if not BASE_DIR.exists():
-        print(f" ERROR: BASE_DIR does not exist: {BASE_DIR}")
-        raise HTTPException(status_code=500, detail="Server configuration error: BASE_DIR missing.")
-
-    study_models = {}
-
-    # Debugging categories inside BASE_DIR
-    category_dirs = list(BASE_DIR.iterdir())
-    print(f" Found categories: {category_dirs}")
-
-    if not category_dirs:
-        raise HTTPException(status_code=404, detail="No study models found (empty BASE_DIR).")
-
-    for category in category_dirs:
-        if category.is_dir():
-            category_name = category.name
-            study_models[category_name] = {}
-
-            yaml_files = list(category.glob("*.yaml"))
-            print(f" Category '{category_name}' - YAML Files Found: {yaml_files}")
-
-            if not yaml_files:
-                print(f" WARNING: No YAML files found in {category_name}")
-
-            for yaml_file in yaml_files:
-                model_data = load_yaml_file(yaml_file)
-                if model_data:
-                    study_models[category_name][yaml_file.stem] = model_data
-                else:
-                    print(f" WARNING: Failed to load {yaml_file}")
-
-    if not study_models:
-        raise HTTPException(status_code=404, detail="No study models found")
-
-    return study_models
-"""
-
-"""
-# doesnt make sense to call an api to just to get file names from yaml files, this has been changed to  get the study type and description
-# from a study_types.json file from public folder. 
-@router.get("/case-studies", response_model=List[Dict[str, str]])
-def get_case_study_names(user: dict = Depends(get_current_user)):
-
-    if not BASE_DIR.exists():
-        raise HTTPException(status_code=500, detail="Server configuration error: BASE_DIR missing.")
-
-    case_studies = []
-
-    yaml_files = list(BASE_DIR.glob("*.yaml"))
-    if not yaml_files:
-        raise HTTPException(status_code=404, detail="No case studies found.")
-
-    for yaml_file in yaml_files:
-        data = load_yaml_file(yaml_file)
-
-        if not data or "classes" not in data:
-            continue  # Skip files without proper structure
-
-        # Extract name from file name
-        study_name = yaml_file.stem.replace("_", " ").title()
-
-        # Get the first class description
-        class_data = next(iter(data["classes"].values()), {})
-        study_description = class_data.get("description", "No description available.")
-
-        case_studies.append({
-            "name": study_name,
-            "description": study_description
-        })
-
-    return case_studies
-
-
-NO longer used since since we are not specifying the study type and its structure, rather just using yaml names to indicate
-the study type as a meta information
-@router.get("/models/{category}/{file_name}")
-def get_yaml_content(category: str, file_name: str, user: User = Depends(get_current_user)):
-    # Fetch and return the structured content of a YAML file.
-    logger.info(f"User {user.username} is accessing {file_name} in {category}")
-
-    category_path = BASE_DIR / category
-    if not category_path.exists() or not category_path.is_dir():
-        raise HTTPException(status_code=404, detail="Category not found")
-
-    yaml_path = category_path / f"{file_name}.yaml"
-    if not yaml_path.exists():
-        raise HTTPException(status_code=404, detail="File not found")
-
-    yaml_content = load_yaml_file(yaml_path)
-    if not yaml_content:
-        raise HTTPException(status_code=500, detail="Error loading YAML file")
-
-    return yaml_content  # Send parsed YAML structure
-"""
-
-"""
-@router.get("/{form_id}")
-def get_form_by_id(
-    form_id: int,
-    db: Session = Depends(get_db),
-    user: User = Depends(get_current_user)
-):
-
-    form = db.query(Form).filter(Form.id == form_id, Form.user_id == user.id).first()
-    if not form:
-        raise HTTPException(status_code=404, detail="Form not found")
-    return form
-"""
 
 @router.post("/studies/", response_model=schemas.StudyFull)
 def create_study(
@@ -267,15 +101,36 @@ def create_study(
     db: Session = Depends(get_db),
     user = Depends(get_current_user)
 ):
-    # Ensure the study is created only for the logged-in user.
     if study_metadata.created_by != user.id:
         raise HTTPException(status_code=403, detail="Not authorized to create study for this user")
+
     try:
         metadata, content = crud.create_study(db, study_metadata, study_content)
     except Exception as e:
         logger.error("Error creating study: %s", e)
         raise HTTPException(status_code=500, detail=str(e))
+
+    # BIDS: create dataset structure after DB commit
+    if upsert_bids_dataset:
+        try:
+            dataset_path = upsert_bids_dataset(
+                study_id=metadata.id,
+                study_name=metadata.study_name,
+                study_description=metadata.study_description,
+                study_data=content.study_data,
+            )
+            # persist any label-map mutations
+            db.query(models.StudyContent).filter(models.StudyContent.id == content.id).update(
+                {"study_data": content.study_data}
+            )
+            db.commit()
+            db.refresh(content)
+            logger.info("BIDS dataset initialized at %s (study_id=%s)", dataset_path, metadata.id)
+        except Exception as be:
+            logger.error("BIDS export (create) failed for study %s: %s", metadata.id, be)
+
     return {"metadata": metadata, "content": content}
+
 
 @router.get("/studies", response_model=List[schemas.StudyMetadataOut])
 def list_studies(
@@ -307,6 +162,7 @@ def read_study(
         raise HTTPException(status_code=403, detail="Not authorized to view this study")
     return {"metadata": metadata, "content": content}
 
+
 @router.put("/studies/{study_id}", response_model=schemas.StudyFull)
 def update_study(
     study_id: int,
@@ -315,31 +171,50 @@ def update_study(
     db: Session = Depends(get_db),
     user = Depends(get_current_user)
 ):
-    # Retrieve the study first and check ownership.
     existing = crud.get_study_full(db, study_id)
     if existing is None:
         raise HTTPException(status_code=404, detail="Study not found")
     metadata, content = existing
-    # Other than original creator or "Administartor", study cannot be edited by someone else
     if metadata.created_by != user.id and user.profile.role != "Administrator":
         raise HTTPException(status_code=403, detail="Not authorized to update this study")
-    # Ensure the study id is present in the dynamic content data and update modification time.
+
     if not study_content.study_data.get("id"):
         study_content.study_data["id"] = study_id
-    # Optionally, update modification timestamp here if your schema supports it.
+
     try:
         result = crud.update_study(db, study_id, study_metadata, study_content)
     except Exception as e:
         logger.error("Error updating study: %s", e)
         raise HTTPException(status_code=500, detail=str(e))
+
     metadata, content = result
+
+    # BIDS: update dataset structure
+    if upsert_bids_dataset:
+        try:
+            dataset_path = upsert_bids_dataset(
+                study_id=metadata.id,
+                study_name=metadata.study_name,
+                study_description=metadata.study_description,
+                study_data=content.study_data,
+            )
+            db.query(models.StudyContent).filter(models.StudyContent.id == content.id).update(
+                {"study_data": content.study_data}
+            )
+            db.commit()
+            db.refresh(content)
+            logger.info("BIDS dataset updated at %s (study_id=%s)", dataset_path, metadata.id)
+        except Exception as be:
+            logger.error("BIDS export (update) failed for study %s: %s", metadata.id, be)
+
     return {"metadata": metadata, "content": content}
+
 
 @router.get("/studies/{study_id}/files", response_model=List[schemas.FileOut])
 def read_files_for_study(
     study_id: int,
     db: Session = Depends(get_db),
-    user = Depends(get_current_user)
+    user: models.User = Depends(get_current_user)
 ):
     study = db.query(models.StudyMetadata).filter(models.StudyMetadata.id == study_id).first()
     if not study or study.created_by != user.id:
@@ -347,51 +222,156 @@ def read_files_for_study(
     files = crud.get_files_for_study(db, study_id)
     return files
 
+
 @router.post("/studies/{study_id}/files", response_model=schemas.FileOut)
 def upload_file(
     study_id: int,
     uploaded_file: UploadFile = File(...),
     description: str = Form(""),
     storage_option: str = Form("local"),
+    subject_index: Optional[int] = Form(None),
+    visit_index: Optional[int] = Form(None),
+    group_index: Optional[int] = Form(None),
+    modalities_json: Optional[str] = Form("[]"),  # NEW: ["anat","func",...]
     db: Session = Depends(get_db),
-    user = Depends(get_current_user)
+    user: models.User = Depends(get_current_user)
 ):
-    # Verify that the study belongs to the current user.
     study = db.query(models.StudyMetadata).filter(models.StudyMetadata.id == study_id).first()
     if not study or study.created_by != user.id:
         raise HTTPException(status_code=403, detail="Not authorized to upload file for this study")
+
     try:
-        upload_dir = "uploads"
-        os.makedirs(upload_dir, exist_ok=True)
-        file_location = os.path.join(upload_dir, uploaded_file.filename)
+        modalities = json.loads(modalities_json or "[]")
+        if not isinstance(modalities, list):
+            modalities = []
+    except Exception:
+        modalities = []
+
+    # Store raw file under uploads/… (gateway responsibility only)
+    try:
+        sub = f"sub-{(int(subject_index) + 1):02d}" if subject_index is not None else "sub-unknown"
+        ses = f"ses-{(int(visit_index) + 1):02d}" if visit_index is not None else "ses-unknown"
+        grp = f"group-{(int(group_index) + 1):02d}" if group_index is not None else "group-unknown"
+    except Exception:
+        sub, ses, grp = "sub-unknown", "ses-unknown", "group-unknown"
+
+    try:
+        base_dir = os.path.join("uploads", f"study-{study_id}", sub, ses, grp)
+        os.makedirs(base_dir, exist_ok=True)
+        file_location = os.path.join(base_dir, uploaded_file.filename)
         with open(file_location, "wb") as f:
             shutil.copyfileobj(uploaded_file.file, f)
+        logger.info("Saved raw upload: %s", file_location)
     except Exception as e:
         logger.error("File upload error: %s", e)
         raise HTTPException(status_code=500, detail="Error saving file")
+
+    # Create DB record
     try:
         file_data = schemas.FileCreate(
             study_id=study_id,
             file_name=uploaded_file.filename,
             file_path=file_location,
             description=description,
-            storage_option=storage_option
+            storage_option=storage_option or "local"
         )
         db_file = crud.create_file(db, file_data)
     except Exception as e:
         logger.error("Error creating file record: %s", e)
         raise HTTPException(status_code=500, detail="Error creating file record")
+
+    # Mirror into BIDS (delegated)
+    try:
+        content = db.query(models.StudyContent).filter(models.StudyContent.study_id == study_id).first()
+        study_data = content.study_data if content else {}
+        stage_file_for_modalities(
+            study_id=study.id,
+            study_name=study.study_name,
+            study_description=study.study_description,
+            study_data=study_data,
+            subject_index=subject_index,
+            visit_index=visit_index,
+            modalities=modalities,
+            source_path=file_location,
+            url=None,
+            filename=uploaded_file.filename,
+        )
+    except Exception as be:
+        logger.error("BIDS mirror (local upload) failed for study %s: %s", study_id, be)
+
+    return db_file
+
+
+@router.post("/studies/{study_id}/files/url", response_model=schemas.FileOut)
+def create_url_file(
+    study_id: int,
+    url: str = Form(...),
+    description: str = Form(""),
+    storage_option: str = Form("url"),
+    subject_index: Optional[int] = Form(None),
+    visit_index: Optional[int] = Form(None),
+    group_index: Optional[int] = Form(None),
+    modalities_json: Optional[str] = Form("[]"),  # NEW
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user)
+):
+    study = db.query(models.StudyMetadata).filter(models.StudyMetadata.id == study_id).first()
+    if not study or study.created_by != user.id:
+        raise HTTPException(status_code=403, detail="Not authorized to create file for this study")
+
+    try:
+        modalities = json.loads(modalities_json or "[]")
+        if not isinstance(modalities, list):
+            modalities = []
+    except Exception:
+        modalities = []
+
+    # Create DB record (URL)
+    try:
+        parsed = urlparse(url)
+        base = os.path.basename(parsed.path) or "link"
+        file_data = schemas.FileCreate(
+            study_id=study_id,
+            file_name=base,
+            file_path=url,           # store URL itself
+            description=description,
+            storage_option=storage_option or "url"
+        )
+        db_file = crud.create_file(db, file_data)
+    except Exception as e:
+        logger.error("Error creating URL file record: %s", e)
+        raise HTTPException(status_code=500, detail="Error creating file record")
+
+    # Mirror into BIDS (delegated; writes .txt with URL)
+    try:
+        content = db.query(models.StudyContent).filter(models.StudyContent.study_id == study_id).first()
+        study_data = content.study_data if content else {}
+        stage_file_for_modalities(
+            study_id=study.id,
+            study_name=study.study_name,
+            study_description=study.study_description,
+            study_data=study_data,
+            subject_index=subject_index,
+            visit_index=visit_index,
+            modalities=modalities,
+            source_path=None,
+            url=url,
+            filename=base,
+        )
+    except Exception as be:
+        logger.error("BIDS mirror (URL) failed for study %s: %s", study_id, be)
+
     return db_file
 
 def generate_token():
     return secrets.token_urlsafe(32)
 
+
 @router.post("/share-link/", status_code=201)
 def create_share_link(payload: schemas.ShareLinkCreate, request: Request,
                      db: Session = Depends(get_db),
-                         current_user: User = Depends(get_current_user)):
+                     current_user: User = Depends(get_current_user)):
 
-    # 1) Only “technician” or the study’s creator can share
     if current_user.profile.role not in ["Investigator", "Administrator", "Principal Investigator"]:
         raise HTTPException(status_code=403, detail="Not allowed")
 
@@ -413,12 +393,10 @@ def create_share_link(payload: schemas.ShareLinkCreate, request: Request,
     db.refresh(access)
 
     frontend = request.headers.get("x-forwarded-host", None) or request.client.host
-    # or just hard-code for now:
     frontend = "http://localhost:8080"
 
-    return {
-        "link": f"{frontend}/forms/shared/{token}"
-    }
+    return {"link": f"{frontend}/forms/shared/{token}"}
+
 
 @router.get("/shared/{token}", response_model=schemas.SharedFormAccessOut)
 def access_shared_form(
@@ -437,11 +415,9 @@ def access_shared_form(
     if access.expires_at < datetime.utcnow():
         raise HTTPException(403, "Link expired")
 
-    # increment usage
     access.used_count += 1
     db.commit()
 
-    # Grab the study content and metadata
     content = (
         db.query(models.StudyContent)
         .filter_by(study_id=access.study_id)
@@ -460,7 +436,6 @@ def access_shared_form(
 
     if not content.study_data or not isinstance(content.study_data.get("assignments"), list):
         raise HTTPException(500, "Study assignments data is missing or invalid")
-
 
     return {
         "study_id":      access.study_id,
@@ -495,6 +470,7 @@ def get_current_form_version(db: Session, study_id: int) -> int:
         raise ValueError(f"No template version found for study_id={study_id}")
     return latest_version.version
 
+
 @router.post("/studies/{study_id}/data", response_model=schemas.StudyDataEntryOut)
 def save_study_data(study_id: int, payload: schemas.StudyDataEntryCreate, db: Session = Depends(get_db)):
     study = db.query(models.StudyMetadata).filter(models.StudyMetadata.id == study_id).first()
@@ -502,9 +478,8 @@ def save_study_data(study_id: int, payload: schemas.StudyDataEntryCreate, db: Se
         raise HTTPException(status_code=404, detail="Study not found")
 
     try:
-        form_version     = get_current_form_version(db, study_id)
+        form_version = get_current_form_version(db, study_id)
     except ValueError:
-        # no versions exist yet ⇒ default to 1
         form_version = 1
 
     entry = models.StudyEntryData(
@@ -513,25 +488,64 @@ def save_study_data(study_id: int, payload: schemas.StudyDataEntryCreate, db: Se
         visit_index=payload.visit_index,
         group_index=payload.group_index,
         data=payload.data,
+        skipped_required_flags=payload.skipped_required_flags,
         form_version=form_version
     )
     db.add(entry)
     db.commit()
     db.refresh(entry)
+
+    # BIDS: structure + write phenotype row
+    content = db.query(models.StudyContent).filter(models.StudyContent.study_id == study_id).first()
+    if upsert_bids_dataset and content:
+        try:
+            upsert_bids_dataset(
+                study_id=study.id,
+                study_name=study.study_name,
+                study_description=study.study_description,
+                study_data=content.study_data,
+            )
+            # persist label-map mutations
+            db.query(models.StudyContent).filter(models.StudyContent.id == content.id).update(
+                {"study_data": content.study_data}
+            )
+            db.commit()
+            if write_entry_to_bids:
+                write_entry_to_bids(
+                    study_id=study.id,
+                    study_name=study.study_name,
+                    study_description=study.study_description,
+                    study_data=content.study_data,
+                    entry={
+                        "id": entry.id,
+                        "subject_index": entry.subject_index,
+                        "visit_index": entry.visit_index,
+                        "group_index": entry.group_index,
+                        "form_version": entry.form_version,
+                        "data": entry.data or {}
+                    }
+                )
+                logger.info(
+                    "BIDS phenotype updated for study=%s sub_idx=%s visit_idx=%s entry_id=%s",
+                    study.id, entry.subject_index, entry.visit_index, entry.id
+                )
+        except Exception as be:
+            logger.error("BIDS export (data save) failed for study %s: %s", study_id, be)
+
     return entry
 
+
 @router.put(
-  "/studies/{study_id}/data_entries/{entry_id}",
-  response_model=schemas.StudyDataEntryOut
+    "/studies/{study_id}/data_entries/{entry_id}",
+    response_model=schemas.StudyDataEntryOut
 )
 def update_study_data_entry(
     study_id: int,
     entry_id: int,
-    payload: schemas.StudyDataEntryCreate,
+    payload: schemas.StudyDataEntryCreate,  # contains skipped_required_flags
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user)
 ):
-    # Optional: verify user owns the study...
     entry = (
         db.query(models.StudyEntryData)
           .filter_by(id=entry_id, study_id=study_id)
@@ -540,14 +554,54 @@ def update_study_data_entry(
     if not entry:
         raise HTTPException(status_code=404, detail="Entry not found")
 
-    # Update fields
     entry.subject_index = payload.subject_index
     entry.visit_index   = payload.visit_index
     entry.group_index   = payload.group_index
     entry.data          = payload.data
 
+    if payload.skipped_required_flags is not None:
+        entry.skipped_required_flags = payload.skipped_required_flags
+
     db.commit()
     db.refresh(entry)
+
+    # BIDS: structure + upsert phenotype row
+    study = db.query(models.StudyMetadata).filter(models.StudyMetadata.id == study_id).first()
+    content = db.query(models.StudyContent).filter(models.StudyContent.study_id == study_id).first()
+    if upsert_bids_dataset and study and content:
+        try:
+            upsert_bids_dataset(
+                study_id=study.id,
+                study_name=study.study_name,
+                study_description=study.study_description,
+                study_data=content.study_data,
+            )
+            db.query(models.StudyContent).filter(models.StudyContent.id == content.id).update(
+                {"study_data": content.study_data}
+            )
+            db.commit()
+            if write_entry_to_bids:
+                write_entry_to_bids(
+                    study_id=study.id,
+                    study_name=study.study_name,
+                    study_description=study.study_description,
+                    study_data=content.study_data,
+                    entry={
+                        "id": entry.id,
+                        "subject_index": entry.subject_index,
+                        "visit_index": entry.visit_index,
+                        "group_index": entry.group_index,
+                        "form_version": entry.form_version,
+                        "data": entry.data or {}
+                    }
+                )
+                logger.info(
+                    "BIDS phenotype upserted for study=%s sub_idx=%s visit_idx=%s entry_id=%s",
+                    study.id, entry.subject_index, entry.visit_index, entry.id
+                )
+        except Exception as be:
+            logger.error("BIDS export (data update) failed for study %s: %s", study_id, be)
+
     return entry
 
 
@@ -557,16 +611,12 @@ def update_study_data_entry(
 )
 def list_study_data_entries(
     study_id: int,
-    # When the UI is showing "rows" (subjects × visits), it will send the
-    # subject/visit indexes for the rows visible on the current page.
     subject_indexes: Optional[str] = Query(None, description="Comma-separated subject indexes for current page"),
     visit_indexes: Optional[str] = Query(None, description="Comma-separated visit indexes for current page"),
-    # Explicit "all" fetch (used for small studies or for export):
     all: bool = Query(False, description="Return all entries for the study"),
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    # Authorization / existence check
     exists = db.query(models.StudyMetadata).filter_by(id=study_id).first()
     if not exists:
         raise HTTPException(404, "Study not found")
@@ -585,10 +635,6 @@ def list_study_data_entries(
     total = q.count()
 
     if not all:
-        # Filter by current page "window" if provided
-        subj_idx_list = None
-        visit_idx_list = None
-
         if subject_indexes:
             subj_idx_list = [int(s) for s in subject_indexes.split(",") if s.strip().isdigit()]
             if subj_idx_list:
@@ -600,9 +646,6 @@ def list_study_data_entries(
                 q = q.filter(models.StudyEntryData.visit_index.in_(visit_idx_list))
 
     entries = q.all()
-
-    # Pydantic v2 note: ensure schemas.StudyDataEntryOut.Config.from_attributes = True
     entries_out = [schemas.StudyDataEntryOut.from_orm(e) for e in entries]
 
     return {"total": total, "entries": entries_out}
-

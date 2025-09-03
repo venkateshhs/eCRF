@@ -56,7 +56,7 @@
             class="available-field-button"
             @click="addFieldToActiveSection(field)"
           >
-            <i :class="field.icon"></i>
+            <i :class="field.icon || fieldIcon(field.label)"></i>
             <div class="field-info">
               <span class="field-label">{{ field.label }}</span>
             </div>
@@ -136,7 +136,6 @@
                       :for="field.name"
                     >
                       {{ field.label }}
-                      <!-- REPLACED raw input with FieldCheckbox -->
                       <FieldCheckbox
                         :id="field.name"
                         v-model="field.value"
@@ -163,10 +162,9 @@
                       <button
                         class="icon-button"
                         title="Delete Field"
-                        @click.stop.prevent="setActiveSection(si); removeField(si, fi)"
+                        @click.stop.prevent="setActiveSection(si, fi); removeField(si, fi)"
                       ><i :class="icons.delete"></i></button>
 
-                      <!-- SINGLE SETTINGS BUTTON handles constraints + type-specific settings -->
                       <button
                         class="icon-button"
                         title="Settings"
@@ -204,7 +202,7 @@
                       @blur="enforceNumberDigitLimits(si, fi, $event, true)"
                     />
 
-                    <!-- DATE (uses real date picker component) -->
+                    <!-- DATE -->
                     <DateFormatPicker
                       v-else-if="field.type === 'date'"
                       v-model="field.value"
@@ -214,6 +212,7 @@
                       :max-date="field.constraints?.maxDate || null"
                     />
 
+                    <!-- TIME -->
                     <FieldTime
                       v-else-if="field.type === 'time'"
                       v-model="field.value"
@@ -231,6 +230,7 @@
                       <option v-for="opt in field.options" :key="opt">{{ opt }}</option>
                     </select>
 
+                    <!-- RADIO -->
                     <FieldRadioGroup
                       v-else-if="field.type === 'radio'"
                       :name="field.name"
@@ -238,7 +238,7 @@
                       v-model="field.value"
                     />
 
-                    <!-- SLIDER or LINEAR based on constraints.mode -->
+                    <!-- SLIDER / LINEAR -->
                     <FieldSlider
                       v-else-if="field.type === 'slider' && (field.constraints?.mode || 'slider') === 'slider'"
                       v-model="field.value"
@@ -249,7 +249,6 @@
                       :percent="!!field.constraints?.percent"
                       :marks="field.constraints?.marks || []"
                     />
-
                     <FieldLinearScale
                       v-else-if="field.type === 'slider' && field.constraints?.mode === 'linear'"
                       v-model="field.value"
@@ -258,6 +257,16 @@
                       :left-label="field.constraints?.leftLabel || ''"
                       :right-label="field.constraints?.rightLabel || ''"
                       :readonly="!!field.constraints?.readonly"
+                    />
+
+                    <!-- FILE (new) -->
+                    <FieldFileUpload
+                      v-else-if="field.type === 'file'"
+                      v-model="field.value"
+                      :constraints="field.constraints || {}"
+                      :readonly="!!field.constraints?.readonly"
+                      :required="!!field.constraints?.required"
+                      stage="builder"
                     />
 
                     <!-- BUTTON -->
@@ -323,7 +332,7 @@
       </div>
     </div>
 
-    <!-- ───────── Model Dialog ───────── -->
+    <!-- Model Dialog -->
     <div v-if="showModelDialog" class="modal-overlay">
       <div class="modal model-dialog">
         <h3>Select Properties for {{ prettyModelTitle(currentModel.title) }}</h3>
@@ -351,7 +360,7 @@
       </div>
     </div>
 
-    <!-- ───────── Constraints Dialog (unified) ───────── -->
+    <!-- Constraints Dialog -->
     <div v-if="showConstraintsDialog" class="modal-overlay">
       <FieldConstraintsDialog
         :currentFieldType="currentFieldType"
@@ -362,7 +371,7 @@
       />
     </div>
 
-    <!-- ───────── Preview Dialog ───────── -->
+    <!-- Preview Dialog -->
     <div v-if="showPreviewDialog" class="modal-overlay">
       <div class="modal preview-modal">
         <FormPreview :form="currentForm" />
@@ -372,7 +381,7 @@
       </div>
     </div>
 
-    <!-- ───────── Upload Dialog ───────── -->
+    <!-- Upload Dialog -->
     <div v-if="showUploadDialog" class="modal-overlay">
       <div class="modal">
         <p>
@@ -388,7 +397,7 @@
       </div>
     </div>
 
-    <!-- ───────── Input Dialog ───────── -->
+    <!-- Input Dialog -->
     <div v-if="showInputDialog" class="modal-overlay">
       <div class="modal input-dialog-modal">
         <p>{{ inputDialogMessage }}</p>
@@ -406,7 +415,7 @@
       </div>
     </div>
 
-    <!-- ───────── Confirm Dialog ───────── -->
+    <!-- Confirm Dialog -->
     <div v-if="showConfirmDialog" class="modal-overlay">
       <div class="modal">
         <p>{{ confirmDialogMessage }}</p>
@@ -417,7 +426,7 @@
       </div>
     </div>
 
-    <!-- ───────── Generic Dialog ───────── -->
+    <!-- Generic Dialog -->
     <div v-if="showGenericDialog" class="modal-overlay">
       <div class="modal">
         <p>{{ genericDialogMessage }}</p>
@@ -441,6 +450,7 @@ import FieldRadioGroup from "@/components/fields/FieldRadioGroup.vue";
 import FieldTime from "@/components/fields/FieldTime.vue";
 import FieldSlider from "@/components/fields/FieldSlider.vue";
 import FieldLinearScale from "@/components/fields/FieldLinearScale.vue";
+import FieldFileUpload from "@/components/fields/FieldFileUpload.vue"; // NEW
 import { normalizeConstraints, coerceDefaultForType } from "@/utils/constraints";
 
 export default {
@@ -455,7 +465,8 @@ export default {
     FieldRadioGroup,
     FieldTime,
     FieldSlider,
-    FieldLinearScale
+    FieldLinearScale,
+    FieldFileUpload
   },
   data() {
     return {
@@ -699,24 +710,46 @@ export default {
         constraints: field.constraints || {}
       };
 
-      // SLIDER defaults — 1..100, integer, no default value
+      // SLIDER defaults
       if (base.type === 'slider') {
-        base.value = null; // no default
+        base.value = null;
         base.constraints = {
           ...(base.constraints || {}),
-          mode: 'slider',
-          percent: false,
-          min: 1,
-          max: 100,
-          step: 1
+          mode: base.constraints?.mode || 'slider',
+          percent: !!base.constraints?.percent,
+          min: Number.isFinite(base.constraints?.min) ? base.constraints.min : (base.constraints?.percent ? 1 : 1),
+          max: Number.isFinite(base.constraints?.max) ? base.constraints.max : (base.constraints?.percent ? 100 : 100),
+          step: Number.isFinite(base.constraints?.step) ? base.constraints.step : 1,
+          marks: Array.isArray(base.constraints?.marks) ? base.constraints.marks : (base.constraints?.marks || [])
         };
       }
 
       // Date defaults
       if (base.type === 'date') {
-        base.constraints = { ...base.constraints, dateFormat: base.constraints.dateFormat || 'dd.MM.yyyy' };
+        base.constraints = { ...base.constraints, dateFormat: base.constraints?.dateFormat || 'dd.MM.yyyy' };
         base.placeholder = base.placeholder || base.constraints.dateFormat;
       }
+
+      // File defaults (NEW)
+        if (base.type === 'file') {
+          base.value = null;
+          base.icon = base.icon || icons.paperclip;
+          base.constraints = {
+            helpText: base.constraints?.helpText || "",
+            required: !!base.constraints?.required,
+            readonly: !!base.constraints?.readonly,
+            allowedFormats: Array.isArray(base.constraints?.allowedFormats)
+              ? base.constraints.allowedFormats
+              : [".pdf", ".csv", ".tsv", "image/*", "txt"],
+            maxSizeMB: Number.isFinite(base.constraints?.maxSizeMB) ? base.constraints.maxSizeMB : 100, // ← 100 MB default
+            storagePreference: (base.constraints?.storagePreference === "url") ? "url" : "local",
+            modalities: Array.isArray(base.constraints?.modalities) ? base.constraints.modalities : [],
+            allowMultipleFiles: !!base.constraints?.allowMultipleFiles
+          };
+        }
+
+
+
 
       sec.fields.push(base);
     },
@@ -753,7 +786,9 @@ export default {
         constraints: f.constraints || {},
         value:
           f.type === 'radio' && f.constraints?.allowMultiple ? [] :
-          (f.type === 'radio' || f.type === 'select') ? '' : f.value
+          (f.type === 'radio' || f.type === 'select') ? '' :
+          (f.type === 'slider' ? null :
+          (f.type === 'file' ? null : f.value))
       };
       this.currentForm.sections[si].fields.splice(fi + 1, 0, clone);
     },
@@ -778,6 +813,7 @@ export default {
           step: Number.isFinite(f.constraints?.step) ? f.constraints.step : 1,
           percent: !!f.constraints?.percent
         } : {})
+        // file-specific keys already present in f.constraints (allowedFormats, maxSizeMB, etc.)
       };
       this.showConstraintsDialog = true;
     },
@@ -785,41 +821,50 @@ export default {
       const { sectionIndex, fieldIndex } = this.currentFieldIndices;
       const f = this.currentForm.sections[sectionIndex].fields[fieldIndex];
       const originalType = f.type;
-
+      if (originalType === 'file') {
+        // Assign cleaned constraints as emitted by FieldConstraintsDialog
+        const cleaned = {
+          helpText: c.helpText || "",
+          required: !!c.required,
+          readonly: !!c.readonly,
+          allowedFormats: Array.isArray(c.allowedFormats) ? c.allowedFormats : [],
+          maxSizeMB: Number.isFinite(c.maxSizeMB) ? c.maxSizeMB : undefined,
+          storagePreference: (c.storagePreference === 'url') ? 'url' : 'local',
+          modalities: Array.isArray(c.modalities) ? c.modalities.filter(Boolean).map(String) : [],
+          allowMultipleFiles: !!c.allowMultipleFiles
+        };
+        f.constraints = cleaned;
+        // Keep current value as-is; builder doesn’t persist files
+        this.showConstraintsDialog = false;
+        return;
+      }
       // Non-slider
       if (originalType !== 'slider') {
         const norm = normalizeConstraints(originalType, c);
 
+        // Choice types: keep existing handling
         if ((f.type === 'select' || f.type === 'radio') && Array.isArray(c.options)) {
           const cleaned = c.options.map(o => String(o || '').trim()).filter(Boolean);
           f.options = cleaned.length ? cleaned : ['Option 1'];
         }
 
-        // ---------- Value shape & membership (radio/select) ----------
         if (f.type === 'radio') {
-          // radios can be single or multi based on allowMultiple
           if (norm.allowMultiple) {
-            // ensure array shape
             if (!Array.isArray(f.value)) f.value = [];
-            // remove any values that no longer exist
             f.value = f.value.filter(v => f.options.includes(v));
-            // if defaultValue provided, prefer it (array)
             if (Object.prototype.hasOwnProperty.call(norm, "defaultValue")) {
               const dv = Array.isArray(norm.defaultValue) ? norm.defaultValue : [];
               f.value = dv.filter(v => f.options.includes(v));
             }
           } else {
-            // single-select: ensure scalar string
             if (Array.isArray(f.value)) f.value = f.value[0] || '';
             if (!f.options.includes(f.value)) f.value = '';
-            // if defaultValue provided, prefer it (scalar)
             if (Object.prototype.hasOwnProperty.call(norm, "defaultValue")) {
               const dv = typeof norm.defaultValue === 'string' ? norm.defaultValue : '';
               f.value = f.options.includes(dv) ? dv : '';
             }
           }
         } else if (f.type === 'select') {
-          // dropdown is ALWAYS single-select
           if (Array.isArray(f.value)) f.value = f.value[0] || '';
           if (!f.options.includes(f.value)) f.value = '';
           if (Object.prototype.hasOwnProperty.call(norm, "defaultValue")) {
@@ -828,8 +873,7 @@ export default {
           }
         }
 
-        // ---------- Placeholder (skip for checkbox by design) ----------
-        if (Object.prototype.hasOwnProperty.call(norm, "placeholder") && f.type !== 'checkbox') {
+        if (Object.prototype.hasOwnProperty.call(norm, "placeholder") && f.type !== 'checkbox' && f.type !== 'file') {
           f.placeholder = norm.placeholder || "";
         }
 
@@ -837,6 +881,7 @@ export default {
           f.type !== 'radio' &&
           f.type !== 'select' &&
           f.type !== 'slider' &&
+          f.type !== 'file' &&
           Object.prototype.hasOwnProperty.call(norm, "defaultValue")
         ) {
           const coerced = coerceDefaultForType(f.type, norm.defaultValue);
@@ -849,21 +894,34 @@ export default {
           norm.dateFormat = fmt;
         }
 
-        f.constraints = { ...norm };
+        // —— merge file-specific constraints explicitly to avoid normalization stripping them
+        if (originalType === 'file') {
+          const fileKeys = [
+            "allowedFormats","maxSizeMB","allowLocal","allowUrl","storagePreference","modalities","allowMultipleFiles"
+          ];
+          const extra = {};
+          fileKeys.forEach(k => {
+            if (Object.prototype.hasOwnProperty.call(c, k)) extra[k] = c[k];
+          });
+          f.constraints = { ...norm, ...extra };
+        } else {
+          f.constraints = { ...norm };
+        }
+
         if (
           (f.value === '' || f.value === undefined || f.value === null) &&
-          Object.prototype.hasOwnProperty.call(f.constraints, 'defaultValue')
+          Object.prototype.hasOwnProperty.call(f.constraints, 'defaultValue') &&
+          f.type !== 'file'
         ) {
           f.value = f.constraints.defaultValue;
         }
-        console.log("[SFC] saved NON-slider constraints:", { si: sectionIndex, fi: fieldIndex, constraints: f.constraints });
+
         this.showConstraintsDialog = false;
         return;
       }
 
-      // Slider -> Linear mode (no marks)
+      // Slider -> Linear mode
       if (c.mode === 'linear') {
-        console.log("[SFC] incoming LINEAR slider constraints:", c);
         let min = Number.isFinite(+c.min) ? Math.round(+c.min) : 1;
         let max = Number.isFinite(+c.max) ? Math.round(+c.max) : 5;
         if (max <= min) max = min + 1;
@@ -877,16 +935,13 @@ export default {
           min, max,
           leftLabel: c.leftLabel || '',
           rightLabel: c.rightLabel || ''
-          // no marks intentionally
         };
-        f.value = null; // no default
-        console.log("[SFC] saved LINEAR slider constraints:", { si: sectionIndex, fi: fieldIndex, constraints: f.constraints });
+        f.value = null;
         this.showConstraintsDialog = false;
         return;
       }
 
-      // Slider -> Slider mode (KEEP MARKS)
-      console.log("[SFC] incoming SLIDER constraints:", c);
+      // Slider -> Slider mode
       let min = Number.isFinite(+c.min) ? +c.min : 1;
       let max = Number.isFinite(+c.max) ? +c.max : (c.percent ? 100 : 5);
       if (max <= min) max = min + 1;
@@ -899,13 +954,11 @@ export default {
         helpText: c.helpText || '',
         percent: !!c.percent,
         min, max, step,
-        // ← IMPORTANT: keep marks so FieldSlider can render them
         marks: Array.isArray(c.marks) ? c.marks : []
       };
 
       const v = Number(f.value);
       f.value = Number.isFinite(v) && v >= min && v <= max ? v : null;
-      console.log("[SFC] saved SLIDER constraints:", { si: sectionIndex, fi: fieldIndex, constraints: f.constraints });
       this.showConstraintsDialog = false;
     },
 
@@ -990,6 +1043,7 @@ export default {
       if (ui.widget === 'dropdown' || dt === 'dropdown' || def.enum) return 'select'
       if (range === 'date' || range === 'datetime') return 'date'
       if (['integer','decimal','number'].includes(range)) return 'number'
+      if (ui.widget === 'file' || dt === 'file' || range === 'file') return 'file'
       return 'text'
     }
   }
@@ -1134,13 +1188,8 @@ export default {
   margin-bottom: 12px;
 }
 
-.section-content {
-  display: flex;           /* vertical list */
-  flex-direction: column;
-  gap: 14px;               /* spacing between field cards */
-}
-
-/* Field "cards" */
+/* Vertical stack for fields */
+.section-content { display:flex; flex-direction:column; gap:14px; }
 .form-group {
   background: #ffffff;
   border: 1px solid $border-color;
@@ -1149,163 +1198,24 @@ export default {
   box-shadow: 0 1px 2px rgba(0,0,0,0.04);
   transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.05s ease;
 }
-.form-group:hover {
-  border-color: rgba(0,0,0,0.12);
-  box-shadow: 0 6px 12px rgba(0,0,0,0.06);
-}
-.form-group:focus-within {
-  border-color: rgba($primary-color, 0.6);
-  box-shadow: 0 0 0 3px rgba($primary-color, 0.12);
-}
+.form-group:hover { border-color: rgba(0,0,0,0.12); box-shadow: 0 6px 12px rgba(0,0,0,0.06); }
+.form-group:focus-within { border-color: rgba($primary-color, 0.6); box-shadow: 0 0 0 3px rgba($primary-color, 0.12); }
 
-/* Header inside each card */
-.field-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  gap: 8px;
-  margin-bottom: 8px;
-}
+.field-header { display:flex; justify-content:space-between; align-items:flex-start; gap:8px; margin-bottom:8px; }
+.field-header > label { font-weight: 600; color: #111827; line-height: 1.25; }
 
-.field-header > label {
-  font-weight: 600;
-  color: #111827;
-  line-height: 1.25;
-}
-
-/* Small icon-only buttons for field actions */
-.icon-button {
-  border: none;
-  background: transparent;
-  padding: 6px;
-  border-radius: 8px;
-  cursor: pointer;
-  line-height: 0;
-  transition: background 0.15s ease, transform 0.02s ease;
-}
+.icon-button { border:none; background:transparent; padding:6px; border-radius:8px; cursor:pointer; line-height:0; transition: background 0.15s ease, transform 0.02s ease; }
 .icon-button:hover { background: rgba(0,0,0,0.06); }
 .icon-button:active { transform: scale(0.98); }
-.icon-button i { font-size: 14px; color: #374151; }
+.icon-button i { font-size:14px; color:#374151; }
 
-/* Compact actions row */
-.field-actions {
-  display: flex;
-  gap: 6px;
-}
+.field-actions { display:flex; gap:6px; }
+.field-box { margin-top:6px; }
 
-/* Input area in the card */
-.field-box {
-  margin-top: 6px;
-}
+.field-header .checkbox-label { display:flex; align-items:center; gap:10px; }
+.field-box .radio-group { display:flex; flex-direction:column; gap:8px; margin-bottom:10px; }
 
-/* Radios & checkboxes styling preserved */
-.field-header .checkbox-label {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.field-header .checkbox-label input[type="checkbox"] {
-  display: block !important;
-  width: 16px;
-  height: 16px;
-  margin: 0;
-  cursor: pointer;
-  border: 2px solid #ccc;
-  border-radius: 4px;
-  background-color: #fff;
-  appearance: none;
-  position: relative;
-  transition: background-color 0.2s ease, border-color 0.2s ease;
-}
-
-.field-header .checkbox-label input[type="checkbox"]:checked {
-  background-color: #444;
-  border-color: #444;
-}
-
-.field-header .checkbox-label input[type="checkbox"]:checked::after {
-  content: '';
-  position: absolute;
-  top: 2px;
-  left: 5px;
-  width: 4px;
-  height: 8px;
-  border: solid #fff;
-  border-width: 0 2px 2px 0;
-  transform: rotate(45deg);
-}
-
-.field-header .checkbox-label input[type="checkbox"]:hover:not(:checked) {
-  border-color: #666;
-}
-
-.field-box .radio-group {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  margin-bottom: 10px;
-}
-
-.field-box .radio-label {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.field-box .radio-label input[type="radio"],
-.field-box .radio-label input[type="checkbox"] {
-  display: block !important;
-  width: 16px;
-  height: 16px;
-  margin: 0;
-  cursor: pointer;
-  border: 2px solid #ccc;
-  border-radius: 50%;
-  background-color: #fff;
-  appearance: none;
-  position: relative;
-  transition: background-color 0.2s ease, border-color 0.2s ease;
-}
-
-.field-box .radio-label input[type="radio"]:checked,
-.field-box .radio-label input[type="checkbox"]:checked {
-  background-color: #444;
-  border-color: #444;
-}
-
-.field-box .radio-label input[type="radio"]:checked::after {
-  content: '';
-  position: absolute;
-  top: 4px;
-  left: 4px;
-  width: 8px;
-  height: 8px;
-  background: #fff;
-  border-radius: 50%;
-}
-
-.field-box .radio-label input[type="checkbox"]:checked::after {
-  content: '';
-  position: absolute;
-  top: 2px;
-  left: 5px;
-  width: 4px;
-  height: 8px;
-  border: solid #fff;
-  border-width: 0 2px 2px 0;
-  transform: rotate(45deg);
-}
-
-.field-box .radio-label input[type="radio"]:hover:not(:checked),
-.field-box .radio-label input[type="checkbox"]:hover:not(:checked) {
-  border-color: #666;
-}
-
-/* Inputs in cards */
-input,
-textarea,
-select {
+input, textarea, select {
   width: 100%;
   padding: 10px;
   border: 1px solid $border-color;
@@ -1314,18 +1224,11 @@ select {
   background: #fff;
 }
 
-textarea {
-  resize: vertical;
-}
+textarea { resize: vertical; }
 
-/* Help text inside cards */
-.help-text {
-  display: inline-block;
-  margin-top: 6px;
-  color: #6b7280;
-}
+.help-text { display:inline-block; margin-top:6px; color:#6b7280; }
 
-/* FORM ACTIONS */
+/* actions footer */
 .form-actions {
   position: sticky;
   bottom: 0;
@@ -1347,9 +1250,7 @@ textarea {
   flex: 1;
 }
 
-.protocol-btn::after {
-  content: ' →';
-}
+.protocol-btn::after { content: ' →'; }
 
 .btn-primary {
   background: $primary-color;
@@ -1360,108 +1261,20 @@ textarea {
   flex: 1;
 }
 
-/* MODALS */
-.modal-overlay {
-  position: fixed;
-  top: 0; left: 0; right: 0; bottom: 0;
-  background: rgba(0,0,0,0.5);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 1000;
-}
-
-.modal {
-  background: white;
-  padding: 20px;
-  border-radius: 8px;
-  max-width: 90%;
-  max-height: 90%;
-  overflow-y: auto;
-}
-
-.modal.model-dialog {
-  width: 400px;
-  max-height: 80vh;
-  padding: 20px 16px;
-}
-
-.preview-modal {
-  width: 500px;
-  height: 80vh;
-  display: flex;
-  flex-direction: column;
-}
-
-.preview-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  background: #f2f3f4;
-  padding: 10px;
-}
-
-.preview-content {
-  flex: 1;
-  background: white;
-  padding: 10px;
-  overflow-y: auto;
-}
-
-.modal-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 10px;
-  margin-top: 10px;
-}
-
-.input-dialog-field {
-  width: 100%;
-  padding: 8px;
-  margin-top: 5px;
-}
+/* modals (unchanged) */
+.modal-overlay { position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:1000; }
+.modal { background:white; padding:20px; border-radius:8px; max-width:90%; max-height:90%; overflow-y:auto; }
+.modal.model-dialog { width:400px; max-height:80vh; padding:20px 16px; }
+.preview-modal { width:500px; height:80vh; display:flex; flex-direction:column; }
+.preview-header { display:flex; justify-content:space-between; align-items:center; background:#f2f3f4; padding:10px; }
+.preview-content { flex:1; background:white; padding:10px; overflow-y:auto; }
+.modal-actions { display:flex; justify-content:flex-end; gap:10px; margin-top:10px; }
+.input-dialog-field { width:100%; padding:8px; margin-top:5px; }
 
 /* Template buttons */
-.template-button {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  justify-content: flex-start;
-  width: 100%;
-  padding: 10px 12px;
-  margin: 6px 0;
-  background-color: #f9fafb;
-  border: 1px solid #d1d5db;
-  border-radius: 6px;
-  cursor: pointer;
-  transition: background-color 0.2s, box-shadow 0.2s;
-  box-sizing: border-box;
-}
-
-.template-button:hover {
-  background-color: #f3f4f6;
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.05);
-}
-
-.template-header {
-  display: flex;
-  align-items: center;
-  font-weight: 600;
-  font-size: 14px;
-  color: #111827;
-  margin-bottom: 4px;
-}
-
-.template-header i {
-  margin-right: 8px;
-  font-size: 16px;
-  color: #374151;
-}
-
-.template-description {
-  font-size: 12px;
-  color: #6b7280;
-  line-height: 1.4;
-  overflow-wrap: anywhere;
-}
+.template-button { display:flex; flex-direction:column; align-items:flex-start; justify-content:flex-start; width:100%; padding:10px 12px; margin:6px 0; background-color:#f9fafb; border:1px solid #d1d5db; border-radius:6px; cursor:pointer; transition: background .2s, box-shadow .2s; box-sizing:border-box; }
+.template-button:hover { background-color:#f3f4f6; box-shadow:0 2px 6px rgba(0,0,0,0.05); }
+.template-header { display:flex; align-items:center; font-weight:600; font-size:14px; color:#111827; margin-bottom:4px; }
+.template-header i { margin-right:8px; font-size:16px; color:#374151; }
+.template-description { font-size:12px; color:#6b7280; line-height:1.4; overflow-wrap:anywhere; }
 </style>
