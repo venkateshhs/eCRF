@@ -659,17 +659,29 @@ export default {
         parts.push("Multiple selection: allowed");
       }
       if (field.type === "file") {
-        const allowed = Array.isArray(c.allowedFormats) && c.allowedFormats.length ? c.allowedFormats.join(", ") : "—";
-        const sizeMB = Number.isFinite(c.maxSizeMB) && c.maxSizeMB > 0 ? c.maxSizeMB : undefined;
-        const storage = (c.storagePreference === "url") ? "Link via URL" : "Local upload";
-        parts.push(`Storage: ${storage}`);
-        parts.push(`Allowed: ${allowed}`);
-        parts.push(`Max size: ${sizeMB} MB`);
-        if (c.allowMultipleFiles) parts.push("Multiple files: allowed");
-        if (Array.isArray(c.modalities) && c.modalities.length) {
-          parts.push(`Modalities: ${c.modalities.join(", ")}`);
-        }
+      const storage = (c.storagePreference === "url") ? "Link via URL" : "Local upload";
+      parts.push(`Storage: ${storage}`);
+
+      // Only show "Allowed" when formats are restricted
+      const allowedList = Array.isArray(c.allowedFormats)
+        ? c.allowedFormats.filter(Boolean).map(String)
+        : [];
+      if (allowedList.length) {
+        parts.push(`Allowed: ${allowedList.join(", ")}`);
       }
+
+      // Only show Max size when it's a valid positive number
+      const sizeNum = Number(c.maxSizeMB);
+      if (Number.isFinite(sizeNum) && sizeNum > 0) {
+        parts.push(`Max size: ${sizeNum} MB`);
+      }
+
+      if (c.allowMultipleFiles) parts.push("Multiple files: allowed");
+      if (Array.isArray(c.modalities) && c.modalities.length) {
+        parts.push(`Modalities: ${c.modalities.join(", ")}`);
+      }
+    }
+
       return parts.length ? parts : ["No constraints."];
     },
     openConstraintDialog(field) {
