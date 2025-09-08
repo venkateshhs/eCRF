@@ -35,8 +35,11 @@ except Exception:
 # Also write CSV mirrors next to TSVs (useful for Excel)
 WRITE_CSV_MIRRORS = os.getenv("BIDS_WRITE_CSV_MIRRORS", "0") == "1"
 
-# Mirror per-subject copies under derivatives/ (optional)
+# Mirror per-subject copies under derivatives/ (optional; existing behavior preserved)
 MIRROR_DERIV_SUBJECT = os.getenv("BIDS_MIRROR_DERIV_SUBJECT", "0") == "1"
+
+# Mirror eCRF entries under each subject’s own folder as well (default ON)
+MIRROR_SUBJECT_FOLDER = os.getenv("BIDS_MIRROR_SUBJECT_FOLDER", "1") == "1"
 
 # Columns we’ll drop from any legacy files we rewrite
 LEGACY_DROP = {"group", "group_index", "visit_index", "data.value", "value", "session"}
@@ -228,23 +231,38 @@ def upsert_bids_dataset(
     _ensure_dir(dataset_path)
     _datalad_dataset_init(dataset_path)
 
-    # dataset_description.json
+    # (CHANGED) Do NOT write dataset_description.json at the dataset root anymore.
+
+    # NEW: metadata/ folder with human-readable files
+    metadata_dir = os.path.join(dataset_path, "metadata")
+    _ensure_dir(metadata_dir)
+
+    # Compose dataset description data (used for metadata text)
     ds_json = {
         "Name": study_name or f"Study {study_id}",
         "BIDSVersion": BIDS_VERSION,
         "DatasetType": "raw",
     }
-    _safe_write_json(os.path.join(dataset_path, "dataset_description.json"), ds_json)
 
-    # README / CHANGES (create once)
-    readme_path = os.path.join(dataset_path, "README")
-    if not os.path.exists(readme_path):
-        with open(readme_path, "w", encoding="utf-8") as f:
-            f.write(study_description or "No description provided.\n")
-    changes_path = os.path.join(dataset_path, "CHANGES")
-    if not os.path.exists(changes_path):
-        with open(changes_path, "w", encoding="utf-8") as f:
-            f.write(f"1.0.0 {datetime.utcnow().strftime('%Y-%m-%d')}\n - Initial BIDS dataset creation.\n")
+    # Write (or create once) metadata/dataset_description.txt
+    ds_txt_path = os.path.join(metadata_dir, "dataset_description.txt")
+    if not os.path.exists(ds_txt_path):
+        with open(ds_txt_path, "w", encoding="utf-8") as f:
+            f.write(
+                "Dataset Description\n"
+                f"Name: {ds_json['Name']}\n"
+                f"BIDSVersion: {ds_json['BIDSVersion']}\n"
+                f"DatasetType: {ds_json['DatasetType']}\n"
+            )
+
+    # Write (or create once) metadata/changes.txt (instead of root CHANGES)
+    changes_txt_path = os.path.join(metadata_dir, "changes.txt")
+    if not os.path.exists(changes_txt_path):
+        with open(changes_txt_path, "w", encoding="utf-8") as f:
+            f.write(
+                f"1.0.0 {datetime.utcnow().strftime('%Y-%m-%d')}\n"
+                " - Initial BIDS dataset creation.\n"
+            )
 
     # maps & columns
     _build_or_load_subject_map(study_data)
@@ -524,9 +542,36 @@ def write_entry_to_bids(
     # Update participants meta
     _rebuild_participants_tsv(dataset_path, study_data)
 
-    # Optional subject-level mirror in derivatives/
+    # Optional subject-level mirror in derivatives/ (existing behavior preserved)
     if MIRROR_DERIV_SUBJECT:
         target_dir = os.path.join(dataset_path, "derivatives", "crf-tsv", participant_id)
+        _ensure_dir(target_dir)
+        sub_tsv = os.path.join(target_dir, "entries.tsv")
+        s_headers, s_rows = _read_tsv_rows(sub_tsv)
+        s_union = (set(s_headers) | set(ordered_headers)) - LEGACY_DROP
+        s_headers = [h for h in ordered_headers if h in s_union] + [h for h in s_headers if h not in ordered_headers]
+        replaced = False
+        for r in s_rows:
+            if r.get("entry_id") == entry_id_str:
+                for k in FIXED_ENTRY_HEADERS:
+                    r[k] = new_row.get(k, r.get(k))
+                for col in catalog_cols:
+                    r[col] = new_row.get(col, r.get(col))
+                for legacy in LEGACY_DROP:
+                    r.pop(legacy, None)
+                replaced = True
+                break
+        if not replaced:
+            s_rows.append(new_row)
+        _write_tsv_rows(sub_tsv, s_headers, s_rows)
+        _write_csv_mirror_from_tsv(sub_tsv)
+
+    # Per-subject mirror under the subject’s own folder (default ON)
+    if MIRROR_SUBJECT_FOLDER:
+        # sub-XXX[/ses-YY]/eCRF/entries.tsv
+        ses_folder = _session_folder(study_data, visit_index)
+        base_dir = os.path.join(dataset_path, participant_id, ses_folder) if ses_folder else os.path.join(dataset_path, participant_id)
+        target_dir = os.path.join(base_dir, "eCRF")
         _ensure_dir(target_dir)
         sub_tsv = os.path.join(target_dir, "entries.tsv")
         s_headers, s_rows = _read_tsv_rows(sub_tsv)
@@ -756,4 +801,3 @@ def stage_file_for_modalities(
 
     logger.info("BIDS mirror written: %s", written)
     return written
-
