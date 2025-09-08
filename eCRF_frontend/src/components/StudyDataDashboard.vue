@@ -380,7 +380,8 @@ export default {
     },
 
     goBack() {
-      this.$router.push({ name: 'Dashboard', query: { openStudies: 'true' } });
+      const id = this.$route.params.id;
+      this.$router.push({ name: 'StudyView', params: { id } });
     },
     toggleExportMenu() {
       this.showExportMenu = !this.showExportMenu;

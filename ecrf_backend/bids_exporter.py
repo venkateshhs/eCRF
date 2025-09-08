@@ -41,7 +41,7 @@ MIRROR_DERIV_SUBJECT = os.getenv("BIDS_MIRROR_DERIV_SUBJECT", "0") == "1"
 # Columns we’ll drop from any legacy files we rewrite
 LEGACY_DROP = {"group", "group_index", "visit_index", "data.value", "value", "session"}
 
-# Fixed headers for phenotype/entries.tsv (data columns follow afterward)
+# Fixed headers for eCRF/entries.tsv (data columns follow afterward)
 FIXED_ENTRY_HEADERS = [
     "participant_id",
     "visit_name",
@@ -252,7 +252,7 @@ def upsert_bids_dataset(
     _build_or_load_column_catalog(study_data)
 
     # base directories
-    _ensure_dir(os.path.join(dataset_path, "phenotype"))
+    _ensure_dir(os.path.join(dataset_path, "eCRF"))
 
     # optional: subject/session dirs
     bids = study_data.get("bids") or {}
@@ -275,7 +275,7 @@ def upsert_bids_dataset(
                 ses_label = f"ses-{ses_map.get(vkey, '01')}"
                 _ensure_dir(os.path.join(sub_dir, ses_label))
 
-    # participants.tsv constructed from phenotype/entries.tsv
+    # participants.tsv constructed from eCRF/entries.tsv
     _rebuild_participants_tsv(dataset_path, study_data)
     _datalad_save(dataset_path, msg="Initialize/Update BIDS dataset structure")
     return dataset_path
@@ -416,7 +416,7 @@ def _compute_entry_status(study_data: dict, entry: Dict[str, Any]) -> str:
         return "complete"
     return "partial"
 
-# -------------------- Public: write phenotype/entries.tsv --------------------
+# -------------------- Public: write eCRF/entries.tsv --------------------
 
 def write_entry_to_bids(
     study_id: int,
@@ -426,12 +426,12 @@ def write_entry_to_bids(
     entry: Dict[str, Any],
 ) -> str:
     """
-    Upsert a row for a saved data entry into phenotype/entries.tsv with:
+    Upsert a row for a saved data entry into eCRF/entries.tsv with:
       - fixed columns: participant_id, visit_name, group_name, entry_id, form_version, last_updated, status
       - data columns: SectionTitle.FieldLabel (stable catalog)
     """
     dataset_path = _dataset_path(study_id, study_name)
-    pheno_dir = os.path.join(dataset_path, "phenotype")
+    pheno_dir = os.path.join(dataset_path, "eCRF")
     _ensure_dir(pheno_dir)
     tsv_path = os.path.join(pheno_dir, "entries.tsv")
 
@@ -548,9 +548,9 @@ def write_entry_to_bids(
         _write_tsv_rows(sub_tsv, s_headers, s_rows)
         _write_csv_mirror_from_tsv(sub_tsv)
 
-    _datalad_save(dataset_path, msg=f"Upsert phenotype entry {entry_id_str} for {participant_id} (visit={visit_name}, status={status})")
+    _datalad_save(dataset_path, msg=f"Upsert eCRF entry {entry_id_str} for {participant_id} (visit={visit_name}, status={status})")
     logger.info(
-        "BIDS phenotype written: %s (entry_id=%s, participant=%s, visit=%s, status=%s)",
+        "BIDS eCRF written: %s (entry_id=%s, participant=%s, visit=%s, status=%s)",
         tsv_path, entry_id_str, participant_id, visit_name, status
     )
     return tsv_path
@@ -559,7 +559,7 @@ def write_entry_to_bids(
 
 def _collect_entries_meta(entries_path: str) -> Dict[str, Dict[str, Any]]:
     """
-    Aggregate per participant across phenotype/entries.tsv into:
+    Aggregate per participant across eCRF/entries.tsv into:
       {
         participant_id: {
           "visits_planned": <filled later>,
@@ -622,7 +622,7 @@ def _rebuild_participants_tsv(dataset_path: str, study_data: dict) -> None:
     visits   = study_data.get("visits") or []
     subj_map = _build_or_load_subject_map(study_data)
 
-    entries_path = os.path.join(dataset_path, "phenotype", "entries.tsv")
+    entries_path = os.path.join(dataset_path, "eCRF", "entries.tsv")
     per_pid_meta = _collect_entries_meta(entries_path)
 
     headers = ["participant_id", "visits_planned", "visits_completed", "visits_partial", "visits_skipped", "last_updated"]

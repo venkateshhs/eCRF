@@ -5,7 +5,12 @@
       <div class="logo-container">
         <img src="../assets/logo.png" alt="Logo" class="logo" />
       </div>
+
       <div class="user-actions">
+        <div class="user-identity">
+          <div class="user-name" :title="userName">{{ userName }}</div>
+          <div class="user-role" :title="role || '—'">{{ role || '—' }}</div>
+        </div>
         <button @click="logout" class="btn-minimal">Logout</button>
       </div>
     </header>
@@ -29,7 +34,10 @@
             <span v-if="!sidebarCollapsed">Study Management</span>
           </li>
           <!-- User Management: visible to all roles -->
-          <li @click="() => { setActiveSection(''); navigate('/dashboard/user-info') }" class="nav-item">
+          <li
+            @click="() => { setActiveSection(''); navigate('/dashboard/user-info') }"
+            class="nav-item"
+          >
             <i :class="icons.user" v-if="sidebarCollapsed"></i>
             <span v-if="!sidebarCollapsed">User Management</span>
           </li>
@@ -40,34 +48,66 @@
     <!-- Main Content -->
     <main :class="['dashboard-main', { expanded: sidebarCollapsed }]">
       <div v-if="$route.name === 'Dashboard' && activeSection === 'study-management'">
-        <h1 class="study-management-title">Study Management</h1>
-        <div class="button-container" v-if="!showStudyOptions">
-          <!-- Create Study: only Admin or PI -->
-          <button
-            v-if="isAdmin || isPI"
-            @click="navigate('/dashboard/create-study')"
-            class="btn-option"
-          >
-            Create Study
-          </button>
-          <!-- Open Study: Admin, PI, Investigator -->
-          <button
-            v-if="isAdmin || isPI || isInvestigator"
-            @click="toggleStudyOptions"
-            class="btn-option"
-          >
-            Open Existing Study
-          </button>
+        <!-- Centered Heading + Subtitle -->
+        <div class="study-management-header">
+          <h1 class="study-management-title">Study Management</h1>
+          <p class="study-management-subtitle">
+            Create a new study or open an existing one to manage and collect data.
+          </p>
+        </div>
+
+        <!-- Primary Actions (hidden when showing Existing Studies) -->
+        <div v-if="!showStudyOptions">
+          <!-- STYLE 1: Large Cards (default) -->
+          <div v-if="actionStyle === 'cards'" class="primary-actions-cards">
+            <button
+              v-if="isAdmin || isPI"
+              class="action-card"
+              @click="navigate('/dashboard/create-study')"
+            >
+              <span class="action-card-title">Create Study</span>
+              <span class="action-card-desc">Start a new protocol and forms</span>
+            </button>
+
+            <button
+              v-if="isAdmin || isPI || isInvestigator"
+              class="action-card"
+              @click="toggleStudyOptions"
+            >
+              <span class="action-card-title">Open Existing Study</span>
+              <span class="action-card-desc">Continue work on an existing study</span>
+            </button>
+          </div>
+
+          <!-- STYLE 2: Wide Buttons -->
+          <div v-else class="button-container">
+            <button
+              v-if="isAdmin || isPI"
+              @click="navigate('/dashboard/create-study')"
+              class="btn-primary"
+            >
+              Create Study
+            </button>
+
+            <button
+              v-if="isAdmin || isPI || isInvestigator"
+              @click="toggleStudyOptions"
+              class="btn-primary"
+            >
+              Open Existing Study
+            </button>
+          </div>
         </div>
 
         <!-- Study Dashboard Table -->
         <div v-if="showStudyOptions" class="study-dashboard">
-          <div class="back-button-container">
-            <button @click="toggleStudyOptions" class="btn-minimal">
-              Back
-            </button>
+          <div class="back-header-row">
+            <div class="back-button-container">
+              <button @click="toggleStudyOptions" class="btn-minimal">Back</button>
+            </div>
+            <h2 class="existing-studies-title">Existing Studies</h2>
           </div>
-          <h2>Existing Studies</h2>
+
           <table class="study-table">
             <thead>
               <tr>
@@ -86,28 +126,22 @@
                 <td>{{ formatDateTime(study.updated_at) }}</td>
                 <td>
                   <div class="action-buttons">
-                    <!-- Edit Study: only Admin or PI -->
-                    <button
-                      v-if="isAdmin || isPI"
-                      @click="editStudy(study)"
-                      class="btn-minimal"
-                    >
-                      Edit Study
-                    </button>
+                    <!-- Removed Edit Study from dashboard per request -->
                     <!-- Add Data: Admin, PI, Investigator -->
                     <button
                       v-if="isAdmin || isPI || isInvestigator"
                       @click="addData(study)"
-                      class="btn-minimal"
+                      class="btn-minimal btn-equal"
                     >
                       Add Data
                     </button>
-                      <button
-                        v-if="isAdmin || isPI || isInvestigator"
-                        @click="viewData(study)"
-                        class="btn-minimal"
-                      >View Data
-                      </button>
+                    <button
+                      v-if="isAdmin || isPI || isInvestigator"
+                      @click="viewStudy(study)"
+                      class="btn-minimal btn-equal"
+                    >
+                      View Study
+                    </button>
                   </div>
                 </td>
               </tr>
@@ -115,6 +149,7 @@
           </table>
         </div>
       </div>
+
       <router-view/>
     </main>
   </div>
@@ -133,6 +168,8 @@ export default {
       showStudyOptions: false,
       studies: [],
       icons,
+      // Toggle primary action style: 'cards' or 'buttons'
+      actionStyle: 'cards',
     };
   },
   watch: {
@@ -153,6 +190,20 @@ export default {
     },
     role() {
       return this.currentUser.profile?.role || "";
+    },
+    // Graceful username fallback chain
+    userName() {
+      const p = this.currentUser.profile || {};
+      const firstLast =
+        [p.first_name, p.last_name].filter(Boolean).join(" ").trim();
+      return (
+        p.name ||
+        p.full_name ||
+        firstLast ||
+        this.currentUser.username ||
+        this.currentUser.email ||
+        "User"
+      );
     },
     isAdmin() {
       return this.role === "Administrator";
@@ -212,6 +263,7 @@ export default {
         hour: "2-digit", minute: "2-digit", second: "2-digit",
       });
     },
+    // Keeping editStudy method for compatibility, but no button on dashboard
     async editStudy(study) {
       localStorage.removeItem("setStudyDetails");
       localStorage.removeItem("scratchForms");
@@ -249,7 +301,6 @@ export default {
         }
         console.log('Loaded assignments from backend:', JSON.stringify(assignments, null, 2));
 
-        // Prepare study metadata
         const studyInfo = {
           id: meta.id,
           name: meta.study_name,
@@ -259,7 +310,6 @@ export default {
           created_by: meta.created_by
         };
 
-        // Commit to Vuex store
         this.$store.commit("setStudyDetails", {
           study_metadata: studyInfo,
           study: { id: meta.id, ...sd.study },
@@ -277,9 +327,7 @@ export default {
             }))
           }] : []
         });
-        console.log('Committed studyDetails to Vuex:', JSON.stringify(this.$store.state.studyDetails, null, 2));
 
-        // Store scratchForms in localStorage
         if (sd.selectedModels) {
           const scratchForms = [{
             sections: sd.selectedModels.map(model => ({
@@ -294,7 +342,7 @@ export default {
         this.activeSection = "";
         this.$router.push({ name: "CreateStudy", params: { id: study.id } });
       } catch (e) {
-        console.error('Failed to fetch study details:', e);
+        console.error('Failed to load study details:', e);
         console.log('Error details:', e.response?.data || e.message);
         alert("Failed to load study details.");
       }
@@ -302,8 +350,8 @@ export default {
     addData(study) {
       this.$router.push({ name: "StudyDetail", params: { id: study.id } });
     },
-    viewData(study) {
-    this.$router.push({ name: "StudyDataDashboard", params: { id: study.id } });
+    viewStudy(study) {
+      this.$router.push({ name: "StudyView", params: { id: study.id } });
     },
     navigate(to) {
       this.activeSection = "";
@@ -328,6 +376,7 @@ export default {
   },
 };
 </script>
+
 <style scoped>
 .dashboard-layout {
   display: grid;
@@ -355,18 +404,50 @@ export default {
   width: 110px;
 }
 
+/* User area */
+.user-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.user-identity {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  line-height: 1.2;
+}
+
+.user-name {
+  font-weight: 600;
+  font-size: 14px;
+  color: #222;
+  max-width: 260px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.user-role {
+  font-size: 12px;
+  color: #666;
+}
+
 .user-actions .btn-minimal {
   background: none;
-  border: none;
+  border: 1px solid #e0e0e0;
   font-size: 14px;
   color: #555;
   cursor: pointer;
   padding: 8px 12px;
-  transition: color 0.3s ease;
+  border-radius: 6px;
+  transition: background 0.3s ease, color 0.3s ease, border-color 0.3s ease;
 }
 
 .user-actions .btn-minimal:hover {
+  background: #eaeaea;
   color: #000;
+  border-color: #d6d6d6;
 }
 
 /* Sidebar */
@@ -375,7 +456,7 @@ export default {
   background: #f9f9f9;
   padding: 20px;
   border-right: 1px solid #e0e0e0;
-  transition: width 0.3s ease;
+  transition: width 0.3s ease, padding 0.3s ease;
 }
 
 .dashboard-sidebar.collapsed {
@@ -417,7 +498,7 @@ export default {
   font-size: 15px;
   color: #555;
   cursor: pointer;
-  border-radius: 4px;
+  border-radius: 6px;
   transition: background 0.3s ease;
   display: flex;
   align-items: center;
@@ -440,18 +521,126 @@ export default {
   margin-left: -150px;
 }
 
-/* Study Management Title */
-.study-management-title {
+/* Study Management Heading + Subtitle (centered) */
+.study-management-header {
   text-align: center;
-  margin-bottom: 20px;
+  margin-bottom: 18px;
+}
+
+.study-management-title {
+  margin: 0 0 6px 0;
   color: #333;
+}
+
+.study-management-subtitle {
+  margin: 0 auto;
+  color: #666;
+  font-size: 14px;
+}
+
+/* Primary Actions — Style 1: Cards */
+.primary-actions-cards {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(260px, 360px));
+  justify-content: center; /* center the grid */
+  gap: 18px;
+  margin-top: 20px;
+}
+
+.action-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 18px 20px;
+  background: #fafafa;
+  border: 1px solid #e3e3e3;
+  border-radius: 12px;
+  cursor: pointer;
+  text-align: left;
+  transition: transform 0.06s ease, box-shadow 0.2s ease, border-color 0.2s ease, background 0.2s ease;
+}
+
+.action-card:hover {
+  background: #f5f5f5;
+  border-color: #dcdcdc;
+  box-shadow: 0 2px 10px rgba(0,0,0,0.06);
+}
+
+.action-card:active {
+  transform: translateY(1px);
+}
+
+.action-card-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: #222;
+}
+
+.action-card-desc {
+  font-size: 13px;
+  color: #666;
+}
+
+/* Primary Actions — Style 2: Wide Buttons */
+.button-container {
+  display: flex;
+  gap: 16px;
+  margin-top: 20px;
+  justify-content: center;   /* centered horizontally */
+  flex-wrap: wrap;
+}
+
+.btn-primary {
+  min-width: 260px;            /* elongated */
+  padding: 14px 24px;
+  background: #2f6fed;
+  border: 1px solid #245fe0;
+  border-radius: 10px;
+  font-size: 16px;
+  color: #fff;
+  cursor: pointer;
+  transition: background 0.15s ease, transform 0.02s ease, box-shadow 0.2s ease;
+}
+
+.btn-primary:hover {
+  background: #285fce;
+  box-shadow: 0 2px 10px rgba(47,111,237,0.25);
+}
+
+.btn-primary:active {
+  transform: translateY(1px);
 }
 
 /* Study Dashboard Styles */
 .study-dashboard {
-  margin-top: 20px;
+  margin-top: 22px;
 }
 
+/* Back + centered title row */
+.back-header-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center; /* centers the title regardless of back width */
+  min-height: 42px;
+  margin-bottom: 12px;
+}
+
+.back-button-container {
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+.existing-studies-title {
+  margin: 0;
+  font-size: 20px;
+  color: #333;
+  text-align: center; /* ensure centered text */
+}
+
+/* Table */
 .study-table {
   width: 100%;
   border-collapse: collapse;
@@ -465,40 +654,39 @@ export default {
   border-bottom: 1px solid #e8e8e8;
 }
 
+/* Uniform text color for all data cells */
+.study-table td {
+  color: #333;
+}
+
 .study-table th {
   background: #f5f5f5;
   font-weight: 600;
-  color: #444;
+  color: #555;
 }
 
 .study-table tr:hover {
   background-color: #f9f9f9;
 }
 
-/* Action Buttons Container */
+/* Action Buttons in table */
 .action-buttons {
   display: flex;
   gap: 10px;
-}
-
-/* Back Button Container */
-.back-button-container {
-  display: flex;
-  justify-content: flex-start;
-  margin-bottom: 15px;
+  flex-wrap: wrap;
 }
 
 /* Minimalistic Button Style */
 .btn-minimal {
   background: none;
   border: 1px solid #e0e0e0;
-  border-radius: 4px;
+  border-radius: 6px;
   padding: 8px 12px;
   font-size: 14px;
   color: #555;
   cursor: pointer;
-  transition: background 0.3s ease, color 0.3s ease;
-  display: flex;
+  transition: background 0.3s ease, color 0.3s ease, border-color 0.3s ease;
+  display: inline-flex;
   align-items: center;
   gap: 5px;
 }
@@ -506,35 +694,20 @@ export default {
 .btn-minimal:hover {
   background: #e8e8e8;
   color: #000;
+  border-color: #d6d6d6;
 }
 
-/* Option Button Style for Create/Open Study */
-.btn-option {
-  flex: 1;
-  padding: 12px;
-  background: #f0f0f0;
-  border: 1px solid #ccc;
-  border-radius: 5px;
-  font-size: 16px;
-  color: #333;
-  cursor: pointer;
-  transition: background 0.3s ease, color 0.3s ease;
+/* Responsive */
+@media (max-width: 900px) {
+  .primary-actions-cards {
+    grid-template-columns: minmax(260px, 1fr);
+  }
+}
+.action-buttons .btn-equal {
+  min-width: 130px;
+  justify-content: center;
   text-align: center;
 }
-
-.btn-option:hover {
-  background: #e0e0e0;
-  color: #000;
-}
-
-/* Button Container */
-.button-container {
-  display: flex;
-  gap: 15px;
-  margin-top: 20px;
-}
-
-/* Responsive Design */
 @media (max-width: 768px) {
   .dashboard-layout {
     grid-template-columns: 70px 1fr;
@@ -545,5 +718,9 @@ export default {
   .dashboard-main {
     padding: 20px;
   }
+  .user-name {
+    max-width: 160px;
+  }
+
 }
 </style>

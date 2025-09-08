@@ -495,7 +495,7 @@ def save_study_data(study_id: int, payload: schemas.StudyDataEntryCreate, db: Se
     db.commit()
     db.refresh(entry)
 
-    # BIDS: structure + write phenotype row
+    # BIDS: structure + write eCRF row
     content = db.query(models.StudyContent).filter(models.StudyContent.study_id == study_id).first()
     if upsert_bids_dataset and content:
         try:
@@ -526,7 +526,7 @@ def save_study_data(study_id: int, payload: schemas.StudyDataEntryCreate, db: Se
                     }
                 )
                 logger.info(
-                    "BIDS phenotype updated for study=%s sub_idx=%s visit_idx=%s entry_id=%s",
+                    "BIDS eCRF updated for study=%s sub_idx=%s visit_idx=%s entry_id=%s",
                     study.id, entry.subject_index, entry.visit_index, entry.id
                 )
         except Exception as be:
@@ -565,7 +565,7 @@ def update_study_data_entry(
     db.commit()
     db.refresh(entry)
 
-    # BIDS: structure + upsert phenotype row
+    # BIDS: structure + upsert eCRF row
     study = db.query(models.StudyMetadata).filter(models.StudyMetadata.id == study_id).first()
     content = db.query(models.StudyContent).filter(models.StudyContent.study_id == study_id).first()
     if upsert_bids_dataset and study and content:
@@ -596,7 +596,7 @@ def update_study_data_entry(
                     }
                 )
                 logger.info(
-                    "BIDS phenotype upserted for study=%s sub_idx=%s visit_idx=%s entry_id=%s",
+                    "BIDS eCRF upserted for study=%s sub_idx=%s visit_idx=%s entry_id=%s",
                     study.id, entry.subject_index, entry.visit_index, entry.id
                 )
         except Exception as be:
