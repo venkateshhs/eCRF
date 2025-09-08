@@ -122,8 +122,8 @@ import icons from "@/assets/styles/icons";
 
 const KB = 1024;
 const MB = 1024 * KB;
-const DEFAULT_ALLOWED = ['.pdf', '.csv', '.tsv', 'image/*', 'txt'];
-const DEFAULT_MAX_MB = 100;
+const DEFAULT_ALLOWED = [];       // ← no default restriction
+const DEFAULT_MAX_MB = null;      // ← no default size limit
 
 export default {
   name: "FieldFileUpload",
@@ -151,15 +151,17 @@ export default {
       return (v === "url") ? "url" : "local";
     },
 
+    // Default to allowing multiple when not explicitly disabled
     isMultiple() {
-      return !!this.constraints?.allowMultipleFiles;
+      const flag = this.constraints?.allowMultipleFiles;
+      return flag === undefined ? true : !!flag;
     },
 
     maxSizeMB() {
       const n = Number(this.constraints?.maxSizeMB);
       return Number.isFinite(n) && n > 0 ? n : null;
     },
-    effectiveMaxSizeMB() { return this.maxSizeMB || DEFAULT_MAX_MB; },
+    effectiveMaxSizeMB() { return this.maxSizeMB ?? DEFAULT_MAX_MB; },
 
     allowedFormats() {
       const arr = Array.isArray(this.constraints?.allowedFormats)

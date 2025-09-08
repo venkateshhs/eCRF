@@ -575,9 +575,11 @@ export default {
 
         // file
         allowedFormats,
-        maxSizeMB: isFinite(base.maxSizeMB) ? Number(base.maxSizeMB) : 100,
+        maxSizeMB: (isFinite(base.maxSizeMB) && Number(base.maxSizeMB) > 0)
+          ? Number(base.maxSizeMB)
+          : undefined,                         // undefined => no size limit
         storagePreference: (base.storagePreference === "url") ? "url" : "local",
-        allowMultipleFiles: !!base.allowMultipleFiles,
+        allowMultipleFiles: base.allowMultipleFiles === undefined ? true : !!base.allowMultipleFiles,
         modalities: Array.isArray(base.modalities)
           ? base.modalities.filter(Boolean).map(String)
           : []
@@ -653,9 +655,6 @@ export default {
       if (this.isSlider && this.local.mode === "linear") {
         return this.linearCount < 2 || this.linearCount > this.LINEAR_MAX;
       }
-      if (this.isFile) {
-        if (this.local.maxSizeMB !== undefined && !(this.local.maxSizeMB > 0)) return true;
-      }
       if (!this.isDate && !(this.isSlider && this.local.mode==='slider') && (this.local.required && this.local.readonly)) {
         return !!this.defaultError;
       }
@@ -666,7 +665,6 @@ export default {
       return new Set(BIDS_MODALITIES);
     },
     allModalities() {
-      // union of built-ins and current selections, keeping order (built-ins first)
       const extras = (this.local.modalities || []).filter(m => !!m && !this.builtInSet.has(m));
       return [...BIDS_MODALITIES, ...Array.from(new Set(extras))];
     }
@@ -726,9 +724,9 @@ export default {
 
           // file
           allowedFormats,
-          maxSizeMB: isFinite(base.maxSizeMB) ? Number(base.maxSizeMB) : undefined,
+          maxSizeMB: (isFinite(base.maxSizeMB) && Number(base.maxSizeMB) > 0) ? Number(base.maxSizeMB) : undefined,
           storagePreference: (base.storagePreference === "url") ? "url" : "local",
-          allowMultipleFiles: !!base.allowMultipleFiles,
+          allowMultipleFiles: base.allowMultipleFiles === undefined ? true : !!base.allowMultipleFiles,
           modalities: Array.isArray(base.modalities)
             ? base.modalities.filter(Boolean).map(String)
             : []
@@ -897,24 +895,30 @@ export default {
     save() {
       if (this.isSaveDisabled) return;
 
+      // FILE: emit cleaned constraints with allowMultipleFiles defaulting to true and no implied limits
       if (this.isFile) {
-          const cleaned = {
-            required: !!this.local.required,
-            readonly: !!this.local.readonly,
-            helpText: this.local.helpText || "",
-            allowedFormats: this.parseAllowedFormats(this.allowedFormatsText),
-            maxSizeMB: Number.isFinite(this.local.maxSizeMB) && this.local.maxSizeMB > 0
-              ? Number(this.local.maxSizeMB)
-              : 100, // fallback to 100 MB
-            storagePreference: (this.local.storagePreference === "url") ? "url" : "local",
-            allowMultipleFiles: !!this.local.allowMultipleFiles,
-            modalities: Array.isArray(this.local.modalities)
-              ? Array.from(new Set(this.local.modalities.filter(Boolean).map(String)))
-              : []
-          };
-          this.$emit("updateConstraints", cleaned);
-          return;
-        }
+        const parsedFormats = String(this.allowedFormatsText || "")
+          .split(",")
+          .map(s => s.trim())
+          .filter(Boolean);
+
+        const cleaned = {
+          required: !!this.local.required,
+          readonly: !!this.local.readonly,
+          helpText: this.local.helpText || "",
+          allowedFormats: parsedFormats,                     // [] => any type
+          maxSizeMB: (Number.isFinite(this.local.maxSizeMB) && this.local.maxSizeMB > 0)
+            ? Number(this.local.maxSizeMB)
+            : undefined,                                     // undefined => no size limit
+          storagePreference: (this.local.storagePreference === "url") ? "url" : "local",
+          allowMultipleFiles: this.local.allowMultipleFiles !== false,  // default true
+          modalities: Array.isArray(this.local.modalities)
+            ? Array.from(new Set(this.local.modalities.filter(Boolean).map(String)))
+            : []
+        };
+        this.$emit("updateConstraints", cleaned);
+        return;
+      }
 
 
       if (!this.isSlider) {
@@ -995,6 +999,8 @@ export default {
   }
 };
 </script>
+
+
 
 <style scoped>
 .constraints-edit-modal{width:480px;background:#fff;padding:16px 16px 12px;border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,0.18);max-height:80vh;overflow-y:auto;box-sizing:border-box}

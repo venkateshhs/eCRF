@@ -436,6 +436,8 @@
   </div>
 </template>
 
+
+
 <script>
 import axios from "axios";
 import yaml from "js-yaml";
@@ -731,31 +733,50 @@ export default {
       }
 
       // File defaults (NEW)
-        if (base.type === 'file') {
-          base.value = null;
-          base.icon = base.icon || icons.paperclip;
-          base.constraints = {
-            helpText: base.constraints?.helpText || "",
-            required: !!base.constraints?.required,
-            readonly: !!base.constraints?.readonly,
-            allowedFormats: Array.isArray(base.constraints?.allowedFormats)
-              ? base.constraints.allowedFormats
-              : [".pdf", ".csv", ".tsv", "image/*", "txt"],
-            maxSizeMB: Number.isFinite(base.constraints?.maxSizeMB) ? base.constraints.maxSizeMB : 100, // ← 100 MB default
-            storagePreference: (base.constraints?.storagePreference === "url") ? "url" : "local",
-            modalities: Array.isArray(base.constraints?.modalities) ? base.constraints.modalities : [],
-            allowMultipleFiles: !!base.constraints?.allowMultipleFiles
-          };
-        }
-
-
-
+      if (base.type === 'file') {
+        base.value = null;
+        base.icon = base.icon || icons.paperclip;
+        const provided = base.constraints || {};
+        base.constraints = {
+          helpText: provided.helpText || "",
+          required: !!provided.required,
+          readonly: !!provided.readonly,
+          allowedFormats: Array.isArray(provided.allowedFormats)
+            ? provided.allowedFormats.map(String).map(s => s.trim()).filter(Boolean)
+            : [],
+          maxSizeMB: (Number.isFinite(provided.maxSizeMB) && provided.maxSizeMB > 0)
+            ? Number(provided.maxSizeMB)
+            : undefined,
+          storagePreference: (provided.storagePreference === "url") ? "url" : "local",
+          modalities: Array.isArray(provided.modalities) ? provided.modalities : [],
+          allowMultipleFiles: (provided.allowMultipleFiles === undefined) ? true : !!provided.allowMultipleFiles
+        };
+      }
 
       sec.fields.push(base);
     },
 
     editSection(i, v) { if (v) this.currentForm.sections[i].title = v; },
-    editField(si, fi, v) { if (v) this.currentForm.sections[si].fields[fi].label = v; },
+    editField(si, fi, v) {
+      if (!v) return;
+      const f = this.currentForm.sections[si].fields[fi];
+      const prevLabel = f.label;
+      f.label = v;
+
+      // If it's a file field and modalities were not explicitly chosen,
+      // keep the auto-derived modality in sync with the label.
+      if (f.type === 'file') {
+        const mods = Array.isArray(f.constraints?.modalities) ? f.constraints.modalities : [];
+        const prevTrim = String(prevLabel || '').trim();
+
+        // Update when: none selected OR was previously auto-derived from the old label
+        if (!mods.length || (mods.length === 1 && String(mods[0] || '').trim() === prevTrim)) {
+          const next = (String(v || '').trim()) || f.name;
+          f.constraints = { ...(f.constraints || {}), modalities: [next] };
+        }
+      }
+    },
+
 
     enforceNumberDigitLimits(sectionIndex, fieldIndex, evt, onBlur = false) {
       const field = this.currentForm.sections[sectionIndex].fields[fieldIndex];
@@ -821,6 +842,7 @@ export default {
       const { sectionIndex, fieldIndex } = this.currentFieldIndices;
       const f = this.currentForm.sections[sectionIndex].fields[fieldIndex];
       const originalType = f.type;
+
       if (originalType === 'file') {
         // Assign cleaned constraints as emitted by FieldConstraintsDialog
         const cleaned = {
@@ -828,11 +850,20 @@ export default {
           required: !!c.required,
           readonly: !!c.readonly,
           allowedFormats: Array.isArray(c.allowedFormats) ? c.allowedFormats : [],
-          maxSizeMB: Number.isFinite(c.maxSizeMB) ? c.maxSizeMB : undefined,
+          maxSizeMB: (Number.isFinite(c.maxSizeMB) && c.maxSizeMB > 0) ? Number(c.maxSizeMB) : undefined,
           storagePreference: (c.storagePreference === 'url') ? 'url' : 'local',
-          modalities: Array.isArray(c.modalities) ? c.modalities.filter(Boolean).map(String) : [],
-          allowMultipleFiles: !!c.allowMultipleFiles
+          modalities: Array.isArray(c.modalities)
+            ? c.modalities.filter(Boolean).map(String)
+            : [],
+          allowMultipleFiles: c.allowMultipleFiles !== false // default true
         };
+
+        // If user hasn’t selected any modality, default to field label
+        if (!cleaned.modalities.length) {
+          const labelAsMod = (f.label || '').toString().trim() || f.name;
+          cleaned.modalities = [labelAsMod];
+        }
+
         f.constraints = cleaned;
         // Keep current value as-is; builder doesn’t persist files
         this.showConstraintsDialog = false;
@@ -905,7 +936,7 @@ export default {
           });
           f.constraints = { ...norm, ...extra };
         } else {
-          f.constraints = { ...norm };
+        f.constraints = { ...norm };
         }
 
         if (
@@ -1049,6 +1080,7 @@ export default {
   }
 };
 </script>
+
 
 <style lang="scss" scoped>
 @import "@/assets/styles/_base.scss";

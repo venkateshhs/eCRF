@@ -660,7 +660,7 @@ export default {
       }
       if (field.type === "file") {
         const allowed = Array.isArray(c.allowedFormats) && c.allowedFormats.length ? c.allowedFormats.join(", ") : "—";
-        const sizeMB = Number.isFinite(c.maxSizeMB) && c.maxSizeMB > 0 ? c.maxSizeMB : 100;
+        const sizeMB = Number.isFinite(c.maxSizeMB) && c.maxSizeMB > 0 ? c.maxSizeMB : undefined;
         const storage = (c.storagePreference === "url") ? "Link via URL" : "Local upload";
         parts.push(`Storage: ${storage}`);
         parts.push(`Allowed: ${allowed}`);
