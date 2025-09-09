@@ -721,7 +721,6 @@ def _normalize_modality(mod: str) -> str:
     m = (mod or "").strip().lower()
     m = _normalize_token(m)
     return m or "misc"
-
 def stage_file_for_modalities(
     study_id: int,
     study_name: str,
@@ -735,25 +734,59 @@ def stage_file_for_modalities(
     filename: Optional[str] = None,
 ) -> List[str]:
     """
-    Mirror a local upload or URL into the BIDS dataset under:
-      dataset_root/sub-XXX[/ses-YY]/<modality>/
+    Mirror a local upload or URL into the BIDS dataset.
 
-    - If source_path is set (local file): copy to each modality folder.
-    - If url is set: write a small .txt file with the URL in each modality folder.
+    STUDY-LEVEL (no indices provided):
+      -> <dataset_root>/metadata/  (kept separate from subject/session trees)
+
+    PER-SUBJECT/PER-VISIT (indices provided):
+      -> <dataset_root>/sub-XXX[/ses-YY]/<modality>/
 
     Returns list of written target paths.
     """
-    modalities = modalities or []
-    if not modalities:
-        modalities = ["misc"]
-
-    # Ensure dataset exists / is initialized
+    # Ensure dataset exists / initialized and metadata dir present
     dataset_path = upsert_bids_dataset(
         study_id=study_id,
         study_name=study_name,
         study_description=study_description,
         study_data=study_data,
     )
+
+    written: List[str] = []
+
+    # ---------- STUDY-LEVEL DOCS ----------
+    if subject_index is None and visit_index is None:
+        # Mirror into dataset-level metadata directory
+        target_dir = os.path.join(dataset_path, "metadata")
+        _ensure_dir(target_dir)
+
+        if source_path:
+            base_name = os.path.basename(source_path)
+            target_path = os.path.join(target_dir, base_name)
+            try:
+                shutil.copy2(source_path, target_path)
+                written.append(target_path)
+            except Exception as e:
+                logger.error("BIDS mirror (study-level) copy failed: %s -> %s (%s)", source_path, target_path, e)
+        elif url:
+            base = os.path.splitext(filename or "link")[0] if filename else "link"
+            target_path = os.path.join(target_dir, f"{base}.txt")
+            try:
+                with open(target_path, "w", encoding="utf-8") as f:
+                    f.write(url.strip() + "\n")
+                written.append(target_path)
+            except Exception as e:
+                logger.error("BIDS mirror (study-level) write-url failed: %s (%s)", target_path, e)
+
+        if written:
+            _datalad_save(dataset_path, msg="Mirror study-level document(s) into metadata/")
+        logger.info("BIDS mirror (study-level) written: %s", written)
+        return written
+
+    # ---------- PER-SUBJECT/PER-VISIT (existing behavior) ----------
+    modalities = modalities or []
+    if not modalities:
+        modalities = ["misc"]
 
     # Resolve subject folder
     try:

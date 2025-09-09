@@ -74,7 +74,7 @@
           <div class="subsection">
             <h3 class="sub-title">Groups</h3>
             <div v-if="groups && groups.length" class="list-grid">
-              <div class="list-card" v-for="(g, i) in groups" :key="i">
+              <div class="list-card" v-for="(g, gi) in groups" :key="gi">
                 <div class="kv-row" v-for="entry in objectEntriesFiltered(g)" :key="entry[0]">
                   <div class="kv-key">{{ prettyLabel(entry[0]) }}</div>
                   <div class="kv-val">{{ formatAny(entry[1]) }}</div>
@@ -88,7 +88,7 @@
           <div class="subsection">
             <h3 class="sub-title">Visits</h3>
             <div v-if="visits && visits.length" class="list-grid">
-              <div class="list-card" v-for="(v, i) in visits" :key="i">
+              <div class="list-card" v-for="(v, vi) in visits" :key="vi">
                 <div class="kv-row" v-for="entry in objectEntriesFiltered(v)" :key="entry[0]">
                   <div class="kv-key">{{ prettyLabel(entry[0]) }}</div>
                   <div class="kv-val">{{ formatAny(entry[1]) }}</div>
@@ -132,17 +132,67 @@
 
         <!-- DOCUMENTS -->
         <div v-else-if="activeTab === 'docs'">
-          <h2 class="panel-title">Documents</h2>
-          <div v-if="documents && documents.length" class="doc-list">
-            <div v-for="(doc, i) in documents" :key="i" class="doc-item">
-              <div class="doc-name">{{ doc.name || doc.title || 'Document' }}</div>
+          <h2 class="panel-title">Study Documents</h2>
+
+          <!-- Existing Study Attachments -->
+          <h3 class="sub-title">Existing Study Attachments</h3>
+          <div v-if="studyLevelFiles.length" class="doc-list">
+            <div v-for="doc in studyLevelFiles" :key="doc.id || doc.file_name" class="doc-item">
+              <div class="doc-name">{{ doc.file_name || doc.name || 'Document' }}</div>
               <div class="doc-meta muted">
-                {{ doc.type || doc.mime || 'file' }} •
-                {{ doc.size ? prettyBytes(doc.size) : (doc.bytes ? prettyBytes(doc.bytes) : 'unknown size') }}
+                {{ doc.storage_option || 'file' }}
+                <span v-if="doc.bytes || doc.size"> • </span>
+                <span v-if="doc.bytes">{{ prettyBytes(doc.bytes) }}</span>
+                <span v-else-if="doc.size">{{ prettyBytes(doc.size) }}</span>
+              </div>
+              <div v-if="doc.description" class="doc-desc">{{ doc.description }}</div>
+              <div class="doc-path" :title="docPathTooltip(doc)">
+                <span class="label">On disk:</span>
+                <span class="file-path">{{ docRelativePath(doc) }}</span>
               </div>
             </div>
           </div>
-          <div v-else class="empty-state">No documents available for this study.</div>
+          <div v-else class="empty-state">No study-level attachments yet.</div>
+
+          <!-- Attach New Study Documents -->
+          <div class="subsection">
+            <h3 class="sub-title">Attach New Study Documents</h3>
+
+            <div class="attach-row">
+              <FieldFileUpload
+                :value="attachTempValue"
+                :constraints="{ allowMultipleFiles: true, storagePreference: 'local' }"
+                :readonly="uploading"
+                stage="runtime"
+                @input="onAttachTempChange"
+                @file-selected="onFilesSelected"
+              />
+            </div>
+
+            <div v-if="pendingFiles.length" class="pending-list">
+              <div class="pending-item" v-for="(p, idx) in pendingFiles" :key="p.key">
+                <div class="pi-head">
+                  <div class="pi-name" :title="p.file.name">{{ p.file.name }}</div>
+                  <div class="pi-size">{{ prettyBytes(p.file.size) }}</div>
+                  <button class="icon-inline danger" type="button" @click="removePending(idx)" title="Remove">✕</button>
+                </div>
+                <label class="pi-desc-label">Description (optional)</label>
+                <input
+                  class="pi-desc-input"
+                  type="text"
+                  v-model="p.description"
+                  :placeholder="'e.g., IRB approval PDF, protocol v2, consent form…'"
+                  :disabled="uploading"
+                />
+              </div>
+            </div>
+
+            <div class="attach-actions">
+              <button class="btn-primary" :disabled="!pendingFiles.length || uploading" @click="saveStudyAttachments">
+                {{ uploading ? 'Saving…' : 'Save Attachments' }}
+              </button>
+            </div>
+          </div>
         </div>
 
         <!-- STUDY TEAM -->
@@ -179,17 +229,19 @@
 
 <script>
 import axios from "axios";
+import FieldFileUpload from "@/components/fields/FieldFileUpload.vue";
 
 export default {
   name: "StudyView",
+  components: { FieldFileUpload },
   data() {
     return {
       studyId: this.$route.params.id,
       studyMeta: {},
       studyData: {},
-      documents: [],
       team: [],
-      me: null, // /me response
+      me: null,
+
       activeTab: "meta",
       tabs: [
         { key: "meta", label: "Meta-data" },
@@ -197,6 +249,12 @@ export default {
         { key: "team", label: "Study Team" },
         { key: "viewdata", label: "View Data" },
       ],
+
+      allFiles: [],             // raw from /studies/{id}/files
+
+      attachTempValue: [],      // bound to FieldFileUpload
+      pendingFiles: [],         // [{ key, file, description }]
+      uploading: false,
     };
   },
   computed: {
@@ -220,6 +278,28 @@ export default {
     studyKVEntries() {
       return this.objectEntriesFiltered(this.studyData.study);
     },
+
+    /**
+     * STRICT study-level filter:
+     * Only include DB rows whose file_path includes
+     *   /sub-unknown/ + /ses-unknown/ + /group-unknown/
+     * Disables any index-null heuristics (which could include everything).
+     */
+    studyLevelFiles() {
+      const arr = Array.isArray(this.allFiles) ? this.allFiles : [];
+      return arr.filter((f) => {
+        const p = String(f?.file_path || "");
+        return (
+          p.includes("/sub-unknown/") &&
+          p.includes("/ses-unknown/") &&
+          p.includes("/group-unknown/")
+        );
+      });
+    },
+
+    token() {
+      return this.$store.state.token;
+    },
   },
   watch: {
     activeTab(val) {
@@ -227,26 +307,30 @@ export default {
     },
   },
   methods: {
-     async fetchUserNameById(userId) {
-      const token = this.$store.state.token;
-      if (!token || userId == null) return null;
-      try {
-        const { data } = await axios.get(`http://127.0.0.1:8000/users/${userId}`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        const u = data || {};
-        const firstLast = [u?.profile?.first_name, u?.profile?.last_name].filter(Boolean).join(" ").trim();
-        return u.name || u.full_name || firstLast || u.username || u.email || null;
-      } catch (e) {
-        console.warn("fetchUserNameById failed:", e?.response?.data || e.message);
-        return null;
-      }
+    // ------- relative dataset path helpers -------
+    makeDatasetFolder(studyId, studyName) {
+      const alnum = (s) => String(s || "").replace(/[^A-Za-z0-9]/g, "");
+      const base = (studyName || `study${studyId}`).replace(/ /g, "");
+      const slug = alnum(base).slice(0, 48);
+      return slug ? `study_${studyId}_${slug}` : `study_${studyId}`;
     },
+    docRelativePath(file) {
+      const folder = this.makeDatasetFolder(this.studyMeta.id, this.studyMeta.study_name);
+      const fname = file?.file_name || "";
+      return `bids_datasets/${folder}/metadata/${fname}`;
+    },
+    docPathTooltip(file) {
+      return `Location on disk (relative to backend working directory): ${this.docRelativePath(file)}`;
+    },
+
+    // ------- helpers -------
     scrollToTop() {
       try {
         window.scrollTo({ top: 0, left: 0, behavior: "auto" });
         if (this.$el && typeof this.$el.scrollTop === "number") this.$el.scrollTop = 0;
-      } catch (err) {console.warn("StudyView scrollToTop failed:", err);}
+      } catch (err) {
+        console.warn("StudyView scrollToTop failed:", err);
+      }
     },
     goBackToDashboard() {
       this.$router.push({ name: "Dashboard", query: { openStudies: "true" } });
@@ -259,9 +343,10 @@ export default {
       });
     },
     prettyBytes(n) {
+      if (n === 0) return "0 B";
       if (!n && n !== 0) return "";
       const units = ["B","KB","MB","GB","TB"];
-      const i = n === 0 ? 0 : Math.floor(Math.log(n)/Math.log(1024));
+      const i = Math.floor(Math.log(n)/Math.log(1024));
       return `${(n/Math.pow(1024, i)).toFixed(1)} ${units[i]}`;
     },
     prettyLabel(key) {
@@ -285,7 +370,6 @@ export default {
       if (typeof val === "string") return val.trim().length > 0;
       if (Array.isArray(val)) return val.length > 0;
       if (typeof val === "object") return Object.keys(val).length > 0;
-      // numbers/booleans count as values (0 and false are valid)
       return true;
     },
     objectEntriesFiltered(obj) {
@@ -296,6 +380,23 @@ export default {
       const firstLast = [u.first_name, u.last_name].filter(Boolean).join(" ").trim();
       return u.name || u.full_name || firstLast || u.username || u.email || "";
     },
+
+    // ------- data fetch -------
+    async fetchUserNameById(userId) {
+      const token = this.token;
+      if (!token || userId == null) return null;
+      try {
+        const { data } = await axios.get(`http://127.0.0.1:8000/users/${userId}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        const u = data || {};
+        const firstLast = [u?.profile?.first_name, u?.profile?.last_name].filter(Boolean).join(" ").trim();
+        return u.name || u.full_name || firstLast || u.username || u.email || null;
+      } catch (e) {
+        console.warn("fetchUserNameById failed:", e?.response?.data || e.message);
+        return null;
+      }
+    },
     resolveCreator(meta) {
       const explicit =
         meta.created_by_name ||
@@ -304,7 +405,6 @@ export default {
         meta.created_by_username ||
         meta.created_by_email;
       if (explicit) return explicit;
-      // try matching /me if ids/usernames/emails align
       if (this.me) {
         const meName = this.displayNameFromUser(this.me);
         const createdBy = meta.created_by != null ? String(meta.created_by) : "";
@@ -316,20 +416,19 @@ export default {
       return meta.created_by || "-";
     },
     async fetchMe() {
-      const token = this.$store.state.token;
+      const token = this.token;
       if (!token) return;
       try {
         const { data } = await axios.get("http://127.0.0.1:8000/users/me", {
           headers: { Authorization: `Bearer ${token}` },
         });
         this.me = data || null;
-        console.log("Venkatesh", data)
       } catch (e) {
         console.warn("Failed to fetch /me:", e?.response?.data || e.message);
       }
     },
     async fetchStudy() {
-      const token = this.$store.state.token;
+      const token = this.token;
       if (!token) {
         this.$router.push("/login");
         return;
@@ -350,7 +449,6 @@ export default {
           null;
 
         if (!createdByDisplay && meta.created_by != null) {
-          // created_by is an ID; resolve it via /users/{id}
           const resolved = await this.fetchUserNameById(meta.created_by);
           createdByDisplay = resolved || String(meta.created_by);
         }
@@ -363,20 +461,34 @@ export default {
           created_by: createdByDisplay || "-",
         };
         this.studyData = sd || {};
-        this.documents = Array.isArray(sd.documents) ? sd.documents : [];
         const maybeTeam = sd.team || sd.studyTeam || sd.collaborators || [];
         this.team = Array.isArray(maybeTeam) ? maybeTeam : [];
       } catch (e) {
         console.error("Failed to fetch study view:", e);
       }
     },
+    async fetchStudyFiles() {
+      const token = this.token;
+      if (!token) return;
+      try {
+        const { data } = await axios.get(
+          `http://127.0.0.1:8000/forms/studies/${this.studyId}/files`,
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+        this.allFiles = Array.isArray(data) ? data : [];
+      } catch (e) {
+        console.warn("Failed to fetch study files:", e?.response?.data || e.message);
+      }
+    },
+
+    // ------- nav -------
     goViewData() {
       this.$router.push({ name: "StudyDataDashboard", params: { id: this.studyId } });
     },
     async editStudy() {
       localStorage.removeItem("setStudyDetails");
       localStorage.removeItem("scratchForms");
-      const token = this.$store.state.token;
+      const token = this.token;
       if (!token) {
         this.$router.push("/login");
         return;
@@ -443,19 +555,79 @@ export default {
         console.error("Failed to load study details for edit:", e);
       }
     },
+
+    // ------- attach handlers -------
+    onAttachTempChange(val) {
+      this.attachTempValue = Array.isArray(val) ? val : [];
+    },
+    onFilesSelected(files) {
+      const arr = Array.isArray(files) ? files : (files ? [files] : []);
+      if (!arr.length) return;
+      const existing = new Set(this.pendingFiles.map((p) => `${p.file.name}|${p.file.size}|${p.file.lastModified || ""}`));
+      const next = [];
+      for (const f of arr) {
+        const key = `${f.name}|${f.size}|${f.lastModified || ""}`;
+        if (!existing.has(key)) {
+          next.push({ key, file: f, description: "" });
+        }
+      }
+      if (next.length) {
+        this.pendingFiles = this.pendingFiles.concat(next);
+      }
+    },
+    removePending(idx) {
+      if (idx >= 0 && idx < this.pendingFiles.length) {
+        this.pendingFiles.splice(idx, 1);
+      }
+    },
+    async saveStudyAttachments() {
+      if (!this.pendingFiles.length) return;
+      const token = this.token;
+      if (!token) {
+        this.$router.push("/login");
+        return;
+      }
+      this.uploading = true;
+      try {
+        for (const item of this.pendingFiles) {
+          const fd = new FormData();
+          fd.append("uploaded_file", item.file);
+          fd.append("description", item.description || "");
+          fd.append("storage_option", "local");
+          // Do NOT set indices ⇒ backend stores under sub-unknown/ses-unknown/group-unknown
+          fd.append("modalities_json", "[]");
+          await axios.post(
+            `http://127.0.0.1:8000/forms/studies/${this.studyId}/files`,
+            fd,
+            { headers: { Authorization: `Bearer ${token}`, "Content-Type": "multipart/form-data" } }
+          );
+        }
+        this.pendingFiles = [];
+        this.attachTempValue = [];
+        await this.fetchStudyFiles();
+      } catch (e) {
+        console.error("Save attachments failed:", e?.response?.data || e.message);
+      } finally {
+        this.uploading = false;
+      }
+    },
   },
-  mounted() {
+  async mounted() {
     this.scrollToTop();
-    this.fetchMe().finally(() => this.fetchStudy());
+    await this.fetchMe();
+    await this.fetchStudy();
+    await this.fetchStudyFiles();
   },
   beforeRouteEnter(to, from, next) {
-    next(vm => vm.scrollToTop());
+    next((vm) => vm.scrollToTop());
   },
   beforeRouteUpdate(to, from, next) {
     this.studyId = to.params.id;
     this.scrollToTop();
-    this.fetchStudy();
-    next();
+    Promise.resolve()
+      .then(() => this.fetchStudy())
+      .then(() => this.fetchStudyFiles())
+      .finally(() => next());
   },
 };
 </script>
@@ -536,34 +708,64 @@ export default {
 .kv-grid { display: grid; grid-template-columns: 1fr; gap: 8px; }
 .kv-row { display: grid; grid-template-columns: 200px 1fr; gap: 8px; padding: 8px 10px; border: 1px solid #f5f5f5; border-radius: 8px; }
 .kv-key { color: #6b7280; font-size: 13px; }
-.kv-val { color: #111827; font-size: 14px; white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  word-break: break-word; }
+.kv-val { color: #111827; font-size: 14px; white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; }
 
 /* Lists for groups/visits */
 .list-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); gap: 10px; }
 .list-card { border: 1px solid #f1f1f1; border-radius: 12px; padding: 10px; background: #fff; }
 .list-card .kv-row {
   display: grid;
-  grid-template-columns: minmax(120px, 220px) 1fr; /* let label shrink/grow */
+  grid-template-columns: minmax(120px, 220px) 1fr;
   gap: 8px;
   align-items: start;
 }
 
 /* Docs */
-.doc-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; }
+.doc-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; }
 .doc-item { border: 1px solid #f1f1f1; border-radius: 12px; padding: 12px; background: #fff; }
-.doc-name { font-weight: 600; }
-.doc-meta { font-size: 12px; margin: 6px 0 10px; }
+.doc-name { font-weight: 700; word-break: break-word; }
+.doc-meta { font-size: 12px; margin: 6px 0 8px; color: #6b7280; }
+.doc-desc { margin-top: 4px; font-size: 13px; color: #374151; }
 
-/* Team */
-.team-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
-.team-card { border: 1px solid #f1f1f1; border-radius: 12px; padding: 12px; background: #fff; }
-.team-name { font-weight: 700; }
-.team-role { margin-top: 2px; color: #6b7280; }
-.team-contact { margin-top: 8px; }
-.contact-row { display: flex; gap: 6px; font-size: 14px; }
-.contact-row .label { color: #6b7280; }
+.doc-path {
+  margin-top: 6px;
+  font-size: 12px;
+  color: #6b7280;
+  display: flex;
+  gap: 6px;
+  align-items: flex-start;
+}
+.doc-path .label {
+  flex: 0 0 auto;
+  color: #6b7280;
+}
+.doc-path .file-path {
+  flex: 1 1 auto;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+/* Attach */
+.attach-row { margin-bottom: 10px; }
+.pending-list { display: grid; grid-template-columns: 1fr; gap: 10px; }
+.pending-item {
+  border: 1px solid #f1f1f1; border-radius: 10px; padding: 10px;
+  background: #fff; display: flex; flex-direction: column; gap: 6px;
+}
+.pi-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.pi-name { font-weight: 600; min-width: 0; word-break: break-word; }
+.pi-size { color: #6b7280; font-size: 12px; }
+.icon-inline { border:none; background:transparent; padding:6px; border-radius:8px; cursor:pointer; }
+.icon-inline.danger { color:#b91c1c; }
+.pi-desc-label { font-size: 12px; color: #6b7280; }
+.pi-desc-input {
+  width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 8px;
+  font-size: 14px; box-sizing: border-box;
+}
+
+.attach-actions { margin-top: 10px; }
 
 /* Buttons */
 .btn-primary {
@@ -571,7 +773,8 @@ export default {
   transition: transform .05s, box-shadow .2s, background .2s, color .2s, border .2s;
   border: 1px solid transparent; background: #111827; color: #fff;
 }
-.btn-primary:hover { transform: translateY(-1px); box-shadow: 0 6px 18px rgba(0,0,0,.1); }
+.btn-primary[disabled] { opacity: 0.6; cursor: not-allowed; }
+.btn-primary:hover:not([disabled]) { transform: translateY(-1px); box-shadow: 0 6px 18px rgba(0,0,0,.1); }
 .btn-minimal {
   background: none; border: 1px solid #e0e0e0; border-radius: 8px;
   padding: 8px 12px; font-size: 14px; color: #555; cursor: pointer;
