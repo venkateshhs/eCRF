@@ -733,25 +733,34 @@ export default {
       }
 
       // File defaults (NEW)
-      if (base.type === 'file') {
-        base.value = null;
-        base.icon = base.icon || icons.paperclip;
-        const provided = base.constraints || {};
-        base.constraints = {
-          helpText: provided.helpText || "",
-          required: !!provided.required,
-          readonly: !!provided.readonly,
-          allowedFormats: Array.isArray(provided.allowedFormats)
-            ? provided.allowedFormats.map(String).map(s => s.trim()).filter(Boolean)
-            : [],
-          maxSizeMB: (Number.isFinite(provided.maxSizeMB) && provided.maxSizeMB > 0)
-            ? Number(provided.maxSizeMB)
-            : undefined,
-          storagePreference: (provided.storagePreference === "url") ? "url" : "local",
-          modalities: Array.isArray(provided.modalities) ? provided.modalities : [],
-          allowMultipleFiles: (provided.allowMultipleFiles === undefined) ? true : !!provided.allowMultipleFiles
-        };
-      }
+        if (base.type === 'file') {
+          base.value = null;
+          base.icon = base.icon || icons.paperclip;
+
+          const provided = base.constraints || {};
+          // default modality from label (or fallback to name)
+          const fallbackMod = (String(base.label || '').trim()) || base.name;
+
+          base.constraints = {
+            helpText: provided.helpText || "",
+            required: !!provided.required,
+            readonly: !!provided.readonly,
+            allowedFormats: Array.isArray(provided.allowedFormats)
+              ? provided.allowedFormats.map(String).map(s => s.trim()).filter(Boolean)
+              : [],
+            maxSizeMB: (Number.isFinite(provided.maxSizeMB) && Number(provided.maxSizeMB) > 0)
+              ? Number(provided.maxSizeMB)
+              : undefined,
+            storagePreference: (provided.storagePreference === "url") ? "url" : "local",
+            //  Default to label/name when user hasn’t picked any modality
+            modalities: (Array.isArray(provided.modalities) && provided.modalities.length)
+              ? provided.modalities
+              : [fallbackMod],
+            // default true when not specified
+            allowMultipleFiles: (provided.allowMultipleFiles === undefined) ? true : !!provided.allowMultipleFiles
+          };
+        }
+
 
       sec.fields.push(base);
     },
@@ -860,9 +869,10 @@ export default {
 
         // If user hasn’t selected any modality, default to field label
         if (!cleaned.modalities.length) {
-          const labelAsMod = (f.label || '').toString().trim() || f.name;
-          cleaned.modalities = [labelAsMod];
-        }
+            const fallback = (String(f.label || '').trim()) || f.name;
+            cleaned.modalities = [fallback];
+            console.log("[ScratchForm] Constraints: defaulted modalities to", cleaned.modalities, "for", fallback);
+          }
 
         f.constraints = cleaned;
         // Keep current value as-is; builder doesn’t persist files
