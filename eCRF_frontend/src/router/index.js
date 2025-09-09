@@ -13,6 +13,7 @@ import StudySettings from "../components/StudySettings.vue";
 import SavedStudyView         from '../components/SavedStudyView.vue'
 import SharedFormComponent from '../components/SharedFormComponent.vue'
 //import StudyDataEntryComponent from '../components/DataEntryComponent.vue'
+import StudyView from '@/components/StudyView.vue';
 const routes = [
   { path: "/", redirect: "/login" },
   { path: "/login", name: "Login", component: LoginComponent },
@@ -59,6 +60,12 @@ const routes = [
     name: "SharedForm",
     component: SharedFormComponent,
   },
+  {
+      path: '/dashboard/studies/:id/view',
+      name: 'StudyView',
+      component: StudyView,
+      props: true,
+    },
   {
   path: "/dashboard/study/:id/data",
   name: "StudyDataDashboard",

@@ -4,6 +4,13 @@
     "fields": [
       {
         "type": "text",
+        "label": "Participant ID",
+        "placeholder": "Enter participant ID",
+        "icon": "fas fa-id-card",
+        "default": ""
+      },
+      {
+        "type": "text",
         "label": "First Name",
         "placeholder": "Enter first name",
         "icon": "fas fa-user",
@@ -29,40 +36,27 @@
         "options": ["Male", "Female", "Other"],
         "icon": "fas fa-venus-mars",
         "default": "Male"
-      }
-    ]
-  },
-  {
-    "title": "Clinical Information",
-    "fields": [
-      {
-        "type": "number",
-        "label": "Height (cm)",
-        "placeholder": "Enter height",
-        "icon": "fas fa-ruler-vertical",
-        "default": 0
-      },
-      {
-        "type": "number",
-        "label": "Weight (kg)",
-        "placeholder": "Enter weight",
-        "icon": "fas fa-weight",
-        "default": 0
       },
       {
         "type": "select",
-        "label": "Blood Type",
-        "options": ["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"],
-        "icon": "fas fa-tint",
-        "default": "A+"
+        "label": "Marital Status",
+        "options": ["Single", "Married", "Divorced", "Widowed", "Separated", "Other"],
+        "icon": "fas fa-ring",
+        "default": "Single"
       },
       {
-        "type": "textarea",
-        "label": "Medical History",
-        "placeholder": "Enter medical history details",
-        "rows": 4,
-        "icon": "fas fa-notes-medical",
-        "default": ""
+        "type": "select",
+        "label": "Race",
+        "options": ["American Indian/Alaska Native", "Asian", "Black/African American", "Native Hawaiian/Pacific Islander", "White", "Other"],
+        "icon": "fas fa-users",
+        "default": "Other"
+      },
+      {
+        "type": "select",
+        "label": "Ethnicity",
+        "options": ["Hispanic or Latino", "Not Hispanic or Latino", "Unknown/Not Reported"],
+        "icon": "fas fa-flag",
+        "default": "Not Hispanic or Latino"
       }
     ]
   },
@@ -88,6 +82,599 @@
         "label": "Address",
         "placeholder": "Enter address",
         "icon": "fas fa-map-marker-alt",
+        "default": ""
+      },
+      {
+        "type": "text",
+        "label": "Emergency Contact Name",
+        "placeholder": "Enter emergency contact name",
+        "icon": "fas fa-user",
+        "default": ""
+      },
+      {
+        "type": "text",
+        "label": "Emergency Contact Phone",
+        "placeholder": "Enter emergency contact phone",
+        "icon": "fas fa-phone-alt",
+        "default": ""
+      },
+      {
+        "type": "text",
+        "label": "Emergency Contact Relationship",
+        "placeholder": "Enter relationship to emergency contact",
+        "icon": "fas fa-user-friends",
+        "default": ""
+      }
+    ]
+  },
+  {
+    "title": "Reproductive Health",
+    "fields": [
+      {
+        "type": "select",
+        "label": "Pregnancy Status",
+        "options": ["Not Pregnant", "Pregnant", "Unknown", "Not Applicable"],
+        "icon": "fas fa-baby",
+        "default": "Not Applicable"
+      },
+      {
+        "type": "date",
+        "label": "Last Menstrual Period",
+        "placeholder": "Select last menstrual period",
+        "icon": "fas fa-calendar-day",
+        "default": ""
+      },
+      {
+        "type": "number",
+        "label": "Gravida (Total Pregnancies)",
+        "placeholder": "Enter total number of pregnancies",
+        "icon": "fas fa-venus",
+        "default": 0
+      },
+      {
+        "type": "number",
+        "label": "Para (Live Births)",
+        "placeholder": "Enter number of live births",
+        "icon": "fas fa-baby-carriage",
+        "default": 0
+      }
+    ]
+  },
+  {
+    "title": "Presenting Complaint",
+    "fields": [
+      {
+        "type": "text",
+        "label": "Chief Complaint",
+        "placeholder": "Enter chief complaint",
+        "icon": "fas fa-comment-medical",
+        "default": ""
+      },
+      {
+        "type": "textarea",
+        "label": "History of Present Illness",
+        "placeholder": "Enter details of current illness",
+        "rows": 4,
+        "icon": "fas fa-file-medical",
+        "default": ""
+      }
+    ]
+  },
+  {
+    "title": "Vital Signs & Measurements",
+    "fields": [
+      {
+        "type": "number",
+        "label": "Height (cm)",
+        "placeholder": "Enter height",
+        "icon": "fas fa-ruler-vertical",
+        "default": 0
+      },
+      {
+        "type": "number",
+        "label": "Weight (kg)",
+        "placeholder": "Enter weight",
+        "icon": "fas fa-weight",
+        "default": 0
+      },
+      {
+        "type": "number",
+        "label": "Body Mass Index (BMI) (kg/m²)",
+        "placeholder": "Enter BMI",
+        "icon": "fas fa-calculator",
+        "default": 0
+      },
+      {
+        "type": "number",
+        "label": "Blood Pressure (Systolic) (mmHg)",
+        "placeholder": "Enter systolic blood pressure",
+        "icon": "fas fa-tachometer-alt",
+        "default": 0
+      },
+      {
+        "type": "number",
+        "label": "Blood Pressure (Diastolic) (mmHg)",
+        "placeholder": "Enter diastolic blood pressure",
+        "icon": "fas fa-tachometer-alt",
+        "default": 0
+      },
+      {
+        "type": "number",
+        "label": "Heart Rate (bpm)",
+        "placeholder": "Enter heart rate",
+        "icon": "fas fa-heartbeat",
+        "default": 0
+      },
+      {
+        "type": "number",
+        "label": "Respiratory Rate (breaths/min)",
+        "placeholder": "Enter respiratory rate",
+        "icon": "fas fa-lungs",
+        "default": 0
+      },
+      {
+        "type": "number",
+        "label": "Body Temperature (°C)",
+        "placeholder": "Enter body temperature",
+        "icon": "fas fa-thermometer-half",
+        "default": 0
+      },
+      {
+        "type": "number",
+        "label": "Oxygen Saturation (%)",
+        "placeholder": "Enter oxygen saturation",
+        "icon": "fas fa-percentage",
+        "default": 0
+      },
+      {
+        "type": "select",
+        "label": "Blood Type",
+        "options": ["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"],
+        "icon": "fas fa-tint",
+        "default": "A+"
+      }
+    ]
+  },
+  {
+    "title": "Physical Examination",
+    "fields": [
+      {
+        "type": "textarea",
+        "label": "HEENT Exam",
+        "placeholder": "Enter head, eyes, ears, nose, throat exam findings",
+        "rows": 4,
+        "icon": "fas fa-head-side-medical",
+        "default": ""
+      },
+      {
+        "type": "textarea",
+        "label": "Cardiovascular Exam",
+        "placeholder": "Enter cardiovascular exam findings",
+        "rows": 4,
+        "icon": "fas fa-heart",
+        "default": ""
+      },
+      {
+        "type": "textarea",
+        "label": "Respiratory Exam",
+        "placeholder": "Enter respiratory exam findings",
+        "rows": 4,
+        "icon": "fas fa-lungs",
+        "default": ""
+      },
+      {
+        "type": "textarea",
+        "label": "Abdominal Exam",
+        "placeholder": "Enter abdominal exam findings",
+        "rows": 4,
+        "icon": "fas fa-stethoscope",
+        "default": ""
+      },
+      {
+        "type": "textarea",
+        "label": "Musculoskeletal Exam",
+        "placeholder": "Enter musculoskeletal exam findings",
+        "rows": 4,
+        "icon": "fas fa-bone",
+        "default": ""
+      },
+      {
+        "type": "textarea",
+        "label": "Neurological Exam",
+        "placeholder": "Enter neurological exam findings",
+        "rows": 4,
+        "icon": "fas fa-brain",
+        "default": ""
+      },
+      {
+        "type": "textarea",
+        "label": "Skin Exam",
+        "placeholder": "Enter skin exam findings",
+        "rows": 4,
+        "icon": "fas fa-band-aid",
+        "default": ""
+      }
+    ]
+  },
+  {
+    "title": "Medical History",
+    "fields": [
+      {
+        "type": "textarea",
+        "label": "Past Medical Conditions",
+        "placeholder": "Enter past or existing medical conditions",
+        "rows": 4,
+        "icon": "fas fa-notes-medical",
+        "default": ""
+      },
+      {
+        "type": "textarea",
+        "label": "Past Surgical Procedures",
+        "placeholder": "Enter past surgeries or procedures",
+        "rows": 4,
+        "icon": "fas fa-procedures",
+        "default": ""
+      },
+      {
+        "type": "textarea",
+        "label": "Past Hospitalizations",
+        "placeholder": "Enter past hospitalizations (if any)",
+        "rows": 4,
+        "icon": "fas fa-hospital",
+        "default": ""
+      }
+    ]
+  },
+  {
+    "title": "Family History",
+    "fields": [
+      {
+        "type": "textarea",
+        "label": "Family Medical History",
+        "placeholder": "Enter family medical history details",
+        "rows": 4,
+        "icon": "fas fa-dna",
+        "default": ""
+      }
+    ]
+  },
+  {
+    "title": "Social History",
+    "fields": [
+      {
+        "type": "select",
+        "label": "Smoking Status",
+        "options": ["Never", "Former", "Current", "Unknown"],
+        "icon": "fas fa-smoking",
+        "default": "Never"
+      },
+      {
+        "type": "select",
+        "label": "Alcohol Use",
+        "options": ["Never", "Occasional", "Regular", "Heavy", "Former"],
+        "icon": "fas fa-beer",
+        "default": "Never"
+      },
+      {
+        "type": "select",
+        "label": "Drug Use",
+        "options": ["Never", "Occasional", "Regular", "Former"],
+        "icon": "fas fa-cannabis",
+        "default": "Never"
+      },
+      {
+        "type": "select",
+        "label": "Exercise Habits",
+        "options": ["None", "Occasional (1-2x/week)", "Regular (3-4x/week)", "Daily"],
+        "icon": "fas fa-running",
+        "default": "None"
+      },
+      {
+        "type": "text",
+        "label": "Occupation",
+        "placeholder": "Enter occupation",
+        "icon": "fas fa-briefcase",
+        "default": ""
+      }
+    ]
+  },
+  {
+    "title": "Allergies",
+    "fields": [
+      {
+        "type": "textarea",
+        "label": "Drug Allergies",
+        "placeholder": "Enter any drug allergies",
+        "rows": 4,
+        "icon": "fas fa-pills",
+        "default": ""
+      },
+      {
+        "type": "textarea",
+        "label": "Food Allergies",
+        "placeholder": "Enter any food allergies",
+        "rows": 4,
+        "icon": "fas fa-apple-alt",
+        "default": ""
+      },
+      {
+        "type": "textarea",
+        "label": "Other Allergies",
+        "placeholder": "Enter any other allergies (e.g. latex)",
+        "rows": 4,
+        "icon": "fas fa-allergies",
+        "default": ""
+      }
+    ]
+  },
+  {
+    "title": "Immunization History",
+    "fields": [
+      {
+        "type": "textarea",
+        "label": "Vaccination History",
+        "placeholder": "Enter immunization history details",
+        "rows": 4,
+        "icon": "fas fa-syringe",
+        "default": ""
+      }
+    ]
+  },
+  {
+    "title": "Medications",
+    "fields": [
+      {
+        "type": "textarea",
+        "label": "Current Medications",
+        "placeholder": "Enter current medications (name, dose, frequency)",
+        "rows": 4,
+        "icon": "fas fa-prescription-bottle",
+        "default": ""
+      }
+    ]
+  },
+  {
+    "title": "Laboratory Tests - Hematology",
+    "fields": [
+      {
+        "type": "number",
+        "label": "Hemoglobin (g/dL)",
+        "placeholder": "Enter hemoglobin",
+        "icon": "fas fa-tint",
+        "default": 0
+      },
+      {
+        "type": "number",
+        "label": "White Blood Cell Count (10³/µL)",
+        "placeholder": "Enter WBC count",
+        "icon": "fas fa-vial",
+        "default": 0
+      },
+      {
+        "type": "number",
+        "label": "Platelet Count (10³/µL)",
+        "placeholder": "Enter platelet count",
+        "icon": "fas fa-vials",
+        "default": 0
+      },
+      {
+        "type": "number",
+        "label": "Hematocrit (%)",
+        "placeholder": "Enter hematocrit",
+        "icon": "fas fa-percentage",
+        "default": 0
+      }
+    ]
+  },
+  {
+    "title": "Laboratory Tests - Biochemistry",
+    "fields": [
+      {
+        "type": "number",
+        "label": "Glucose (mg/dL)",
+        "placeholder": "Enter glucose",
+        "icon": "fas fa-tint",
+        "default": 0
+      },
+      {
+        "type": "number",
+        "label": "Urea (mg/dL)",
+        "placeholder": "Enter urea",
+        "icon": "fas fa-flask",
+        "default": 0
+      },
+      {
+        "type": "number",
+        "label": "Creatinine (mg/dL)",
+        "placeholder": "Enter creatinine",
+        "icon": "fas fa-vials",
+        "default": 0
+      },
+      {
+        "type": "number",
+        "label": "Sodium (mmol/L)",
+        "placeholder": "Enter sodium",
+        "icon": "fas fa-syringe",
+        "default": 0
+      },
+      {
+        "type": "number",
+        "label": "Potassium (mmol/L)",
+        "placeholder": "Enter potassium",
+        "icon": "fas fa-atom",
+        "default": 0
+      },
+      {
+        "type": "number",
+        "label": "ALT (U/L)",
+        "placeholder": "Enter ALT",
+        "icon": "fas fa-microscope",
+        "default": 0
+      },
+      {
+        "type": "number",
+        "label": "AST (U/L)",
+        "placeholder": "Enter AST",
+        "icon": "fas fa-notes-medical",
+        "default": 0
+      },
+      {
+        "type": "number",
+        "label": "Total Cholesterol (mg/dL)",
+        "placeholder": "Enter total cholesterol",
+        "icon": "fas fa-vial",
+        "default": 0
+      }
+    ]
+  },
+  {
+    "title": "Laboratory Tests - Urinalysis",
+    "fields": [
+      {
+        "type": "textarea",
+        "label": "Urinalysis Results",
+        "placeholder": "Enter urinalysis results",
+        "rows": 4,
+        "icon": "fas fa-prescription-bottle",
+        "default": ""
+      }
+    ]
+  },
+  {
+    "title": "Imaging",
+    "fields": [
+      {
+        "type": "textarea",
+        "label": "X-Ray Results",
+        "placeholder": "Enter X-ray results or findings",
+        "rows": 4,
+        "icon": "fas fa-x-ray",
+        "default": ""
+      },
+      {
+        "type": "textarea",
+        "label": "CT Scan Results",
+        "placeholder": "Enter CT scan results or findings",
+        "rows": 4,
+        "icon": "fas fa-radiation",
+        "default": ""
+      },
+      {
+        "type": "textarea",
+        "label": "MRI Results",
+        "placeholder": "Enter MRI results or findings",
+        "rows": 4,
+        "icon": "fas fa-magnet",
+        "default": ""
+      },
+      {
+        "type": "textarea",
+        "label": "Ultrasound Results",
+        "placeholder": "Enter ultrasound results or findings",
+        "rows": 4,
+        "icon": "fas fa-wave-square",
+        "default": ""
+      },
+      {
+        "type": "textarea",
+        "label": "Other Imaging Results",
+        "placeholder": "Enter other imaging results",
+        "rows": 4,
+        "icon": "fas fa-radiation-alt",
+        "default": ""
+      }
+    ]
+  },
+  {
+    "title": "Diagnosis",
+    "fields": [
+      {
+        "type": "text",
+        "label": "Primary Diagnosis",
+        "placeholder": "Enter primary diagnosis",
+        "icon": "fas fa-diagnoses",
+        "default": ""
+      },
+      {
+        "type": "textarea",
+        "label": "Secondary Diagnoses",
+        "placeholder": "Enter other diagnoses",
+        "rows": 4,
+        "icon": "fas fa-notes-medical",
+        "default": ""
+      }
+    ]
+  },
+  {
+    "title": "Treatment Plan",
+    "fields": [
+      {
+        "type": "textarea",
+        "label": "Treatment Plan",
+        "placeholder": "Enter treatment or management plan",
+        "rows": 4,
+        "icon": "fas fa-briefcase-medical",
+        "default": ""
+      }
+    ]
+  },
+  {
+    "title": "Adverse Events",
+    "fields": [
+      {
+        "type": "textarea",
+        "label": "Adverse Events",
+        "placeholder": "Enter any adverse events",
+        "rows": 4,
+        "icon": "fas fa-exclamation-triangle",
+        "default": ""
+      },
+      {
+        "type": "textarea",
+        "label": "Serious Adverse Events",
+        "placeholder": "Enter any serious adverse events",
+        "rows": 4,
+        "icon": "fas fa-ambulance",
+        "default": ""
+      }
+    ]
+  },
+  {
+    "title": "Outcome and Follow-up",
+    "fields": [
+      {
+        "type": "select",
+        "label": "Outcome Status",
+        "options": ["Recovered", "Improved", "Stable", "Worsened", "Deceased", "Ongoing", "Not Applicable"],
+        "icon": "fas fa-clipboard-check",
+        "default": "Not Applicable"
+      },
+      {
+        "type": "textarea",
+        "label": "Follow-up Plan",
+        "placeholder": "Enter follow-up plan (if any)",
+        "rows": 4,
+        "icon": "fas fa-calendar-check",
+        "default": ""
+      },
+      {
+        "type": "date",
+        "label": "Follow-up Date",
+        "placeholder": "Select follow-up date",
+        "icon": "fas fa-calendar-plus",
+        "default": ""
+      }
+    ]
+  },
+  {
+    "title": "Additional Information",
+    "fields": [
+      {
+        "type": "textarea",
+        "label": "Additional Notes / Comments",
+        "placeholder": "Enter any additional notes or comments",
+        "rows": 4,
+        "icon": "fas fa-comment-dots",
         "default": ""
       }
     ]

@@ -118,5 +118,6 @@ class StudyEntryData(Base):
     group_index = Column(Integer, nullable=False)
     data = Column(JSON, nullable=False)  # Actual field data per form instance
     created_at = Column(DateTime, server_default=func.now())
+    skipped_required_flags = Column(JSON, nullable=True)
 
     study = relationship("StudyMetadata", back_populates="entry_data")

@@ -173,6 +173,7 @@ class StudyDataEntryCreate(BaseModel):
     visit_index: int
     group_index: int
     data: list
+    skipped_required_flags: Optional[List[List[bool]]] = None
 
 class StudyDataEntryOut(StudyDataEntryCreate):
     id: int
@@ -189,7 +190,18 @@ class StudyDataEntryOut(BaseModel):
     visit_index: int
     group_index: int
     data: List[Any]
+    skipped_required_flags: Optional[List[List[bool]]] = None
     created_at: datetime
 
     class Config:
-        orm_mode = True
+        from_attributes = True
+
+class StudyDataEntryUpdate(BaseModel):
+    data: Optional[List[Any]] = None
+    skipped_required_flags: Optional[List[List[bool]]] = None
+
+class PaginatedStudyDataEntries(BaseModel):
+    total: int
+    entries: List[StudyDataEntryOut]
+    class Config:
+        from_attributes = True

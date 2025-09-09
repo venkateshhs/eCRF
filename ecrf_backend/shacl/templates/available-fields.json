@@ -51,16 +51,42 @@
     "default": ""
   },
   {
+    "type": "time",
+    "label": "Time Field",
+    "placeholder": "Select a time",
+    "icon": "fas fa-clock",
+    "default": ""
+  },
+  {
     "type": "file",
     "label": "File Upload",
-    "icon": "fas fa-file-upload",
+    "icon": "fas fa-paperclip",
     "default": null
   },
   {
-    "type": "button",
-    "label": "Button",
-    "icon": "fas fa-mouse-pointer",
-    "default": "Click Me"
+  "type": "slider",
+  "label": "Slider",
+  "icon": "fas fa-sliders-h",
+  "placeholder": "Drag to select a value",
+  "constraints": {
+    "mode": "slider",
+    "required": false,
+    "readonly": false,
+    "helpText": "",
+    "percent": true,
+    "min": 1,
+    "max": 100,
+    "step": 1,
+    "showTicks": true,
+    "marks": [
+      { "value": 10, "label": "Low" },
+      { "value": 50, "label": "Medium" },
+      { "value": 90, "label": "High" }
+    ]
   }
+}
+
+
+
 
 ]
