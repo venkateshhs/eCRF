@@ -26,6 +26,7 @@
             <i :class="showDetails ? icons.toggleUp : icons.toggleDown"></i>
             {{ showDetails ? 'Hide Details' : 'Show Details' }}
           </button>
+
           <button
             v-if="!showSelection"
             class="share-icon"
@@ -33,6 +34,13 @@
             @click="openShareDialog(currentSubjectIndex, currentVisitIndex, currentGroupIndex)"
           >
             <i :class="icons.share"></i>
+          </button>
+          <button
+            class="legend-icon-btn"
+            :title="'Selection status legend'"
+            @click="openStatusLegend"
+          >
+            <i :class="icons.info"></i>
           </button>
         </div>
 
@@ -391,6 +399,20 @@
         </ul>
       </div>
     </div>
+    <div v-if="showStatusLegend" class="mini-overlay" @click.self="closeStatusLegend">
+      <div class="mini-dialog" role="dialog" aria-modal="true">
+        <div class="mini-head">
+          <h4 class="mini-title">Selection Status</h4>
+          <button class="mini-close" @click="closeStatusLegend" aria-label="Close">✕</button>
+        </div>
+        <ul class="mini-list legend-explain">
+          <li><span class="legend-swatch swatch-none"></span> None — no data saved yet.</li>
+          <li><span class="legend-swatch swatch-partial"></span> Partial — some fields filled.</li>
+          <li><span class="legend-swatch swatch-complete"></span> Complete — all assigned fields filled.</li>
+          <li><span class="legend-swatch swatch-skipped"></span> Skipped — one or more required fields were skipped.</li>
+        </ul>
+      </div>
+    </div>
 
     <CustomDialog :message="dialogMessage" :isVisible="showDialog" @close="closeDialog" />
 
@@ -493,6 +515,7 @@ export default {
       showLegendDialog: false,
 
       pendingFiles: {},
+      showStatusLegend: false,
     };
   },
 
@@ -540,7 +563,6 @@ export default {
     // --- tiny helpers for Vue 3 reactivity on deep arrays ---
     setDeepValue(s, v, g, m, f, val) {
       this.entryData[s][v][g][m][f] = val;
-      // Optional nudge: replace inner row to ensure watchers pick it up if needed
       this.entryData[s][v][g][m] = [...this.entryData[s][v][g][m]];
     },
     setDeepSkip(s, v, g, m, f, on) {
@@ -567,8 +589,7 @@ export default {
       return { s, v, g, m, f };
     },
 
-       onRawFileSelected(mIdx, fIdx, fileOrFiles) {
-      // derive the stable per-field key (subject/visit/group/section/field)
+    onRawFileSelected(mIdx, fIdx, fileOrFiles) {
       const key = this.errorKey(mIdx, fIdx);
       const arr = Array.isArray(fileOrFiles)
         ? fileOrFiles
@@ -577,7 +598,6 @@ export default {
       const cur = Array.isArray(this.pendingFiles[key])
         ? this.pendingFiles[key]
         : (this.pendingFiles[key] ? [this.pendingFiles[key]] : []);
-      // reassign to preserve Vue 3 reactivity when adding props
       this.pendingFiles = { ...this.pendingFiles, [key]: [...cur, ...arr] };
     },
 
@@ -599,6 +619,9 @@ export default {
 
     openLegendDialog() { this.showLegendDialog = true; },
     closeLegendDialog() { this.showLegendDialog = false; },
+
+    openStatusLegend() { this.showStatusLegend = true; },
+    closeStatusLegend() { this.showStatusLegend = false; },
 
     hasConstraints(field) {
       const c = field?.constraints || {};
@@ -659,24 +682,24 @@ export default {
         parts.push("Multiple selection: allowed");
       }
       if (field.type === "file") {
-      const storage = (c.storagePreference === "url") ? "Link via URL" : "Local upload";
-      parts.push(`Storage: ${storage}`);
+        const storage = (c.storagePreference === "url") ? "Link via URL" : "Local upload";
+        parts.push(`Storage: ${storage}`);
 
       // Only show "Allowed" when formats are restricted
-      const allowedList = Array.isArray(c.allowedFormats)
-        ? c.allowedFormats.filter(Boolean).map(String)
-        : [];
+        const allowedList = Array.isArray(c.allowedFormats)
+          ? c.allowedFormats.filter(Boolean).map(String)
+          : [];
       if (allowedList.length) {
         parts.push(`Allowed: ${allowedList.join(", ")}`);
       }
 
       // Only show Max size when it's a valid positive number
-      const sizeNum = Number(c.maxSizeMB);
+        const sizeNum = Number(c.maxSizeMB);
       if (Number.isFinite(sizeNum) && sizeNum > 0) {
         parts.push(`Max size: ${sizeNum} MB`);
       }
 
-      if (c.allowMultipleFiles) parts.push("Multiple files: allowed");
+        if (c.allowMultipleFiles) parts.push("Multiple files: allowed");
       if (Array.isArray(c.modalities) && c.modalities.length) {
         parts.push(`Modalities: ${c.modalities.join(", ")}`);
       }
@@ -1116,23 +1139,21 @@ export default {
 
           const key = this.errorKey(mIdx, fIdx);
           const cons = def.constraints || {};
-         const allowMulti = !!cons.allowMultipleFiles;
-         const val = this.entryData[s][v][g][mIdx][fIdx];
-         if (!val && !allowMulti) continue;
+          const allowMulti = !!cons.allowMultipleFiles;
+          const val = this.entryData[s][v][g][mIdx][fIdx];
+          if (!val && !allowMulti) continue;
 
           const modalities = Array.isArray(def?.constraints?.modalities) ? def.constraints.modalities : [];
           const modalitiesJson = JSON.stringify(modalities || []);
 
           const pendingArr = Array.isArray(this.pendingFiles[key]) ? this.pendingFiles[key] : (this.pendingFiles[key] ? [this.pendingFiles[key]] : []);
 
-          // Helper to find matching raw File for a meta
           const matchFile = (meta) => pendingArr.find(f =>
             f && meta && f.name === meta.name && Number(f.size) === Number(meta.size) && (!!f.lastModified ? f.lastModified === meta.lastModified : true)
           );
 
           if (allowMulti) {
             const items = Array.isArray(val) ? [...val] : [];
-            // Upload local metas
             for (let i = 0; i < items.length; i++) {
               const it = items[i];
               if (!it || it.dbId) continue;
@@ -1193,7 +1214,6 @@ export default {
             this.setDeepValue(s, v, g, mIdx, fIdx, items);
             delete this.pendingFiles[key];
           } else {
-            // Single-file behavior (unchanged)
             if (!val) continue;
             if (val.source === "local" && (pendingArr[0] instanceof File)) {
               const file = pendingArr[0];
@@ -1471,6 +1491,20 @@ hr { margin: 12px 0; border: 0; border-top: 1px solid #e5e7eb; }
 .details-block ul { margin: 0 0 12px 16px; padding: 0; }
 .details-block li { font-size: 14px; color: #374151; }
 
+.legend-icon-btn {
+  background: transparent;
+  border: none;
+  padding: 4px 6px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  line-height: 1;
+  color: #6b7280;
+  margin-left: auto;
+}
+.legend-icon-btn:hover { color: #374151; }
+.legend-icon-btn i { font-size: 14px; }
+
 /* breadcrumb */
 .bread-crumb { background: #f9fafb; padding: 12px 16px; border: 1px solid #e5e7eb; border-radius: 6px; margin-bottom: 24px; font-size: 14px; color: #374151; display: flex; align-items: center; justify-content: space-between; }
 .crumb-left { display: flex; gap: 10px; flex-wrap: wrap; }
@@ -1534,6 +1568,22 @@ input:focus, textarea:focus, select:focus { outline: none; border-color: #6b7280
 .mini-close:hover { color: #111827; }
 .mini-list { margin: 0; padding-left: 18px; color: #374151; font-size: 14px; }
 .mini-list li { margin: 4px 0; }
+
+.legend-swatch {
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  border: 1px solid rgba(0,0,0,0.12);
+  display: inline-block;
+  margin-right: 8px;
+  vertical-align: -1px;
+}
+.swatch-none     { background: #e5e7eb; } /* matches .select-btn.status-none */
+.swatch-partial  { background: #fbbf24; } /* matches .select-btn.status-partial */
+.swatch-complete { background: #16a34a; } /* matches .select-btn.status-complete */
+.swatch-skipped  { background: #ef4444; } /* matches .select-btn.status-skipped */
+
+.legend-explain li { display: flex; align-items: center; gap: 6px; }
 
 /* skip dialog */
 .dialog-wide { width: 680px; max-width: 95%; }
