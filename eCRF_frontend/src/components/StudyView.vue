@@ -122,6 +122,29 @@
                 </div>
               </div>
             </div>
+
+            <!-- NEW: Per-Subject Group mapping (PI/Admin only) -->
+            <div v-if="isPIOrAdmin" class="per-subject-block">
+              <h4 class="per-subject-title">Per-Subject Group Assignment</h4>
+              <div v-if="subjectAssignments.length" class="ps-table-wrap">
+                <table class="ps-table" aria-label="Per-subject group assignment">
+                  <thead>
+                    <tr>
+                      <th scope="col">Subject ID</th>
+                      <th scope="col">Assigned Group</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="row in subjectAssignments" :key="row.subjectId">
+                      <td class="monospace">{{ row.subjectId }}</td>
+                      <td>{{ row.groupName || '—' }}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+              <div v-else class="empty-state">No subjects enrolled yet.</div>
+            </div>
+            <!-- /NEW -->
           </div>
 
           <!-- Edit Study -->
@@ -299,6 +322,30 @@ export default {
 
     token() {
       return this.$store.state.token;
+    },
+
+    /** Role helpers */
+    myRoleRaw() {
+      return (
+        (this.me && (this.me.profile?.role || this.me.role)) ||
+        ""
+      );
+    },
+    myRole() {
+      return String(this.myRoleRaw).trim();
+    },
+    isPIOrAdmin() {
+      const r = this.myRole.toLowerCase();
+      return r === "administrator" || r === "principal investigator" || r === "pi";
+    },
+
+    /** Per-subject group assignment rows (subject id -> group name) */
+    subjectAssignments() {
+      const subs = this.subjects || [];
+      return subs.map((s) => ({
+        subjectId: s?.id || "",
+        groupName: s?.group || "",
+      }));
     },
   },
   watch: {
@@ -719,6 +766,15 @@ export default {
   gap: 8px;
   align-items: start;
 }
+
+/* per-subject table */
+.per-subject-block { margin-top: 14px; }
+.per-subject-title { margin: 8px 0; font-size: 13px; font-weight: 700; color: #111827; }
+.ps-table-wrap { overflow: auto; border: 1px solid #f1f1f1; border-radius: 10px; }
+.ps-table { width: 100%; border-collapse: collapse; font-size: 13px; background: #fff; }
+.ps-table th, .ps-table td { border-bottom: 1px solid #f5f5f5; padding: 8px 10px; text-align: left; }
+.ps-table th { background: #fafafe; color: #374151; font-weight: 600; }
+.ps-table tr:last-child td { border-bottom: none; }
 
 /* Docs */
 .doc-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; }
