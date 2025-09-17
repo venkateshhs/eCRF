@@ -1,7 +1,7 @@
 <template>
   <div class="study-data-container" v-if="study">
-    <!-- Back Buttons -->
-    <div class="back-buttons-container">
+    <!-- Back Buttons (hidden for shared links) -->
+    <div class="back-buttons-container" v-if="!isShared">
       <button v-if="showSelection" @click="goToDashboard" class="btn-back">
         <i :class="icons.back"></i> Back to Dashboard
       </button>
@@ -18,6 +18,9 @@
         <p class="study-meta">
           Subjects: {{ numberOfSubjects }} | Visits: {{ visitList.length }} | Groups: {{ groupList.length }}
         </p>
+        <p v-if="isShared" class="shared-banner">
+          Shared link (permission: <strong>{{ sharedPermission }}</strong>)
+        </p>
       </div>
 
       <div class="details-panel">
@@ -27,8 +30,9 @@
             {{ showDetails ? 'Hide Details' : 'Show Details' }}
           </button>
 
+          <!-- Share icon hidden for shared mode -->
           <button
-            v-if="!showSelection"
+            v-if="!showSelection && !isShared"
             class="share-icon"
             title="Share this form link"
             @click="openShareDialog(currentSubjectIndex, currentVisitIndex, currentGroupIndex)"
@@ -66,8 +70,8 @@
       <hr />
     </div>
 
-    <!-- Selection -->
-    <div v-if="showSelection">
+    <!-- Selection (hidden in shared mode; shared preselects) -->
+    <div v-if="showSelection && !isShared">
       <h2>Select Subject × Visit</h2>
       <table class="selection-matrix">
         <thead>
@@ -148,7 +152,7 @@
                 v-model="entryData[currentSubjectIndex][currentVisitIndex][currentGroupIndex][mIdx][fIdx]"
                 :placeholder="field.placeholder"
                 :required="!!field.constraints?.required"
-                :readonly="!!field.constraints?.readonly"
+                :readonly="!!field.constraints?.readonly || !canEdit"
                 :minlength="field.constraints?.minLength"
                 :maxlength="field.constraints?.maxLength"
                 :pattern="field.constraints?.pattern"
@@ -163,7 +167,7 @@
                 v-model="entryData[currentSubjectIndex][currentVisitIndex][currentGroupIndex][mIdx][fIdx]"
                 :placeholder="field.placeholder"
                 :required="!!field.constraints?.required"
-                :readonly="!!field.constraints?.readonly"
+                :readonly="!!field.constraints?.readonly || !canEdit"
                 :minlength="field.constraints?.minLength"
                 :maxlength="field.constraints?.maxLength"
                 :pattern="field.constraints?.pattern"
@@ -180,7 +184,7 @@
                 v-model.number="entryData[currentSubjectIndex][currentVisitIndex][currentGroupIndex][mIdx][fIdx]"
                 :placeholder="field.placeholder"
                 :required="!!field.constraints?.required"
-                :readonly="!!field.constraints?.readonly"
+                :readonly="!!field.constraints?.readonly || !canEdit"
                 :min="field.constraints?.min"
                 :max="field.constraints?.max"
                 :step="field.constraints?.step"
@@ -194,6 +198,7 @@
                 :id="fieldId(mIdx, fIdx)"
                 v-model="entryData[currentSubjectIndex][currentVisitIndex][currentGroupIndex][mIdx][fIdx]"
                 v-bind="selectedModels[mIdx].fields[fIdx].constraints"
+                :disabled="!canEdit"
                 @change="validateField(mIdx, fIdx)"
               />
 
@@ -206,6 +211,7 @@
                 v-model="entryData[currentSubjectIndex][currentVisitIndex][currentGroupIndex][mIdx][fIdx]"
                 :default-value="field.constraints?.defaultValue"
                 v-bind="selectedModels[mIdx].fields[fIdx].constraints"
+                :disabled="!canEdit"
                 @change="validateField(mIdx, fIdx)"
                 @update:modelValue="() => { clearError(mIdx, fIdx); validateField(mIdx, fIdx); }"
               />
@@ -219,7 +225,7 @@
                 :placeholder="field.placeholder || (field.constraints?.dateFormat || 'dd.MM.yyyy')"
                 :min-date="field.constraints?.minDate || null"
                 :max-date="field.constraints?.maxDate || null"
-                :readonly="!!field.constraints?.readonly"
+                :readonly="!!field.constraints?.readonly || !canEdit"
                 @change="validateField(mIdx, fIdx)"
                 @blur="validateField(mIdx, fIdx)"
               />
@@ -231,6 +237,7 @@
                 v-model="entryData[currentSubjectIndex][currentVisitIndex][currentGroupIndex][mIdx][fIdx]"
                 :placeholder="field.placeholder || (field.constraints?.timeFormat || 'HH:mm')"
                 v-bind="selectedModels[mIdx].fields[fIdx].constraints"
+                :readonly="!!field.constraints?.readonly || !canEdit"
                 @change="validateField(mIdx, fIdx)"
                 @blur="validateField(mIdx, fIdx)"
               />
@@ -242,7 +249,7 @@
                 v-model="entryData[currentSubjectIndex][currentVisitIndex][currentGroupIndex][mIdx][fIdx]"
                 :options="field.options || []"
                 :multiple="!!field.constraints?.allowMultiple"
-                :readonly="!!field.constraints?.readonly"
+                :readonly="!!field.constraints?.readonly || !canEdit"
                 :default-value="field.constraints?.defaultValue"
                 :placeholder="'Select…'"
                 @update:modelValue="() => validateField(mIdx, fIdx)"
@@ -254,6 +261,7 @@
                 :id="fieldId(mIdx, fIdx)"
                 v-model="entryData[currentSubjectIndex][currentVisitIndex][currentGroupIndex][mIdx][fIdx]"
                 v-bind="getSliderProps(field)"
+                :disabled="!canEdit"
                 @update:modelValue="() => { clearError(mIdx, fIdx); validateField(mIdx, fIdx); }"
                 @change="validateField(mIdx, fIdx)"
               />
@@ -264,6 +272,7 @@
                 :id="fieldId(mIdx, fIdx)"
                 v-model="entryData[currentSubjectIndex][currentVisitIndex][currentGroupIndex][mIdx][fIdx]"
                 v-bind="getLinearProps(field)"
+                :disabled="!canEdit"
                 @update:modelValue="() => { clearError(mIdx, fIdx); validateField(mIdx, fIdx); }"
                 @change="validateField(mIdx, fIdx)"
               />
@@ -274,7 +283,7 @@
                 :id="fieldId(mIdx, fIdx)"
                 :value="entryData[currentSubjectIndex][currentVisitIndex][currentGroupIndex][mIdx][fIdx]"
                 :constraints="field.constraints || {}"
-                :readonly="!!field.constraints?.readonly"
+                :readonly="!!field.constraints?.readonly || !canEdit"
                 :required="!!field.constraints?.required"
                 stage="runtime"
                 @input="(meta) => setEntryValue(mIdx, fIdx, meta)"
@@ -289,7 +298,7 @@
                 v-model="entryData[currentSubjectIndex][currentVisitIndex][currentGroupIndex][mIdx][fIdx]"
                 :placeholder="field.placeholder"
                 :required="!!field.constraints?.required"
-                :readonly="!!field.constraints?.readonly"
+                :readonly="!!field.constraints?.readonly || !canEdit"
                 @blur="onFieldBlur(mIdx, fIdx)"
                 @input="clearError(mIdx, fIdx)"
               />
@@ -315,12 +324,12 @@
             <button
               @click="submitData"
               class="btn-save"
-              :disabled="blockingErrorsPresent"
-              :title="blockingErrorsPresent ? 'Fix validation errors before saving' : 'Save Data'"
+              :disabled="blockingErrorsPresent || !canEdit"
+              :title="!canEdit ? 'This shared link is view-only' : (blockingErrorsPresent ? 'Fix validation errors before saving' : 'Save Data')"
             >
               Save Data
             </button>
-            <button type="button" class="btn-clear" @click="clearCurrentSection" title="Clear all inputs">
+            <button type="button" class="btn-clear" @click="clearCurrentSection" title="Clear all inputs" :disabled="!canEdit">
               Clear
             </button>
           </div>
@@ -332,8 +341,8 @@
       </div>
     </div>
 
-    <!-- dialogs (unchanged) -->
-    <div v-if="showShareDialog" class="dialog-overlay">
+    <!-- dialogs (unchanged except share hidden on shared) -->
+    <div v-if="showShareDialog && !isShared" class="dialog-overlay">
       <div class="dialog">
         <h3>Generate Share Link</h3>
         <p>
@@ -437,7 +446,7 @@
         </div>
 
         <div class="dialog-actions">
-          <button @click="confirmSkipSelection" class="btn-primary">Skip selected & Save</button>
+          <button @click="confirmSkipSelection" class="btn-primary" :disabled="!canEdit">Skip selected & Save</button>
           <button @click="cancelSkipSelection" class="btn-option">Cancel</button>
         </div>
       </div>
@@ -516,18 +525,25 @@ export default {
 
       pendingFiles: {},
       showStatusLegend: false,
+
+      // shared link
+      shareToken: null,
+      sharedPermission: "view",
     };
   },
 
   computed: {
     token() { return this.$store.state.token; },
+    isShared() { return !!this.$route.params.token; },
+    canEdit() { return !this.isShared || this.sharedPermission === "add"; },
+
     visitList() { return this.study?.content?.study_data?.visits || []; },
     groupList() { return this.study?.content?.study_data?.groups || []; },
     selectedModels() { return this.study?.content?.study_data?.selectedModels || []; },
     assignments() { return this.study?.content?.study_data?.assignments || []; },
     numberOfSubjects() {
       const sd = this.study?.content?.study_data;
-      return sd?.subjectCount != null ? sd.subjectCount : sd.subjects?.length || 0;
+      return sd?.subjectCount != null ? sd.subjectCount : sd?.subjects?.length || 0;
     },
     visitCombos() {
       return this.visitList.map((visit, vIdx) => ({ visitIndex: vIdx, label: `Visit: ${visit.name}` }));
@@ -554,9 +570,14 @@ export default {
 
   async created() {
     this.ajv = createAjv();
-    const studyId = this.$route.params.id;
-    await this.loadStudy(studyId);
-    await this.loadExistingEntries(studyId);
+    if (this.isShared) {
+      const token = this.$route.params.token;
+      await this.loadShared(token);
+    } else {
+      const studyId = this.$route.params.id;
+      await this.loadStudy(studyId);
+      await this.loadExistingEntries(studyId);
+    }
   },
 
   methods: {
@@ -573,7 +594,6 @@ export default {
     // ---------- deep set for file (reactive!) ----------
     setEntryValue(mIdx, fIdx, val) {
       const s = this.currentSubjectIndex, v = this.currentVisitIndex, g = this.currentGroupIndex;
-      console.log("[Entry] setEntryValue", { s, v, g, mIdx, fIdx, val });
       this.setDeepValue(s, v, g, mIdx, fIdx, val);
       this.clearError(mIdx, fIdx);
       this.validateField(mIdx, fIdx);
@@ -591,10 +611,7 @@ export default {
 
     onRawFileSelected(mIdx, fIdx, fileOrFiles) {
       const key = this.errorKey(mIdx, fIdx);
-      const arr = Array.isArray(fileOrFiles)
-        ? fileOrFiles
-        : (fileOrFiles ? [fileOrFiles] : []);
-      console.log("[Entry] onRawFileSelected", { key, count: arr.length });
+      const arr = Array.isArray(fileOrFiles) ? fileOrFiles : (fileOrFiles ? [fileOrFiles] : []);
       const cur = Array.isArray(this.pendingFiles[key])
         ? this.pendingFiles[key]
         : (this.pendingFiles[key] ? [this.pendingFiles[key]] : []);
@@ -607,14 +624,14 @@ export default {
       const max = c.percent ? 100 : (Number.isFinite(+c.max) ? +c.max : (c.percent ? 100 : 5));
       const step = Number.isFinite(+c.step) && +c.step > 0 ? +c.step : 1;
       const marks = Array.isArray(c.marks) ? c.marks : [];
-      return { min, max, step, readonly: !!c.readonly, percent: !!c.percent, showTicks: !!c.showTicks, marks };
+      return { min, max, step, readonly: !!c.readonly || !this.canEdit, percent: !!c.percent, showTicks: !!c.showTicks, marks };
     },
     getLinearProps(field) {
       const c = field?.constraints || {};
       const min = Number.isFinite(+c.min) ? Math.round(+c.min) : 1;
       let max = Number.isFinite(+c.max) ? Math.round(+c.max) : 5;
       if (max <= min) max = min + 1;
-      return { min, max, leftLabel: c.leftLabel || "", rightLabel: c.rightLabel || "", readonly: !!c.readonly };
+      return { min, max, leftLabel: c.leftLabel || "", rightLabel: c.rightLabel || "", readonly: !!c.readonly || !this.canEdit };
     },
 
     openLegendDialog() { this.showLegendDialog = true; },
@@ -631,7 +648,7 @@ export default {
     buildConstraintList(field) {
       const c = field?.constraints || {};
       const parts = [];
-      if (c.readonly) parts.push("Read-only");
+      if (c.readonly || !this.canEdit) parts.push("Read-only");
       if (field.type === "slider") {
         const mode = (c.mode || "slider").toLowerCase();
         if (mode === "slider") {
@@ -767,36 +784,56 @@ export default {
         this.validationErrors = next;
       }
     },
-    fieldErrors(mIdx, fIdx) {
-      return this.validationErrors[this.errorKey(mIdx, fIdx)] || "";
-    },
+    fieldErrors(mIdx, fIdx) { return this.validationErrors[this.errorKey(mIdx, fIdx)] || ""; },
 
     goToDashboard() {
       this.$router.push({ name: "Dashboard", query: { openStudies: "true" } });
     },
+
     async loadStudy(studyId) {
       try {
         const resp = await axios.get(
-          `http://127.0.0.1:8000/forms/studies/${studyId}`,
+          `/forms/studies/${studyId}`,
           { headers: { Authorization: `Bearer ${this.token}` } }
         );
         this.study = resp.data;
         this.initializeEntryData();
-        console.log("[Entry] Study loaded", { id: studyId, models: (this.selectedModels || []).length });
       } catch (err) {
         console.error("[Entry] loadStudy error", err);
         this.showDialogMessage("Failed to load study details.");
       }
     },
+
+    async loadShared(token) {
+      try {
+        // trailing slash avoids any redirect quirks
+        const resp = await axios.get(`/forms/shared-api/${token}/`);
+        const payload = resp.data || {};
+        this.shareToken = token;
+        this.sharedPermission = payload.permission || "view";
+        this.study = payload.study;
+        this.initializeEntryData();
+        // lock selection
+        this.currentSubjectIndex = payload.subject_index ?? 0;
+        this.currentVisitIndex   = payload.visit_index ?? 0;
+        this.currentGroupIndex   = payload.group_index ?? 0;
+        this.showSelection = false;
+        this.validationErrors = {};
+        // no existing entries fetch in shared mode (requires auth)
+      } catch (e) {
+        console.error("[Shared] load error", e);
+        this.showDialogMessage("Shared link is invalid or expired.");
+      }
+    },
+
     async loadExistingEntries(studyId) {
       try {
         const resp = await axios.get(
-          `http://127.0.0.1:8000/forms/studies/${studyId}/data_entries`,
+          `/forms/studies/${studyId}/data_entries`,
           { headers: { Authorization: `Bearer ${this.token}` } }
         );
         this.existingEntries = Array.isArray(resp.data) ? resp.data : (resp.data?.entries || []);
         this.populateFromExisting();
-        console.log("[Entry] Existing entries", { count: (this.existingEntries || []).length });
       } catch (err) {
         console.error("Failed to load existing entries", err);
       }
@@ -822,7 +859,9 @@ export default {
         default: return "";
       }
     },
+
     clearCurrentSection() {
+      if (!this.canEdit) return;
       const s = this.currentSubjectIndex, v = this.currentVisitIndex, g = this.currentGroupIndex;
       this.assignedModelIndices.forEach((mIdx) => {
         const section = this.selectedModels[mIdx];
@@ -839,6 +878,7 @@ export default {
         });
       });
     },
+
     initializeEntryData() {
       const nS = this.numberOfSubjects;
       const nV = this.visitList.length;
@@ -865,8 +905,8 @@ export default {
       );
 
       this.validationErrors = {};
-      console.log("[Entry] initializeEntryData matrix ready");
     },
+
     populateFromExisting() {
       this.initializeEntryData();
       (Array.isArray(this.existingEntries) ? this.existingEntries : []).forEach((e) => {
@@ -881,7 +921,6 @@ export default {
           }
         }
       });
-      console.log("[Entry] Populated matrix from existing");
     },
 
     selectCell(sIdx, vIdx) {
@@ -895,9 +934,9 @@ export default {
       this.currentGroupIndex = idx >= 0 ? idx : 0;
       this.showSelection = false;
       this.validationErrors = {};
-      console.log("[Entry] Selected cell", { sIdx, vIdx, gIdx: this.currentGroupIndex });
     },
     backToSelection() {
+      if (this.isShared) return; // no selection in shared mode
       this.showSelection = true;
       this.showDetails = false;
       this.currentSubjectIndex = null;
@@ -956,10 +995,6 @@ export default {
         return (val == null || (typeof val === "string" && val.trim() === ""));
       };
 
-      console.log("[Validate] field", {
-        label, key: this.errorKey(mIdx, fIdx), type: def.type, cons, value: val
-      });
-
       this.clearError(mIdx, fIdx);
 
       if (isSkipped) {
@@ -970,7 +1005,6 @@ export default {
 
       if (cons.required && isEmpty()) {
         this.setError(mIdx, fIdx, `${label} is required.`);
-        console.warn("[Validate] required failed", { label, mIdx, fIdx });
         return false;
       }
 
@@ -986,25 +1020,16 @@ export default {
           const min = cons.percent ? 1 : (Number.isFinite(+cons.min) ? +cons.min : 1);
           const max = cons.percent ? 100 : (Number.isFinite(+cons.max) ? +cons.max : (cons.percent ? 100 : 5));
           const step = Number.isFinite(+cons.step) && +cons.step > 0 ? +cons.step : 1;
-          if (n < min || n > max) {
-            this.setError(mIdx, fIdx, `${label} must be between ${min} and ${max}.`);
-            return false;
-          }
+          if (n < min || n > max) { this.setError(mIdx, fIdx, `${label} must be between ${min} and ${max}.`); return false; }
           if (step >= 1) {
             const k = (n - min) / step;
-            if (Math.abs(k - Math.round(k)) > 1e-9) {
-              this.setError(mIdx, fIdx, `${label} must align to step ${step}.`);
-              return false;
-            }
+            if (Math.abs(k - Math.round(k)) > 1e-9) { this.setError(mIdx, fIdx, `${label} must align to step ${step}.`); return false; }
           }
           return true;
         } else {
           const min = Number.isFinite(+cons.min) ? Math.round(+cons.min) : 1;
           const max = Number.isFinite(+cons.max) ? Math.round(+cons.max) : 5;
-          if (n < min || n > max || Math.round(n) !== n) {
-            this.setError(mIdx, fIdx, `${label} must be an integer between ${min} and ${max}.`);
-            return false;
-          }
+          if (n < min || n > max || Math.round(n) !== n) { this.setError(mIdx, fIdx, `${label} must be an integer between ${min} and ${max}.`); return false; }
           return true;
         }
       }
@@ -1013,7 +1038,6 @@ export default {
         const { valid, message } = validateFieldValue(this.ajv, def, val);
         if (!valid) {
           this.setError(mIdx, fIdx, message || `${label} is invalid.`);
-          console.warn("[Validate] schema failed", { label, message });
           return false;
         }
       }
@@ -1128,6 +1152,7 @@ export default {
 
     // ---------- FILE UPLOADS ----------
     async uploadPendingFilesForCurrentSection() {
+      if (!this.canEdit) return;
       const s = this.currentSubjectIndex, v = this.currentVisitIndex, g = this.currentGroupIndex;
       const studyId = this.study?.metadata?.id;
 
@@ -1147,127 +1172,107 @@ export default {
           const modalitiesJson = JSON.stringify(modalities || []);
 
           const pendingArr = Array.isArray(this.pendingFiles[key]) ? this.pendingFiles[key] : (this.pendingFiles[key] ? [this.pendingFiles[key]] : []);
-
           const matchFile = (meta) => pendingArr.find(f =>
             f && meta && f.name === meta.name && Number(f.size) === Number(meta.size) && (!!f.lastModified ? f.lastModified === meta.lastModified : true)
           );
+
+          const base = this.isShared ? `/forms/shared/${this.shareToken}` : `/forms/studies/${studyId}`;
 
           if (allowMulti) {
             const items = Array.isArray(val) ? [...val] : [];
             for (let i = 0; i < items.length; i++) {
               const it = items[i];
               if (!it || it.dbId) continue;
+
               if (it.source === "local") {
                 const file = matchFile(it);
                 if (!file) continue;
-                console.log("[Upload] POST /files (multi)", { key, name: file.name, size: file.size, modalities });
                 const fd = new FormData();
                 fd.append("uploaded_file", file);
                 fd.append("description", def.label || "");
-                fd.append("storage_option", "local");
-                fd.append("subject_index", String(s));
-                fd.append("visit_index", String(v));
-                fd.append("group_index", String(g));
                 fd.append("modalities_json", modalitiesJson);
-                const resp = await axios.post(
-                  `http://127.0.0.1:8000/forms/studies/${studyId}/files`,
-                  fd,
-                  { headers: { Authorization: `Bearer ${this.token}`, "Content-Type": "multipart/form-data" } }
-                );
+                if (!this.isShared) {
+                  fd.append("storage_option", "local");
+                  fd.append("subject_index", String(s));
+                  fd.append("visit_index", String(v));
+                  fd.append("group_index", String(g));
+                }
+                const headers = this.isShared
+                  ? { "Content-Type": "multipart/form-data" }
+                  : { Authorization: `Bearer ${this.token}`, "Content-Type": "multipart/form-data" };
+                const resp = await axios.post(`${base}/files`, fd, { headers });
                 const saved = resp?.data || {};
                 items[i] = {
                   ...it,
                   dbId: saved.id,
                   file_path: saved.file_path,
-                  storage_option: saved.storage_option || "local",
+                  storage_option: saved.storage_option || (this.isShared ? "bids" : "local"),
                   file_name: saved.file_name || it.name,
                 };
               } else if (it.source === "url" && it.url) {
-                try {
-                  console.log("[Upload] POST /files/url (multi)", { key, url: it.url, modalities });
-                  const fd = new FormData();
-                  fd.append("url", it.url);
-                  fd.append("description", def.label || "");
-                  fd.append("storage_option", "url");
-                  fd.append("subject_index", String(s));
-                  fd.append("visit_index", String(v));
-                  fd.append("group_index", String(g));
-                  fd.append("modalities_json", modalitiesJson);
-                  const resp = await axios.post(
-                    `http://127.0.0.1:8000/forms/studies/${studyId}/files/url`,
-                    fd,
-                    { headers: { Authorization: `Bearer ${this.token}` } }
-                  );
-                  const saved = resp?.data || {};
-                  items[i] = {
-                    ...it,
-                    dbId: saved.id,
-                    file_path: saved.file_path,
-                    storage_option: "url",
-                    file_name: saved.file_name || "",
-                  };
-                } catch (e) {
-                  console.warn("URL record create failed; keeping raw URL.", e);
-                }
+                const fd = new FormData();
+                fd.append("url", it.url);
+                fd.append("description", def.label || "");
+                fd.append("modalities_json", modalitiesJson);
+                const headers = this.isShared ? {} : { Authorization: `Bearer ${this.token}` };
+                const resp = await axios.post(`${base}/files/url`, fd, { headers });
+                const saved = resp?.data || {};
+                items[i] = {
+                  ...it,
+                  dbId: saved.id,
+                  file_path: saved.file_path,
+                  storage_option: "url",
+                  file_name: saved.file_name || "",
+                };
               }
             }
             this.setDeepValue(s, v, g, mIdx, fIdx, items);
             delete this.pendingFiles[key];
           } else {
             if (!val) continue;
+
             if (val.source === "local" && (pendingArr[0] instanceof File)) {
               const file = pendingArr[0];
-              console.log("[Upload] POST /files", { key, name: file.name, size: file.size, modalities });
               const fd = new FormData();
               fd.append("uploaded_file", file);
               fd.append("description", def.label || "");
-              fd.append("storage_option", "local");
-              fd.append("subject_index", String(s));
-              fd.append("visit_index", String(v));
-              fd.append("group_index", String(g));
               fd.append("modalities_json", modalitiesJson);
-              const resp = await axios.post(
-                `http://127.0.0.1:8000/forms/studies/${studyId}/files`,
-                fd,
-                { headers: { Authorization: `Bearer ${this.token}`, "Content-Type": "multipart/form-data" } }
-              );
+              if (!this.isShared) {
+                fd.append("storage_option", "local");
+                fd.append("subject_index", String(s));
+                fd.append("visit_index", String(v));
+                fd.append("group_index", String(g));
+              }
+              const headers = this.isShared
+                ? { "Content-Type": "multipart/form-data" }
+                : { Authorization: `Bearer ${this.token}`, "Content-Type": "multipart/form-data" };
+              const resp = await axios.post(`${base}/files`, fd, { headers });
               const saved = resp?.data || {};
               this.setDeepValue(s, v, g, mIdx, fIdx, {
                 ...val,
                 dbId: saved.id,
                 file_path: saved.file_path,
-                storage_option: saved.storage_option || "local",
+                storage_option: saved.storage_option || (this.isShared ? "bids" : "local"),
                 file_name: saved.file_name || val.name,
               });
               delete this.pendingFiles[key];
             }
+
             if (val.source === "url" && val.url) {
-              try {
-                console.log("[Upload] POST /files/url", { key, url: val.url, modalities });
-                const fd = new FormData();
-                fd.append("url", val.url);
-                fd.append("description", def.label || "");
-                fd.append("storage_option", "url");
-                fd.append("subject_index", String(s));
-                fd.append("visit_index", String(v));
-                fd.append("group_index", String(g));
-                fd.append("modalities_json", modalitiesJson);
-                const resp = await axios.post(
-                  `http://127.0.0.1:8000/forms/studies/${studyId}/files/url`,
-                  fd,
-                  { headers: { Authorization: `Bearer ${this.token}` } }
-                );
-                const saved = resp?.data || {};
-                this.setDeepValue(s, v, g, mIdx, fIdx, {
-                  ...val,
-                  dbId: saved.id,
-                  file_path: saved.file_path,
-                  storage_option: "url",
-                  file_name: saved.file_name || ""
-                });
-              } catch (e) {
-                console.warn("URL record create failed; continuing with raw URL only.", e);
-              }
+              const fd = new FormData();
+              fd.append("url", val.url);
+              fd.append("description", def.label || "");
+              fd.append("modalities_json", modalitiesJson);
+              const headers = this.isShared ? {} : { Authorization: `Bearer ${this.token}` };
+              const resp = await axios.post(`${base}/files/url`, fd, { headers });
+              const saved = resp?.data || {};
+              this.setDeepValue(s, v, g, mIdx, fIdx, {
+                ...val,
+                dbId: saved.id,
+                file_path: saved.file_path,
+                storage_option: "url",
+                file_name: saved.file_name || ""
+              });
             }
           }
         }
@@ -1275,6 +1280,11 @@ export default {
     },
 
     async submitData() {
+      if (!this.canEdit) {
+        this.showDialogMessage("This shared link is view-only.");
+        return;
+      }
+
       this.applyTransformsForSection();
 
       const ok = this.validateCurrentSection();
@@ -1290,7 +1300,6 @@ export default {
         });
 
       if (!ok && blocking.length) {
-        console.warn("[Entry] blocking validation errors", this.validationErrors);
         this.showDialogMessage("Please fix validation errors before saving.");
         return;
       }
@@ -1320,22 +1329,39 @@ export default {
         data: this.entryData[s][v][g],
         skipped_required_flags: this.skipFlags[s][v][g],
       };
-      const existingId = this.entryIds[s][v][g];
 
       try {
+        if (this.isShared) {
+          const s = this.currentSubjectIndex, v = this.currentVisitIndex, g = this.currentGroupIndex;
+            await axios.post(
+              `/forms/shared/${this.shareToken}/data`,
+              {
+                study_id: this.study.metadata.id,
+                subject_index: s,
+                visit_index: v,
+                group_index: g,
+                data: this.entryData[s][v][g],
+                skipped_required_flags: this.skipFlags[s][v][g],
+              }
+            );
+          this.showDialogMessage("Data saved successfully.");
+          return;
+        }
+
+        // Logged-in path (no regression): PUT when we have an entry id, else POST
+        const existingId = this.entryIds[s][v][g];
         if (existingId) {
           const resp = await axios.put(
-            `http://127.0.0.1:8000/forms/studies/${this.study.metadata.id}/data_entries/${existingId}`,
+            `/forms/studies/${this.study.metadata.id}/data_entries/${existingId}`,
             payload,
             { headers: { Authorization: `Bearer ${this.token}` } }
           );
-          console.log("[Entry] updated", { id: existingId });
           this.showDialogMessage("Data updated successfully.");
           const idx = this.existingEntries.findIndex(x => x.id === existingId);
           if (idx >= 0) this.existingEntries.splice(idx, 1, resp.data);
         } else {
           const resp = await axios.post(
-            `http://127.0.0.1:8000/forms/studies/${this.study.metadata.id}/data`,
+            `/forms/studies/${this.study.metadata.id}/data`,
             payload,
             { headers: { Authorization: `Bearer ${this.token}` } }
           );
@@ -1353,7 +1379,6 @@ export default {
             created_at: resp?.data?.created_at ?? new Date().toISOString(),
           };
           (this.existingEntries = this.existingEntries || []).push(saved);
-          console.log("[Entry] created", { id: newId });
           this.showDialogMessage("Data saved successfully.");
         }
       } catch (err) {
@@ -1368,9 +1393,6 @@ export default {
         const on = !!this.skipSelections[it.key];
         this.setDeepSkip(s, v, g, it.sectionIndex, it.fieldIndex, on);
         if (on) this.clearError(it.sectionIndex, it.fieldIndex);
-        console.log("[Entry] confirmSkipSelection set", {
-          s, v, g, m: it.sectionIndex, f: it.fieldIndex, on
-        });
       });
       this.showSkipDialog = false;
       this.submitData();
@@ -1401,9 +1423,7 @@ export default {
         expires_in_days: this.shareConfig.expiresInDays,
       };
       try {
-        const resp = await axios.post("http://localhost:8000/forms/share-link/", {
-          ...payload
-        }, {
+        const resp = await axios.post("/forms/share-link/", payload, {
           headers: { Authorization: `Bearer ${this.token}` },
         });
         this.generatedLink = resp.data.link;
@@ -1416,6 +1436,8 @@ export default {
     closeDialog() { this.showDialog = false; this.dialogMessage = ""; },
 
     statusFor(sIdx, vIdx) {
+      // Only works in logged-in mode where existingEntries is available
+      if (this.isShared) return "none";
       const subj = this.study.content.study_data.subjects[sIdx];
       const name = (subj.group || "").trim().toLowerCase();
       const gi = this.groupList.findIndex((g) => (g.name || "").trim().toLowerCase() === name);
@@ -1444,7 +1466,6 @@ export default {
   },
 };
 </script>
-
 
 <style scoped>
 /* matrix */
@@ -1476,6 +1497,8 @@ export default {
 .study-description { font-size: 16px; color: #4b5563; margin-bottom: 8px; }
 .study-meta { font-size: 14px; color: #6b7280; }
 hr { margin: 12px 0; border: 0; border-top: 1px solid #e5e7eb; }
+
+.shared-banner { margin-top: 8px; font-size: 14px; color: #374151; }
 
 /* details panel */
 .details-panel { margin-bottom: 16px; }

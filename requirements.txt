@@ -1,6 +1,5 @@
 fastapi~=0.115.5
 uvicorn
-sqlite3
 bcrypt~=4.2.1
 sqlalchemy~=2.0.36
 pydantic~=2.10.1
@@ -10,7 +9,16 @@ pyshacl~=0.29.0
 rdflib~=7.1.1
 PyJWT~=2.10.0
 starlette~=0.41.3
-
+PyYAML
+python-multipart
+filelock
+pytz
+requests
+tzdata
+pyinstaller
 
 # npm install --save-dev sass sass-loader
 # npm install dayjs # added for datepicker
+# pip install dump-things-service
+
+

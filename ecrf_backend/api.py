@@ -1,10 +1,11 @@
 from fastapi import APIRouter, Depends, HTTPException
 import pytz
-from requests import Session
+from sqlalchemy.orm import Session
 
-from database import get_db, SessionLocal
-from models import UserSettings
-from schemas import SettingsModel
+from .database import get_db, SessionLocal
+from .models import UserSettings
+from .schemas import SettingsModel
+
 
 router = APIRouter(prefix="/api", tags=["api"])
 

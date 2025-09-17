@@ -181,7 +181,7 @@ watch(info, val => {
 onMounted(async () => {
   try {
     const resp = await axios.get(
-      `http://localhost:8000/forms/shared/${token.value}/`,
+      `/forms/shared-api/${token.value}/`,
       { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } }
     )
     info.value = resp.data
@@ -207,7 +207,7 @@ function fieldId(mIdx,fIdx){
 async function submitData() {
   try {
     await axios.post(
-      `http://localhost:8000/forms/studies/` +
+      `/forms/studies/` +
         `${info.value.study.metadata.id}/data`,
       {
         study_id:      info.value.study.metadata.id,

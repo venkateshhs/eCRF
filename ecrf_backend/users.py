@@ -5,13 +5,15 @@ from fastapi import APIRouter, Depends, HTTPException, Header
 from sqlalchemy.orm import Session
 from sqlalchemy.orm import Session
 from fastapi import status
-import schemas, models
-from schemas import UserCreate, LoginRequest, UserResponse
-from crud import get_user_by_username, create_user
-from auth import hash_password, verify_password, create_access_token
-from database import get_db
-from logger import logger
-from models import User, UserProfile
+
+from . import schemas, models
+from .schemas import UserCreate, LoginRequest, UserResponse
+from .crud import get_user_by_username, create_user
+from .auth import hash_password, verify_password, create_access_token
+from .database import get_db
+from .logger import logger
+from .models import User, UserProfile
+
 import jwt
 import re
 from fastapi.security import OAuth2PasswordBearer
@@ -82,7 +84,6 @@ def login_user(request: LoginRequest, db: Session = Depends(get_db)):
             status_code=403,
             detail="Your account does not have permission to access this application."
         )
-
 
     if not verify_password(request.password, user.password):
         logger.warning(f"Login failed: Incorrect password for {request.username}")
@@ -253,4 +254,3 @@ def get_user_by_id(user_id: int, db: Session = Depends(get_db)):
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     return user
-
