@@ -11,8 +11,6 @@ from starlette.responses import FileResponse
 BACKEND_IMPORT = "ecrf_backend.main:app"
 
 def runtime_base_dir() -> Path:
-    # In one-file builds, resources unpack into _MEIPASS.
-    # In one-folder, use the executable directory.
     if getattr(sys, "frozen", False):
         return Path(getattr(sys, "_MEIPASS", Path(sys.executable).resolve().parent))
     return Path(__file__).resolve().parent
@@ -25,9 +23,10 @@ INDEX_HTML = FRONTEND_DIST / "index.html"
 if str(BASE) not in sys.path:
     sys.path.insert(0, str(BASE))
 
-# Let backend discover DB/templates relative to the bundle
-os.environ.setdefault("ECRF_BASE_DIR", str(BASE))
-os.environ.setdefault("ECRF_SHACL_DIR", str(BASE / "ecrf_backend" / "shacl" / "templates"))
+# === NEW: point to ecrf_backend/templates (and keep back-compat) ===
+templates_dir = BASE / "ecrf_backend" / "templates"
+os.environ.setdefault("ECRF_TEMPLATES_DIR", str(templates_dir))
+
 
 def import_backend_app() -> FastAPI:
     mod_name, _, attr = BACKEND_IMPORT.partition(":")
@@ -43,7 +42,6 @@ def import_backend_app() -> FastAPI:
 def make_root_app() -> FastAPI:
     app = import_backend_app()
 
-    # Log resolved paths (helps when debugging frozen builds)
     print(f"[eCRF] BASE = {BASE}")
     print(f"[eCRF] FRONTEND_DIST = {FRONTEND_DIST} (exists={FRONTEND_DIST.exists()})")
 
@@ -54,13 +52,10 @@ def make_root_app() -> FastAPI:
         async def spa_fallback(request: Request, call_next):
             path = request.url.path
             API_PREFIXES = (
-                "/users", "/forms", "/api", "/health", "/docs", "/openapi.json", "/redoc"
+                "/users", "/forms", "/api", "/health", "/docs", "/openapi.json", "/redoc", "/template_schema.yaml"
             )
-            # Let API and non-GET go through
             if request.method != "GET" or any(path.startswith(p) for p in API_PREFIXES):
                 return await call_next(request)
-
-            # Serve index.html for unknown frontend routes
             resp = await call_next(request)
             if resp.status_code == 404 and INDEX_HTML.exists():
                 return FileResponse(str(INDEX_HTML))
@@ -73,7 +68,6 @@ def make_root_app() -> FastAPI:
     return app
 
 def pick_port(default: int = 8000) -> int:
-    # If default busy, try next few ports
     try:
         with socket.socket() as s:
             s.bind(("127.0.0.1", default))

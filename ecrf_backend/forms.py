@@ -23,54 +23,31 @@ from .models import StudyTemplateVersion
 
 router = APIRouter(prefix="/forms", tags=["forms"])
 
-TEMPLATE_DIR = Path("shacl/templates")  # Path to your templates directory
-BASE_DIR = Path(__file__).resolve().parent.parent / "ecrf_backend" / "data_models" / "clinical_study_model"
-
+TEMPLATE_DIR = Path(os.environ.get("ECRF_TEMPLATES_DIR", "")) if os.environ.get("ECRF_TEMPLATES_DIR") \
+    else (Path(__file__).resolve().parent / "templates")
 
 def _assert_owner_or_admin(meta: models.StudyMetadata, user) -> None:
     if meta.created_by != user.id and getattr(user.profile, "role", None) != "Administrator":
         raise HTTPException(status_code=403, detail="Not authorized")
 
 
-@router.get("/templates")
-def list_templates():
-    """
-    List all available SHACL templates.
-    """
-    templates = [f.name for f in TEMPLATE_DIR.glob("*.json")]
-    print(templates)
-    return {"templates": templates}
-
-
-@router.get("/templates/shacl")
-def get_shacl_template(template_name: str = Query(None)):
-    """
-    Load and return the selected SHACL template by name.
-    """
-    if not template_name:
-        raise HTTPException(status_code=400, detail="No template selected.")
-    template_path = TEMPLATE_DIR / template_name
-    if not template_path.exists():
-        raise HTTPException(status_code=404, detail="Template not found.")
-    with open(template_path, "r") as template_file:
-        try:
-            template = json.load(template_file)
-            return template
-        except json.JSONDecodeError:
-            raise HTTPException(status_code=500, detail="Error reading template file.")
-
-
 @router.get("/available-fields")
 async def get_available_fields():
+    """
+    Return list of generic/custom field definitions from available-fields.json.
+    If missing, return [] so the UI doesn't break.
+    """
+    path = TEMPLATE_DIR / "available-fields.json"
+    if not path.exists():
+        logger.warning("available-fields.json not found at %s — returning empty list", path)
+        return []
     try:
-        available_fields_file = TEMPLATE_DIR / "available-fields.json"
-        if not available_fields_file.exists():
-            raise HTTPException(status_code=404, detail="Available fields file not found.")
-        with open(available_fields_file, "r") as file:
-            data = json.load(file)
-        return data
+        with open(path, "r", encoding="utf-8") as fh:
+            data = json.load(fh)
+        return data if isinstance(data, list) else []
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error loading available fields: {str(e)}")
+        logger.exception("Error loading available-fields.json: %s", e)
+        raise HTTPException(status_code=500, detail="Error loading available fields.")
 
 
 @router.get("/specialized-fields")
