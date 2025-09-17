@@ -11,7 +11,7 @@ import StudyCreationComponent from "../components/StudyCreationComponent.vue";
 //import YamlViewerComponent from "../components/YamlViewerComponent.vue";
 import StudySettings from "../components/StudySettings.vue";
 import SavedStudyView         from '../components/SavedStudyView.vue'
-import SharedFormComponent from '../components/SharedFormComponent.vue'
+//import SharedFormComponent from '../components/SharedFormComponent.vue'
 //import StudyDataEntryComponent from '../components/DataEntryComponent.vue'
 import StudyView from '@/components/StudyView.vue';
 const routes = [
@@ -56,9 +56,9 @@ const routes = [
       component: StudySettings,
     },
     {
-    path: "/forms/shared/:token",
+    path: "/shared/:token",
     name: "SharedForm",
-    component: SharedFormComponent,
+    component: StudyDataEntryComponent,
   },
   {
       path: '/dashboard/studies/:id/view',

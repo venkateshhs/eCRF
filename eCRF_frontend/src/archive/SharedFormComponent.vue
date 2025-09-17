@@ -181,7 +181,7 @@ watch(info, val => {
 onMounted(async () => {
   try {
     const resp = await axios.get(
-      `/forms/shared/${token.value}/`,
+      `/forms/shared-api/${token.value}/`,
       { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } }
     )
     info.value = resp.data

@@ -1,6 +1,8 @@
+# ecrf_backend/forms.py
 import os
 import shutil
-from typing import List, Dict, Optional
+import tempfile
+from typing import List, Optional
 from urllib.parse import urlparse
 
 from fastapi import Request
@@ -14,17 +16,16 @@ from .database import get_db
 from . import schemas, crud, models
 from .bids_exporter import upsert_bids_dataset, write_entry_to_bids, stage_file_for_modalities
 from .logger import logger
-from .models import User
-from .users import get_current_user, oauth2_scheme
-import secrets
+from .models import User, StudyTemplateVersion
+from .users import get_current_user
 from sqlalchemy.orm import Session
-from .models import StudyTemplateVersion
-
+import secrets
 
 router = APIRouter(prefix="/forms", tags=["forms"])
 
 TEMPLATE_DIR = Path(os.environ.get("ECRF_TEMPLATES_DIR", "")) if os.environ.get("ECRF_TEMPLATES_DIR") \
     else (Path(__file__).resolve().parent / "templates")
+
 
 def _assert_owner_or_admin(meta: models.StudyMetadata, user) -> None:
     if meta.created_by != user.id and getattr(user.profile, "role", None) != "Administrator":
@@ -206,11 +207,11 @@ def upload_file(
     study_id: int,
     uploaded_file: UploadFile = File(...),
     description: str = Form(""),
-    storage_option: str = Form("local"),
+    storage_option: str = Form("local"),  # kept for compat; we override to "bids" below
     subject_index: Optional[int] = Form(None),
     visit_index: Optional[int] = Form(None),
     group_index: Optional[int] = Form(None),
-    modalities_json: Optional[str] = Form("[]"),  # NEW: ["anat","func",...]
+    modalities_json: Optional[str] = Form("[]"),
     db: Session = Depends(get_db),
     user: models.User = Depends(get_current_user)
 ):
@@ -225,42 +226,15 @@ def upload_file(
     except Exception:
         modalities = []
 
-    # Store raw file under uploads/… (gateway responsibility only)
+    # Save to a temporary file just for the exporter to ingest; then delete.
+    tmp_path = None
     try:
-        sub = f"sub-{(int(subject_index) + 1):02d}" if subject_index is not None else "sub-unknown"
-        ses = f"ses-{(int(visit_index) + 1):02d}" if visit_index is not None else "ses-unknown"
-        grp = f"group-{(int(group_index) + 1):02d}" if group_index is not None else "group-unknown"
-    except Exception:
-        sub, ses, grp = "sub-unknown", "ses-unknown", "group-unknown"
-    # This is not required since we do not need duplicate folder named "Uploads" its already taken care in
-    # BIDS folder structure
-    try:
-        base_dir = os.path.join("uploads", f"study-{study_id}", sub, ses, grp)
-        os.makedirs(base_dir, exist_ok=True)
-        file_location = os.path.join(base_dir, uploaded_file.filename)
-        with open(file_location, "wb") as f:
-            shutil.copyfileobj(uploaded_file.file, f)
-        logger.info("Saved raw upload: %s", file_location)
-    except Exception as e:
-        logger.error("File upload error: %s", e)
-        raise HTTPException(status_code=500, detail="Error saving file")
+        with tempfile.NamedTemporaryFile(delete=False, prefix=f"ecrf_study{study_id}_", suffix=f"_{uploaded_file.filename}") as tmp:
+            shutil.copyfileobj(uploaded_file.file, tmp)
+            tmp_path = tmp.name
+        logger.info("Staged temp upload: %s", tmp_path)
 
-    # Create DB record
-    try:
-        file_data = schemas.FileCreate(
-            study_id=study_id,
-            file_name=uploaded_file.filename,
-            file_path=file_location,
-            description=description,
-            storage_option=storage_option or "local"
-        )
-        db_file = crud.create_file(db, file_data)
-    except Exception as e:
-        logger.error("Error creating file record: %s", e)
-        raise HTTPException(status_code=500, detail="Error creating file record")
-
-    # Mirror into BIDS (delegated)
-    try:
+        # Mirror into BIDS structure (authoritative storage)
         content = db.query(models.StudyContent).filter(models.StudyContent.study_id == study_id).first()
         study_data = content.study_data if content else {}
         stage_file_for_modalities(
@@ -271,14 +245,34 @@ def upload_file(
             subject_index=subject_index,
             visit_index=visit_index,
             modalities=modalities,
-            source_path=file_location,
+            source_path=tmp_path,
             url=None,
             filename=uploaded_file.filename,
         )
-    except Exception as be:
-        logger.error("BIDS mirror (local upload) failed for study %s: %s", study_id, be)
 
-    return db_file
+        # DB record: mark storage as 'bids' and store the filename (path is managed by BIDS layout)
+        file_data = schemas.FileCreate(
+            study_id=study_id,
+            file_name=uploaded_file.filename,
+            file_path=uploaded_file.filename,   # logical reference; actual path is within BIDS dataset
+            description=description,
+            storage_option="bids"
+        )
+        db_file = crud.create_file(db, file_data)
+
+        return db_file
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("File upload/BIDS staging error: %s", e)
+        raise HTTPException(status_code=500, detail="Error staging file to BIDS")
+    finally:
+        try:
+            if tmp_path and os.path.exists(tmp_path):
+                os.remove(tmp_path)
+        except Exception:
+            pass
 
 
 @router.post("/studies/{study_id}/files/url", response_model=schemas.FileOut)
@@ -290,9 +284,9 @@ def create_url_file(
     subject_index: Optional[int] = Form(None),
     visit_index: Optional[int] = Form(None),
     group_index: Optional[int] = Form(None),
-    modalities_json: Optional[str] = Form("[]"),  # NEW
+    modalities_json: Optional[str] = Form("[]"),
     db: Session = Depends(get_db),
-    user: models.User = Depends(get_current_user)
+    user: User = Depends(get_current_user),
 ):
     study = db.query(models.StudyMetadata).filter(models.StudyMetadata.id == study_id).first()
     if not study or study.created_by != user.id:
@@ -342,15 +336,18 @@ def create_url_file(
 
     return db_file
 
+
 def generate_token():
     return secrets.token_urlsafe(32)
 
 
 @router.post("/share-link/", status_code=201)
-def create_share_link(payload: schemas.ShareLinkCreate, request: Request,
-                     db: Session = Depends(get_db),
-                     current_user: User = Depends(get_current_user)):
-
+def create_share_link(
+    payload: schemas.ShareLinkCreate,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     if current_user.profile.role not in ["Investigator", "Administrator", "Principal Investigator"]:
         raise HTTPException(status_code=403, detail="Not allowed")
 
@@ -371,13 +368,29 @@ def create_share_link(payload: schemas.ShareLinkCreate, request: Request,
     db.commit()
     db.refresh(access)
 
-    frontend = request.headers.get("x-forwarded-host", None) or request.client.host
-    frontend = "http://localhost:8080"
+    # Prefer explicit config, then Origin, then Referer, then X-Forwarded, then Host
+    frontend_base = os.getenv("FRONTEND_BASE_URL", "").rstrip("/")
+    if not frontend_base:
+        origin = (request.headers.get("origin") or "").rstrip("/")
+        if origin:
+            frontend_base = origin
+    if not frontend_base:
+        referer = request.headers.get("referer")
+        if referer:
+            p = urlparse(referer)
+            frontend_base = f"{p.scheme}://{p.netloc}"
+    if not frontend_base:
+        scheme = request.headers.get("x-forwarded-proto", request.url.scheme)
+        host   = request.headers.get("x-forwarded-host", request.headers.get("host", request.url.netloc))
+        frontend_base = f"{scheme}://{host}"
 
-    return {"link": f"{frontend}/forms/shared/{token}"}
+    # Build SPA route (NOT the API endpoint)
+    link = f"{frontend_base}/shared/{token}"
+    return {"token": token, "link": link}
 
 
-@router.get("/shared/{token}", response_model=schemas.SharedFormAccessOut)
+
+@router.get("/shared-api/{token}", response_model=schemas.SharedFormAccessOut)
 def access_shared_form(
     token: str,
     db: Session = Depends(get_db),
@@ -514,10 +527,7 @@ def save_study_data(study_id: int, payload: schemas.StudyDataEntryCreate, db: Se
     return entry
 
 
-@router.put(
-    "/studies/{study_id}/data_entries/{entry_id}",
-    response_model=schemas.StudyDataEntryOut
-)
+@router.put("/studies/{study_id}/data_entries/{entry_id}", response_model=schemas.StudyDataEntryOut)
 def update_study_data_entry(
     study_id: int,
     entry_id: int,
@@ -584,10 +594,7 @@ def update_study_data_entry(
     return entry
 
 
-@router.get(
-    "/studies/{study_id}/data_entries",
-    response_model=schemas.PaginatedStudyDataEntries
-)
+@router.get("/studies/{study_id}/data_entries", response_model=schemas.PaginatedStudyDataEntries)
 def list_study_data_entries(
     study_id: int,
     subject_indexes: Optional[str] = Query(None, description="Comma-separated subject indexes for current page"),
@@ -628,3 +635,185 @@ def list_study_data_entries(
     entries_out = [schemas.StudyDataEntryOut.from_orm(e) for e in entries]
 
     return {"total": total, "entries": entries_out}
+
+@router.get("/shared-api/{token}/", response_model=schemas.SharedFormAccessOut)
+def access_shared_form_slash(token: str, db: Session = Depends(get_db)):
+    return access_shared_form(token, db)
+
+@router.post("/shared/{token}/files", response_model=schemas.FileOut)
+def shared_upload_file(
+    token: str,
+    uploaded_file: UploadFile = File(...),
+    description: str = Form(""),
+    modalities_json: Optional[str] = Form("[]"),
+    db: Session = Depends(get_db),
+):
+    access = (
+        db.query(models.SharedFormAccess)
+        .filter_by(token=token)
+        .first()
+    )
+    if not access:
+        raise HTTPException(404, "Link not found")
+    if access.used_count >= access.max_uses:
+        raise HTTPException(403, "Usage limit exceeded")
+    if access.expires_at < datetime.utcnow():
+        raise HTTPException(403, "Link expired")
+    if access.permission != "add":
+        raise HTTPException(403, "Not allowed")
+
+    study = db.query(models.StudyMetadata).filter(models.StudyMetadata.id == access.study_id).first()
+    if not study:
+        raise HTTPException(status_code=404, detail="Study not found")
+
+    try:
+        modalities = json.loads(modalities_json or "[]")
+        if not isinstance(modalities, list):
+            modalities = []
+    except Exception:
+        modalities = []
+
+    tmp_path = None
+    try:
+        with tempfile.NamedTemporaryFile(delete=False, prefix=f"ecrf_study{study.id}_", suffix=f"_{uploaded_file.filename}") as tmp:
+            shutil.copyfileobj(uploaded_file.file, tmp)
+            tmp_path = tmp.name
+        content = db.query(models.StudyContent).filter(models.StudyContent.study_id == study.id).first()
+        study_data = content.study_data if content else {}
+        stage_file_for_modalities(
+            study_id=study.id,
+            study_name=study.study_name,
+            study_description=study.study_description,
+            study_data=study_data,
+            subject_index=access.subject_index,
+            visit_index=access.visit_index,
+            modalities=modalities,
+            source_path=tmp_path,
+            url=None,
+            filename=uploaded_file.filename,
+        )
+        file_data = schemas.FileCreate(
+            study_id=study.id,
+            file_name=uploaded_file.filename,
+            file_path=uploaded_file.filename,
+            description=description,
+            storage_option="bids",
+        )
+        db_file = crud.create_file(db, file_data)
+        return db_file
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Shared upload error: %s", e)
+        raise HTTPException(status_code=500, detail="Error staging file to BIDS")
+    finally:
+        try:
+            if tmp_path and os.path.exists(tmp_path):
+                os.remove(tmp_path)
+        except Exception:
+            pass
+
+
+@router.post("/shared/{token}/files/url", response_model=schemas.FileOut)
+def shared_create_url_file(
+    token: str,
+    url: str = Form(...),
+    description: str = Form(""),
+    modalities_json: Optional[str] = Form("[]"),
+    db: Session = Depends(get_db),
+):
+    access = (
+        db.query(models.SharedFormAccess)
+        .filter_by(token=token)
+        .first()
+    )
+    if not access:
+        raise HTTPException(404, "Link not found")
+    if access.used_count >= access.max_uses:
+        raise HTTPException(403, "Usage limit exceeded")
+    if access.expires_at < datetime.utcnow():
+        raise HTTPException(403, "Link expired")
+    if access.permission != "add":
+        raise HTTPException(403, "Not allowed")
+
+    study = db.query(models.StudyMetadata).filter(models.StudyMetadata.id == access.study_id).first()
+    if not study:
+        raise HTTPException(status_code=404, detail="Study not found")
+
+    try:
+        modalities = json.loads(modalities_json or "[]")
+        if not isinstance(modalities, list):
+            modalities = []
+    except Exception:
+        modalities = []
+
+    try:
+        parsed = urlparse(url)
+        base = os.path.basename(parsed.path) or "link"
+        file_data = schemas.FileCreate(
+            study_id=study.id,
+            file_name=base,
+            file_path=url,
+            description=description,
+            storage_option="url",
+        )
+        db_file = crud.create_file(db, file_data)
+    except Exception as e:
+        logger.error("Shared URL file record error: %s", e)
+        raise HTTPException(status_code=500, detail="Error creating file record")
+
+    try:
+        content = db.query(models.StudyContent).filter(models.StudyContent.study_id == study.id).first()
+        study_data = content.study_data if content else {}
+        stage_file_for_modalities(
+            study_id=study.id,
+            study_name=study.study_name,
+            study_description=study.study_description,
+            study_data=study_data,
+            subject_index=access.subject_index,
+            visit_index=access.visit_index,
+            modalities=modalities,
+            source_path=None,
+            url=url,
+            filename=base,
+        )
+    except Exception as be:
+        logger.error("Shared BIDS mirror (URL) failed for study %s: %s", study.id, be)
+
+    return db_file
+
+
+@router.post("/shared/{token}/data", response_model=schemas.StudyDataEntryOut)
+def shared_upsert_data(token: str, payload: schemas.StudyDataEntryCreate, db: Session = Depends(get_db)):
+    access = db.query(models.SharedFormAccess).filter_by(token=token).first()
+    if not access: raise HTTPException(404, "Link not found")
+    if access.expires_at < datetime.utcnow(): raise HTTPException(403, "Link expired")
+    if access.permission != "add": raise HTTPException(403, "Not allowed")
+
+    # lock to token’s indices
+    s, v, g = access.subject_index, access.visit_index, access.group_index
+    study_id = access.study_id
+
+    entry = (db.query(models.StudyEntryData)
+               .filter_by(study_id=study_id, subject_index=s, visit_index=v, group_index=g)
+               .order_by(models.StudyEntryData.id.desc())
+               .first())
+
+    if entry:
+        entry.data = payload.data
+        entry.skipped_required_flags = payload.skipped_required_flags
+        db.commit(); db.refresh(entry)
+        return entry
+    else:
+        # reuse your existing create flow/versioning
+        try:
+            form_version = get_current_form_version(db, study_id)
+        except ValueError:
+            form_version = 1
+        entry = models.StudyEntryData(
+            study_id=study_id, subject_index=s, visit_index=v, group_index=g,
+            data=payload.data, skipped_required_flags=payload.skipped_required_flags,
+            form_version=form_version
+        )
+        db.add(entry); db.commit(); db.refresh(entry)
+        return entry
