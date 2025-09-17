@@ -9,15 +9,16 @@ from pathlib import Path
 import json
 import yaml
 from datetime import datetime, timedelta
-from database import get_db
-import schemas, crud, models
-from bids_exporter import upsert_bids_dataset, write_entry_to_bids, stage_file_for_modalities
-from logger import logger
-from models import User
-from users import get_current_user, oauth2_scheme
+
+from .database import get_db
+from . import schemas, crud, models
+from .bids_exporter import upsert_bids_dataset, write_entry_to_bids, stage_file_for_modalities
+from .logger import logger
+from .models import User
+from .users import get_current_user, oauth2_scheme
 import secrets
 from sqlalchemy.orm import Session
-from models import StudyTemplateVersion
+from .models import StudyTemplateVersion
 
 
 router = APIRouter(prefix="/forms", tags=["forms"])
@@ -254,7 +255,8 @@ def upload_file(
         grp = f"group-{(int(group_index) + 1):02d}" if group_index is not None else "group-unknown"
     except Exception:
         sub, ses, grp = "sub-unknown", "ses-unknown", "group-unknown"
-
+    # This is not required since we do not need duplicate folder named "Uploads" its already taken care in
+    # BIDS folder structure
     try:
         base_dir = os.path.join("uploads", f"study-{study_id}", sub, ses, grp)
         os.makedirs(base_dir, exist_ok=True)

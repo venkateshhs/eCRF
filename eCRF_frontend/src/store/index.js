@@ -2,16 +2,17 @@ import { createStore } from "vuex";
 import axios from "axios";
 import createPersistedState from "vuex-persistedstate";
 
-// Dynamically set the base URL based on environment variables or defaults
-const API_BASE_URL = process.env.VUE_APP_API_URL || "http://127.0.0.1:8000";
+// Same-origin by default (relative URLs). If VUE_APP_API_URL is set, we use it.
+const envBase = (process.env.VUE_APP_API_URL || "").trim();
+const API_BASE_URL = envBase ? envBase.replace(/\/+$/, "") : ""; // "" + "/users/..." => same-origin
 
 const store = createStore({
   state: {
-    user: null, // User object after login
-    token: null, // JWT token after successful login
-    forms: [], // Store all forms
-    currentForm: null, // Store the currently selected form for editing/viewing
-    studyDetails: null, // Store study details (used in study creation)
+    user: null,          // User object after login
+    token: null,         // JWT token after successful login
+    forms: [],           // Store all forms
+    currentForm: null,   // Store the currently selected form for editing/viewing
+    studyDetails: null,  // Store study details (used in study creation)
   },
   mutations: {
     setUser(state, user) {
@@ -34,7 +35,7 @@ const store = createStore({
       state.currentForm = form;
     },
     setStudyDetails(state, payload) {
-     state.studyDetails = {
+      state.studyDetails = {
         ...state.studyDetails,
         ...payload
       };
@@ -54,6 +55,7 @@ const store = createStore({
         commit("setToken", access_token);
         console.log("access token:", response.data.access_token);
         localStorage.setItem("access_token", response.data.access_token);
+
         const userResponse = await axios.get(`${API_BASE_URL}/users/me`, {
           headers: { Authorization: `Bearer ${access_token}` },
         });
@@ -63,8 +65,8 @@ const store = createStore({
       } catch (error) {
         console.error("Login failed, error from API:", error.response?.data || error.message);
         if (error.response?.status === 403) {
-        throw error;
-      }
+          throw error;
+        }
         return false;
       }
     },

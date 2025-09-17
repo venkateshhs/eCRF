@@ -288,7 +288,7 @@ export default {
     async bootstrap() {
       const studyId = this.$route.params.id;
       try {
-        const studyResp = await axios.get(`http://localhost:8000/forms/studies/${studyId}`, {
+        const studyResp = await axios.get(`/forms/studies/${studyId}`, {
           headers: { Authorization: `Bearer ${this.token}` },
         });
         this.study = studyResp.data;
@@ -365,7 +365,7 @@ export default {
       try {
         this.isLoadingEntries = true;
         const resp = await axios.get(
-          `http://localhost:8000/forms/studies/${studyId}/data_entries` + (params.toString() ? `?${params.toString()}` : ''),
+          `/forms/studies/${studyId}/data_entries` + (params.toString() ? `?${params.toString()}` : ''),
           { headers: { Authorization: `Bearer ${this.token}` } }
         );
         // entries include: id, subject_index, visit_index, group_index, data, skipped_required_flags, form_version, created_at
@@ -466,7 +466,7 @@ export default {
       if (!this.viewAll && !this.canViewAll) {
         try {
           const resp = await axios.get(
-            `http://localhost:8000/forms/studies/${studyId}/data_entries?all=true`,
+            `/forms/studies/${studyId}/data_entries?all=true`,
             { headers: { Authorization: `Bearer ${this.token}` } }
           );
           entriesForExport = resp.data.entries || [];

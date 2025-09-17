@@ -240,7 +240,7 @@ export default {
         return this.$router.push("/login");
       }
       try {
-        const { data } = await axios.get("http://127.0.0.1:8000/forms/studies", {
+        const { data } = await axios.get("/forms/studies", {
           headers: { Authorization: `Bearer ${token}` },
         });
         console.log('Fetched studies:', JSON.stringify(data, null, 2));
@@ -274,7 +274,7 @@ export default {
       }
       try {
         const resp = await axios.get(
-          `http://127.0.0.1:8000/forms/studies/${study.id}`,
+          `/forms/studies/${study.id}`,
           { headers: { Authorization: `Bearer ${token}` } }
         );
         console.log('Fetched study details:', JSON.stringify(resp.data, null, 2));

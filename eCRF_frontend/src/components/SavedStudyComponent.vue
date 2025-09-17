@@ -51,7 +51,7 @@ export default {
     async loadSavedForms() {
       try {
         console.log("Loading saved studies...", this.token);
-        const response = await axios.get("http://127.0.0.1:8000/forms/studies", {
+        const response = await axios.get("/forms/studies", {
           headers: {
             Authorization: `Bearer ${this.token}`,
           },

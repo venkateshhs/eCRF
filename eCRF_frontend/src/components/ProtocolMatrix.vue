@@ -343,7 +343,7 @@ export default {
       console.log("Final payload to send:", payload);
 
       // Send request
-      const url = studyId ? `http://localhost:8000/forms/studies/${studyId}` : "http://localhost:8000/forms/studies/";
+      const url = studyId ? `/forms/studies/${studyId}` : "/forms/studies/";
       const method = studyId ? "put" : "post";
       try {
         console.log(`Sending ${method.toUpperCase()} to ${url} …`);

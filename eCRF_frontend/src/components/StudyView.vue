@@ -386,7 +386,7 @@ export default {
       const token = this.token;
       if (!token || userId == null) return null;
       try {
-        const { data } = await axios.get(`http://127.0.0.1:8000/users/${userId}`, {
+        const { data } = await axios.get(`/users/${userId}`, {
           headers: { Authorization: `Bearer ${token}` },
         });
         const u = data || {};
@@ -419,7 +419,7 @@ export default {
       const token = this.token;
       if (!token) return;
       try {
-        const { data } = await axios.get("http://127.0.0.1:8000/users/me", {
+        const { data } = await axios.get("/users/me", {
           headers: { Authorization: `Bearer ${token}` },
         });
         this.me = data || null;
@@ -435,7 +435,7 @@ export default {
       }
       try {
         const resp = await axios.get(
-          `http://127.0.0.1:8000/forms/studies/${this.studyId}`,
+          `/forms/studies/${this.studyId}`,
           { headers: { Authorization: `Bearer ${token}` } }
         );
         const sd = resp.data?.content?.study_data || {};
@@ -472,7 +472,7 @@ export default {
       if (!token) return;
       try {
         const { data } = await axios.get(
-          `http://127.0.0.1:8000/forms/studies/${this.studyId}/files`,
+          `/forms/studies/${this.studyId}/files`,
           { headers: { Authorization: `Bearer ${token}` } }
         );
         this.allFiles = Array.isArray(data) ? data : [];
@@ -495,7 +495,7 @@ export default {
       }
       try {
         const resp = await axios.get(
-          `http://127.0.0.1:8000/forms/studies/${this.studyId}`,
+          `/forms/studies/${this.studyId}`,
           { headers: { Authorization: `Bearer ${token}` } }
         );
         const sd = resp.data.content?.study_data;
@@ -597,7 +597,7 @@ export default {
           // Do NOT set indices ⇒ backend stores under sub-unknown/ses-unknown/group-unknown
           fd.append("modalities_json", "[]");
           await axios.post(
-            `http://127.0.0.1:8000/forms/studies/${this.studyId}/files`,
+            `/forms/studies/${this.studyId}/files`,
             fd,
             { headers: { Authorization: `Bearer ${token}`, "Content-Type": "multipart/form-data" } }
           );

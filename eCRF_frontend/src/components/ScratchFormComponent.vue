@@ -543,7 +543,7 @@ export default {
     this.adjustAssignments();
 
     try {
-      const res = await axios.get("http://127.0.0.1:8000/forms/available-fields");
+      const res = await axios.get("/forms/available-fields");
       this.generalFields = res.data.map((f, idx) => ({
         ...f,
         name: f.name || `${f.type}_${idx}`,

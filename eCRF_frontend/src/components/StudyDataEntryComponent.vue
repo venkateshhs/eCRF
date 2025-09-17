@@ -777,7 +777,7 @@ export default {
     async loadStudy(studyId) {
       try {
         const resp = await axios.get(
-          `http://127.0.0.1:8000/forms/studies/${studyId}`,
+          `/forms/studies/${studyId}`,
           { headers: { Authorization: `Bearer ${this.token}` } }
         );
         this.study = resp.data;
@@ -791,7 +791,7 @@ export default {
     async loadExistingEntries(studyId) {
       try {
         const resp = await axios.get(
-          `http://127.0.0.1:8000/forms/studies/${studyId}/data_entries`,
+          `/forms/studies/${studyId}/data_entries`,
           { headers: { Authorization: `Bearer ${this.token}` } }
         );
         this.existingEntries = Array.isArray(resp.data) ? resp.data : (resp.data?.entries || []);
@@ -1170,7 +1170,7 @@ export default {
                 fd.append("group_index", String(g));
                 fd.append("modalities_json", modalitiesJson);
                 const resp = await axios.post(
-                  `http://127.0.0.1:8000/forms/studies/${studyId}/files`,
+                  `/forms/studies/${studyId}/files`,
                   fd,
                   { headers: { Authorization: `Bearer ${this.token}`, "Content-Type": "multipart/form-data" } }
                 );
@@ -1194,7 +1194,7 @@ export default {
                   fd.append("group_index", String(g));
                   fd.append("modalities_json", modalitiesJson);
                   const resp = await axios.post(
-                    `http://127.0.0.1:8000/forms/studies/${studyId}/files/url`,
+                    `/forms/studies/${studyId}/files/url`,
                     fd,
                     { headers: { Authorization: `Bearer ${this.token}` } }
                   );
@@ -1227,7 +1227,7 @@ export default {
               fd.append("group_index", String(g));
               fd.append("modalities_json", modalitiesJson);
               const resp = await axios.post(
-                `http://127.0.0.1:8000/forms/studies/${studyId}/files`,
+                `/forms/studies/${studyId}/files`,
                 fd,
                 { headers: { Authorization: `Bearer ${this.token}`, "Content-Type": "multipart/form-data" } }
               );
@@ -1253,7 +1253,7 @@ export default {
                 fd.append("group_index", String(g));
                 fd.append("modalities_json", modalitiesJson);
                 const resp = await axios.post(
-                  `http://127.0.0.1:8000/forms/studies/${studyId}/files/url`,
+                  `/forms/studies/${studyId}/files/url`,
                   fd,
                   { headers: { Authorization: `Bearer ${this.token}` } }
                 );
@@ -1325,7 +1325,7 @@ export default {
       try {
         if (existingId) {
           const resp = await axios.put(
-            `http://127.0.0.1:8000/forms/studies/${this.study.metadata.id}/data_entries/${existingId}`,
+            `/forms/studies/${this.study.metadata.id}/data_entries/${existingId}`,
             payload,
             { headers: { Authorization: `Bearer ${this.token}` } }
           );
@@ -1335,7 +1335,7 @@ export default {
           if (idx >= 0) this.existingEntries.splice(idx, 1, resp.data);
         } else {
           const resp = await axios.post(
-            `http://127.0.0.1:8000/forms/studies/${this.study.metadata.id}/data`,
+            `/forms/studies/${this.study.metadata.id}/data`,
             payload,
             { headers: { Authorization: `Bearer ${this.token}` } }
           );
@@ -1401,7 +1401,7 @@ export default {
         expires_in_days: this.shareConfig.expiresInDays,
       };
       try {
-        const resp = await axios.post("http://localhost:8000/forms/share-link/", {
+        const resp = await axios.post("/forms/share-link/", {
           ...payload
         }, {
           headers: { Authorization: `Bearer ${this.token}` },

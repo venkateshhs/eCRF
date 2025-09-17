@@ -185,7 +185,7 @@ export default {
   methods: {
     async fetchTimezones() {
       try {
-        const response = await fetch("http://127.0.0.1:8000/api/timezones");
+        const response = await fetch("/api/timezones");
         const data = await response.json();
         this.timezones = data;
       } catch (error) {
@@ -195,7 +195,7 @@ export default {
     },
     async fetchUserSettings() {
       try {
-        const response = await fetch(`http://127.0.0.1:8000/api/settings/${this.userId}`);
+        const response = await fetch(`/api/settings/${this.userId}`);
         if (response.ok) {
           const data = await response.json();
           this.settings = data;
@@ -212,7 +212,7 @@ export default {
       this.saveMessage = null;
       this.saveError = null;
       try {
-        const response = await fetch(`http://127.0.0.1:8000/api/settings/${this.userId}`, {
+        const response = await fetch(`/api/settings/${this.userId}`, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",

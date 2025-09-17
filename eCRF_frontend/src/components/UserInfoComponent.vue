@@ -280,7 +280,7 @@ export default {
       this.userMgmtError = null;
       try {
         const resp = await axios.get(
-          "http://localhost:8000/users/admin/users",
+          "/users/admin/users",
           { headers: { Authorization: `Bearer ${this.$store.state.token}` } }
         );
         this.users = resp.data;
@@ -308,7 +308,7 @@ export default {
       }
       try {
         await axios.post(
-          "http://localhost:8000/users/admin/users",
+          "/users/admin/users",
           {
             username: u.username,
             email: u.email,
@@ -344,7 +344,7 @@ export default {
     async confirmRoleChange() {
       try {
         await axios.patch(
-          `http://localhost:8000/users/admin/users/${this.pendingUser.id}/role`,
+          `/users/admin/users/${this.pendingUser.id}/role`,
           { role: this.pendingRole },
           { headers: { Authorization: `Bearer ${this.$store.state.token}` } }
         );
