@@ -78,7 +78,7 @@ def _seed_default_users_if_empty() -> None:
         inv_pw   = os.getenv("ECRF_DEFAULT_INV_PASSWORD",   "Investigator123!")
 
         _ensure_default_user(db, "admin",        "admin@example.com",        admin_pw, "Admin",        "User", "Administrator")
-        _ensure_default_user(db, "pi",           "pi@example.com",           pi_pw,    "Principal",    "Investigator", "Principal Investigator")
+        _ensure_default_user(db, "pi_user",           "pi@example.com",           pi_pw,    "Principal",    "Investigator", "Principal Investigator")
         _ensure_default_user(db, "investigator", "investigator@example.com", inv_pw,   "Investigator", "User", "Investigator")
 
         logger.info("Default users seeded (admin, pi, investigator).")
