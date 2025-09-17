@@ -18,7 +18,7 @@ tzdata
 pyinstaller
 
 # npm install --save-dev sass sass-loader
-# npm instal dayjs # added for datepicker
+# npm install dayjs # added for datepicker
 # pip install dump-things-service
 
 
