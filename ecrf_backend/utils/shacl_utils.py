@@ -3,7 +3,7 @@ from rdflib import Graph
 from typing import Tuple
 
 # TODO
-"""Is this really necessary if we do all validations at the frontend ???? ckeck this"""
+"""Is this really necessary if we do all validations at the frontend ???? check this"""
 
 
 
