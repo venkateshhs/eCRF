@@ -20,6 +20,7 @@ from .models import User, StudyTemplateVersion
 from .users import get_current_user
 from sqlalchemy.orm import Session
 import secrets
+from sqlalchemy import or_
 
 router = APIRouter(prefix="/forms", tags=["forms"])
 
@@ -30,6 +31,14 @@ TEMPLATE_DIR = Path(os.environ.get("ECRF_TEMPLATES_DIR", "")) if os.environ.get(
 def _assert_owner_or_admin(meta: models.StudyMetadata, user) -> None:
     if meta.created_by != user.id and getattr(user.profile, "role", None) != "Administrator":
         raise HTTPException(status_code=403, detail="Not authorized")
+
+def _display_name(u: models.User) -> str:
+    if not u:
+        return ""
+    first = getattr(getattr(u, "profile", None), "first_name", "") or ""
+    last  = getattr(getattr(u, "profile", None), "last_name", "") or ""
+    full  = (first + " " + last).strip()
+    return full or u.username or u.email or f"User#{u.id}"
 
 
 @router.get("/available-fields")
@@ -111,35 +120,71 @@ def create_study(
     return {"metadata": metadata, "content": content}
 
 
+
 @router.get("/studies", response_model=List[schemas.StudyMetadataOut])
 def list_studies(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    if current_user.profile.role == "Administrator":
-        studies = db.query(models.StudyMetadata).all()
-    else:
-        studies = (
-            db.query(models.StudyMetadata)
-            .filter(models.StudyMetadata.created_by == current_user.id)
-            .all()
-        )
+    role = (current_user.profile.role or "").strip()
+
+    # Admin sees everything
+    if role == "Administrator":
+        return db.query(models.StudyMetadata).all()
+
+    # Everyone else: include (a) studies they own, plus (b) studies they were granted access to
+    grant_subq = (
+        db.query(models.StudyAccessGrant.study_id)
+          .filter(models.StudyAccessGrant.user_id == current_user.id)
+          .subquery()
+    )
+
+    studies = (
+        db.query(models.StudyMetadata)
+          .filter(
+              or_(
+                  models.StudyMetadata.created_by == current_user.id,
+                  models.StudyMetadata.id.in_(grant_subq)
+              )
+          )
+          .all()
+    )
     return studies
+
 
 
 @router.get("/studies/{study_id}", response_model=schemas.StudyFull)
 def read_study(
     study_id: int,
     db: Session = Depends(get_db),
-    user = Depends(get_current_user)
+    user: models.User = Depends(get_current_user),
 ):
     result = crud.get_study_full(db, study_id)
     if result is None:
         raise HTTPException(status_code=404, detail="Study not found")
+
     metadata, content = result
-    if metadata.created_by != user.id and user.profile.role != "Administrator":
+
+    # authorize: admin OR owner OR explicit access grant
+    role = (getattr(user.profile, "role", "") or "").strip()
+    is_admin = role == "Administrator"
+    is_owner = (metadata.created_by == user.id)
+
+    has_grant = (
+        db.query(models.StudyAccessGrant)
+          .filter(
+              models.StudyAccessGrant.study_id == study_id,
+              models.StudyAccessGrant.user_id == user.id,
+          )
+          .first()
+        is not None
+    )
+
+    if not (is_admin or is_owner or has_grant):
         raise HTTPException(status_code=403, detail="Not authorized to view this study")
+
     return {"metadata": metadata, "content": content}
+
 
 
 @router.put("/studies/{study_id}", response_model=schemas.StudyFull)
@@ -462,12 +507,30 @@ def get_current_form_version(db: Session, study_id: int) -> int:
         raise ValueError(f"No template version found for study_id={study_id}")
     return latest_version.version
 
-
 @router.post("/studies/{study_id}/data", response_model=schemas.StudyDataEntryOut)
-def save_study_data(study_id: int, payload: schemas.StudyDataEntryCreate, db: Session = Depends(get_db)):
+def save_study_data(
+    study_id: int,
+    payload: schemas.StudyDataEntryCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     study = db.query(models.StudyMetadata).filter(models.StudyMetadata.id == study_id).first()
     if not study:
         raise HTTPException(status_code=404, detail="Study not found")
+
+    # Permission: Admin or Owner --> OK
+    is_admin = getattr(getattr(current_user, "profile", None), "role", "") == "Administrator"
+    is_owner = study.created_by == current_user.id
+
+    if not (is_admin or is_owner):
+        # Must have an access grant with add_data = True
+        grant = (
+            db.query(models.StudyAccessGrant)
+              .filter_by(study_id=study_id, user_id=current_user.id)
+              .first()
+        )
+        if not grant or not (grant.permissions or {}).get("add_data", False):
+            raise HTTPException(status_code=403, detail="Not allowed to add data for this study")
 
     try:
         form_version = get_current_form_version(db, study_id)
@@ -497,7 +560,6 @@ def save_study_data(study_id: int, payload: schemas.StudyDataEntryCreate, db: Se
                 study_description=study.study_description,
                 study_data=content.study_data,
             )
-            # persist label-map mutations
             db.query(models.StudyContent).filter(models.StudyContent.id == content.id).update(
                 {"study_data": content.study_data}
             )
@@ -782,38 +844,212 @@ def shared_create_url_file(
 
     return db_file
 
-
 @router.post("/shared/{token}/data", response_model=schemas.StudyDataEntryOut)
-def shared_upsert_data(token: str, payload: schemas.StudyDataEntryCreate, db: Session = Depends(get_db)):
+def shared_upsert_data(
+    token: str,
+    payload: schemas.SharedStudyDataEntryCreate,   # <-- lightweight schema (no indexes required)
+    db: Session = Depends(get_db),
+):
     access = db.query(models.SharedFormAccess).filter_by(token=token).first()
-    if not access: raise HTTPException(404, "Link not found")
-    if access.expires_at < datetime.utcnow(): raise HTTPException(403, "Link expired")
-    if access.permission != "add": raise HTTPException(403, "Not allowed")
+    if not access:
+        raise HTTPException(404, "Link not found")
+    if access.expires_at < datetime.utcnow():
+        raise HTTPException(403, "Link expired")
+    if access.permission != "add":
+        raise HTTPException(403, "Not allowed")
 
-    # lock to token’s indices
-    s, v, g = access.subject_index, access.visit_index, access.group_index
     study_id = access.study_id
+    s, v, g = access.subject_index, access.visit_index, access.group_index
 
-    entry = (db.query(models.StudyEntryData)
-               .filter_by(study_id=study_id, subject_index=s, visit_index=v, group_index=g)
-               .order_by(models.StudyEntryData.id.desc())
-               .first())
-
+    # Upsert latest row at (study, s, v, g)
+    entry = (
+        db.query(models.StudyEntryData)
+          .filter_by(study_id=study_id, subject_index=s, visit_index=v, group_index=g)
+          .order_by(models.StudyEntryData.id.desc())
+          .first()
+    )
     if entry:
         entry.data = payload.data
         entry.skipped_required_flags = payload.skipped_required_flags
-        db.commit(); db.refresh(entry)
-        return entry
+        db.commit()
+        db.refresh(entry)
     else:
-        # reuse your existing create flow/versioning
         try:
             form_version = get_current_form_version(db, study_id)
         except ValueError:
             form_version = 1
         entry = models.StudyEntryData(
-            study_id=study_id, subject_index=s, visit_index=v, group_index=g,
-            data=payload.data, skipped_required_flags=payload.skipped_required_flags,
+            study_id=study_id,
+            subject_index=s,
+            visit_index=v,
+            group_index=g,
+            data=payload.data,
+            skipped_required_flags=payload.skipped_required_flags,
             form_version=form_version
         )
-        db.add(entry); db.commit(); db.refresh(entry)
-        return entry
+        db.add(entry)
+        db.commit()
+        db.refresh(entry)
+
+    # BIDS: mirror (same as authenticated path)
+    study = db.query(models.StudyMetadata).filter(models.StudyMetadata.id == study_id).first()
+    content = db.query(models.StudyContent).filter(models.StudyContent.study_id == study_id).first()
+    if upsert_bids_dataset and study and content:
+        try:
+            upsert_bids_dataset(
+                study_id=study.id,
+                study_name=study.study_name,
+                study_description=study.study_description,
+                study_data=content.study_data,
+            )
+            db.query(models.StudyContent).filter(models.StudyContent.id == content.id).update(
+                {"study_data": content.study_data}
+            )
+            db.commit()
+            if write_entry_to_bids:
+                write_entry_to_bids(
+                    study_id=study.id,
+                    study_name=study.study_name,
+                    study_description=study.study_description,
+                    study_data=content.study_data,
+                    entry={
+                        "id": entry.id,
+                        "subject_index": entry.subject_index,
+                        "visit_index": entry.visit_index,
+                        "group_index": entry.group_index,
+                        "form_version": entry.form_version,
+                        "data": entry.data or {}
+                    }
+                )
+                logger.info(
+                    "BIDS eCRF upserted (shared) for study=%s sub_idx=%s visit_idx=%s entry_id=%s",
+                    study.id, entry.subject_index, entry.visit_index, entry.id
+                )
+        except Exception as be:
+            logger.error("BIDS export (shared data) failed for study %s: %s", study_id, be)
+
+    return entry
+
+# ---------- Study Access Management ----------
+
+@router.get("/studies/{study_id}/access", response_model=List[schemas.StudyAccessGrantOut])
+def list_study_access(
+    study_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    # Only owner or admin can list
+    meta = db.query(models.StudyMetadata).filter(models.StudyMetadata.id == study_id).first()
+    if not meta:
+        raise HTTPException(status_code=404, detail="Study not found")
+    _assert_owner_or_admin(meta, current_user)
+
+    grants = (
+        db.query(models.StudyAccessGrant)
+          .filter(models.StudyAccessGrant.study_id == study_id)
+          .all()
+    )
+
+    out: List[schemas.StudyAccessGrantOut] = []
+    for g in grants:
+        grantee = g.user
+        granter = g.granted_by
+        out.append(
+            schemas.StudyAccessGrantOut(
+                user_id=grantee.id,
+                role=getattr(getattr(grantee, "profile", None), "role", None),
+                email=grantee.email,
+                username=grantee.username,
+                display_name=_display_name(grantee),
+                created_by=g.created_by,
+                created_by_display=_display_name(granter) if granter else None,
+                created_at=g.created_at,
+                permissions=g.permissions or {"view": True, "add_data": True, "edit_study": False},
+            )
+        )
+    return out
+
+
+@router.post("/studies/{study_id}/access", response_model=schemas.StudyAccessGrantOut, status_code=201)
+def grant_study_access(
+    study_id: int,
+    payload: schemas.StudyAccessGrantCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    meta = db.query(models.StudyMetadata).filter(models.StudyMetadata.id == study_id).first()
+    if not meta:
+        raise HTTPException(status_code=404, detail="Study not found")
+    _assert_owner_or_admin(meta, current_user)
+
+    # can't grant to owner (already has full)
+    if payload.user_id == meta.created_by:
+        raise HTTPException(status_code=400, detail="Owner already has full access")
+
+    grantee = db.query(models.User).filter(models.User.id == payload.user_id).first()
+    if not grantee:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    # default permissions: Add Data only (View + Add, no Edit)
+    perms = payload.permissions or {"view": True, "add_data": True, "edit_study": False}
+
+    # upsert
+    grant = (
+        db.query(models.StudyAccessGrant)
+          .filter_by(study_id=study_id, user_id=payload.user_id)
+          .first()
+    )
+    if grant:
+        grant.permissions = perms
+        # keep created_by as is
+    else:
+        grant = models.StudyAccessGrant(
+            study_id=study_id,
+            user_id=payload.user_id,
+            permissions=perms,
+            created_by=current_user.id,
+        )
+        db.add(grant)
+    db.commit()
+    db.refresh(grant)
+
+    granter = grant.granted_by
+    return schemas.StudyAccessGrantOut(
+        user_id=grantee.id,
+        role=getattr(getattr(grantee, "profile", None), "role", None),
+        email=grantee.email,
+        username=grantee.username,
+        display_name=_display_name(grantee),
+        created_by=grant.created_by,
+        created_by_display=_display_name(granter) if granter else None,
+        created_at=grant.created_at,
+        permissions=grant.permissions,
+    )
+
+
+@router.delete("/studies/{study_id}/access/{user_id}", status_code=204)
+def revoke_study_access(
+    study_id: int,
+    user_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    meta = db.query(models.StudyMetadata).filter(models.StudyMetadata.id == study_id).first()
+    if not meta:
+        raise HTTPException(status_code=404, detail="Study not found")
+    _assert_owner_or_admin(meta, current_user)
+
+    if user_id == meta.created_by:
+        raise HTTPException(status_code=400, detail="Cannot revoke owner access")
+
+    grant = (
+        db.query(models.StudyAccessGrant)
+          .filter_by(study_id=study_id, user_id=user_id)
+          .first()
+    )
+    if not grant:
+        # idempotent
+        return
+
+    db.delete(grant)
+    db.commit()

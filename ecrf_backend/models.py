@@ -1,6 +1,6 @@
 import datetime
 
-from sqlalchemy import Column, Integer, String, ForeignKey, DateTime, func, JSON, Text
+from sqlalchemy import Column, Integer, String, ForeignKey, DateTime, func, JSON, Text, UniqueConstraint
 from sqlalchemy.orm import relationship
 from .database import Base
 
@@ -121,3 +121,23 @@ class StudyEntryData(Base):
     skipped_required_flags = Column(JSON, nullable=True)
 
     study = relationship("StudyMetadata", back_populates="entry_data")
+
+class StudyAccessGrant(Base):
+    __tablename__ = "study_access_grants"
+    __table_args__ = (
+        UniqueConstraint("study_id", "user_id", name="uq_study_user_access"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    study_id = Column(Integer, ForeignKey("study_metadata.id", ondelete="CASCADE"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+
+    # JSON of booleans, e.g. {"view": true, "add_data": true, "edit_study": false}
+    permissions = Column(JSON, nullable=False, default={"view": True, "add_data": True, "edit_study": False})
+
+    created_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    study = relationship("StudyMetadata", backref="access_grants")
+    user = relationship("User", foreign_keys=[user_id])
+    granted_by = relationship("User", foreign_keys=[created_by])
