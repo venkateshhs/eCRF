@@ -467,6 +467,7 @@
 
     <div class="modal-actions">
       <button class="btn-primary" @click="save" :disabled="isSaveDisabled">Save</button>
+      <button class="btn-option" @click="clearToInitial">Clear</button>
       <button class="btn-option" @click="$emit('closeConstraintsDialog')">Cancel</button>
     </div>
   </div>
@@ -499,6 +500,15 @@ export default {
     currentFieldType: { type: String, default: "text" },
     constraintsForm:  { type: Object, default: () => ({}) }
   },
+  created() {
+    // snapshot the state as it was when the dialog opened
+    this._initialSnapshot = {
+      local: JSON.parse(JSON.stringify(this.local)),
+      localOptions: JSON.parse(JSON.stringify(this.localOptions)),
+      optionsCount: this.optionsCount,
+      allowedFormatsText: this.allowedFormatsText
+    };
+    },
   data() {
     const base = this.constraintsForm || {};
     const type = (this.currentFieldType || "text").toLowerCase();
@@ -995,6 +1005,21 @@ export default {
         rightLabel: this.local.rightLabel || ""
       };
       this.$emit("updateConstraints", cleaned);
+    },
+    clearToInitial() {
+      const s = this._initialSnapshot;
+      if (!s) return;
+      // restore the original values from when dialog was opened
+      this.local = JSON.parse(JSON.stringify(s.local));
+      this.localOptions = JSON.parse(JSON.stringify(s.localOptions));
+      this.optionsCount = s.optionsCount;
+      this.allowedFormatsText = s.allowedFormatsText;
+
+      // clear transient editor inputs
+      this.chipInput = "";
+      this.markEditValue = null;
+      this.markEditLabel = "";
+      this.customMod = "";
     }
   }
 };
