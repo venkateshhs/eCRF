@@ -232,7 +232,7 @@ class SharedStudyDataEntryCreate(BaseModel):
     skipped_required_flags: Optional[List[List[bool]]] = None
 
 
-#this is to fecilitate when new user is being created and users cannot set thier role explicitely
+#this is to fecilitate when new user is being created and users cannot set their role explicitly
 #so in backend we are keeping it as Investigator as the default role
 class UserRegister(BaseModel):
     username: constr(min_length=3, max_length=50)
