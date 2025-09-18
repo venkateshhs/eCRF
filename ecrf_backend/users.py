@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from fastapi import status
 
 from . import schemas, models
-from .schemas import UserCreate, LoginRequest, UserResponse
+from .schemas import LoginRequest, UserResponse, UserRegister
 from .crud import get_user_by_username, create_user
 from .auth import hash_password, verify_password, create_access_token
 from .database import get_db
@@ -27,9 +27,8 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="users/login")
 logger.info("Its here.")
 router = APIRouter(prefix="/users", tags=["users"])
 
-
 @router.post("/register", response_model=UserResponse)
-def register_user(user_data: UserCreate, db: Session = Depends(get_db)):
+def register_user(user_data: UserRegister, db: Session = Depends(get_db)):
     logger.info("Attempting to register a new user.")
 
     # Check if user already exists
@@ -57,7 +56,8 @@ def register_user(user_data: UserCreate, db: Session = Depends(get_db)):
     profile = UserProfile(
         user_id=user.id,
         first_name=user_data.first_name,
-        last_name=user_data.last_name
+        last_name=user_data.last_name,
+        role="Investigator",
     )
     db.add(profile)  # Add the profile to the session
     db.commit()  # Commit the transaction
@@ -177,11 +177,13 @@ def get_current_user(authorization: str = Header(None), db: Session = Depends(ge
     dependencies=[Depends(get_current_user)]
 )
 def list_all_users(
+    db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
 ):
-    if current_user.profile.role != "Administrator":
+    role = (current_user.profile.role or "").strip()
+    if role not in ("Administrator", "Principal Investigator"):
         raise HTTPException(status_code=403, detail="Not allowed")
+
     users = db.query(User).all()
     return users
 

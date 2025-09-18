@@ -44,9 +44,9 @@
               <div class="meta-label">Description</div>
               <div class="meta-value">{{ studyMeta.study_description }}</div>
             </div>
-            <div class="meta-item" v-if="hasValue(studyMeta.created_by)">
+            <div class="meta-item" v-if="hasValue(studyMeta.created_by_display)">
               <div class="meta-label">Created By</div>
-              <div class="meta-value">{{ studyMeta.created_by }}</div>
+              <div class="meta-value">{{ studyMeta.created_by_display }}</div>
             </div>
             <div class="meta-item" v-if="hasValue(studyMeta.created_at)">
               <div class="meta-label">Created At</div>
@@ -123,7 +123,7 @@
               </div>
             </div>
 
-            <!-- NEW: Per-Subject Group mapping (PI/Admin only) -->
+            <!-- Per-Subject Group mapping (PI/Admin only) -->
             <div v-if="isPIOrAdmin" class="per-subject-block">
               <h4 class="per-subject-title">Per-Subject Group Assignment</h4>
               <div v-if="subjectAssignments.length" class="ps-table-wrap">
@@ -144,11 +144,10 @@
               </div>
               <div v-else class="empty-state">No subjects enrolled yet.</div>
             </div>
-            <!-- /NEW -->
           </div>
 
-          <!-- Edit Study -->
-          <div class="edit-row">
+          <!-- Edit Study (PI owner or Admin only) -->
+          <div class="edit-row" v-if="canEditStudy">
             <button class="btn-primary" @click="editStudy">Edit Study</button>
           </div>
         </div>
@@ -218,26 +217,141 @@
           </div>
         </div>
 
-        <!-- STUDY TEAM -->
+        <!-- STUDY TEAM (access table + grants) -->
         <div v-else-if="activeTab === 'team'">
           <h2 class="panel-title">Study Team</h2>
-          <div v-if="team && team.length" class="team-list">
-            <div v-for="(m, i) in team" :key="i" class="team-card">
-              <div class="team-name">{{ m.name || m.displayName || m.email || 'Team Member' }}</div>
-              <div class="team-role muted">{{ m.role || '—' }}</div>
-              <div class="team-contact">
-                <div v-if="m.email" class="contact-row">
-                  <span class="label">Email:</span>
-                  <a :href="'mailto:' + m.email">{{ m.email }}</a>
-                </div>
-                <div v-if="m.phone || m.phoneNumber" class="contact-row">
-                  <span class="label">Phone:</span>
-                  <a :href="'tel:' + (m.phone || m.phoneNumber)">{{ m.phone || m.phoneNumber }}</a>
+
+          <!-- ACCESS TABLE -->
+          <div class="subsection">
+            <h3 class="sub-title">Access for this Study</h3>
+
+            <div class="table-wrap">
+              <table class="access-table" aria-label="Study access">
+                <thead>
+                  <tr>
+                    <th>User</th>
+                    <th>Email</th>
+                    <th>Role</th>
+                    <th>Permissions</th>
+                    <th>Granted By</th>
+                    <th>Granted At</th>
+                    <th v-if="canManageAccess">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <!-- Owner row (always present) -->
+                  <tr class="owner-row">
+                    <td class="strong">
+                      {{ studyMeta.created_by_display || 'Owner' }}
+                      <span class="tag">Owner</span>
+                    </td>
+                    <td>{{ studyMeta.created_by_email || '—' }}</td>
+                    <td>PI / Admin</td>
+                    <td>
+                      <span class="pill ok">View</span>
+                      <span class="pill ok">Add data</span>
+                      <span class="pill ok">Edit study</span>
+                    </td>
+                    <td>System</td>
+                    <td>{{ formatDateTime(studyMeta.created_at) || '—' }}</td>
+                    <td v-if="canManageAccess">—</td>
+                  </tr>
+
+                  <!-- Explicit grants -->
+                  <tr v-for="g in accessList" :key="g.user_id">
+                    <td class="strong">{{ g.display_name || g.username || g.email || ('User#' + g.user_id) }}</td>
+                    <td>{{ g.email || '—' }}</td>
+                    <td>{{ prettyGrantRole(g.role) }}</td>
+                    <td>
+                      <span class="pill" :class="g.permissions?.view ? 'ok' : 'muted'">View</span>
+                      <span class="pill" :class="g.permissions?.add_data ? 'ok' : 'muted'">Add data</span>
+                      <span class="pill" :class="g.permissions?.edit_study ? 'ok' : 'muted'">Edit study</span>
+                    </td>
+                    <td>{{ g.granted_by_display || g.granted_by || '—' }}</td>
+                    <td>{{ formatDateTime(g.created_at) || '—' }}</td>
+                    <td v-if="canManageAccess">
+                      <button
+                          class="btn-link danger"
+                          :disabled="revokeBusy[g.user_id]"
+                          @click="openRevokeDialog(g)"
+                          title="Revoke access"
+                        >Revoke</button>
+                    </td>
+                  </tr>
+
+                  <tr v-if="!accessList.length">
+                    <td :colspan="canManageAccess ? 7 : 6" class="muted center">No additional users have access.</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+           <!-- Revoke confirm dialog -->
+            <div
+              v-if="confirm.visible"
+              class="modal-backdrop"
+              role="dialog"
+              aria-modal="true"
+              @click.self="cancelRevoke"
+            >
+              <div class="modal" @keydown.esc.prevent="cancelRevoke" tabindex="-1">
+                <h3 class="modal-title">Revoke access?</h3>
+                <p class="modal-text">
+                  This will remove access for
+                  <span class="strong">
+                    {{ confirm.target?.display_name || confirm.target?.email || ('User#' + confirm.target?.user_id) }}
+                  </span>.
+                </p>
+                <div class="modal-actions">
+                  <button class="btn-minimal" @click="cancelRevoke">Cancel</button>
+                  <button
+                    class="btn-primary danger"
+                    :disabled="revokeBusy[confirm.target?.user_id]"
+                    @click="confirmRevoke"
+                  >
+                    {{ revokeBusy[confirm.target?.user_id] ? 'Revoking…' : 'Revoke' }}
+                  </button>
                 </div>
               </div>
             </div>
+
+
+          <!-- GRANT FORM (owner PI or Admin only) -->
+          <div v-if="canManageAccess" class="subsection">
+            <h3 class="sub-title">Grant Access</h3>
+
+            <div class="grant-grid">
+              <div class="field">
+                <label class="label">Select User</label>
+                <select v-model="selectedUserId" class="input">
+                  <option value="" disabled>Select a user…</option>
+                  <option
+                    v-for="u in grantableUsers"
+                    :key="u.id"
+                    :value="u.id"
+                  >
+                    {{ userDisplay(u) }}
+                  </option>
+                </select>
+                <div class="help" v-if="!allUsers.length">No users found to grant.</div>
+              </div>
+
+              <!-- Future-proof: we keep a preset, but today we only allow Add Data -->
+              <div class="field">
+                <label class="label">Permission</label>
+                <select v-model="permissionPreset" class="input" disabled>
+                  <option value="data-entry">Add data only</option>
+                </select>
+                <div class="help">Adds the user with ability to submit data to this study; no editing.</div>
+              </div>
+
+              <div class="actions">
+                <button class="btn-primary" :disabled="!selectedUserId || granting" @click="grantAccess">
+                  {{ granting ? 'Granting…' : 'Grant Access' }}
+                </button>
+              </div>
+            </div>
           </div>
-          <div v-else class="empty-state">No team members defined for this study.</div>
         </div>
 
         <!-- VIEW DATA: Auto-redirect -->
@@ -260,11 +374,22 @@ export default {
   data() {
     return {
       studyId: this.$route.params.id,
-      studyMeta: {},
-      studyData: {},
-      team: [],
-      me: null,
 
+      // meta/content
+      studyMeta: {
+        id: null,
+        study_name: "",
+        study_description: "",
+        created_by_id: null,        // raw owner id
+        created_by_display: "",     // resolved human-friendly name
+        created_by_email: "",       // optional
+        created_at: "",
+        updated_at: "",
+      },
+      studyData: {},
+      me: null,
+      confirm: { visible: false, target: null },
+      // tabs
       activeTab: "meta",
       tabs: [
         { key: "meta", label: "Meta-data" },
@@ -273,11 +398,19 @@ export default {
         { key: "viewdata", label: "View Data" },
       ],
 
-      allFiles: [],             // raw from /studies/{id}/files
-
-      attachTempValue: [],      // bound to FieldFileUpload
-      pendingFiles: [],         // [{ key, file, description }]
+      // files
+      allFiles: [],
+      attachTempValue: [],
+      pendingFiles: [],
       uploading: false,
+
+      // access management
+      accessList: [],        // [{user_id, role, permissions: {view, add_data, edit_study}, granted_by, ...}]
+      allUsers: [],          // [{id, name, email, ...}]
+      selectedUserId: "",
+      permissionPreset: "data-entry",
+      granting: false,
+      revokeBusy: {},
     };
   },
   computed: {
@@ -302,21 +435,12 @@ export default {
       return this.objectEntriesFiltered(this.studyData.study);
     },
 
-    /**
-     * STRICT study-level filter:
-     * Only include DB rows whose file_path includes
-     *   /sub-unknown/ + /ses-unknown/ + /group-unknown/
-     * Disables any index-null heuristics (which could include everything).
-     */
+    // study-level files (strict)
     studyLevelFiles() {
       const arr = Array.isArray(this.allFiles) ? this.allFiles : [];
       return arr.filter((f) => {
         const p = String(f?.file_path || "");
-        return (
-          p.includes("/sub-unknown/") &&
-          p.includes("/ses-unknown/") &&
-          p.includes("/group-unknown/")
-        );
+        return p.includes("/sub-unknown/") && p.includes("/ses-unknown/") && p.includes("/group-unknown/");
       });
     },
 
@@ -324,37 +448,81 @@ export default {
       return this.$store.state.token;
     },
 
-    /** Role helpers */
+    // role helpers
     myRoleRaw() {
-      return (
-        (this.me && (this.me.profile?.role || this.me.role)) ||
-        ""
-      );
+      return (this.me && (this.me.profile?.role || this.me.role)) || "";
     },
     myRole() {
       return String(this.myRoleRaw).trim();
     },
-    isPIOrAdmin() {
+    isAdmin() {
+      return this.myRole.toLowerCase() === "administrator";
+    },
+    isPI() {
       const r = this.myRole.toLowerCase();
-      return r === "administrator" || r === "principal investigator" || r === "pi";
+      return r === "principal investigator" || r === "pi";
+    },
+    isPIOrAdmin() {
+      return this.isAdmin || this.isPI;
     },
 
-    /** Per-subject group assignment rows (subject id -> group name) */
+    // ownership + capabilities
+    isOwner() {
+      const meId = this.me?.id;
+      return meId != null && this.studyMeta.created_by_id != null && Number(meId) === Number(this.studyMeta.created_by_id);
+    },
+    canEditStudy() {
+      // Owner PI or Admin can edit
+      return this.isAdmin || this.isOwner;
+    },
+    canManageAccess() {
+      // Only Admin or Owner PI can grant/revoke
+      return this.isAdmin || this.isOwner;
+    },
+
+    // Per-subject group assignment table
     subjectAssignments() {
       const subs = this.subjects || [];
-      return subs.map((s) => ({
-        subjectId: s?.id || "",
-        groupName: s?.group || "",
-      }));
+      return subs.map((s) => ({ subjectId: s?.id || "", groupName: s?.group || "" }));
+    },
+
+    // users that can be granted (exclude owner, already granted, and self if already in)
+    grantableUsers() {
+      const grantedIds = new Set(this.accessList.map(g => g.user_id));
+      if (this.studyMeta.created_by_id != null) grantedIds.add(Number(this.studyMeta.created_by_id));
+      return (this.allUsers || [])
+        .filter(u => u && u.id != null && !grantedIds.has(Number(u.id)))
+        .sort((a, b) => this.userDisplay(a).localeCompare(this.userDisplay(b)));
     },
   },
   watch: {
     activeTab(val) {
       if (val === "viewdata") this.goViewData();
+      if (val === "team") {
+        // lazy load users/access when entering team tab
+        this.ensureAccessData();
+      }
     },
   },
   methods: {
-    // ------- relative dataset path helpers -------
+    // ---------- tiny helpers ----------
+    userDisplay(u) {
+      const firstLast = [u.first_name || u.profile?.first_name, u.last_name || u.profile?.last_name]
+        .filter(Boolean)
+        .join(" ")
+        .trim();
+      return u.name || u.full_name || firstLast || u.username || u.email || `User#${u.id}`;
+    },
+    prettyGrantRole(role) {
+      if (!role) return "Investigator";
+      const r = String(role).toLowerCase();
+      if (r.includes("investigator")) return "Investigator";
+      if (r.includes("principal") || r === "pi") return "PI";
+      if (r.includes("admin")) return "Admin";
+      return role;
+    },
+
+    // ---------- layout helpers ----------
     makeDatasetFolder(studyId, studyName) {
       const alnum = (s) => String(s || "").replace(/[^A-Za-z0-9]/g, "");
       const base = (studyName || `study${studyId}`).replace(/ /g, "");
@@ -422,13 +590,20 @@ export default {
     objectEntriesFiltered(obj) {
       return Object.entries(obj || {}).filter(([, v]) => this.hasValue(v));
     },
-    displayNameFromUser(u) {
-      if (!u) return "";
-      const firstLast = [u.first_name, u.last_name].filter(Boolean).join(" ").trim();
-      return u.name || u.full_name || firstLast || u.username || u.email || "";
-    },
 
-    // ------- data fetch -------
+    // ---------- data fetch ----------
+    async fetchMe() {
+      const token = this.token;
+      if (!token) return;
+      try {
+        const { data } = await axios.get("/users/me", {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        this.me = data || null;
+      } catch (e) {
+        console.warn("Failed to fetch /users/me:", e?.response?.data || e.message);
+      }
+    },
     async fetchUserNameById(userId) {
       const token = this.token;
       if (!token || userId == null) return null;
@@ -440,38 +615,7 @@ export default {
         const firstLast = [u?.profile?.first_name, u?.profile?.last_name].filter(Boolean).join(" ").trim();
         return u.name || u.full_name || firstLast || u.username || u.email || null;
       } catch (e) {
-        console.warn("fetchUserNameById failed:", e?.response?.data || e.message);
         return null;
-      }
-    },
-    resolveCreator(meta) {
-      const explicit =
-        meta.created_by_name ||
-        meta.created_by_full_name ||
-        meta.created_by_display ||
-        meta.created_by_username ||
-        meta.created_by_email;
-      if (explicit) return explicit;
-      if (this.me) {
-        const meName = this.displayNameFromUser(this.me);
-        const createdBy = meta.created_by != null ? String(meta.created_by) : "";
-        const meId = this.me.id != null ? String(this.me.id) : "";
-        if (createdBy && (createdBy === meId || createdBy === this.me.username || createdBy === this.me.email)) {
-          return meName || createdBy;
-        }
-      }
-      return meta.created_by || "-";
-    },
-    async fetchMe() {
-      const token = this.token;
-      if (!token) return;
-      try {
-        const { data } = await axios.get("/users/me", {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        this.me = data || null;
-      } catch (e) {
-        console.warn("Failed to fetch /me:", e?.response?.data || e.message);
       }
     },
     async fetchStudy() {
@@ -487,6 +631,8 @@ export default {
         );
         const sd = resp.data?.content?.study_data || {};
         const meta = resp.data?.metadata || {};
+
+        // resolve creator name/email
         let createdByDisplay =
           meta.created_by_name ||
           meta.created_by_full_name ||
@@ -499,17 +645,18 @@ export default {
           const resolved = await this.fetchUserNameById(meta.created_by);
           createdByDisplay = resolved || String(meta.created_by);
         }
+
         this.studyMeta = {
           id: meta.id,
           study_name: meta.study_name,
           study_description: meta.study_description,
+          created_by_id: meta.created_by,
+          created_by_display: createdByDisplay || "-",
+          created_by_email: meta.created_by_email || "",
           created_at: meta.created_at,
           updated_at: meta.updated_at,
-          created_by: createdByDisplay || "-",
         };
         this.studyData = sd || {};
-        const maybeTeam = sd.team || sd.studyTeam || sd.collaborators || [];
-        this.team = Array.isArray(maybeTeam) ? maybeTeam : [];
       } catch (e) {
         console.error("Failed to fetch study view:", e);
       }
@@ -528,11 +675,107 @@ export default {
       }
     },
 
-    // ------- nav -------
+    // ---------- access endpoints ----------
+    async ensureAccessData() {
+      // load users + access in parallel; safe to retry silently
+      await Promise.all([this.fetchAccessList(), this.fetchAllUsers()]);
+    },
+    async fetchAccessList() {
+      const token = this.token;
+      if (!token) return;
+      try {
+        const { data } = await axios.get(
+          `/forms/studies/${this.studyId}/access`,
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+        // expect array; normalize permissions object
+        const list = Array.isArray(data) ? data : (data?.items || []);
+        this.accessList = list.map((g) => ({
+          user_id: g.user_id,
+          role: g.role || "Investigator",
+          email: g.email || g.user_email || "",
+          username: g.username || "",
+          display_name: g.display_name || g.user_display || "",
+          granted_by: g.created_by,
+          granted_by_display: g.created_by_display || "",
+          created_at: g.created_at,
+          permissions: {
+            view: !!(g.permissions?.view ?? true),
+            add_data: !!(g.permissions?.add_data ?? true),
+            edit_study: !!(g.permissions?.edit_study ?? false),
+          },
+        }));
+      } catch (e) {
+        console.warn("fetchAccessList failed:", e?.response?.data || e.message);
+        this.accessList = [];
+      }
+    },
+    async fetchAllUsers() {
+      const token = this.token;
+      if (!token) return;
+      try {
+        // Adjust if your API uses a different listing endpoint
+        const { data } = await axios.get(
+          `/users/admin/users`,
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+        const arr = Array.isArray(data) ? data : (data?.items || []);
+        this.allUsers = arr;
+      } catch (e) {
+        console.warn("fetchAllUsers failed:", e?.response?.data || e.message);
+        this.allUsers = [];
+      }
+    },
+    async grantAccess() {
+      if (!this.selectedUserId) return;
+      this.granting = true;
+      const token = this.token;
+      try {
+        // Always "Add data only"
+        const payload = {
+          user_id: Number(this.selectedUserId),
+          role: "Investigator", // fixed per spec; future: allow PI/Admin
+          permissions: { view: true, add_data: true, edit_study: false },
+        };
+        await axios.post(
+          `/forms/studies/${this.studyId}/access`,
+          payload,
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+        this.selectedUserId = "";
+        await this.fetchAccessList();
+      } catch (e) {
+        console.error("grantAccess failed:", e?.response?.data || e.message);
+      } finally {
+        this.granting = false;
+      }
+    },
+    async revokeAccess(g) {
+      if (!g || g.user_id == null) return;
+      const token = this.token;
+      this.$set ? this.$set(this.revokeBusy, g.user_id, true) : (this.revokeBusy = { ...this.revokeBusy, [g.user_id]: true });
+      try {
+        await axios.delete(
+          `/forms/studies/${this.studyId}/access/${g.user_id}`,
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+        await this.fetchAccessList();
+      } catch (e) {
+        console.error("revokeAccess failed:", e?.response?.data || e.message);
+      } finally {
+        const next = { ...this.revokeBusy };
+        delete next[g.user_id];
+        this.revokeBusy = next;
+      }
+    },
+
+
+    // ---------- nav ----------
     goViewData() {
       this.$router.push({ name: "StudyDataDashboard", params: { id: this.studyId } });
     },
     async editStudy() {
+      // Guarded by canEditStudy
       localStorage.removeItem("setStudyDetails");
       localStorage.removeItem("scratchForms");
       const token = this.token;
@@ -547,10 +790,8 @@ export default {
         );
         const sd = resp.data.content?.study_data;
         const meta = resp.data.metadata || {};
-        if (!sd) {
-          console.error("Study content is empty");
-          return;
-        }
+        if (!sd) return;
+
         let assignments = Array.isArray(sd.assignments) ? sd.assignments : [];
         if (!assignments.length && sd.selectedModels?.length) {
           const m = sd.selectedModels.length;
@@ -603,7 +844,7 @@ export default {
       }
     },
 
-    // ------- attach handlers -------
+    // ---------- attach handlers ----------
     onAttachTempChange(val) {
       this.attachTempValue = Array.isArray(val) ? val : [];
     },
@@ -614,18 +855,12 @@ export default {
       const next = [];
       for (const f of arr) {
         const key = `${f.name}|${f.size}|${f.lastModified || ""}`;
-        if (!existing.has(key)) {
-          next.push({ key, file: f, description: "" });
-        }
+        if (!existing.has(key)) next.push({ key, file: f, description: "" });
       }
-      if (next.length) {
-        this.pendingFiles = this.pendingFiles.concat(next);
-      }
+      if (next.length) this.pendingFiles = this.pendingFiles.concat(next);
     },
     removePending(idx) {
-      if (idx >= 0 && idx < this.pendingFiles.length) {
-        this.pendingFiles.splice(idx, 1);
-      }
+      if (idx >= 0 && idx < this.pendingFiles.length) this.pendingFiles.splice(idx, 1);
     },
     async saveStudyAttachments() {
       if (!this.pendingFiles.length) return;
@@ -641,8 +876,7 @@ export default {
           fd.append("uploaded_file", item.file);
           fd.append("description", item.description || "");
           fd.append("storage_option", "local");
-          // Do NOT set indices ⇒ backend stores under sub-unknown/ses-unknown/group-unknown
-          fd.append("modalities_json", "[]");
+          fd.append("modalities_json", "[]"); // study-level
           await axios.post(
             `/forms/studies/${this.studyId}/files`,
             fd,
@@ -658,19 +892,40 @@ export default {
         this.uploading = false;
       }
     },
+    openRevokeDialog(g) {
+      this.confirm = { visible: true, target: g };
+      this.$nextTick(() => {
+        try {
+          const el = this.$el.querySelector('.modal');
+          el && el.focus();
+        } catch (err) {
+      console.warn('openRevokeDialog: failed to focus modal', err);
+    }
+      });
+    },
+    cancelRevoke() {
+      this.confirm = { visible: false, target: null };
+    },
+    async confirmRevoke() {
+      const g = this.confirm.target;
+      if (!g) return;
+      await this.revokeAccess(g); // runs without window.confirm
+      this.cancelRevoke();
+    },
+
   },
   async mounted() {
-    this.scrollToTop();
+    this.scrollToTop?.();
     await this.fetchMe();
     await this.fetchStudy();
     await this.fetchStudyFiles();
   },
   beforeRouteEnter(to, from, next) {
-    next((vm) => vm.scrollToTop());
+    next((vm) => vm.scrollToTop?.());
   },
   beforeRouteUpdate(to, from, next) {
     this.studyId = to.params.id;
-    this.scrollToTop();
+    this.scrollToTop?.();
     Promise.resolve()
       .then(() => this.fetchStudy())
       .then(() => this.fetchStudyFiles())
@@ -680,7 +935,7 @@ export default {
 </script>
 
 <style scoped>
-/* Typography base for consistency */
+/* Typography base */
 :host, * {
   font-family: "Inter", system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial, sans-serif;
   letter-spacing: 0.1px;
@@ -703,11 +958,7 @@ export default {
   position: absolute;
   left: 0; top: 50%; transform: translateY(-50%);
 }
-.title-wrap {
-  grid-column: 2 / 3;
-  min-width: 0;
-  text-align: center;
-}
+.title-wrap { grid-column: 2 / 3; min-width: 0; text-align: center; }
 .sv-title { margin: 0; font-size: 22px; font-weight: 800; color: #111827; }
 .sv-subtitle { margin: 6px 0 0; color: #6b7280; }
 .header-spacer { width: 56px; height: 1px; }
@@ -734,8 +985,6 @@ export default {
 
 /* Panel */
 .v-panel { padding: 18px 20px; }
-
-/* Panel title */
 .panel-title { margin: 4px 0 12px; font-size: 16px; font-weight: 700; }
 
 /* Subsections */
@@ -745,9 +994,7 @@ export default {
 /* Meta grid */
 .meta-grid { display: grid; grid-template-columns: repeat(2, minmax(220px, 1fr)); gap: 12px; }
 .meta-item { border: 1px solid #f1f1f1; border-radius: 10px; padding: 10px 12px; background: #fff; }
-.meta-label {
-  font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; color: #6b7280; margin-bottom: 6px;
-}
+.meta-label { font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; color: #6b7280; margin-bottom: 6px; }
 .meta-value { font-size: 14px; color: #111827; word-break: break-word; }
 .monospace { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; }
 
@@ -761,10 +1008,7 @@ export default {
 .list-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); gap: 10px; }
 .list-card { border: 1px solid #f1f1f1; border-radius: 12px; padding: 10px; background: #fff; }
 .list-card .kv-row {
-  display: grid;
-  grid-template-columns: minmax(120px, 220px) 1fr;
-  gap: 8px;
-  align-items: start;
+  display: grid; grid-template-columns: minmax(120px, 220px) 1fr; gap: 8px; align-items: start;
 }
 
 /* per-subject table */
@@ -783,24 +1027,11 @@ export default {
 .doc-meta { font-size: 12px; margin: 6px 0 8px; color: #6b7280; }
 .doc-desc { margin-top: 4px; font-size: 13px; color: #374151; }
 
-.doc-path {
-  margin-top: 6px;
-  font-size: 12px;
-  color: #6b7280;
-  display: flex;
-  gap: 6px;
-  align-items: flex-start;
-}
-.doc-path .label {
-  flex: 0 0 auto;
-  color: #6b7280;
-}
+.doc-path { margin-top: 6px; font-size: 12px; color: #6b7280; display: flex; gap: 6px; align-items: flex-start; }
+.doc-path .label { flex: 0 0 auto; color: #6b7280; }
 .doc-path .file-path {
-  flex: 1 1 auto;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
-  word-break: break-word;
-  overflow-wrap: anywhere;
-  white-space: normal;
+  flex: 1 1 auto; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  word-break: break-word; overflow-wrap: anywhere; white-space: normal;
 }
 
 /* Attach */
@@ -816,11 +1047,7 @@ export default {
 .icon-inline { border:none; background:transparent; padding:6px; border-radius:8px; cursor:pointer; }
 .icon-inline.danger { color:#b91c1c; }
 .pi-desc-label { font-size: 12px; color: #6b7280; }
-.pi-desc-input {
-  width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 8px;
-  font-size: 14px; box-sizing: border-box;
-}
-
+.pi-desc-input { width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 14px; box-sizing: border-box; }
 .attach-actions { margin-top: 10px; }
 
 /* Buttons */
@@ -839,27 +1066,60 @@ export default {
 .btn-minimal:hover { background: #e8e8e8; color: #000; border-color: #d6d6d6; }
 .edit-row { margin-top: 16px; }
 
-/* Empty */
+/* Empty + util */
 .empty-state { color: #6b7280; }
+.center { text-align: center; }
+.strong { font-weight: 600; }
+.muted { color: #6b7280; }
 
-@media (max-width: 520px) {
-  .list-card .kv-row {
-    grid-template-columns: 1fr;
-  }
-  .list-card .kv-key {
-    margin-bottom: 4px;
-  }
+/* Access table */
+.table-wrap { overflow: auto; border: 1px solid #f1f1f1; border-radius: 12px; background: #fff; }
+.access-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.access-table th, .access-table td { padding: 10px 12px; border-bottom: 1px solid #f6f6f6; text-align: left; }
+.access-table thead th { background: #fafafe; color: #374151; font-weight: 600; }
+.access-table tr:last-child td { border-bottom: none; }
+.owner-row { background: #fcfcff; }
+.pill {
+  display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 12px; margin-right: 6px;
+  border: 1px solid #e5e7eb; color: #6b7280; background: #fff;
 }
+.pill.ok { color: #065f46; background: #ecfdf5; border-color: #a7f3d0; }
+.pill.muted { color: #6b7280; background: #f9fafb; }
+.tag {
+  margin-left: 8px; font-size: 11px; border-radius: 6px; padding: 2px 6px;
+  background: #eef2ff; color: #3538cd; border: 1px solid #e0e7ff;
+}
+.btn-link {
+  background: transparent; border: none; padding: 0; cursor: pointer; text-decoration: underline;
+}
+.btn-link.danger { color: #b91c1c; }
 
-/* Responsive */
-@media (max-width: 980px) {
-  .card { grid-template-columns: 200px 1fr; }
+/* Grant form */
+.grant-grid {
+  display: grid; grid-template-columns: repeat(3, minmax(180px, 1fr)); gap: 12px; align-items: end;
+  background: #fff; border: 1px solid #f1f1f1; border-radius: 12px; padding: 12px;
 }
-@media (max-width: 760px) {
-  .card { grid-template-columns: 1fr; }
-  .v-tabs { flex-direction: row; border-right: 0; border-bottom: 1px solid #f0f0f6; }
-  .v-tab { flex: 1; text-align: center; }
-  .meta-grid { grid-template-columns: 1fr; }
-  .kv-row { grid-template-columns: 140px 1fr; }
+.field { display: flex; flex-direction: column; gap: 6px; }
+.label { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: #6b7280; }
+.input {
+  width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 14px; box-sizing: border-box;
+  background: #fff;
 }
+.help { font-size: 12px; color: #6b7280; }
+.actions { display: flex; gap: 8px; }
+/* Modal */
+.modal-backdrop {
+  position: fixed; inset: 0; background: rgba(0,0,0,.35);
+  display: flex; align-items: center; justify-content: center; z-index: 1000;
+}
+.modal {
+  background: #fff; border-radius: 12px; padding: 16px; width: 100%; max-width: 420px;
+  box-shadow: 0 10px 30px rgba(0,0,0,.15); outline: none;
+}
+.modal-title { margin: 0 0 8px; font-size: 16px; font-weight: 700; color: #111827; }
+.modal-text { margin: 0 0 14px; color: #374151; font-size: 14px; }
+.modal-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.btn-primary.danger { background: #b91c1c; border-color: #a11a1a; }
+.btn-primary.danger:hover { background: #991b1b; }
+
 </style>

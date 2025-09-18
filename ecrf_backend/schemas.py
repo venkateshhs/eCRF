@@ -205,3 +205,38 @@ class PaginatedStudyDataEntries(BaseModel):
     entries: List[StudyDataEntryOut]
     class Config:
         from_attributes = True
+
+
+class StudyAccessGrantCreate(BaseModel):
+    user_id: int
+    role: Optional[str] = None   # optional, for display only
+    permissions: Optional[Dict[str, bool]] = None  # defaults applied server-side
+
+class StudyAccessGrantOut(BaseModel):
+    user_id: int
+    role: Optional[str] = None
+    email: Optional[EmailStr] = None
+    username: Optional[str] = None
+    display_name: Optional[str] = None
+    created_by: Optional[int] = None
+    created_by_display: Optional[str] = None
+    created_at: datetime
+    permissions: Dict[str, bool]
+
+    class Config:
+        from_attributes = True
+
+
+class SharedStudyDataEntryCreate(BaseModel):
+    data: List[Any]
+    skipped_required_flags: Optional[List[List[bool]]] = None
+
+
+#this is to fecilitate when new user is being created and users cannot set thier role explicitely
+#so in backend we are keeping it as Investigator as the default role
+class UserRegister(BaseModel):
+    username: constr(min_length=3, max_length=50)
+    email: EmailStr
+    password: constr(min_length=8)
+    first_name: constr(min_length=1, max_length=50)
+    last_name: constr(min_length=1, max_length=50)
