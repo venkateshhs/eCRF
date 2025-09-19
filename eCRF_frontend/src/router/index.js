@@ -10,7 +10,7 @@ import StudyDataEntryComponent from "../components/StudyDataEntryComponent.vue";
 import StudyCreationComponent from "../components/StudyCreationComponent.vue";
 //import YamlViewerComponent from "../components/YamlViewerComponent.vue";
 import StudySettings from "../components/StudySettings.vue";
-import SavedStudyView         from '../components/SavedStudyView.vue'
+//import SavedStudyView         from '../components/SavedStudyView.vue'
 //import SharedFormComponent from '../components/SharedFormComponent.vue'
 //import StudyDataEntryComponent from '../components/DataEntryComponent.vue'
 import StudyView from '@/components/StudyView.vue';
@@ -44,11 +44,6 @@ const routes = [
     path: "/studies/:id",
     name: "StudyDetail",
     component: StudyDataEntryComponent,
-  },
-  {
-    path: '/saved-study',
-    name: 'SavedStudyView',
-    component: SavedStudyView
   },
   {
       path: "/settings",
