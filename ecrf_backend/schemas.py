@@ -95,12 +95,19 @@ class FileBase(BaseModel):
 
 class FileCreate(FileBase):
     study_id: int
+    # NEW
+    subject_index: Optional[int] = None
+    visit_index: Optional[int] = None
+    group_index: Optional[int] = None
 
 
 class FileOut(FileBase):
     id: int
     study_id: int
     created_at: datetime
+    subject_index: Optional[int] = None
+    visit_index: Optional[int] = None
+    group_index: Optional[int] = None
 
     class Config:
         from_attributes = True

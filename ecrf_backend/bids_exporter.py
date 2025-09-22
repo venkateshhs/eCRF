@@ -8,6 +8,7 @@ import pathlib
 import shutil
 from datetime import datetime
 from typing import Dict, List, Tuple, Optional, Any
+from urllib.parse import urlparse
 
 from filelock import FileLock
 
@@ -56,6 +57,16 @@ FIXED_ENTRY_HEADERS = [
 ]
 
 # -------------------- FS / I/O utils --------------------
+def _safe_name(candidate: str) -> str:
+    # keep user’s name; only strip path separators and trim whitespace
+    return (candidate or "file").replace("/", "_").replace("\\", "_").strip()
+
+def _choose_candidate_name(source_path: Optional[str], url: Optional[str], filename: Optional[str]) -> str:
+    if filename and filename.strip():
+        return _safe_name(filename)
+    if url:
+        return _safe_name(os.path.basename(urlparse(url).path) or "link")
+    return _safe_name(os.path.basename(source_path or "file"))
 
 def _ensure_dir(p: str) -> None:
     pathlib.Path(p).mkdir(parents=True, exist_ok=True)
@@ -799,18 +810,19 @@ def stage_file_for_modalities(
         # Mirror into dataset-level metadata directory
         target_dir = os.path.join(dataset_path, "metadata")
         _ensure_dir(target_dir)
+        candidate = _choose_candidate_name(source_path, url, filename)
 
         if source_path:
-            base_name = os.path.basename(source_path)
-            target_path = os.path.join(target_dir, base_name)
+            target_path = os.path.join(target_dir, candidate)
             try:
                 shutil.copy2(source_path, target_path)
                 written.append(target_path)
             except Exception as e:
                 logger.error("BIDS mirror (study-level) copy failed: %s -> %s (%s)", source_path, target_path, e)
+
         elif url:
-            base = os.path.splitext(filename or "link")[0] if filename else "link"
-            target_path = os.path.join(target_dir, f"{base}.txt")
+            stem = os.path.splitext(candidate)[0]  # keep user/URL stem, write .txt sidecar with link
+            target_path = os.path.join(target_dir, f"{stem}.txt")
             try:
                 with open(target_path, "w", encoding="utf-8") as f:
                     f.write(url.strip() + "\n")
@@ -862,19 +874,19 @@ def stage_file_for_modalities(
         target_dir = os.path.join(base_dir, mod_folder)
         _ensure_dir(target_dir)
 
+        candidate = _choose_candidate_name(source_path, url, filename)
+
         if source_path:
-            # copy local file
-            base_name = os.path.basename(source_path)
-            target_path = os.path.join(target_dir, base_name)
+            target_path = os.path.join(target_dir, candidate)
             try:
                 shutil.copy2(source_path, target_path)
                 written.append(target_path)
             except Exception as e:
                 logger.error("BIDS mirror copy failed: %s -> %s (%s)", source_path, target_path, e)
+
         elif url:
-            # write URL file
-            base = os.path.splitext(filename or "link")[0] if filename else "link"
-            target_path = os.path.join(target_dir, f"{base}.txt")
+            stem = os.path.splitext(candidate)[0]
+            target_path = os.path.join(target_dir, f"{stem}.txt")
             try:
                 _ensure_dir(os.path.dirname(target_path))
                 with open(target_path, "w", encoding="utf-8") as f:

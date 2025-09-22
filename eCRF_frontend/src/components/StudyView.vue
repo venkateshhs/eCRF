@@ -446,11 +446,11 @@ export default {
     // study-level files (strict)
     studyLevelFiles() {
       const arr = Array.isArray(this.allFiles) ? this.allFiles : [];
-      return arr.filter((f) => {
-        const p = String(f?.file_path || "");
-        return p.includes("/sub-unknown/") && p.includes("/ses-unknown/") && p.includes("/group-unknown/");
-      });
+      return arr.filter(f =>
+        f.subject_index == null && f.visit_index == null && f.group_index == null
+      );
     },
+
 
     token() {
       return this.$store.state.token;

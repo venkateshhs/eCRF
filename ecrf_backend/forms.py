@@ -326,7 +326,10 @@ def upload_file(
             file_name=uploaded_file.filename,
             file_path=uploaded_file.filename,   # logical reference; actual path is within BIDS dataset
             description=description,
-            storage_option="bids"
+            storage_option="bids",
+            subject_index=subject_index,
+            visit_index=visit_index,
+            group_index=group_index,
         )
         db_file = crud.create_file(db, file_data)
 
@@ -793,6 +796,9 @@ def shared_upload_file(
             file_path=uploaded_file.filename,
             description=description,
             storage_option="bids",
+            subject_index=access.subject_index,
+            visit_index=access.visit_index,
+            group_index=access.group_index,
         )
         db_file = crud.create_file(db, file_data)
         return db_file
@@ -851,6 +857,9 @@ def shared_create_url_file(
             file_path=url,
             description=description,
             storage_option="url",
+            subject_index=access.subject_index,
+            visit_index=access.visit_index,
+            group_index=access.group_index,
         )
         db_file = crud.create_file(db, file_data)
     except Exception as e:
