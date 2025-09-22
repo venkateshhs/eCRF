@@ -435,7 +435,6 @@ def _compute_entry_status(study_data: dict, entry: Dict[str, Any]) -> str:
     return "partial"
 
 # -------------------- Public: write eCRF/entries.tsv --------------------
-
 def write_entry_to_bids(
     study_id: int,
     study_name: str,
@@ -488,7 +487,7 @@ def write_entry_to_bids(
 
     # Data columns from catalog
     data_cols: Dict[str, str] = {}
-    fields_changed: List[str] = []  # for audit trail (no values)
+    written_fields: List[str] = []  # names written this call (no values)
     for item in catalog:
         sIdx = int(item["sIdx"])
         fIdx = int(item["fIdx"])
@@ -506,7 +505,7 @@ def write_entry_to_bids(
             else:
                 data_cols[col] = str(val)
             # record field name only (no values) for changes.txt
-            fields_changed.append(col)
+            written_fields.append(col)
 
     new_row = {**base_row, **data_cols}
 
@@ -522,8 +521,12 @@ def write_entry_to_bids(
     # Upsert by entry_id
     entry_id_str = str(entry.get("id"))
     updated = False
+
+    # snapshot previous row BEFORE mutation to detect actual changes ---
+    prev_row = None
     for row in rows:
         if row.get("entry_id") == entry_id_str:
+            prev_row = dict(row)  # snapshot for diffing later
             # refresh fixed, then all catalog cols; drop legacy
             for k in FIXED_ENTRY_HEADERS:
                 row[k] = new_row.get(k, row.get(k))
@@ -599,7 +602,19 @@ def write_entry_to_bids(
 
     _datalad_save(dataset_path, msg=f"Upsert eCRF entry {entry_id_str} for {participant_id} (visit={visit_name}, status={status})")
 
-    # ------ NEW: append audit line to metadata/changes.txt (no data values) ------
+    # compute actual changed fields (vs. merely written)
+    if prev_row is None:
+        fields_changed = list(written_fields)  # brand new entry: everything we wrote is a change
+    else:
+        fields_changed = []
+        for col in written_fields:  # compare only the form fields we touched in this call
+            prev_val = "" if prev_row.get(col) is None else str(prev_row.get(col))
+            new_val  = "" if new_row.get(col)  is None else str(new_row.get(col))
+            if prev_val != new_val:
+                fields_changed.append(col)
+    # --------------------------------------------------------------------
+
+    # append audit line to metadata/changes.txt (no data values) ------
     try:
         _append_change_line(
             study_id=study_id,
@@ -612,7 +627,7 @@ def write_entry_to_bids(
                 "entry_id": entry_id_str,
                 "status": status,
                 "fields_count": len(fields_changed),
-                "fields": fields_changed,  # names only
+                "fields": fields_changed,  # names only; now ONLY those whose values changed
                 "actor": actor or "",
             },
         )
