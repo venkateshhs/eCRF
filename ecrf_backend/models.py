@@ -68,6 +68,10 @@ class File(Base):
     storage_option = Column(String(50))  # e.g., 'local' or 'db'
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
+    subject_index = Column(Integer, nullable=True)
+    visit_index = Column(Integer, nullable=True)
+    group_index = Column(Integer, nullable=True)
+
 """
 Table for user settings/configuration
 """

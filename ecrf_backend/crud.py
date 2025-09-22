@@ -96,13 +96,7 @@ def update_study(db: Session, study_id: int, metadata_update: schemas.StudyMetad
 
 def create_file(db: Session, file_data: schemas.FileCreate):
     try:
-        db_file = models.File(
-            study_id=file_data.study_id,
-            file_name=file_data.file_name,
-            file_path=file_data.file_path,
-            description=file_data.description,
-            storage_option=file_data.storage_option
-        )
+        db_file = models.File(**file_data.model_dump())
         db.add(db_file)
         db.commit()
         db.refresh(db_file)
