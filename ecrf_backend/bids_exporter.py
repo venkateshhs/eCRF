@@ -442,6 +442,7 @@ def write_entry_to_bids(
     study_description: Optional[str],
     study_data: dict,
     entry: Dict[str, Any],
+    actor: Optional[str] = None,  # NEW: for audit trail (who performed the change)
 ) -> str:
     """
     Upsert a row for a saved data entry into eCRF/entries.tsv with:
@@ -487,6 +488,7 @@ def write_entry_to_bids(
 
     # Data columns from catalog
     data_cols: Dict[str, str] = {}
+    fields_changed: List[str] = []  # for audit trail (no values)
     for item in catalog:
         sIdx = int(item["sIdx"])
         fIdx = int(item["fIdx"])
@@ -503,6 +505,8 @@ def write_entry_to_bids(
                 data_cols[col] = "No"
             else:
                 data_cols[col] = str(val)
+            # record field name only (no values) for changes.txt
+            fields_changed.append(col)
 
     new_row = {**base_row, **data_cols}
 
@@ -594,6 +598,28 @@ def write_entry_to_bids(
         _write_csv_mirror_from_tsv(sub_tsv)
 
     _datalad_save(dataset_path, msg=f"Upsert eCRF entry {entry_id_str} for {participant_id} (visit={visit_name}, status={status})")
+
+    # ------ NEW: append audit line to metadata/changes.txt (no data values) ------
+    try:
+        _append_change_line(
+            study_id=study_id,
+            study_name=study_name,
+            action="entry_upsert",
+            detail={
+                "participant_id": participant_id,
+                "visit_name": visit_name,
+                "group_name": group_name or "",
+                "entry_id": entry_id_str,
+                "status": status,
+                "fields_count": len(fields_changed),
+                "fields": fields_changed,  # names only
+                "actor": actor or "",
+            },
+        )
+    except Exception as e:
+        logger.error("Failed to append entry_upsert to changes.txt: %s", e)
+    # -----------------------------------------------------------------------------
+
     logger.info(
         "BIDS eCRF written: %s (entry_id=%s, participant=%s, visit=%s, status=%s)",
         tsv_path, entry_id_str, participant_id, visit_name, status
@@ -700,9 +726,6 @@ def _rebuild_participants_tsv(dataset_path: str, study_data: dict) -> None:
     _write_csv_mirror_from_tsv(tsv_path)
     _datalad_save(dataset_path, msg="Update participants.tsv meta")
 
-
-
-
 def _session_folder(study_data: dict, visit_index: Optional[int]) -> Optional[str]:
     """
     Returns 'ses-XX' if multiple sessions/visits exist, else None.
@@ -721,6 +744,7 @@ def _normalize_modality(mod: str) -> str:
     m = (mod or "").strip().lower()
     m = _normalize_token(m)
     return m or "misc"
+
 def stage_file_for_modalities(
     study_id: int,
     study_name: str,
@@ -732,6 +756,7 @@ def stage_file_for_modalities(
     source_path: Optional[str],
     url: Optional[str],
     filename: Optional[str] = None,
+    actor: Optional[str] = None,  # NEW: for audit trail (who performed the change)
 ) -> List[str]:
     """
     Mirror a local upload or URL into the BIDS dataset.
@@ -780,6 +805,20 @@ def stage_file_for_modalities(
 
         if written:
             _datalad_save(dataset_path, msg="Mirror study-level document(s) into metadata/")
+            # NEW: changes.txt line
+            try:
+                _append_change_line(
+                    study_id=study_id,
+                    study_name=study_name,
+                    action="file_mirrored_study_level",
+                    detail={
+                        "targets": [os.path.relpath(p, dataset_path) for p in written],
+                        "filename": filename or "",
+                        "actor": actor or "",
+                    },
+                )
+            except Exception as e:
+                logger.error("Failed to append study-level file_mirrored to changes.txt: %s", e)
         logger.info("BIDS mirror (study-level) written: %s", written)
         return written
 
@@ -801,7 +840,7 @@ def stage_file_for_modalities(
     ses_folder = _session_folder(study_data, visit_index)
     base_dir = os.path.join(sub_dir, ses_folder) if ses_folder else sub_dir
 
-    written: List[str] = []
+    written = []
 
     for mod in modalities:
         mod_folder = _normalize_modality(mod)
@@ -831,6 +870,158 @@ def stage_file_for_modalities(
 
     if written:
         _datalad_save(dataset_path, msg=f"Mirror files/links for sub-{_alnum(sub_label_num)} (visit={visit_index})")
+        # NEW: changes.txt line
+        try:
+            _append_change_line(
+                study_id=study_id,
+                study_name=study_name,
+                action="file_mirrored",
+                detail={
+                    "participant_id": f"sub-{_alnum(sub_label_num)}",
+                    "session": _session_folder(study_data, visit_index),
+                    "modalities": modalities,
+                    "targets": [os.path.relpath(p, dataset_path) for p in written],
+                    "filename": filename or "",
+                    "actor": actor or "",
+                },
+            )
+        except Exception as e:
+            logger.error("Failed to append file_mirrored to changes.txt: %s", e)
 
     logger.info("BIDS mirror written: %s", written)
     return written
+
+# -------------------- NEW: Study Access CSV + changes.txt helpers --------------------
+
+def _changes_file_path(study_id: int, study_name: Optional[str]) -> str:
+    dataset_path = _dataset_path(study_id, study_name)
+    metadata_dir = os.path.join(dataset_path, "metadata")
+    _ensure_dir(metadata_dir)
+    return os.path.join(metadata_dir, "changes.txt")
+
+def _study_access_csv_path(study_id: int, study_name: Optional[str]) -> str:
+    dataset_path = _dataset_path(study_id, study_name)
+    metadata_dir = os.path.join(dataset_path, "metadata")
+    _ensure_dir(metadata_dir)
+    return os.path.join(metadata_dir, "Study Access.csv")
+
+def _append_change_line(study_id: int, study_name: Optional[str], action: str, detail: Dict[str, Any]) -> None:
+    """
+    Append a single structured line to metadata/changes.txt.
+    The format is machine-readable JSON per line, prefixed with ISO timestamp.
+    Values must not include actual data values from eCRF—only metadata/field names.
+    """
+    path = _changes_file_path(study_id, study_name)
+    payload = {
+        "ts": datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "action": action,
+        "study_name": (study_name or ""),
+        **detail,
+    }
+    lock = FileLock(path + ".lock")
+    _ensure_dir(os.path.dirname(path))
+    with lock:
+        with open(path, "a", encoding="utf-8") as f:
+            # One JSON object per line to keep it greppable/append-only
+            f.write(json.dumps(payload, ensure_ascii=False) + "\n")
+
+def append_study_access_audit(
+    study_id: int,
+    study_name: Optional[str],
+    action: str,  # "granted" | "updated" | "revoked"
+    actor_id: int,
+    actor_name: str,
+    target_user_id: int,
+    target_user_email: str,
+    target_user_display: str,
+    permissions: Dict[str, Any],
+) -> None:
+    """
+    Append (and create if needed) "Study Access.csv" under metadata/ with a full audit of access changes.
+    Columns:
+      timestamp, action, actor_id, actor_name, target_user_id, target_user_display, target_user_email,
+      permissions_view, permissions_add_data, permissions_edit_study
+    """
+    path = _study_access_csv_path(study_id, study_name)
+    headers = [
+        "timestamp",
+        "action",
+        "actor_id",
+        "actor_name",
+        "target_user_id",
+        "target_user_display",
+        "target_user_email",
+        "permissions_view",
+        "permissions_add_data",
+        "permissions_edit_study",
+    ]
+    _ensure_dir(os.path.dirname(path))
+    lock = FileLock(path + ".lock")
+    with lock:
+        write_header = not os.path.exists(path)
+        with open(path, "a", newline="", encoding="utf-8") as f:
+            w = csv.DictWriter(f, fieldnames=headers)
+            if write_header:
+                w.writeheader()
+            w.writerow({
+                "timestamp": datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "action": action,
+                "actor_id": actor_id,
+                "actor_name": actor_name or "",
+                "target_user_id": target_user_id,
+                "target_user_display": target_user_display or "",
+                "target_user_email": target_user_email or "",
+                "permissions_view": bool((permissions or {}).get("view", True)),
+                "permissions_add_data": bool((permissions or {}).get("add_data", True)),
+                "permissions_edit_study": bool((permissions or {}).get("edit_study", False)),
+            })
+
+def log_access_change_to_changes(
+    study_id: int,
+    study_name: Optional[str],
+    action: str,  # "access_granted" | "access_updated" | "access_revoked"
+    actor_id: int,
+    actor_name: str,
+    target_user_id: int,
+    target_user_display: str,
+    permissions: Dict[str, Any],
+) -> None:
+    """
+    Mirror the access change into metadata/changes.txt (without sensitive data beyond identities/roles).
+    """
+    _append_change_line(
+        study_id=study_id,
+        study_name=study_name,
+        action=action,
+        detail={
+            "actor": f"{actor_name} (id={actor_id})",
+            "target_user_id": target_user_id,
+            "target_user_display": target_user_display,
+            "permissions": {
+                "view": bool((permissions or {}).get("view", True)),
+                "add_data": bool((permissions or {}).get("add_data", True)),
+                "edit_study": bool((permissions or {}).get("edit_study", False)),
+            },
+        },
+    )
+
+def log_dataset_change_to_changes(
+    study_id: int,
+    study_name: Optional[str],
+    action: str,  # e.g., "dataset_initialized", "dataset_structure_updated"
+    actor_id: Optional[int] = None,
+    actor_name: Optional[str] = None,
+    detail: Optional[str] = None,
+) -> None:
+    """
+    Generic dataset-level change logger (e.g., called from forms after upsert_bids_dataset).
+    """
+    _append_change_line(
+        study_id=study_id,
+        study_name=study_name,
+        action=action,
+        detail={
+            "actor": (f"{actor_name} (id={actor_id})" if actor_id is not None else ""),
+            "detail": detail or "",
+        },
+    )
