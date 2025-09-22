@@ -28,7 +28,7 @@
       <section class="v-panel">
         <!-- META-DATA -->
         <div v-if="activeTab === 'meta'">
-          <h2 class="panel-title">Meta-data</h2>
+          <h2 class="panel-title center">Meta-data</h2>
 
           <!-- Core meta (only show fields that have values) -->
           <div class="meta-grid">
@@ -154,7 +154,7 @@
 
         <!-- DOCUMENTS -->
         <div v-else-if="activeTab === 'docs'">
-          <h2 class="panel-title">Study Documents</h2>
+          <h2 class="panel-title center">Study Documents</h2>
 
           <!-- Existing Study Attachments -->
           <h3 class="sub-title">Existing Study Attachments</h3>
@@ -217,9 +217,9 @@
           </div>
         </div>
 
-        <!-- STUDY TEAM (access table + grants) -->
+        <!-- SETTINGS / ACCESS MANAGEMENT -->
         <div v-else-if="activeTab === 'team'">
-          <h2 class="panel-title">Study Team</h2>
+          <h2 class="panel-title center">Study Access Management</h2>
 
           <!-- ACCESS TABLE -->
           <div class="subsection">
@@ -286,35 +286,35 @@
               </table>
             </div>
           </div>
-           <!-- Revoke confirm dialog -->
-            <div
-              v-if="confirm.visible"
-              class="modal-backdrop"
-              role="dialog"
-              aria-modal="true"
-              @click.self="cancelRevoke"
-            >
-              <div class="modal" @keydown.esc.prevent="cancelRevoke" tabindex="-1">
-                <h3 class="modal-title">Revoke access?</h3>
-                <p class="modal-text">
-                  This will remove access for
-                  <span class="strong">
-                    {{ confirm.target?.display_name || confirm.target?.email || ('User#' + confirm.target?.user_id) }}
-                  </span>.
-                </p>
-                <div class="modal-actions">
-                  <button class="btn-minimal" @click="cancelRevoke">Cancel</button>
-                  <button
-                    class="btn-primary danger"
-                    :disabled="revokeBusy[confirm.target?.user_id]"
-                    @click="confirmRevoke"
-                  >
-                    {{ revokeBusy[confirm.target?.user_id] ? 'Revoking…' : 'Revoke' }}
-                  </button>
-                </div>
+
+          <!-- Revoke confirm dialog -->
+          <div
+            v-if="confirm.visible"
+            class="modal-backdrop"
+            role="dialog"
+            aria-modal="true"
+            @click.self="cancelRevoke"
+          >
+            <div class="modal" @keydown.esc.prevent="cancelRevoke" tabindex="-1">
+              <h3 class="modal-title">Revoke access?</h3>
+              <p class="modal-text">
+                This will remove access for
+                <span class="strong">
+                  {{ confirm.target?.display_name || confirm.target?.email || ('User#' + confirm.target?.user_id) }}
+                </span>.
+              </p>
+              <div class="modal-actions">
+                <button class="btn-minimal" @click="cancelRevoke">Cancel</button>
+                <button
+                  class="btn-primary danger"
+                  :disabled="revokeBusy[confirm.target?.user_id]"
+                  @click="confirmRevoke"
+                >
+                  {{ revokeBusy[confirm.target?.user_id] ? 'Revoking…' : 'Revoke' }}
+                </button>
               </div>
             </div>
-
+          </div>
 
           <!-- GRANT FORM (owner PI or Admin only) -->
           <div v-if="canManageAccess" class="subsection">
@@ -323,7 +323,7 @@
             <div class="grant-grid">
               <div class="field">
                 <label class="label">Select User</label>
-                <select v-model="selectedUserId" class="input">
+                <select v-model="selectedUserId" class="input input-select">
                   <option value="" disabled>Select a user…</option>
                   <option
                     v-for="u in grantableUsers"
@@ -336,10 +336,9 @@
                 <div class="help" v-if="!allUsers.length">No users found to grant.</div>
               </div>
 
-              <!-- Future-proof: we keep a preset, but today we only allow Add Data -->
               <div class="field">
                 <label class="label">Permission</label>
-                <select v-model="permissionPreset" class="input" disabled>
+                <select v-model="permissionPreset" class="input input-select" disabled>
                   <option value="data-entry">Add data only</option>
                 </select>
                 <div class="help">Adds the user with ability to submit data to this study; no editing.</div>
@@ -352,11 +351,20 @@
               </div>
             </div>
           </div>
+
+          <!-- STUDY CONFIGURATIONS (placeholder section) -->
+          <div class="subsection">
+            <h3 class="sub-title">Study Configurations</h3>
+            <p class="muted">
+              (Yet to Decide on this part) This section can include configuration options such as: edit windows for visits, allowed data entry roles,
+              randomization settings, subject ID format, data export preferences, and notification settings.
+            </p>
+          </div>
         </div>
 
         <!-- VIEW DATA: Auto-redirect -->
         <div v-else-if="activeTab === 'viewdata'">
-          <h2 class="panel-title">View Data</h2>
+          <h2 class="panel-title center">View Data</h2>
           <p class="muted">Redirecting to the data dashboard…</p>
         </div>
       </section>
@@ -380,9 +388,9 @@ export default {
         id: null,
         study_name: "",
         study_description: "",
-        created_by_id: null,        // raw owner id
-        created_by_display: "",     // resolved human-friendly name
-        created_by_email: "",       // optional
+        created_by_id: null,
+        created_by_display: "",
+        created_by_email: "",
         created_at: "",
         updated_at: "",
       },
@@ -394,7 +402,7 @@ export default {
       tabs: [
         { key: "meta", label: "Meta-data" },
         { key: "docs", label: "Documents" },
-        { key: "team", label: "Study Team" },
+        { key: "team", label: "Settings" },
         { key: "viewdata", label: "View Data" },
       ],
 
@@ -405,8 +413,8 @@ export default {
       uploading: false,
 
       // access management
-      accessList: [],        // [{user_id, role, permissions: {view, add_data, edit_study}, granted_by, ...}]
-      allUsers: [],          // [{id, name, email, ...}]
+      accessList: [],
+      allUsers: [],
       selectedUserId: "",
       permissionPreset: "data-entry",
       granting: false,
@@ -714,7 +722,6 @@ export default {
       const token = this.token;
       if (!token) return;
       try {
-        // Adjust if your API uses a different listing endpoint
         const { data } = await axios.get(
           `/users/admin/users`,
           { headers: { Authorization: `Bearer ${token}` } }
@@ -769,13 +776,11 @@ export default {
       }
     },
 
-
     // ---------- nav ----------
     goViewData() {
       this.$router.push({ name: "StudyDataDashboard", params: { id: this.studyId } });
     },
     async editStudy() {
-      // Guarded by canEditStudy
       localStorage.removeItem("setStudyDetails");
       localStorage.removeItem("scratchForms");
       const token = this.token;
@@ -899,8 +904,8 @@ export default {
           const el = this.$el.querySelector('.modal');
           el && el.focus();
         } catch (err) {
-      console.warn('openRevokeDialog: failed to focus modal', err);
-    }
+          console.warn('openRevokeDialog: failed to focus modal', err);
+        }
       });
     },
     cancelRevoke() {
@@ -909,7 +914,7 @@ export default {
     async confirmRevoke() {
       const g = this.confirm.target;
       if (!g) return;
-      await this.revokeAccess(g); // runs without window.confirm
+      await this.revokeAccess(g);
       this.cancelRevoke();
     },
 
@@ -986,6 +991,7 @@ export default {
 /* Panel */
 .v-panel { padding: 18px 20px; }
 .panel-title { margin: 4px 0 12px; font-size: 16px; font-weight: 700; }
+.panel-title.center { text-align: center; }
 
 /* Subsections */
 .subsection { margin-top: 18px; }
@@ -1096,17 +1102,21 @@ export default {
 
 /* Grant form */
 .grant-grid {
-  display: grid; grid-template-columns: repeat(3, minmax(180px, 1fr)); gap: 12px; align-items: end;
+  display: grid; grid-template-columns: repeat(3, minmax(180px, 1fr)); gap: 12px; align-items: center;
   background: #fff; border: 1px solid #f1f1f1; border-radius: 12px; padding: 12px;
+  align-items: start;
 }
 .field { display: flex; flex-direction: column; gap: 6px; }
 .label { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: #6b7280; }
+/* Normalize control heights across selects/inputs */
 .input {
-  width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 14px; box-sizing: border-box;
+  width: 100%; height: 40px; padding: 8px 10px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 14px; box-sizing: border-box;
   background: #fff;
 }
+.input-select { appearance: none; -webkit-appearance: none; -moz-appearance: none; background-position: right 10px center; }
 .help { font-size: 12px; color: #6b7280; }
-.actions { display: flex; gap: 8px; }
+.actions { display: flex; gap: 8px; align-self: end; }
+
 /* Modal */
 .modal-backdrop {
   position: fixed; inset: 0; background: rgba(0,0,0,.35);
@@ -1121,5 +1131,42 @@ export default {
 .modal-actions { display: flex; justify-content: flex-end; gap: 8px; }
 .btn-primary.danger { background: #b91c1c; border-color: #a11a1a; }
 .btn-primary.danger:hover { background: #991b1b; }
+/* Make both headings (labels) the same height and vertically centered */
+.grant-grid .field .label {
+  display: flex;
+  align-items: center;
+  min-height: 20px;         /* consistent label block height */
+  line-height: 1.2;
+  margin-bottom: 4px;       /* tighten spacing above control */
+}
 
+/* Normalize control heights (input + select) */
+.grant-grid .input {
+  height: 40px;
+  padding: 8px 12px;
+  line-height: 1.2;         /* avoids clipping across browsers */
+  box-sizing: border-box;
+}
+
+/* Normalize native select rendering across browsers */
+.grant-grid .input.input-select {
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  height: 40px;
+  padding-right: 32px;      /* space for caret */
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+}
+
+/* Safari tweak: avoid text clipping inside <select> */
+@supports (-webkit-touch-callout: none) {
+  .grant-grid .input.input-select { line-height: normal; }
+}
+
+/* Align the action button baseline with the selects */
+.grant-grid .actions {
+  align-self: end;
+  padding-top: 24px;        /* nudge to align with control row */
+}
 </style>
