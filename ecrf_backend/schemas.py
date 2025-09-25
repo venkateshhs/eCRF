@@ -117,6 +117,27 @@ class FileOut(FileBase):
 class SettingsModel(BaseModel):
     model_config = {"extra": "allow"}
 
+# Pydantic models for output (and input)
+
+
+class EventOut(BaseModel):
+    id: int
+    study_id: Optional[int]
+    subject_id: Optional[int]
+    user: Optional[UserResponse]    # nested user info (who did it)
+    action: str
+    timestamp: datetime
+    details: Dict[str, Any]
+    class Config:
+        orm_mode = True
+
+class EventCreate(BaseModel):
+    study_id: Optional[int] = None
+    subject_id: Optional[int] = None
+    user_id: int    # ID of the user/agent performing the action
+    action: str
+    details: Optional[Dict[str, Any]] = None
+
 
 class ShareLinkCreate(BaseModel):
     study_id:       int

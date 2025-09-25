@@ -1,8 +1,10 @@
 import os
+from typing import Optional, Dict, Any
+
 from sqlalchemy.orm import Session
 from datetime import datetime
 from . import schemas, models
-from .models import User
+from .models import User, AuditEvent
 from .logger import logger
 from zoneinfo import ZoneInfo
 
@@ -107,3 +109,21 @@ def create_file(db: Session, file_data: schemas.FileCreate):
 
 def get_files_for_study(db: Session, study_id: int):
     return db.query(models.File).filter(models.File.study_id == study_id).all()
+
+def record_event(db: Session, *, user_id: int, action: str,
+                 study_id: Optional[int] = None, subject_id: Optional[int] = None,
+                 details: Optional[Dict[str, Any]] = None) -> AuditEvent:
+    """
+    Utility function to create and save a new audit event.
+    """
+    event = AuditEvent(
+        study_id=study_id,
+        subject_id=subject_id,
+        user_id=user_id,
+        action=action,
+        details=details or {}
+    )
+    db.add(event)
+    db.commit()
+    db.refresh(event)  # Refresh to get auto-generated fields (e.g., timestamp, id)
+    return event

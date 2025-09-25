@@ -367,6 +367,11 @@
           <h2 class="panel-title center">View Data</h2>
           <p class="muted">Redirecting to the data dashboard…</p>
         </div>
+
+        <!-- AUDIT LOGS -->
+         <div v-else-if="activeTab === 'audit'">
+           <StudyAuditLogs :study-id="studyId" />
+         </div>
       </section>
     </div>
   </div>
@@ -375,10 +380,10 @@
 <script>
 import axios from "axios";
 import FieldFileUpload from "@/components/fields/FieldFileUpload.vue";
-
+import StudyAuditLogs from "@/components/StudyAuditLogs.vue";
 export default {
   name: "StudyView",
-  components: { FieldFileUpload },
+  components: { FieldFileUpload, StudyAuditLogs },
   data() {
     return {
       studyId: this.$route.params.id,
@@ -404,6 +409,7 @@ export default {
         { key: "docs", label: "Documents" },
         { key: "team", label: "Settings" },
         { key: "viewdata", label: "View Data" },
+        { key: "audit", label: "Audit logs" },
       ],
 
       // files

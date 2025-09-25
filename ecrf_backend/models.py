@@ -18,6 +18,9 @@ class User(Base):
     studies = relationship("StudyMetadata", back_populates="user")
     profile = relationship("UserProfile", back_populates="user", uselist=False)
 
+    # Relationship back to audit events (one-to-many)
+    events = relationship("AuditEvent", back_populates="user")
+
 
 class UserProfile(Base):
     __tablename__ = "user_profiles"
@@ -145,3 +148,17 @@ class StudyAccessGrant(Base):
     study = relationship("StudyMetadata", backref="access_grants")
     user = relationship("User", foreign_keys=[user_id])
     granted_by = relationship("User", foreign_keys=[created_by])
+
+class AuditEvent(Base):
+    __tablename__ = "audit_events"
+    id = Column(Integer, primary_key=True, index=True)
+    timestamp = Column(DateTime, nullable=False, server_default=func.now())
+    # If an event is about a Study as a whole, subject_id stays NULL. If it's about a specific subject, both study_id and subject_id are set.
+    study_id = Column(Integer, nullable=True, index=True)
+    subject_id = Column(Integer, nullable=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    action = Column(String, nullable=False)
+    details = Column(JSON, nullable=True)  # JSON column to store event details (flexible schema)
+
+    # Relationships
+    user = relationship("User", back_populates="events")
