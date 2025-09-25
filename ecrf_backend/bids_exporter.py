@@ -12,6 +12,8 @@ from urllib.parse import urlparse
 
 from filelock import FileLock
 
+from .crud import record_event as _db_record_event  # (db, user_id, study_id, subject_id, action, details)
+
 logger = logging.getLogger(__name__)
 
 # -------------------- Config --------------------
@@ -24,6 +26,9 @@ BIDS_VERSION = os.getenv("BIDS_VERSION", "1.8.0")
 
 # Optional DataLad integration (safe no-op if disabled/not installed)
 DATALAD_ENABLED = os.getenv("BIDS_DATALAD_ENABLED", "0") == "1"
+
+AUDIT_SYSTEM_TO_BIDS = os.getenv("AUDIT_SYSTEM_TO_BIDS", "0") == "1"  # default OFF
+SYSTEM_BUCKET_DIR = os.path.join(BIDS_ROOT, "_system")
 try:
     if DATALAD_ENABLED:
         import datalad.api as dl  # type: ignore
@@ -57,6 +62,28 @@ FIXED_ENTRY_HEADERS = [
 ]
 
 # -------------------- FS / I/O utils --------------------
+
+def _system_changes_path() -> str:
+    _ensure_dir(SYSTEM_BUCKET_DIR)
+    return os.path.join(SYSTEM_BUCKET_DIR, "changes.txt")
+
+def _append_system_change_line(action: str, detail: Dict[str, Any]) -> None:
+    """
+    System-scope append-only changes file (optional, disabled by default).
+    Never creates per-study folders.
+    """
+    path = _system_changes_path()
+    payload = {
+        "ts": datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "action": action,
+        "study_name": "",  # system scope
+        **detail,
+    }
+    lock = FileLock(path + ".lock")
+    with lock:
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(json.dumps(payload, ensure_ascii=False) + "\n")
+
 def _safe_name(candidate: str) -> str:
     # keep user’s name; only strip path separators and trim whitespace
     return (candidate or "file").replace("/", "_").replace("\\", "_").strip()
@@ -242,9 +269,6 @@ def upsert_bids_dataset(
     _ensure_dir(dataset_path)
     _datalad_dataset_init(dataset_path)
 
-    # (CHANGED) Do NOT write dataset_description.json at the dataset root anymore.
-
-    # NEW: metadata/ folder with human-readable files
     metadata_dir = os.path.join(dataset_path, "metadata")
     _ensure_dir(metadata_dir)
 
@@ -445,14 +469,211 @@ def _compute_entry_status(study_data: dict, entry: Dict[str, Any]) -> str:
         return "complete"
     return "partial"
 
+# -------------------- NEW: Unified audit helpers (DB + BIDS) --------------------
+
+def _changes_file_path(study_id: int, study_name: Optional[str]) -> str:
+    dataset_path = _dataset_path(study_id, study_name)
+    metadata_dir = os.path.join(dataset_path, "metadata")
+    _ensure_dir(metadata_dir)
+    return os.path.join(metadata_dir, "changes.txt")
+
+def _study_access_csv_path(study_id: int, study_name: Optional[str]) -> str:
+    dataset_path = _dataset_path(study_id, study_name)
+    metadata_dir = os.path.join(dataset_path, "metadata")
+    _ensure_dir(metadata_dir)
+    return os.path.join(metadata_dir, "Study Access.csv")
+
+def _append_change_line(study_id: int, study_name: Optional[str], action: str, detail: Dict[str, Any]) -> None:
+    path = _changes_file_path(study_id, study_name)
+    payload = {
+        "ts": datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "action": action,
+        "study_name": (study_name or ""),
+        **detail,
+    }
+    lock = FileLock(path + ".lock")
+    _ensure_dir(os.path.dirname(path))
+    with lock:
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(json.dumps(payload, ensure_ascii=False) + "\n")
+
+# ---- UNIFIED AUDIT ENTRYPOINT (flexible signature; DB + BIDS) ----
+def audit_change_both(
+    *,
+    # canonical fields
+    scope: Optional[str] = None,                # "study" | "system" (auto-infers if omitted)
+    action: str,                                # e.g., "list_data_entries", "user_login_success", ...
+    actor: Optional[str] = None,                # preformatted display string
+    study_id: Optional[int] = None,
+    study_name: Optional[str] = None,
+    subject_index: Optional[int] = None,
+    visit_index: Optional[int] = None,
+    extra: Optional[Dict[str, Any]] = None,     # generic payload (legacy name)
+    # compatibility kwargs expected by callers elsewhere
+    db=None,
+    actor_id: Optional[int] = None,
+    actor_name: Optional[str] = None,
+    detail: Optional[Dict[str, Any]] = None,    # generic payload (newer name)
+) -> None:
+    """
+    Unified auditor:
+      1) Always tries to write to DB provenance if `db` and `_db_record_event` are available.
+      2) Writes to BIDS `metadata/changes.txt` only when we have a real study context
+         (study_id > 0 and non-empty study_name). System-scope never creates study_0_*.
+      3) If AUDIT_SYSTEM_TO_BIDS=1, system events also go to BIDS_ROOT/_system/changes.txt.
+    """
+
+    # ---- normalize scope -----------------------------------------------------
+    # If not provided, infer: study if we have a real study_id, else system.
+    if not scope:
+        scope = "study" if (isinstance(study_id, int) and study_id > 0) else "system"
+
+    # ---- build detail payload ------------------------------------------------
+    # merge both naming styles; `detail` wins over `extra` for overlapping keys.
+    payload: Dict[str, Any] = {}
+    if isinstance(extra, dict):
+        payload.update(extra)
+    if isinstance(detail, dict):
+        payload.update(detail)
+
+    # add subject/visit hints if provided
+    if subject_index is not None and "subject_index" not in payload:
+        payload["subject_index"] = subject_index
+    if visit_index is not None and "visit_index" not in payload:
+        payload["visit_index"] = visit_index
+
+    # actor precedence: explicit `actor` string > (actor_name + id) > nothing
+    if not actor and actor_name:
+        actor = f"{actor_name} (id={actor_id})" if actor_id is not None else actor_name
+    if actor:
+        payload["actor"] = actor
+
+    # ---- 1) DB provenance (best-effort) -------------------------------------
+    # If your project wires _db_record_event(db, user_id, study_id, subject_id, action, details)
+    # this will capture the audit in the database.
+    if _db_record_event and db is not None:
+        try:
+            _db_record_event(
+                db=db,
+                user_id=actor_id,
+                study_id=(study_id if isinstance(study_id, int) else None),
+                subject_id=None,
+                action=action,
+                details=payload,
+            )
+        except Exception as e:  # keep audit non-fatal
+            logger.error("audit_change_both: DB provenance write failed: %s", e)
+
+    # ---- 2) BIDS changes.txt (study scope only) ------------------------------
+    write_study_bids = (
+        scope == "study"
+        and isinstance(study_id, int) and study_id > 0
+        and isinstance(study_name, str) and study_name.strip() != ""
+    )
+    if write_study_bids:
+        try:
+            _append_change_line(
+                study_id=study_id,
+                study_name=study_name,
+                action=action,
+                detail=payload,
+            )
+        except Exception as e:
+            logger.error("audit_change_both: failed to write study changes.txt: %s", e)
+        return
+
+    # ---- 3) Optional system bucket (never creates study_0_*) -----------------
+    if scope == "system" and AUDIT_SYSTEM_TO_BIDS:
+        try:
+            _append_system_change_line(action=action, detail=payload)
+        except Exception as e:
+            logger.error("audit_change_both: failed to write system changes.txt: %s", e)
+
+
+def audit_access_change_both(
+    *,
+    db=None,
+    study_id: int,
+    study_name: Optional[str],
+    action: str,  # "access_granted" | "access_updated" | "access_revoked"
+    actor_id: int,
+    actor_name: str,
+    target_user_id: int,
+    target_user_email: str,
+    target_user_display: str,
+    permissions: Dict[str, Any],
+) -> None:
+    """
+    Unified access audit: writes to Study Access.csv, study changes.txt, and DB.
+    """
+    # 1) CSV line
+    path = _study_access_csv_path(study_id, study_name)
+    headers = [
+        "timestamp",
+        "action",
+        "actor_id",
+        "actor_name",
+        "target_user_id",
+        "target_user_display",
+        "target_user_email",
+        "permissions_view",
+        "permissions_add_data",
+        "permissions_edit_study",
+    ]
+    _ensure_dir(os.path.dirname(path))
+    lock = FileLock(path + ".lock")
+    with lock:
+        write_header = not os.path.exists(path)
+        with open(path, "a", newline="", encoding="utf-8") as f:
+            w = csv.DictWriter(f, fieldnames=headers)
+            if write_header:
+                w.writeheader()
+            w.writerow({
+                "timestamp": datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "action": action,
+                "actor_id": actor_id,
+                "actor_name": actor_name or "",
+                "target_user_id": target_user_id,
+                "target_user_display": target_user_display or "",
+                "target_user_email": target_user_email or "",
+                "permissions_view": bool((permissions or {}).get("view", True)),
+                "permissions_add_data": bool((permissions or {}).get("add_data", True)),
+                "permissions_edit_study": bool((permissions or {}).get("edit_study", False)),
+            })
+
+    # 2) changes.txt + DB via the unified helper (scope auto-infers to "study")
+    audit_change_both(
+        db=db,
+        study_id=study_id,
+        study_name=study_name,
+        action=action,
+        actor_id=actor_id,
+        actor_name=actor_name,
+        detail={
+            "target_user_id": target_user_id,
+            "target_user_display": target_user_display,
+            "target_user_email": target_user_email,
+            "permissions": {
+                "view": bool((permissions or {}).get("view", True)),
+                "add_data": bool((permissions or {}).get("add_data", True)),
+                "edit_study": bool((permissions or {}).get("edit_study", False)),
+            },
+        },
+    )
+
 # -------------------- Public: write eCRF/entries.tsv --------------------
+
 def write_entry_to_bids(
     study_id: int,
     study_name: str,
     study_description: Optional[str],
     study_data: dict,
     entry: Dict[str, Any],
-    actor: Optional[str] = None,  # NEW: for audit trail (who performed the change)
+    actor: Optional[str] = None,
+    *,
+    db=None,               # NEW optional DB session for unified audit
+    actor_id: Optional[int] = None,
+    actor_name: Optional[str] = None,
 ) -> str:
     """
     Upsert a row for a saved data entry into eCRF/entries.tsv with:
@@ -623,28 +844,27 @@ def write_entry_to_bids(
             new_val  = "" if new_row.get(col)  is None else str(new_row.get(col))
             if prev_val != new_val:
                 fields_changed.append(col)
-    # --------------------------------------------------------------------
 
-    # append audit line to metadata/changes.txt (no data values) ------
-    try:
-        _append_change_line(
-            study_id=study_id,
-            study_name=study_name,
-            action="entry_upsert",
-            detail={
-                "participant_id": participant_id,
-                "visit_name": visit_name,
-                "group_name": group_name or "",
-                "entry_id": entry_id_str,
-                "status": status,
-                "fields_count": len(fields_changed),
-                "fields": fields_changed,  # names only; now ONLY those whose values changed
-                "actor": actor or "",
-            },
-        )
-    except Exception as e:
-        logger.error("Failed to append entry_upsert to changes.txt: %s", e)
-    # -----------------------------------------------------------------------------
+    # Unified audit (BIDS + DB)
+    audit_change_both(
+        db=db,
+        study_id=study_id,
+        study_name=study_name,
+        action="entry_upsert",
+        actor_id=actor_id,
+        actor_name=actor_name or actor,  # keep legacy 'actor' param
+        subject_index=subject_index,
+        visit_index=visit_index,
+        detail={
+            "participant_id": participant_id,
+            "visit_name": visit_name,
+            "group_name": group_name or "",
+            "entry_id": entry_id_str,
+            "status": status,
+            "fields_count": len(fields_changed),
+            "fields": fields_changed,  # names only; no values
+        },
+    )
 
     logger.info(
         "BIDS eCRF written: %s (entry_id=%s, participant=%s, visit=%s, status=%s)",
@@ -725,7 +945,6 @@ def _rebuild_participants_tsv(dataset_path: str, study_data: dict) -> None:
     headers = ["participant_id", "visits_planned", "visits_completed", "visits_partial", "visits_skipped", "last_updated"]
     rows: List[Dict[str, str]] = []
     visits_planned = str(len(visits)) if visits else "0"
-
     now_iso = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
 
     for idx, subj in enumerate(subjects):
@@ -782,20 +1001,16 @@ def stage_file_for_modalities(
     source_path: Optional[str],
     url: Optional[str],
     filename: Optional[str] = None,
-    actor: Optional[str] = None,  # NEW: for audit trail (who performed the change)
+    actor: Optional[str] = None,
+    *,
+    db=None,                      # NEW optional DB session for unified audit
+    actor_id: Optional[int] = None,
+    actor_name: Optional[str] = None,
 ) -> List[str]:
     """
     Mirror a local upload or URL into the BIDS dataset.
-
-    STUDY-LEVEL (no indices provided):
-      -> <dataset_root>/metadata/  (kept separate from subject/session trees)
-
-    PER-SUBJECT/PER-VISIT (indices provided):
-      -> <dataset_root>/sub-XXX[/ses-YY]/<modality>/
-
-    Returns list of written target paths.
+    Also emits unified audit records (BIDS + DB).
     """
-    # Ensure dataset exists / initialized and metadata dir present
     dataset_path = upsert_bids_dataset(
         study_id=study_id,
         study_name=study_name,
@@ -807,7 +1022,6 @@ def stage_file_for_modalities(
 
     # ---------- STUDY-LEVEL DOCS ----------
     if subject_index is None and visit_index is None:
-        # Mirror into dataset-level metadata directory
         target_dir = os.path.join(dataset_path, "metadata")
         _ensure_dir(target_dir)
         candidate = _choose_candidate_name(source_path, url, filename)
@@ -821,7 +1035,7 @@ def stage_file_for_modalities(
                 logger.error("BIDS mirror (study-level) copy failed: %s -> %s (%s)", source_path, target_path, e)
 
         elif url:
-            stem = os.path.splitext(candidate)[0]  # keep user/URL stem, write .txt sidecar with link
+            stem = os.path.splitext(candidate)[0]
             target_path = os.path.join(target_dir, f"{stem}.txt")
             try:
                 with open(target_path, "w", encoding="utf-8") as f:
@@ -832,29 +1046,26 @@ def stage_file_for_modalities(
 
         if written:
             _datalad_save(dataset_path, msg="Mirror study-level document(s) into metadata/")
-            # NEW: changes.txt line
-            try:
-                _append_change_line(
-                    study_id=study_id,
-                    study_name=study_name,
-                    action="file_mirrored_study_level",
-                    detail={
-                        "targets": [os.path.relpath(p, dataset_path) for p in written],
-                        "filename": filename or "",
-                        "actor": actor or "",
-                    },
-                )
-            except Exception as e:
-                logger.error("Failed to append study-level file_mirrored to changes.txt: %s", e)
+            audit_change_both(
+                db=db,
+                study_id=study_id,
+                study_name=study_name,
+                action="file_mirrored_study_level",
+                actor_id=actor_id,
+                actor_name=actor_name or actor,
+                detail={
+                    "targets": [os.path.relpath(p, dataset_path) for p in written],
+                    "filename": filename or "",
+                },
+            )
         logger.info("BIDS mirror (study-level) written: %s", written)
         return written
 
-    # ---------- PER-SUBJECT/PER-VISIT (existing behavior) ----------
+    # ---------- PER-SUBJECT/PER-VISIT ----------
     modalities = modalities or []
     if not modalities:
         modalities = ["misc"]
 
-    # Resolve subject folder
     try:
         s_idx = int(subject_index) if subject_index is not None else 0
     except Exception:
@@ -863,7 +1074,6 @@ def stage_file_for_modalities(
     sub_label_num = _resolve_bids_subject_label(study_data, s_idx)
     sub_dir = os.path.join(dataset_path, f"sub-{_alnum(sub_label_num)}")
 
-    # Optional session
     ses_folder = _session_folder(study_data, visit_index)
     base_dir = os.path.join(sub_dir, ses_folder) if ses_folder else sub_dir
 
@@ -897,158 +1107,44 @@ def stage_file_for_modalities(
 
     if written:
         _datalad_save(dataset_path, msg=f"Mirror files/links for sub-{_alnum(sub_label_num)} (visit={visit_index})")
-        # NEW: changes.txt line
-        try:
-            _append_change_line(
-                study_id=study_id,
-                study_name=study_name,
-                action="file_mirrored",
-                detail={
-                    "participant_id": f"sub-{_alnum(sub_label_num)}",
-                    "session": _session_folder(study_data, visit_index),
-                    "modalities": modalities,
-                    "targets": [os.path.relpath(p, dataset_path) for p in written],
-                    "filename": filename or "",
-                    "actor": actor or "",
-                },
-            )
-        except Exception as e:
-            logger.error("Failed to append file_mirrored to changes.txt: %s", e)
+        audit_change_both(
+            db=db,
+            study_id=study_id,
+            study_name=study_name,
+            action="file_mirrored",
+            actor_id=actor_id,
+            actor_name=actor_name or actor,
+            subject_index=s_idx,
+            visit_index=(int(visit_index) if visit_index is not None else None),
+            detail={
+                "participant_id": f"sub-{_alnum(sub_label_num)}",
+                "session": _session_folder(study_data, visit_index),
+                "modalities": modalities,
+                "targets": [os.path.relpath(p, dataset_path) for p in written],
+                "filename": filename or "",
+            },
+        )
 
     logger.info("BIDS mirror written: %s", written)
     return written
 
-# -------------------- NEW: Study Access CSV + changes.txt helpers --------------------
-
-def _changes_file_path(study_id: int, study_name: Optional[str]) -> str:
-    dataset_path = _dataset_path(study_id, study_name)
-    metadata_dir = os.path.join(dataset_path, "metadata")
-    _ensure_dir(metadata_dir)
-    return os.path.join(metadata_dir, "changes.txt")
-
-def _study_access_csv_path(study_id: int, study_name: Optional[str]) -> str:
-    dataset_path = _dataset_path(study_id, study_name)
-    metadata_dir = os.path.join(dataset_path, "metadata")
-    _ensure_dir(metadata_dir)
-    return os.path.join(metadata_dir, "Study Access.csv")
-
-def _append_change_line(study_id: int, study_name: Optional[str], action: str, detail: Dict[str, Any]) -> None:
-    """
-    Append a single structured line to metadata/changes.txt.
-    The format is machine-readable JSON per line, prefixed with ISO timestamp.
-    Values must not include actual data values from eCRF—only metadata/field names.
-    """
-    path = _changes_file_path(study_id, study_name)
-    payload = {
-        "ts": datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "action": action,
-        "study_name": (study_name or ""),
-        **detail,
-    }
-    lock = FileLock(path + ".lock")
-    _ensure_dir(os.path.dirname(path))
-    with lock:
-        with open(path, "a", encoding="utf-8") as f:
-            # One JSON object per line to keep it greppable/append-only
-            f.write(json.dumps(payload, ensure_ascii=False) + "\n")
-
-def append_study_access_audit(
-    study_id: int,
-    study_name: Optional[str],
-    action: str,  # "granted" | "updated" | "revoked"
-    actor_id: int,
-    actor_name: str,
-    target_user_id: int,
-    target_user_email: str,
-    target_user_display: str,
-    permissions: Dict[str, Any],
-) -> None:
-    """
-    Append (and create if needed) "Study Access.csv" under metadata/ with a full audit of access changes.
-    Columns:
-      timestamp, action, actor_id, actor_name, target_user_id, target_user_display, target_user_email,
-      permissions_view, permissions_add_data, permissions_edit_study
-    """
-    path = _study_access_csv_path(study_id, study_name)
-    headers = [
-        "timestamp",
-        "action",
-        "actor_id",
-        "actor_name",
-        "target_user_id",
-        "target_user_display",
-        "target_user_email",
-        "permissions_view",
-        "permissions_add_data",
-        "permissions_edit_study",
-    ]
-    _ensure_dir(os.path.dirname(path))
-    lock = FileLock(path + ".lock")
-    with lock:
-        write_header = not os.path.exists(path)
-        with open(path, "a", newline="", encoding="utf-8") as f:
-            w = csv.DictWriter(f, fieldnames=headers)
-            if write_header:
-                w.writeheader()
-            w.writerow({
-                "timestamp": datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
-                "action": action,
-                "actor_id": actor_id,
-                "actor_name": actor_name or "",
-                "target_user_id": target_user_id,
-                "target_user_display": target_user_display or "",
-                "target_user_email": target_user_email or "",
-                "permissions_view": bool((permissions or {}).get("view", True)),
-                "permissions_add_data": bool((permissions or {}).get("add_data", True)),
-                "permissions_edit_study": bool((permissions or {}).get("edit_study", False)),
-            })
-
-def log_access_change_to_changes(
-    study_id: int,
-    study_name: Optional[str],
-    action: str,  # "access_granted" | "access_updated" | "access_revoked"
-    actor_id: int,
-    actor_name: str,
-    target_user_id: int,
-    target_user_display: str,
-    permissions: Dict[str, Any],
-) -> None:
-    """
-    Mirror the access change into metadata/changes.txt (without sensitive data beyond identities/roles).
-    """
-    _append_change_line(
-        study_id=study_id,
-        study_name=study_name,
-        action=action,
-        detail={
-            "actor": f"{actor_name} (id={actor_id})",
-            "target_user_id": target_user_id,
-            "target_user_display": target_user_display,
-            "permissions": {
-                "view": bool((permissions or {}).get("view", True)),
-                "add_data": bool((permissions or {}).get("add_data", True)),
-                "edit_study": bool((permissions or {}).get("edit_study", False)),
-            },
-        },
-    )
 
 def log_dataset_change_to_changes(
     study_id: int,
     study_name: Optional[str],
-    action: str,  # e.g., "dataset_initialized", "dataset_structure_updated"
+    action: str,
     actor_id: Optional[int] = None,
     actor_name: Optional[str] = None,
     detail: Optional[str] = None,
-) -> None:
-    """
-    Generic dataset-level change logger (e.g., called from forms after upsert_bids_dataset).
-    """
-    _append_change_line(
+    *,
+    db=None,
+):
+    audit_change_both(
+        db=db,
         study_id=study_id,
         study_name=study_name,
         action=action,
-        detail={
-            "actor": (f"{actor_name} (id={actor_id})" if actor_id is not None else ""),
-            "detail": detail or "",
-        },
+        actor_id=actor_id,
+        actor_name=actor_name,
+        detail={"detail": detail or ""},
     )

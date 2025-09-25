@@ -2,7 +2,7 @@
 import os
 import shutil
 import tempfile
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from urllib.parse import urlparse
 
 from fastapi import Request
@@ -14,14 +14,14 @@ from datetime import datetime, timedelta
 
 from .database import get_db
 from . import schemas, crud, models
-from .bids_exporter import upsert_bids_dataset, write_entry_to_bids, stage_file_for_modalities
-# === NEW: import audit helpers ===
 from .bids_exporter import (
-    append_study_access_audit,
-    log_access_change_to_changes,
-    log_dataset_change_to_changes,
+    upsert_bids_dataset,
+    write_entry_to_bids,
+    stage_file_for_modalities,
+    audit_change_both,          # unified audit (DB + BIDS)
+    audit_access_change_both,   # unified access audit
+    log_dataset_change_to_changes,  # optional BIDS CHANGES mirror
 )
-# =================================
 from .logger import logger
 from .models import User, StudyTemplateVersion
 from .users import get_current_user
@@ -105,7 +105,7 @@ def create_study(
         logger.error("Error creating study: %s", e)
         raise HTTPException(status_code=500, detail=str(e))
 
-    # BIDS: create dataset structure after DB commit
+    # Initialize BIDS dataset
     if upsert_bids_dataset:
         try:
             dataset_path = upsert_bids_dataset(
@@ -114,21 +114,36 @@ def create_study(
                 study_description=metadata.study_description,
                 study_data=content.study_data,
             )
-            # persist any label-map mutations
+            # persist any label-map mutations made by upsert
             db.query(models.StudyContent).filter(models.StudyContent.id == content.id).update(
                 {"study_data": content.study_data}
             )
             db.commit()
             db.refresh(content)
             logger.info("BIDS dataset initialized at %s (study_id=%s)", dataset_path, metadata.id)
-            # === NEW: audit (dataset init) ===
+
+            # Optional BIDS metadata/changes.txt mirror
             log_dataset_change_to_changes(
                 metadata.id, metadata.study_name,
                 action="dataset_initialized",
                 actor_id=user.id, actor_name=_display_name(user),
                 detail="Initial BIDS dataset creation"
             )
-            # ================================
+
+            # AUDIT: study created
+            try:
+                audit_change_both(
+                    scope="study",
+                    action="study_created",
+                    actor=_display_name(user),
+                    extra={"study_name": metadata.study_name},
+                    study_id=metadata.id,
+                    study_name=metadata.study_name,
+                    db=db,
+                    actor_id=user.id,
+                )
+            except Exception:
+                pass
         except Exception as be:
             logger.error("BIDS export (create) failed for study %s: %s", metadata.id, be)
 
@@ -228,7 +243,7 @@ def update_study(
 
     metadata, content = result
 
-    # BIDS: update dataset structure
+    # Update BIDS structure (and persist any label updates)
     if upsert_bids_dataset:
         try:
             dataset_path = upsert_bids_dataset(
@@ -243,14 +258,29 @@ def update_study(
             db.commit()
             db.refresh(content)
             logger.info("BIDS dataset updated at %s (study_id=%s)", dataset_path, metadata.id)
-            # === NEW: audit (dataset update) ===
+
+            # Optional CHANGES mirror
             log_dataset_change_to_changes(
                 metadata.id, metadata.study_name,
                 action="dataset_structure_updated",
                 actor_id=user.id, actor_name=_display_name(user),
                 detail="Study metadata/content updated"
             )
-            # ===================================
+
+            # AUDIT: study edited
+            try:
+                audit_change_both(
+                    scope="study",
+                    action="study_edited",
+                    actor=_display_name(user),
+                    extra={"study_name": metadata.study_name},
+                    study_id=metadata.id,
+                    study_name=metadata.study_name,
+                    db=db,
+                    actor_id=user.id,
+                )
+            except Exception:
+                pass
         except Exception as be:
             logger.error("BIDS export (update) failed for study %s: %s", metadata.id, be)
 
@@ -275,7 +305,7 @@ def upload_file(
     study_id: int,
     uploaded_file: UploadFile = File(...),
     description: str = Form(""),
-    storage_option: str = Form("local"),  # kept for compat; we override to "bids" below
+    storage_option: str = Form("local"),  # ignored; we force to "bids"
     subject_index: Optional[int] = Form(None),
     visit_index: Optional[int] = Form(None),
     group_index: Optional[int] = Form(None),
@@ -294,7 +324,6 @@ def upload_file(
     except Exception:
         modalities = []
 
-    # Save to a temporary file just for the exporter to ingest; then delete.
     tmp_path = None
     try:
         with tempfile.NamedTemporaryFile(delete=False, prefix=f"ecrf_study{study_id}_", suffix=f"_{uploaded_file.filename}") as tmp:
@@ -302,7 +331,7 @@ def upload_file(
             tmp_path = tmp.name
         logger.info("Staged temp upload: %s", tmp_path)
 
-        # Mirror into BIDS structure (authoritative storage)
+        # Mirror into BIDS
         content = db.query(models.StudyContent).filter(models.StudyContent.study_id == study_id).first()
         study_data = content.study_data if content else {}
         stage_file_for_modalities(
@@ -316,15 +345,17 @@ def upload_file(
             source_path=tmp_path,
             url=None,
             filename=uploaded_file.filename,
-            # === NEW: actor for audit trail ===
-            actor=f"{_display_name(user)} (id={user.id})"
+            actor=_display_name(user),
+            db=db,
+            actor_id=user.id,
+            actor_name=_display_name(user),
         )
 
-        # DB record: mark storage as 'bids' and store the filename (path is managed by BIDS layout)
+        # DB record
         file_data = schemas.FileCreate(
             study_id=study_id,
             file_name=uploaded_file.filename,
-            file_path=uploaded_file.filename,   # logical reference; actual path is within BIDS dataset
+            file_path=uploaded_file.filename,   # logical ref; actual path is inside BIDS dataset
             description=description,
             storage_option="bids",
             subject_index=subject_index,
@@ -332,6 +363,26 @@ def upload_file(
             group_index=group_index,
         )
         db_file = crud.create_file(db, file_data)
+
+        # AUDIT: file added to study
+        try:
+            audit_change_both(
+                scope="study",
+                action="file_added",
+                actor=_display_name(user),
+                extra={
+                    "file_name": uploaded_file.filename,
+                    "modalities": modalities,
+                    "subject_index": subject_index,
+                    "visit_index": visit_index,
+                },
+                study_id=study_id,
+                study_name=study.study_name,
+                db=db,
+                actor_id=user.id,
+            )
+        except Exception:
+            pass
 
         return db_file
 
@@ -372,23 +423,26 @@ def create_url_file(
     except Exception:
         modalities = []
 
-    # Create DB record (URL)
+    # DB record (URL)
     try:
         parsed = urlparse(url)
         base = os.path.basename(parsed.path) or "link"
         file_data = schemas.FileCreate(
             study_id=study_id,
             file_name=base,
-            file_path=url,           # store URL itself
+            file_path=url,
             description=description,
-            storage_option=storage_option or "url"
+            storage_option=storage_option or "url",
+            subject_index=subject_index,
+            visit_index=visit_index,
+            group_index=group_index,
         )
         db_file = crud.create_file(db, file_data)
     except Exception as e:
         logger.error("Error creating URL file record: %s", e)
         raise HTTPException(status_code=500, detail="Error creating file record")
 
-    # Mirror into BIDS (delegated; writes .txt with URL)
+    # Mirror into BIDS as .txt pointer
     try:
         content = db.query(models.StudyContent).filter(models.StudyContent.study_id == study_id).first()
         study_data = content.study_data if content else {}
@@ -403,14 +457,39 @@ def create_url_file(
             source_path=None,
             url=url,
             filename=base,
-            # === NEW: actor for audit trail ===
-            actor=f"{_display_name(user)} (id={user.id})"
+            actor=_display_name(user),
+            db=db,
+            actor_id=user.id,
+            actor_name=_display_name(user),
         )
     except Exception as be:
         logger.error("BIDS mirror (URL) failed for study %s: %s", study_id, be)
 
+    # AUDIT: file added to study (URL)
+    try:
+        audit_change_both(
+            scope="study",
+            action="file_added",
+            actor=_display_name(user),
+            extra={
+                "file_name": base,
+                "url": url,
+                "modalities": modalities,
+                "subject_index": subject_index,
+                "visit_index": visit_index,
+            },
+            study_id=study_id,
+            study_name=study.study_name,
+            db=db,
+            actor_id=user.id,
+        )
+    except Exception:
+        pass
+
     return db_file
 
+
+# -------------------- Share Links --------------------
 
 def generate_token():
     return secrets.token_urlsafe(32)
@@ -443,7 +522,26 @@ def create_share_link(
     db.commit()
     db.refresh(access)
 
-    # Prefer explicit config, then Origin, then Referer, then X-Forwarded, then Host
+    # AUDIT: share link created
+    try:
+        audit_change_both(
+            scope="study",
+            action="share_link_created",
+            actor=_display_name(current_user),
+            extra={
+                "permission": payload.permission,
+                "max_uses": payload.max_uses,
+                "expires_in_days": payload.expires_in_days,
+            },
+            study_id=payload.study_id,
+            study_name=None,
+            db=db,
+            actor_id=current_user.id,
+        )
+    except Exception:
+        pass
+
+    # Build SPA route
     frontend_base = os.getenv("FRONTEND_BASE_URL", "").rstrip("/")
     if not frontend_base:
         origin = (request.headers.get("origin") or "").rstrip("/")
@@ -459,10 +557,8 @@ def create_share_link(
         host   = request.headers.get("x-forwarded-host", request.headers.get("host", request.url.netloc))
         frontend_base = f"{scheme}://{host}"
 
-    # Build SPA route (NOT the API endpoint)
     link = f"{frontend_base}/shared/{token}"
     return {"token": token, "link": link}
-
 
 
 @router.get("/shared-api/{token}", response_model=schemas.SharedFormAccessOut)
@@ -526,6 +622,8 @@ def access_shared_form(
     }
 
 
+# -------------------- Data Entry --------------------
+
 def get_current_form_version(db: Session, study_id: int) -> int:
     latest_version = (
         db.query(StudyTemplateVersion)
@@ -536,6 +634,7 @@ def get_current_form_version(db: Session, study_id: int) -> int:
     if not latest_version:
         raise ValueError(f"No template version found for study_id={study_id}")
     return latest_version.version
+
 
 @router.post("/studies/{study_id}/data", response_model=schemas.StudyDataEntryOut)
 def save_study_data(
@@ -548,10 +647,9 @@ def save_study_data(
     if not study:
         raise HTTPException(status_code=404, detail="Study not found")
 
-    # Permission: Admin or Owner --> OK
+    # Permission: Admin/Owner or explicit grant with add_data=True
     is_admin = getattr(getattr(current_user, "profile", None), "role", "") == "Administrator"
     is_owner = study.created_by == current_user.id
-
     if not (is_admin or is_owner):
         # Must have an access grant with add_data = True
         grant = (
@@ -580,7 +678,7 @@ def save_study_data(
     db.commit()
     db.refresh(entry)
 
-    # BIDS: structure + write eCRF row
+    # BIDS: upsert eCRF row
     content = db.query(models.StudyContent).filter(models.StudyContent.study_id == study_id).first()
     if upsert_bids_dataset and content:
         try:
@@ -608,13 +706,33 @@ def save_study_data(
                         "form_version": entry.form_version,
                         "data": entry.data or {}
                     },
-                    # === NEW: actor for audit trail ===
-                    actor=f"{_display_name(current_user)} (id={current_user.id})"
+                    actor=_display_name(current_user),
+                    db=db,
+                    actor_id=current_user.id,
+                    actor_name=_display_name(current_user),
                 )
                 logger.info(
                     "BIDS eCRF updated for study=%s sub_idx=%s visit_idx=%s entry_id=%s",
                     study.id, entry.subject_index, entry.visit_index, entry.id
                 )
+            # AUDIT: user adds data
+            try:
+                audit_change_both(
+                    scope="study",
+                    action="entry_upserted",
+                    actor=_display_name(current_user),
+                    extra={
+                        "entry_id": entry.id,
+                        "subject_index": entry.subject_index,
+                        "visit_index": entry.visit_index,
+                    },
+                    study_id=study.id,
+                    study_name=study.study_name,
+                    db=db,
+                    actor_id=current_user.id,
+                )
+            except Exception:
+                pass
         except Exception as be:
             logger.error("BIDS export (data save) failed for study %s: %s", study_id, be)
 
@@ -641,14 +759,12 @@ def update_study_data_entry(
     entry.visit_index   = payload.visit_index
     entry.group_index   = payload.group_index
     entry.data          = payload.data
-
     if payload.skipped_required_flags is not None:
         entry.skipped_required_flags = payload.skipped_required_flags
-
     db.commit()
     db.refresh(entry)
 
-    # BIDS: structure + upsert eCRF row
+    # BIDS: upsert eCRF row
     study = db.query(models.StudyMetadata).filter(models.StudyMetadata.id == study_id).first()
     content = db.query(models.StudyContent).filter(models.StudyContent.study_id == study_id).first()
     if upsert_bids_dataset and study and content:
@@ -677,13 +793,33 @@ def update_study_data_entry(
                         "form_version": entry.form_version,
                         "data": entry.data or {}
                     },
-                    # === NEW: actor for audit trail ===
-                    actor=f"{_display_name(user)} (id={user.id})"
+                    actor=_display_name(user),
+                    db=db,
+                    actor_id=user.id,
+                    actor_name=_display_name(user),
                 )
                 logger.info(
                     "BIDS eCRF upserted for study=%s sub_idx=%s visit_idx=%s entry_id=%s",
                     study.id, entry.subject_index, entry.visit_index, entry.id
                 )
+            # AUDIT: user edits data
+            try:
+                audit_change_both(
+                    scope="study",
+                    action="entry_upserted",
+                    actor=_display_name(user),
+                    extra={
+                        "entry_id": entry.id,
+                        "subject_index": entry.subject_index,
+                        "visit_index": entry.visit_index,
+                    },
+                    study_id=study.id,
+                    study_name=study.study_name,
+                    db=db,
+                    actor_id=user.id,
+                )
+            except Exception:
+                pass
         except Exception as be:
             logger.error("BIDS export (data update) failed for study %s: %s", study_id, be)
 
@@ -774,6 +910,7 @@ def shared_upload_file(
         with tempfile.NamedTemporaryFile(delete=False, prefix=f"ecrf_study{study.id}_", suffix=f"_{uploaded_file.filename}") as tmp:
             shutil.copyfileobj(uploaded_file.file, tmp)
             tmp_path = tmp.name
+
         content = db.query(models.StudyContent).filter(models.StudyContent.study_id == study.id).first()
         study_data = content.study_data if content else {}
         stage_file_for_modalities(
@@ -787,9 +924,12 @@ def shared_upload_file(
             source_path=tmp_path,
             url=None,
             filename=uploaded_file.filename,
-            # === NEW: actor (shared link) ===
-            actor="Shared link upload"
+            actor="Shared link upload",
+            db=db,
+            actor_id=None,
+            actor_name=None,
         )
+
         file_data = schemas.FileCreate(
             study_id=study.id,
             file_name=uploaded_file.filename,
@@ -801,6 +941,27 @@ def shared_upload_file(
             group_index=access.group_index,
         )
         db_file = crud.create_file(db, file_data)
+
+        # AUDIT: share link file addition
+        try:
+            audit_change_both(
+                scope="study",
+                action="share_file_added",
+                actor="",
+                extra={
+                    "file_name": uploaded_file.filename,
+                    "modalities": modalities,
+                    "subject_index": access.subject_index,
+                    "visit_index": access.visit_index,
+                },
+                study_id=study.id,
+                study_name=study.study_name,
+                db=db,
+                actor_id=None,
+            )
+        except Exception:
+            pass
+
         return db_file
     except HTTPException:
         raise
@@ -880,18 +1041,37 @@ def shared_create_url_file(
             source_path=None,
             url=url,
             filename=base,
-            # === NEW: actor (shared link) ===
-            actor="Shared link URL"
+            actor="Shared link URL",
+            db=db,
+            actor_id=None,
+            actor_name=None,
         )
     except Exception as be:
         logger.error("Shared BIDS mirror (URL) failed for study %s: %s", study.id, be)
 
+    # AUDIT: share link file addition (URL)
+    try:
+        audit_change_both(
+            scope="study",
+            action="share_file_added",
+            actor="",
+            extra={"file_name": base, "url": url, "modalities": modalities,
+                   "subject_index": access.subject_index, "visit_index": access.visit_index},
+            study_id=study.id,
+            study_name=study.study_name,
+            db=db,
+            actor_id=None,
+        )
+    except Exception:
+        pass
+
     return db_file
+
 
 @router.post("/shared/{token}/data", response_model=schemas.StudyDataEntryOut)
 def shared_upsert_data(
     token: str,
-    payload: schemas.SharedStudyDataEntryCreate,   # <-- lightweight schema (no indexes required)
+    payload: schemas.SharedStudyDataEntryCreate,
     db: Session = Depends(get_db),
 ):
     access = db.query(models.SharedFormAccess).filter_by(token=token).first()
@@ -935,7 +1115,7 @@ def shared_upsert_data(
         db.commit()
         db.refresh(entry)
 
-    # BIDS: mirror (same as authenticated path)
+    # BIDS mirror (same as authenticated path)
     study = db.query(models.StudyMetadata).filter(models.StudyMetadata.id == study_id).first()
     content = db.query(models.StudyContent).filter(models.StudyContent.study_id == study_id).first()
     if upsert_bids_dataset and study and content:
@@ -964,19 +1144,40 @@ def shared_upsert_data(
                         "form_version": entry.form_version,
                         "data": entry.data or {}
                     },
-                    # === NEW: actor (shared link) ===
-                    actor="Shared link submit"
+                    actor="Shared link submit",
+                    db=db,
+                    actor_id=None,
+                    actor_name=None,
                 )
                 logger.info(
                     "BIDS eCRF upserted (shared) for study=%s sub_idx=%s visit_idx=%s entry_id=%s",
                     study.id, entry.subject_index, entry.visit_index, entry.id
                 )
+            # AUDIT: share-link data submission
+            try:
+                audit_change_both(
+                    scope="study",
+                    action="share_entry_upserted",
+                    actor="",
+                    extra={
+                        "entry_id": entry.id,
+                        "subject_index": entry.subject_index,
+                        "visit_index": entry.visit_index,
+                    },
+                    study_id=study.id,
+                    study_name=study.study_name,
+                    db=db,
+                    actor_id=None,
+                )
+            except Exception:
+                pass
         except Exception as be:
             logger.error("BIDS export (shared data) failed for study %s: %s", study_id, be)
 
     return entry
 
-# ---------- Study Access Management ----------
+
+# -------------------- Study Access Management --------------------
 
 @router.get("/studies/{study_id}/access", response_model=List[schemas.StudyAccessGrantOut])
 def list_study_access(
@@ -984,7 +1185,6 @@ def list_study_access(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    # Only owner or admin can list
     meta = db.query(models.StudyMetadata).filter(models.StudyMetadata.id == study_id).first()
     if not meta:
         raise HTTPException(status_code=404, detail="Study not found")
@@ -1028,7 +1228,6 @@ def grant_study_access(
         raise HTTPException(status_code=404, detail="Study not found")
     _assert_owner_or_admin(meta, current_user)
 
-    # can't grant to owner (already has full)
     if payload.user_id == meta.created_by:
         raise HTTPException(status_code=400, detail="Owner already has full access")
 
@@ -1036,7 +1235,6 @@ def grant_study_access(
     if not grantee:
         raise HTTPException(status_code=404, detail="User not found")
 
-    # default permissions: Add Data only (View + Add, no Edit)
     perms = payload.permissions or {"view": True, "add_data": True, "edit_study": False}
 
     # upsert
@@ -1047,8 +1245,7 @@ def grant_study_access(
     )
     if grant:
         grant.permissions = perms
-        # keep created_by as is
-        action = "updated"
+        action = "access_updated"
     else:
         grant = models.StudyAccessGrant(
             study_id=study_id,
@@ -1057,13 +1254,13 @@ def grant_study_access(
             created_by=current_user.id,
         )
         db.add(grant)
-        action = "granted"
+        action = "access_granted"
     db.commit()
     db.refresh(grant)
 
-    # === NEW: write Study Access.csv and changes.txt entries ===
+    # AUDIT: access granted/updated
     try:
-        append_study_access_audit(
+        audit_access_change_both(
             study_id=meta.id,
             study_name=meta.study_name,
             action=action,
@@ -1074,19 +1271,8 @@ def grant_study_access(
             target_user_display=_display_name(grantee),
             permissions=grant.permissions,
         )
-        log_access_change_to_changes(
-            study_id=meta.id,
-            study_name=meta.study_name,
-            action=f"access_{action}",
-            actor_id=current_user.id,
-            actor_name=_display_name(current_user),
-            target_user_id=grantee.id,
-            target_user_display=_display_name(grantee),
-            permissions=grant.permissions,
-        )
-    except Exception as e:
-        logger.error("Failed to append Study Access audit: %s", e)
-    # ===========================================================
+    except Exception:
+        pass
 
     granter = grant.granted_by
     return schemas.StudyAccessGrantOut(
@@ -1117,28 +1303,22 @@ def revoke_study_access(
     if user_id == meta.created_by:
         raise HTTPException(status_code=400, detail="Cannot revoke owner access")
 
-    grant = (
-        db.query(models.StudyAccessGrant)
-          .filter_by(study_id=study_id, user_id=user_id)
-          .first()
-    )
+    grant = db.query(models.StudyAccessGrant).filter_by(study_id=study_id, user_id=user_id).first()
     if not grant:
-        # idempotent
         return
 
-    # capture for audit before delete
     perms_snapshot = grant.permissions or {}
     grantee = db.query(models.User).filter(models.User.id == user_id).first()
 
     db.delete(grant)
     db.commit()
 
-    # === NEW: write Study Access.csv and changes.txt entries ===
+    # AUDIT: access revoked
     try:
-        append_study_access_audit(
+        audit_access_change_both(
             study_id=meta.id,
             study_name=meta.study_name,
-            action="revoked",
+            action="access_revoked",
             actor_id=current_user.id,
             actor_name=_display_name(current_user),
             target_user_id=user_id,
@@ -1146,17 +1326,5 @@ def revoke_study_access(
             target_user_display=_display_name(grantee) if grantee else f"User#{user_id}",
             permissions=perms_snapshot,
         )
-        log_access_change_to_changes(
-            study_id=meta.id,
-            study_name=meta.study_name,
-            action="access_revoked",
-            actor_id=current_user.id,
-            actor_name=_display_name(current_user),
-            target_user_id=user_id,
-            target_user_display=_display_name(grantee) if grantee else f"User#{user_id}",
-            permissions=perms_snapshot,
-        )
-    except Exception as e:
-        logger.error("Failed to append Study Access revoke audit: %s", e)
-    # ===========================================================
-
+    except Exception:
+        pass
