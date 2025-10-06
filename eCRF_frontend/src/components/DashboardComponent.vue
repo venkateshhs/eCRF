@@ -77,6 +77,14 @@
               <span class="action-card-title">Open Existing Study</span>
               <span class="action-card-desc">Continue work on an existing study</span>
             </button>
+            <button
+              v-if="isAdmin || isPI || isInvestigator"
+              class="action-card"
+              @click="navigate('/dashboard/import-study')"
+            >
+              <span class="action-card-title">Import Study</span>
+              <span class="action-card-desc">Ingest from CSV/Excel</span>
+            </button>
           </div>
 
           <!-- STYLE 2: Wide Buttons -->
@@ -95,6 +103,13 @@
               class="btn-primary"
             >
               Open Existing Study
+            </button>
+            <button
+              v-if="isAdmin || isPI || isInvestigator"
+              @click="navigate('/dashboard/import-study')"
+              class="btn-primary"
+            >
+              Import Study
             </button>
           </div>
         </div>

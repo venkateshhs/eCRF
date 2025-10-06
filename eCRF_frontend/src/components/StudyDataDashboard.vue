@@ -70,7 +70,7 @@
             <template v-for="(section, sIdx) in sections" :key="'hdr-fld-'+sIdx">
               <template v-for="(field, fIdx) in section.fields" :key="'hdr-fld-'+sIdx+'-'+fIdx">
                 <th @click="sortTable(`s${sIdx}_f${fIdx}`)">
-                  {{ field.label }}
+                  {{ field.label || field.name || field.title || `Field ${fIdx+1}` }}
                   <i :class="sortIcon(`s${sIdx}_f${fIdx}`)"></i>
                 </th>
               </template>
@@ -81,7 +81,7 @@
             <th><input v-model="filters.visit" placeholder="Filter Visit"></th>
             <template v-for="(section, sIdx) in sections" :key="'filter-sec-'+sIdx">
               <template v-for="(field, fIdx) in section.fields" :key="'filter-fld-'+sIdx+'-'+fIdx">
-                <th><input v-model="filters[`s${sIdx}_f${fIdx}`]" :placeholder="`Filter ${field.label}`"></th>
+                <th><input v-model="filters[`s${sIdx}_f${fIdx}`]" :placeholder="`Filter ${field.label || field.name || field.title || (fIdx+1)}`"></th>
               </template>
             </template>
           </tr>
@@ -150,6 +150,9 @@ export default {
       VIEW_ALL_MAX_ROWS: 1000,
       viewAll: false,
       isLoadingEntries: false,
+
+      // debug (no leading underscores to satisfy vue/no-reserved-keys)
+      debugOnce: { study:false, fetch:false, entryShape:false },
     };
   },
   computed: {
@@ -166,7 +169,6 @@ export default {
       return this.sections.map(sec => sec.fields?.length || 0);
     },
 
-    // Total theoretical grid rows (subjects × visits)
     totalGridRows() {
       return (this.subjects?.length || 0) * (this.visits?.length || 0);
     },
@@ -174,7 +176,6 @@ export default {
       return this.totalGridRows > 0 && this.totalGridRows <= this.VIEW_ALL_MAX_ROWS;
     },
 
-    // Build rows for the current visible window.
     filteredData() {
       let data = [];
       const { subjectIdxPageSet, visitIdxPageSet } = this.currentWindowIndexSets();
@@ -195,7 +196,7 @@ export default {
                 value = '-';
               } else {
                 const raw = this.getValue(subjIdx, vIdx, sIdx, fIdx);
-                if (field.type === 'checkbox') {
+                if ((field.type || '').toLowerCase() === 'checkbox') {
                   value = (raw === true) ? 'Yes'
                         : (raw === false) ? 'No'
                         : '(No data)';
@@ -228,13 +229,10 @@ export default {
       // Sorting
       if (this.sortConfig.key) {
         const key = this.sortConfig.key;
-        // eslint-disable-next-line no-unused-labels
-        aconst_dir: 1;
         const dir = this.sortConfig.direction === 'asc' ? 1 : -1;
         data.sort((a, b) => {
           let valA = a[key] ?? '';
           let valB = b[key] ?? '';
-          // keep '-' and '(No data)' near the end
           if (valA === '-' && valB !== '-') return 1 * dir;
           if (valB === '-' && valA !== '-') return -1 * dir;
           if (valA === '(No data)' && valB !== '(No data)') return 1 * dir;
@@ -285,6 +283,62 @@ export default {
     this.bootstrap();
   },
   methods: {
+    // ---- debug helpers ----
+    dbg(...args){ console.log('[Dashboard]', ...args); },
+    groupDbg(label, obj){ console.groupCollapsed('[Dashboard]', label); console.log(obj); console.groupEnd(); },
+    normalizeKey(k){ return String(k || '').trim().toLowerCase(); },
+    listKeys(obj){ return Object.keys(obj || {}); },
+
+    // ---- dict helpers (section/field keys consistent with save) ----
+    sectionDictKey(sectionObj) {
+      return sectionObj?.title ?? '';
+    },
+    fieldDictKey(fieldObj, fallbackIndex) {
+      // include 'id' fallback
+      return fieldObj?.name ?? fieldObj?.key ?? fieldObj?.id ?? fieldObj?.label ?? fieldObj?.title ?? `f${fallbackIndex}`;
+    },
+    // tolerant getter: exact match, else case/trim-insensitive fallback (logs on miss)
+    dictRead(dataDict, sIdx, fIdx) {
+      if (!dataDict || typeof dataDict !== 'object' || Array.isArray(dataDict)) return undefined;
+
+      const sec = this.sections[sIdx];
+      const fld = sec?.fields?.[fIdx];
+
+      const sKey = this.sectionDictKey(sec);
+      const fKey = this.fieldDictKey(fld, fIdx);
+
+      let secObj = dataDict[sKey];
+      // fallback section key (case/trim-insensitive)
+      if (!secObj) {
+        const wanted = this.normalizeKey(sKey);
+        const hitKey = Object.keys(dataDict).find(k => this.normalizeKey(k) === wanted);
+        if (hitKey) {
+          secObj = dataDict[hitKey];
+          this.dbg('Section key fallback used:', { expected: sKey, matched: hitKey });
+        }
+      }
+      if (!secObj || typeof secObj !== 'object') {
+        this.dbg('dictRead: section not found', { sIdx, sKey, available: this.listKeys(dataDict) });
+        return undefined;
+      }
+
+      if (Object.prototype.hasOwnProperty.call(secObj, fKey)) return secObj[fKey];
+
+      // fallback field key (case/trim-insensitive)
+      const wantedField = this.normalizeKey(fKey);
+      const hitField = Object.keys(secObj).find(k => this.normalizeKey(k) === wantedField);
+      if (hitField) {
+        this.dbg('Field key fallback used:', { sKey, expectedField: fKey, matchedField: hitField });
+        return secObj[hitField];
+      }
+
+      this.dbg('dictRead: field not found', {
+        sIdx, fIdx, sKey, fKey,
+        availableFields: this.listKeys(secObj)
+      });
+      return undefined;
+    },
+
     async bootstrap() {
       const studyId = this.$route.params.id;
       try {
@@ -292,6 +346,24 @@ export default {
           headers: { Authorization: `Bearer ${this.token}` },
         });
         this.study = studyResp.data;
+
+        if (!this.debugOnce.study) {
+          this.debugOnce.study = true;
+          this.groupDbg('Study loaded', {
+            studyId,
+            subjects: this.subjects.length,
+            visits: this.visits.length,
+            sections: this.sections.map((s, i) => ({
+              i, title: s.title,
+              fieldKeys: (s.fields || []).map((f, j) => this.fieldDictKey(f, j))
+            })),
+            assignmentsShape: {
+              m: this.sections.length,
+              v: this.visits.length,
+              g: (this.study?.content?.study_data?.groups || []).length
+            }
+          });
+        }
 
         // Initialize dynamic filters
         this.sections.forEach((section, sIdx) => {
@@ -362,15 +434,36 @@ export default {
       if (subject_indexes) params.append('subject_indexes', subject_indexes);
       if (visit_indexes) params.append('visit_indexes', visit_indexes);
 
+      const url = `/forms/studies/${studyId}/data_entries` + (params.toString() ? `?${params.toString()}` : '');
+
       try {
         this.isLoadingEntries = true;
-        const resp = await axios.get(
-          `/forms/studies/${studyId}/data_entries` + (params.toString() ? `?${params.toString()}` : ''),
-          { headers: { Authorization: `Bearer ${this.token}` } }
-        );
-        // entries include: id, subject_index, visit_index, group_index, data, skipped_required_flags, form_version, created_at
-        this.entries = resp.data.entries || [];
-        this.totalEntries = resp.data.total ?? this.entries.length;
+        if (!this.debugOnce.fetch) {
+          this.debugOnce.fetch = true;
+          this.dbg('Fetching entries…', { url, viewAll: this.viewAll, subject_indexes, visit_indexes });
+        }
+        const resp = await axios.get(url, { headers: { Authorization: `Bearer ${this.token}` } });
+        const payload = Array.isArray(resp.data) ? { entries: resp.data, total: resp.data.length } : (resp.data || {});
+        this.entries = payload.entries || [];
+        this.totalEntries = payload.total ?? this.entries.length;
+
+        if (!this.debugOnce.entryShape) {
+          this.debugOnce.entryShape = true;
+          const sample = (this.entries || []).slice(0, 3).map(e => ({
+            id: e.id,
+            s: e.subject_index, v: e.visit_index, g: e.group_index,
+            dataType: Array.isArray(e.data) ? 'array' : (e.data && typeof e.data === 'object') ? 'dict' : typeof e.data,
+            topKeys: e.data && typeof e.data === 'object' && !Array.isArray(e.data) ? Object.keys(e.data) : null
+          }));
+          this.groupDbg('Entries fetched', {
+            count: this.entries.length,
+            sample
+          });
+          if (sample[0]?.topKeys) {
+            this.dbg('First entry dict section keys:', sample[0].topKeys);
+          }
+        }
+
       } catch (err) {
         console.error('Failed to load entries:', err);
         this.entries = [];
@@ -381,7 +474,7 @@ export default {
 
     goBack() {
       const id = this.$route.params.id;
-      this.$router.push({ name: 'StudyView', params: { id } });
+      this.$router.push({ name: "StudyView", params: { id } });
     },
     toggleExportMenu() {
       this.showExportMenu = !this.showExportMenu;
@@ -392,28 +485,49 @@ export default {
       const subjGroup = (this.subjects[subjIdx]?.group || '').trim().toLowerCase();
       const grpList = this.study?.content?.study_data?.groups || [];
       const idx = grpList.findIndex(g => (g.name || '').trim().toLowerCase() === subjGroup);
+      if (idx < 0) {
+        this.dbg('resolveGroup: subject group not found, defaulting to 0', {
+          subjectIndex: subjIdx, subjectGroup: subjGroup, availableGroups: grpList.map(g => g.name)
+        });
+      }
       return idx >= 0 ? idx : 0;
     },
     isAssigned(sectionIdx, visitIdx, groupIdx) {
-      return !!(this.study?.content?.study_data?.assignments?.[sectionIdx]?.[visitIdx]?.[groupIdx]);
+      const ok = !!(this.study?.content?.study_data?.assignments?.[sectionIdx]?.[visitIdx]?.[groupIdx]);
+      if (!ok && (sectionIdx === 0) && (visitIdx === 0) && (groupIdx === 0)) {
+        this.dbg('isAssigned=false example', { sectionIdx, visitIdx, groupIdx });
+      }
+      return ok;
     },
     findEntry(subjIdx, visitIdx, groupIdx) {
-      return this.entries.find(e =>
+      const e = (this.entries || []).find(e =>
         e.subject_index === subjIdx &&
         e.visit_index === visitIdx &&
         e.group_index === groupIdx
       ) || null;
+      if (!e) {
+        if (subjIdx === 0 && visitIdx === 0 && groupIdx === 0) {
+          this.dbg('findEntry: no entry for (s,v,g)', { subjIdx, visitIdx, groupIdx, entries: this.entries.length });
+        }
+      }
+      return e;
     },
     getValue(subjIdx, visitIdx, sectionIdx, fieldIdx) {
       const groupIdx = this.resolveGroup(subjIdx);
       const entry = this.findEntry(subjIdx, visitIdx, groupIdx);
-      if (!entry || !Array.isArray(entry.data)) return '';
-      const section = entry.data[sectionIdx] || [];
+      if (!entry || !entry.data) return '';
+      // Primary: dict
+      const d = entry.data;
+      if (!Array.isArray(d)) {
+        const v = this.dictRead(d, sectionIdx, fieldIdx);
+        return v != null ? v : '';
+      }
+      // Fallback (old rows): list-of-lists
+      const section = Array.isArray(d) ? (d[sectionIdx] || []) : [];
       return section[fieldIdx] != null ? section[fieldIdx] : '';
     },
     isCellSkipped(subjIdx, visitIdx, sectionIdx, fieldIdx) {
       const groupIdx = this.resolveGroup(subjIdx);
-      if (!this.isAssigned(sectionIdx, visitIdx, groupIdx)) return false;
       const entry = this.findEntry(subjIdx, visitIdx, groupIdx);
       if (!entry) return false;
       const flags = entry.skipped_required_flags;
@@ -469,7 +583,8 @@ export default {
             `/forms/studies/${studyId}/data_entries?all=true`,
             { headers: { Authorization: `Bearer ${this.token}` } }
           );
-          entriesForExport = resp.data.entries || [];
+          const payload = Array.isArray(resp.data) ? { entries: resp.data } : (resp.data || {});
+          entriesForExport = payload.entries || [];
         } catch (e) {
           console.error('Failed to fetch all entries for export, using current page only.', e);
         }
@@ -492,7 +607,7 @@ export default {
                 value = '-';
               } else {
                 const raw = this.getValue(subjIdx, vIdx, sIdx, fIdx);
-                if (field.type === 'checkbox') {
+                if ((field.type || '').toLowerCase() === 'checkbox') {
                   value = (raw === true) ? 'Yes'
                         : (raw === false) ? 'No'
                         : '(No data)';
@@ -513,7 +628,7 @@ export default {
     downloadDelimited(rows, kind) {
       const quote = v => `"${String(v).replace(/"/g, '""')}"`;
       const hdr1 = ['Subject ID', 'Visit', ...this.sections.flatMap((s, i) => Array(this.fieldsPerSection[i]).fill(s.title))];
-      const hdr2 = ['', '', ...this.sections.flatMap(sec => sec.fields.map(f => f.label))];
+      const hdr2 = ['', '', ...this.sections.flatMap(sec => sec.fields.map(f => f.label || f.name || f.title))];
 
       const lines = [];
       lines.push(hdr1.map(quote).join(','));
@@ -561,6 +676,7 @@ export default {
 </script>
 
 <style scoped>
+/* (unchanged styles from your file) */
 .dashboard-header-controls {
   display: grid;
   grid-template-columns: auto 1fr auto auto;
@@ -650,11 +766,11 @@ export default {
 .dashboard-table tbody td:not(:first-child):not(:nth-child(2)) { background: #ffffff; color: #4b5563; }
 .dashboard-table tbody tr:hover td { background: #f1f5f9; }
 
-/* Skipped cell (aligns with 'status-skipped' red) */
+/* Skipped cell */
 .cell-skipped {
-  background: #fee2e2 !important; /* red-200 */
-  color: #991b1b;                 /* red-800 */
-  border-color: #ef4444 !important; /* red-500 */
+  background: #fee2e2 !important;
+  color: #991b1b;
+  border-color: #ef4444 !important;
   font-weight: 600;
 }
 

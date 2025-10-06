@@ -24,10 +24,11 @@ from .bids_exporter import (
 )
 from .logger import logger
 from .models import User, StudyTemplateVersion
+from .schemas import BulkPayload
 from .users import get_current_user
 from sqlalchemy.orm import Session
 import secrets
-from sqlalchemy import or_
+from sqlalchemy import or_, text
 
 router = APIRouter(prefix="/forms", tags=["forms"])
 
@@ -1328,3 +1329,43 @@ def revoke_study_access(
         )
     except Exception:
         pass
+
+
+@router.post("/studies/{study_id}/data/bulk")
+def bulk_insert_data(study_id: int, payload: BulkPayload, db: Session = Depends(get_db)):
+    if not payload.entries:
+        return {"inserted": 0, "failed": 0, "errors": []}
+
+    now = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+
+    # Build rows as list of dicts (named binds) → executemany via session.execute
+    rows = []
+    try:
+        form_version = get_current_form_version(db, study_id)
+    except ValueError:
+        form_version = 1
+    for e in payload.entries:
+        rows.append({
+            "study_id": study_id,
+            "form_version": form_version,
+            "subject_index": int(e.subject_index),
+            "visit_index": int(e.visit_index),
+            "group_index": int(e.group_index),
+            "data": json.dumps(e.data, ensure_ascii=False),
+            "created_at": now,
+            "skipped_required_flags": json.dumps(e.skipped_required_flags or [], ensure_ascii=False),
+        })
+
+    sql = text("""
+            INSERT INTO study_entry_data
+              (study_id, form_version, subject_index, visit_index, group_index, data, created_at, skipped_required_flags)
+            VALUES (:study_id, :form_version, :subject_index, :visit_index, :group_index, :data, :created_at, :skipped_required_flags)
+        """)
+
+    try:
+        db.execute(sql, rows)   # list of dicts → executemany
+        db.commit()
+        return {"inserted": len(rows), "failed": 0, "errors": []}
+    except Exception as ex:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=f"Bulk insert failed: {ex}")
