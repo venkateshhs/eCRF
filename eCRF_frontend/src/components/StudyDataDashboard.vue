@@ -12,11 +12,17 @@
           <i :class="icons.info"></i>
         </button>
         <div v-if="showLegend" class="legend-content" @click.stop>
-          <p><strong>-</strong>: No section is assigned to this subject's group for this visit.</p>
-          <p><strong>(No data)</strong>: Section is assigned, but no data has been entered. Use the data entry form to add data.</p>
           <p>
-            <span class="legend-swatch cell-skipped"></span>
-            <strong>Red cell</strong>: Required field was <em>skipped</em> when saving.
+            <span class="legend-swatch swatch-none"></span>
+            <strong>No color:</strong> No section assigned for this subject’s group at this visit.
+          </p>
+          <p>
+            <span class="legend-swatch swatch-gray"></span>
+            <strong>Gray cell:</strong> Section assigned but no data has been entered.
+          </p>
+          <p>
+            <span class="legend-swatch swatch-red"></span>
+            <strong>Red cell:</strong> Required field was <em>skipped</em> when saving.
           </p>
           <p>Data is displayed for each subject under the visit and section assigned to their group.</p>
         </div>
@@ -191,19 +197,17 @@ export default {
           this.sections.forEach((section, sIdx) => {
             const assigned = this.isAssigned(sIdx, vIdx, groupIdx);
             section.fields.forEach((field, fIdx) => {
-              let value;
-              if (!assigned) {
-                value = '-';
-              } else {
+              let value = '';
+              if (assigned) {
                 const raw = this.getValue(subjIdx, vIdx, sIdx, fIdx);
                 if ((field.type || '').toLowerCase() === 'checkbox') {
                   value = (raw === true) ? 'Yes'
                         : (raw === false) ? 'No'
-                        : '(No data)';
+                        : '';
                 } else {
-                  value = (raw == null || raw === '') ? '(No data)' : raw;
+                  value = (raw == null || raw === '') ? '' : raw;
                 }
-              }
+              } // if not assigned, leave empty string and default background
               row[`s${sIdx}_f${fIdx}`] = value;
             });
           });
@@ -233,10 +237,6 @@ export default {
         data.sort((a, b) => {
           let valA = a[key] ?? '';
           let valB = b[key] ?? '';
-          if (valA === '-' && valB !== '-') return 1 * dir;
-          if (valB === '-' && valA !== '-') return -1 * dir;
-          if (valA === '(No data)' && valB !== '(No data)') return 1 * dir;
-          if (valB === '(No data)' && valA !== '(No data)') return -1 * dir;
           valA = String(valA).toLowerCase();
           valB = String(valB).toLowerCase();
           if (valA < valB) return -1 * dir;
@@ -536,8 +536,17 @@ export default {
                 flags[sectionIdx][fieldIdx] === true);
     },
     cellClass(subjIdx, visitIdx, sectionIdx, fieldIdx) {
+      const groupIdx = this.resolveGroup(subjIdx);
+      const assigned = this.isAssigned(sectionIdx, visitIdx, groupIdx);
+      const raw = assigned ? this.getValue(subjIdx, visitIdx, sectionIdx, fieldIdx) : '';
+      const field = this.sections?.[sectionIdx]?.fields?.[fieldIdx] || {};
+      const isCheckbox = (field.type || '').toLowerCase() === 'checkbox';
+      const hasData = isCheckbox ? (raw === true || raw === false) : !(raw == null || raw === '');
+
       return {
         'cell-skipped': this.isCellSkipped(subjIdx, visitIdx, sectionIdx, fieldIdx),
+        'cell-empty-assigned': assigned && !hasData
+        // unassigned => no extra class (no color)
       };
     },
 
@@ -556,10 +565,14 @@ export default {
     },
 
     // Paging helpers
-    goFirst() { this.currentPage = 1; },
-    goPrev()  { if (this.currentPage > 1) this.currentPage--; },
-    goNext()  { if (this.currentPage < this.totalPages) this.currentPage++; },
-    goLast()  { this.currentPage = this.totalPages; },
+    goFirst() { this.currentPage = 1; }
+    ,
+    goPrev()  { if (this.currentPage > 1) this.currentPage--; }
+    ,
+    goNext()  { if (this.currentPage < this.totalPages) this.currentPage++; }
+    ,
+    goLast()  { this.currentPage = this.totalPages; }
+    ,
 
     // Exports
     async exportCSV() {
@@ -602,17 +615,15 @@ export default {
           this.sections.forEach((section, sIdx) => {
             const assigned = this.isAssigned(sIdx, vIdx, groupIdx);
             section.fields.forEach((field, fIdx) => {
-              let value;
-              if (!assigned) {
-                value = '-';
-              } else {
+              let value = '';
+              if (assigned) {
                 const raw = this.getValue(subjIdx, vIdx, sIdx, fIdx);
                 if ((field.type || '').toLowerCase() === 'checkbox') {
                   value = (raw === true) ? 'Yes'
                         : (raw === false) ? 'No'
-                        : '(No data)';
+                        : '';
                 } else {
-                  value = (raw == null || raw === '') ? '(No data)' : raw;
+                  value = (raw == null || raw === '') ? '' : raw;
                 }
               }
               row[`s${sIdx}_f${fIdx}`] = value;
@@ -737,11 +748,17 @@ export default {
   width: 14px;
   height: 14px;
   margin-right: 6px;
-  border: 1px solid #ef4444;
+  border: 1px solid #d1d5db;
   vertical-align: -2px;
-  background: #fee2e2;
+  background: #ffffff;
 }
 
+/* legend variants */
+.swatch-none { background: #ffffff; border-color: #d1d5db; }
+.swatch-gray { background: #e5e7eb; border-color: #9ca3af; }
+.swatch-red  { background: #fee2e2; border-color: #ef4444; }
+
+/* table */
 .table-controls {
   display: flex; justify-content: space-between; align-items: center; margin: 8px 0;
   color: #4b5563; font-size: 0.9rem;
@@ -766,7 +783,14 @@ export default {
 .dashboard-table tbody td:not(:first-child):not(:nth-child(2)) { background: #ffffff; color: #4b5563; }
 .dashboard-table tbody tr:hover td { background: #f1f5f9; }
 
-/* Skipped cell */
+/* Assigned but empty (gray). Keep strong so hover doesn't override */
+.cell-empty-assigned {
+  background: #e5e7eb !important;
+  color: #374151;
+  border-color: #d1d5db !important;
+}
+
+/* Skipped cell (red) */
 .cell-skipped {
   background: #fee2e2 !important;
   color: #991b1b;
