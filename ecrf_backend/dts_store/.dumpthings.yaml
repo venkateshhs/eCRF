@@ -1,0 +1,31 @@
+type: collections
+version: 1
+
+collections:
+  ecrf:
+    # Make incoming writes land directly in curated (simplifies ops/offline)
+    curated: ecrf/curated
+    incoming: ecrf                  # <- same tree; token label below makes it ecrf/curated
+    default_token: anon_read
+    backend:
+      # sqlite+stl makes JSON responses always carry schema_type, convenient for clients
+      type: sqlite+stl
+      # Use local file URL to avoid internet dependency
+      schema: file://${STORAGE_ROOT}/schemas/flat-data-unreleased.yaml
+
+tokens:
+  # App will use this token from FastAPI for R/W
+  app_admin:
+    user_id: ecrf-backend
+    collections:
+      ecrf:
+        mode: WRITE_COLLECTION       # read curated + write incoming/curated
+        incoming_label: curated      # <- routes into curated immediately
+
+  # Optional read-only token
+  anon_read:
+    user_id: anonymous
+    collections:
+      ecrf:
+        mode: READ_CURATED
+        incoming_label: ""
