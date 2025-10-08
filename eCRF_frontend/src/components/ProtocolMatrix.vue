@@ -29,15 +29,14 @@
         <thead v-if="visitList.length <= 3">
           <tr>
             <th rowspan="2">Data Models</th>
-            <th v-for="(visit, vIdx) in visitList" :key="vIdx" :colspan="groupList.length">
+            <th v-for="(visit, vIdx) in visitList" :key="`vh-${vIdx}`" :colspan="groupList.length">
               <span class="th-title">Visit:</span>
               <span class="th-chip">{{ visit.name }}</span>
             </th>
           </tr>
           <tr>
-            <template v-for="(_, vIdx) in visitList" :key="vIdx">
-              <th v-for="(group, gIdx) in groupList" :key="gIdx">
-                <!-- Group names: plain bold text (no chip) -->
+            <template v-for="(_, vIdx) in visitList" :key="`vg-${vIdx}`">
+              <th v-for="(group, gIdx) in groupList" :key="`vg-${vIdx}-${gIdx}`">
                 <span class="group-name">Group/Cohort: {{ group.name }}</span>
               </th>
             </template>
@@ -48,23 +47,22 @@
         <thead v-else>
           <tr>
             <th>Data Models</th>
-            <th v-for="(group, gIdx) in groupList" :key="gIdx">
-              <!-- Group names: plain bold text (no chip) -->
+            <th v-for="(group, gIdx) in groupList" :key="`g-${gIdx}`">
               <span class="group-name">{{ group.name }}</span>
             </th>
           </tr>
         </thead>
 
         <tbody>
-          <tr v-for="(model, mIdx) in selectedModels" :key="mIdx">
+          <tr v-for="(model, mIdx) in selectedModels" :key="`m-${mIdx}`">
             <td class="model-cell">
               <span class="model-title">{{ model.title }}</span>
             </td>
 
             <!-- Full-matrix cells -->
             <template v-if="visitList.length <= 3">
-              <template v-for="(_, vIdx) in visitList" :key="vIdx">
-                <td v-for="(_, gIdx) in groupList" :key="gIdx">
+              <template v-for="(_, vIdx) in visitList" :key="`row-${mIdx}-v-${vIdx}`">
+                <td v-for="(_, gIdx) in groupList" :key="`cell-${mIdx}-${vIdx}-${gIdx}`">
                   <label class="chk-wrap" :title="`Toggle ${model.title} @ ${visitList[vIdx]?.name} / ${groupList[gIdx]?.name}`">
                     <input
                       type="checkbox"
@@ -72,10 +70,7 @@
                       @change="onToggle(mIdx, vIdx, gIdx, $event.target.checked)"
                     />
                     <!-- Unchecked: outline square; Checked: check-square -->
-                    <i
-                      class="fa-chk"
-                      :class="[assignments[mIdx][vIdx][gIdx] ? 'fas fa-check-square' : 'far fa-square']"
-                    ></i>
+                    <i class="fa-chk" :class="[assignments[mIdx][vIdx][gIdx] ? 'fas fa-check-square' : 'far fa-square']"></i>
                   </label>
                 </td>
               </template>
@@ -83,17 +78,14 @@
 
             <!-- Single-visit cells -->
             <template v-else>
-              <td v-for="(_, gIdx) in groupList" :key="gIdx">
+              <td v-for="(_, gIdx) in groupList" :key="`celln-${mIdx}-${gIdx}`">
                 <label class="chk-wrap" :title="`Toggle ${model.title} @ ${visitList[currentVisitIndex]?.name} / ${groupList[gIdx]?.name}`">
                   <input
                     type="checkbox"
                     :checked="assignments[mIdx][currentVisitIndex][gIdx]"
                     @change="onToggle(mIdx, currentVisitIndex, gIdx, $event.target.checked)"
                   />
-                  <i
-                    class="fa-chk"
-                    :class="[assignments[mIdx][currentVisitIndex][gIdx] ? 'fas fa-check-square' : 'far fa-square']"
-                  ></i>
+                  <i class="fa-chk" :class="[assignments[mIdx][currentVisitIndex][gIdx] ? 'fas fa-check-square' : 'far fa-square']"></i>
                 </label>
               </td>
             </template>
@@ -137,11 +129,7 @@
     </div>
 
     <!-- 4. Custom Dialog for Notifications -->
-    <CustomDialog
-      :message="dialogMessage"
-      :isVisible="showDialog"
-      @close="closeDialog"
-    />
+    <CustomDialog :message="dialogMessage" :isVisible="showDialog" @close="closeDialog" />
 
     <!-- 4a. Info dialog for ProtocolMatrix -->
     <div v-if="showInfo" class="modal-overlay">
@@ -171,7 +159,7 @@
           We found visits without any model assigned. You can go fix them, or save anyway.
         </p>
         <ul class="empty-visits-list">
-          <li v-for="vIdx in emptyVisitIndices" :key="vIdx">
+          <li v-for="vIdx in emptyVisitIndices" :key="'empty-v-'+vIdx">
             <span class="visit-item-title">Visit {{ vIdx + 1 }} — {{ visitList[vIdx]?.name || 'Visit' }}</span>
           </li>
         </ul>
@@ -185,24 +173,133 @@
       </div>
     </div>
 
+    <!-- 4c. Confirm Template Changes -->
+    <div v-if="showConfirmChanges" class="modal-overlay">
+      <div class="modal validation-modal">
+        <h3 class="validation-title">Confirm Template Changes</h3>
+        <p class="validation-text">
+          You made structural changes. Saving will
+          <strong v-if="versionDecision?.will_bump">create a new template version (v{{ versionDecision.decision_version_after }})</strong>
+          <strong v-else>update the current version (no new version will be created)</strong>.
+          Existing data remains attached to its original versions and is not lost.
+        </p>
+
+        <div class="diff-sections">
+          <!-- Metadata (generic key-by-key diff) -->
+          <div v-if="diffResult.metadata.any" class="diff-block">
+            <h4>Study Metadata</h4>
+            <ul>
+              <li v-for="c in diffResult.metadata.changes" :key="'md-'+c.key">
+                <strong>{{ c.label }}:</strong>
+                <em>{{ c.from || '—' }}</em> → <em>{{ c.to || '—' }}</em>
+              </li>
+            </ul>
+          </div>
+
+          <!-- Groups -->
+          <div v-if="diffResult.groups.any" class="diff-block">
+            <h4>Groups</h4>
+            <ul>
+              <li v-for="n in diffResult.groups.added" :key="'gadd-'+n">➕ Added: <strong>{{ n }}</strong></li>
+              <li v-for="n in diffResult.groups.removed" :key="'grem-'+n">➖ Removed: <strong>{{ n }}</strong></li>
+              <li v-for="p in diffResult.groups.renamed" :key="'gren-'+p.from+'-'+p.to">
+                ✎ Renamed: <strong>{{ p.from }}</strong> → <strong>{{ p.to }}</strong>
+              </li>
+              <li v-for="chg in diffResult.groups.changed" :key="'gchg-'+chg.name">
+                ⚙︎ Updated: <strong>{{ chg.name }}</strong>
+                <ul>
+                  <li v-for="field in chg.fields" :key="'gchg-'+chg.name+'-'+field.key">
+                    {{ field.label }}: <em>{{ field.from || '—' }}</em> → <em>{{ field.to || '—' }}</em>
+                  </li>
+                </ul>
+              </li>
+            </ul>
+          </div>
+
+          <!-- Visits -->
+          <div v-if="diffResult.visits.any" class="diff-block">
+            <h4>Visits</h4>
+            <ul>
+              <li v-for="n in diffResult.visits.added" :key="'vadd-'+n">➕ Added: <strong>{{ n }}</strong></li>
+              <li v-for="n in diffResult.visits.removed" :key="'vrem-'+n">➖ Removed: <strong>{{ n }}</strong></li>
+              <li v-for="p in diffResult.visits.renamed" :key="'vren-'+p.from+'-'+p.to">
+                ✎ Renamed: <strong>{{ p.from }}</strong> → <strong>{{ p.to }}</strong>
+              </li>
+              <li v-for="chg in diffResult.visits.changed" :key="'vchg-'+chg.name">
+                ⚙︎ Updated: <strong>{{ chg.name }}</strong>
+                <ul>
+                  <li v-for="field in chg.fields" :key="'vchg-'+chg.name+'-'+field.key">
+                    {{ field.label }}: <em>{{ field.from || '—' }}</em> → <em>{{ field.to || '—' }}</em>
+                  </li>
+                </ul>
+              </li>
+            </ul>
+          </div>
+
+          <!-- Subjects -->
+          <div v-if="diffResult.subjects.any" class="diff-block">
+            <h4>Subjects</h4>
+            <ul>
+              <li v-for="id in diffResult.subjects.added" :key="'sadd-'+id">➕ Added subject: <strong>{{ id }}</strong></li>
+              <li v-for="id in diffResult.subjects.removed" :key="'srem-'+id">➖ Removed subject: <strong>{{ id }}</strong></li>
+              <li v-for="r in diffResult.subjects.reassigned" :key="'srea-'+r.id">
+                ⇄ <strong>{{ r.id }}</strong> moved group: <em>{{ r.from || '—' }}</em> → <em>{{ r.to || '—' }}</em>
+              </li>
+            </ul>
+          </div>
+
+          <!-- Models (sections) -->
+          <div v-if="diffResult.models.meta.any" class="diff-block">
+            <h4>Data Models</h4>
+            <ul>
+              <li v-for="n in diffResult.models.meta.added" :key="'madd-'+n">➕ Added: <strong>{{ n }}</strong></li>
+              <li v-for="n in diffResult.models.meta.removed" :key="'mrem-'+n">➖ Removed: <strong>{{ n }}</strong></li>
+              <li v-for="p in diffResult.models.meta.renamed" :key="'mren-'+p.from+'-'+p.to">
+                ✎ Renamed: <strong>{{ p.from }}</strong> → <strong>{{ p.to }}</strong>
+              </li>
+            </ul>
+          </div>
+
+          <!-- Model Assignments -->
+          <div v-if="diffResult.models.assign.any" class="diff-block">
+            <h4>Model Assignments</h4>
+            <p>Turned <strong>ON</strong>: {{ diffResult.models.assign.turnedOn }}, Turned <strong>OFF</strong>: {{ diffResult.models.assign.turnedOff }}</p>
+            <details>
+              <summary>Show details</summary>
+              <ul>
+                <li v-for="t in diffResult.models.assign.toggles" :key="'tg-'+t.key">
+                  <span v-if="t.to">✔ Assigned</span><span v-else>✖ Unassigned</span>
+                  <strong> {{ t.section }}</strong>
+                  <span> @ {{ t.visit }} / {{ t.group }}</span>
+                </li>
+              </ul>
+            </details>
+          </div>
+
+          <div v-if="!diffResult.any" class="diff-block">
+            <em>No structural changes detected.</em>
+          </div>
+        </div>
+
+        <div class="modal-actions">
+          <button class="btn-option" @click="cancelConfirm">Cancel</button>
+          <button class="btn-primary" @click="confirmAndSave">Confirm & Save</button>
+        </div>
+      </div>
+    </div>
+
     <!-- 5. Footer Actions -->
     <div class="matrix-actions card-surface">
       <button @click="$emit('edit-template')" class="btn-option">Edit Template</button>
       <button @click="saveStudy" class="btn-primary">Save</button>
-      <button
-        @click="openPreview"
-        :disabled="!hasAssignment(currentVisitIndex)"
-        class="btn-option"
-      >
-        Preview
-      </button>
+      <button @click="openPreview" :disabled="!hasAssignment(currentVisitIndex)" class="btn-option">Preview</button>
       <button @click="goToSaved" class="btn-option">View Saved Study</button>
     </div>
   </div>
 </template>
 
 <script>
-import { ref, computed } from "vue";
+import { ref, computed, onMounted } from "vue";
 import { useRouter } from "vue-router";
 import { useStore } from "vuex";
 import axios from "axios";
@@ -223,6 +320,8 @@ export default {
     const router = useRouter();
     const store = useStore();
 
+    const isEditing = computed(() => !!(store.state.studyDetails?.study_metadata?.id));
+
     // Matrix indices
     const currentVisitIndex = ref(0);
 
@@ -241,11 +340,28 @@ export default {
     const emptyVisitIndices = ref([]);
     const isSavingInProgress = ref(false);
 
-    // Lists with fallback (fallback is used ONLY for display/preview)
+    // Confirm changes
+    const showConfirmChanges = ref(false);
+    const diffResult = ref({
+      any: false,
+      metadata: { any: false, changes: [] },
+      groups:   { any: false, added: [], removed: [], renamed: [], changed: [] },
+      visits:   { any: false, added: [], removed: [], renamed: [], changed: [] },
+      subjects: { any: false, added: [], removed: [], reassigned: [] },
+      models:   {
+        meta:   { any: false, added: [], removed: [], renamed: [] },
+        assign: { any: false, toggles: [], turnedOn: 0, turnedOff: 0 }
+      }
+    });
+    const versionDecision = ref(null);
+
+    // Baseline (server)
+    const baseline = ref(null);
+
+    // Display lists
     const visitList = computed(() => props.visits.length ? props.visits : [{ name: "All Visits" }]);
     const groupList = computed(() => props.groups.length ? props.groups : [{ name: "All Groups" }]);
 
-    // Toggle a checkbox
     function onToggle(mIdx, vIdx, gIdx, checked) {
       emit("assignment-updated", { mIdx, vIdx, gIdx, checked });
     }
@@ -270,7 +386,6 @@ export default {
     }
     const assignedGroups = computed(() => groupsForVisit(previewVisitIndex.value));
     const previewGroupPos = computed(() => assignedGroups.value.indexOf(previewGroupIndex.value));
-
     function setFirstGroup(vIdx) {
       const arr = groupsForVisit(vIdx);
       previewGroupIndex.value = arr.length ? arr[0] : 0;
@@ -337,28 +452,300 @@ export default {
       }
       return empties;
     }
-
     function openPreview() {
       if (!hasAssignment(currentVisitIndex.value)) return;
       previewVisitIndex.value = currentVisitIndex.value;
       setFirstGroup(currentVisitIndex.value);
       showPreviewModal.value = true;
     }
-    function closePreview() {
-      showPreviewModal.value = false;
+    function closePreview() { showPreviewModal.value = false; }
+
+    function showDialogMessage(message) { dialogMessage.value = message; showDialog.value = true; }
+    function closeDialog() { showDialog.value = false; dialogMessage.value = ""; }
+
+    // ---------- DIFF ENGINE (unchanged core, but metadata now compares all keys) ----------
+    function deepClone(o) { return JSON.parse(JSON.stringify(o ?? null)); }
+    function normalizeName(s) { return String(s || "").trim(); }
+    function levenshtein(a, b) {
+      a = a || ""; b = b || "";
+      const m = a.length, n = b.length;
+      const dp = Array.from({ length: m + 1 }, () => Array(n + 1).fill(0));
+      for (let i = 0; i <= m; i++) dp[i][0] = i;
+      for (let j = 0; j <= n; j++) dp[0][j] = j;
+      for (let i = 1; i <= m; i++) {
+        for (let j = 1; j <= n; j++) {
+          const cost = a[i-1] === b[j-1] ? 0 : 1;
+          dp[i][j] = Math.min(dp[i-1][j] + 1, dp[i][j-1] + 1, dp[i-1][j-1] + cost);
+        }
+      }
+      return dp[m][n];
+    }
+    function similarity(a, b) {
+      const L = Math.max((a || "").length, (b || "").length) || 1;
+      return 1 - (levenshtein((a||"").toLowerCase(), (b||"").toLowerCase()) / L);
+    }
+    function mapBy(arr, keyFn) {
+      const m = new Map();
+      (arr || []).forEach((x, i) => m.set(keyFn(x, i), { item: x, idx: i }));
+      return m;
+    }
+    function diffListByName(oldList, newList, getName) {
+      const oldNames = (oldList || []).map(getName).map(normalizeName);
+      const newNames = (newList || []).map(getName).map(normalizeName);
+      const oldSet = new Set(oldNames);
+      const newSet = new Set(newNames);
+
+      const added = newNames.filter(n => !oldSet.has(n));
+      const removed = oldNames.filter(n => !newSet.has(n));
+
+      const renamed = [];
+      const stillAdded = [];
+      const stillRemoved = [];
+
+      const usedAdded = new Set();
+      removed.forEach(r => {
+        let best = { name: null, score: 0, j: -1 };
+        added.forEach((a, j) => {
+          if (usedAdded.has(j)) return;
+          const sc = similarity(r, a);
+          if (sc > best.score) best = { name: a, score: sc, j };
+        });
+        if (best.score >= 0.6 && best.j >= 0) {
+          usedAdded.add(best.j);
+          renamed.push({ from: r, to: best.name, score: Number(best.score.toFixed(2)) });
+        } else {
+          stillRemoved.push(r);
+        }
+      });
+      added.forEach((a, j) => { if (!usedAdded.has(j)) stillAdded.push(a); });
+
+      const changed = [];
+      const oldByName = mapBy(oldList || [], x => normalizeName(getName(x)));
+      const newByName = mapBy(newList || [], x => normalizeName(getName(x)));
+      newSet.forEach(nm => {
+        if (oldSet.has(nm)) {
+          const o = oldByName.get(nm)?.item || {};
+          const n = newByName.get(nm)?.item || {};
+          const local = [];
+          ["description", "label"].forEach(k => {
+            if ((o?.[k] || "") !== (n?.[k] || "")) {
+              local.push({ key: k, label: k[0].toUpperCase() + k.slice(1), from: o?.[k] || "", to: n?.[k] || "" });
+            }
+          });
+          if (local.length) changed.push({ name: nm, fields: local });
+        }
+      });
+
+      return {
+        any: !!(stillAdded.length || stillRemoved.length || renamed.length || changed.length),
+        added: stillAdded,
+        removed: stillRemoved,
+        renamed,
+        changed
+      };
+    }
+    function diffMetadata(oldStudy, newStudy) {
+      const keys = new Set([...Object.keys(oldStudy || {}), ...Object.keys(newStudy || {})]);
+      keys.delete("id");
+      const changes = [];
+      keys.forEach(k => {
+        const fromVal = (oldStudy?.[k] ?? "");
+        const toVal   = (newStudy?.[k] ?? "");
+        if (JSON.stringify(fromVal) !== JSON.stringify(toVal)) {
+          const label = k.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+          changes.push({ key: k, label, from: fromVal, to: toVal });
+        }
+      });
+      return { any: changes.length > 0, changes };
+    }
+    function diffSubjects(oldSubjects, newSubjects) {
+      const oldById = mapBy(oldSubjects || [], s => s.id);
+      const newById = mapBy(newSubjects || [], s => s.id);
+      const oldIds = new Set((oldSubjects || []).map(s => s.id));
+      const newIds = new Set((newSubjects || []).map(s => s.id));
+      const added = [...newIds].filter(id => !oldIds.has(id));
+      const removed = [...oldIds].filter(id => !newIds.has(id));
+      const reassigned = [];
+      [...oldIds].forEach(id => {
+        if (newIds.has(id)) {
+          const og = (oldById.get(id)?.item?.group || "").trim();
+          const ng = (newById.get(id)?.item?.group || "").trim();
+          if (og !== ng) reassigned.push({ id, from: og, to: ng });
+        }
+      });
+      return { any: !!(added.length || removed.length || reassigned.length), added, removed, reassigned };
+    }
+    function diffModelsMeta(oldModels, newModels) {
+      return diffListByName(oldModels || [], newModels || [], m => m.title || m.name);
+    }
+    function diffModelAssignments(oldModels, newModels, oldAssign, newAssign, visitsOld, visitsNew, groupsOld, groupsNew) {
+      const oldIdx = mapBy(oldModels || [], m => (m.title || m.name || "").trim());
+      const newIdx = mapBy(newModels || [], m => (m.title || m.name || "").trim());
+      const vOld = (visitsOld || []).map(v => v.name);
+      const vNew = (visitsNew || []).map(v => v.name);
+      const gOld = (groupsOld || []).map(g => g.name);
+      const gNew = (groupsNew || []).map(g => g.name);
+
+      const toggles = [];
+      let on = 0, off = 0;
+
+      newIdx.forEach((val, title) => {
+        if (!oldIdx.has(title)) return;
+        const mNew = val.idx;
+        const mOld = oldIdx.get(title).idx;
+
+        const vMax = Math.min((oldAssign?.[mOld] || []).length, (newAssign?.[mNew] || []).length);
+        const gMaxOld = Math.max(0, ...(oldAssign?.[mOld] || []).map(r => (r || []).length), 0);
+        const gMaxNew = Math.max(0, ...(newAssign?.[mNew] || []).map(r => (r || []).length), 0);
+        const gMax = Math.min(gMaxOld, gMaxNew);
+
+        for (let v = 0; v < vMax; v++) {
+          for (let g = 0; g < gMax; g++) {
+            const before = !!(oldAssign?.[mOld]?.[v]?.[g]);
+            const after  = !!(newAssign?.[mNew]?.[v]?.[g]);
+            if (before !== after) {
+              if (after) on++; else off++;
+              toggles.push({
+                key: `${title}|v${v}|g${g}`,
+                section: title,
+                visit: vNew[v] ?? vOld[v] ?? `Visit ${v+1}`,
+                group: gNew[g] ?? gOld[g] ?? `Group ${g+1}`,
+                from: before, to: after
+              });
+            }
+          }
+        }
+      });
+
+      return { any: toggles.length > 0, toggles, turnedOn: on, turnedOff: off };
     }
 
-    // Generic dialog
-    function showDialogMessage(message) {
-      dialogMessage.value = message;
-      showDialog.value = true;
-    }
-    function closeDialog() {
-      showDialog.value = false;
-      dialogMessage.value = "";
+    function computeDiff() {
+      const base = baseline.value || {};
+      const nowStudyDetails = store.state.studyDetails || {};
+
+      const baseStudy  = base.study || {};
+      const baseGroups = base.groups || [];
+      const baseVisits = base.visits || [];
+      const baseSubs   = base.subjects || [];
+      const baseModels = base.selectedModels || [];
+      const baseAssign = base.assignments || [];
+
+      const nowStudy  = nowStudyDetails.study || {};
+      const nowGroups = deepClone(props.groups || []);
+      const nowVisits = deepClone(props.visits || []);
+      const nowSubs   = nowStudyDetails.subjects || [];
+      const nowModels = deepClone(props.selectedModels || []);
+      const nowAssign = deepClone(props.assignments || []);
+
+      const metadata = diffMetadata(baseStudy, nowStudy);
+      const groups   = diffListByName(baseGroups, nowGroups, g => g.name);
+      const visits   = diffListByName(baseVisits, nowVisits, v => v.name);
+      const subjects = diffSubjects(baseSubs, nowSubs);
+      const modelsMeta = diffModelsMeta(baseModels, nowModels);
+      const modelsAssign = diffModelAssignments(baseModels, nowModels, baseAssign, nowAssign, baseVisits, nowVisits, baseGroups, nowGroups);
+
+      const any = metadata.any || groups.any || visits.any || subjects.any || modelsMeta.any || modelsAssign.any;
+
+      const result = { any, metadata, groups, visits, subjects, models: { meta: modelsMeta, assign: modelsAssign } };
+
+      console.groupCollapsed("[ProtocolMatrix] Diff computation");
+      console.log("Baseline (server):", base);
+      console.log("Current (UI):", {
+        study: nowStudy,
+        groups: nowGroups, visits: nowVisits,
+        subjects: nowSubs, selectedModels: nowModels, assignments: nowAssign
+      });
+      console.log("Diff result:", result);
+      console.groupEnd();
+
+      return result;
     }
 
-    // Save or update the study in the database
+    // ---------- BASELINE LOADING ----------
+    async function loadBaselineFromServer() {
+      const studyId = store.state.studyDetails?.study_metadata?.id;
+      if (!studyId) {
+        baseline.value = deepClone(store.state.studyDetails || {});
+        baseline.value.groups = deepClone(props.groups);
+        baseline.value.visits = deepClone(props.visits);
+        baseline.value.selectedModels = deepClone(props.selectedModels);
+        baseline.value.assignments = deepClone(props.assignments);
+        console.groupCollapsed("[ProtocolMatrix] Baseline (create) captured");
+        console.log("baseline:", baseline.value);
+        console.groupEnd();
+        return;
+      }
+      try {
+        const resp = await axios.get(`/forms/studies/${studyId}`, {
+          headers: { Authorization: `Bearer ${store.state.token}` }
+        });
+        const payload = resp.data || {};
+        const metadata = payload.metadata || {};
+        const studyData = payload.content?.study_data || {};
+
+        const baselineShape = {
+          study_metadata: {
+            id: metadata.id,
+            study_name: metadata.study_name,
+            study_description: metadata.study_description,
+            created_at: metadata.created_at,
+            updated_at: metadata.updated_at,
+            created_by: metadata.created_by
+          },
+          study: {
+            id: metadata.id,
+            title: (studyData.study?.title ?? metadata.study_name) || "",
+            description: (studyData.study?.description ?? metadata.study_description) || "",
+            ...((studyData.study || {})) // include all dynamic YAML-driven fields
+          },
+          groups: studyData.groups || [],
+          visits: studyData.visits || [],
+          subjects: studyData.subjects || [],
+          selectedModels: studyData.selectedModels || [],
+          assignments: studyData.assignments || []
+        };
+
+        baseline.value = deepClone(baselineShape);
+
+        console.groupCollapsed("[ProtocolMatrix] Baseline fetched from server");
+        console.log("GET /forms/studies/:id payload:", payload);
+        console.log("Extracted baseline:", baseline.value);
+        console.groupEnd();
+      } catch (e) {
+        console.error("[ProtocolMatrix] Failed to load baseline from server; falling back to store snapshot.", e);
+        baseline.value = deepClone(store.state.studyDetails || {});
+        baseline.value.groups = deepClone(props.groups);
+        baseline.value.visits = deepClone(props.visits);
+        baseline.value.selectedModels = deepClone(props.selectedModels);
+        baseline.value.assignments = deepClone(props.assignments);
+      }
+    }
+
+    onMounted(async () => {
+      await loadBaselineFromServer();
+    });
+
+    // ---------- PREVIEW VERSION DECISION ----------
+    async function previewVersionDecision(studyDataPayload) {
+      const studyId = store.state.studyDetails?.study_metadata?.id;
+      if (!studyId) return { structural_change: false, will_bump: false };
+
+      try {
+        const resp = await axios.post(
+          `/forms/studies/${studyId}/versioning/preview`,
+          { study_content: { study_data: studyDataPayload } },
+          { headers: { Authorization: `Bearer ${store.state.token}` } }
+        );
+        console.log("[ProtocolMatrix] Versioning preview:", resp.data);
+        return resp.data || { structural_change: false, will_bump: false };
+      } catch (e) {
+        console.error("[ProtocolMatrix] Versioning preview failed; falling back to local diff.", e);
+        return { structural_change: true, will_bump: true }; // conservative fallback
+      }
+    }
+
+    // ---------- SAVE ----------
     async function saveStudy() {
       const empties = computeEmptyVisits();
       if (empties.length > 0) {
@@ -366,13 +753,56 @@ export default {
         showEmptyVisitsModal.value = true;
         return;
       }
+
+      // Only gate dialog on edit flows
+      if (isEditing.value) {
+        // Build proposed study_data (what you'll send to backend on save)
+        const studyDetails = store.state.studyDetails || {};
+        const proposed = {
+          ...studyDetails,
+          visits: props.visits,
+          groups: props.groups,
+          selectedModels: props.selectedModels,
+          assignments: props.assignments
+        };
+
+        // Ask backend if a bump is needed
+        const decision = await previewVersionDecision(proposed);
+        versionDecision.value = decision;
+
+        // If backend says no bump → save immediately (no dialog)
+        if (!decision.will_bump && !decision.structural_change) {
+          await saveStudyImpl();
+          return;
+        }
+        if (!decision.will_bump && decision.structural_change) {
+          // Structural change but no bump (latest version has no data) → no need to confirm
+          await saveStudyImpl();
+          return;
+        }
+
+        // Otherwise: bump will happen → show detailed diff to user
+        const diff = computeDiff();
+        diffResult.value = diff;
+        if (diff.any) {
+          showConfirmChanges.value = true;
+          return;
+        }
+      }
+
+      // Create flow or nothing to confirm
       await saveStudyImpl();
     }
+
+    function cancelConfirm() { showConfirmChanges.value = false; }
+    async function confirmAndSave() {
+      showConfirmChanges.value = false;
+      await saveStudyImpl();
+    }
+
     function closeEmptyVisitsModal() { showEmptyVisitsModal.value = false; }
     function goToFirstEmptyVisit() {
-      if (emptyVisitIndices.value.length) {
-        currentVisitIndex.value = emptyVisitIndices.value[0];
-      }
+      if (emptyVisitIndices.value.length) currentVisitIndex.value = emptyVisitIndices.value[0];
       showEmptyVisitsModal.value = false;
     }
     async function saveAnyway() {
@@ -429,26 +859,30 @@ export default {
 
       try {
         const response = await axios[method](url, payload, { headers: { Authorization: `Bearer ${store.state.token}` } });
-        const updatedMetadata = response.data.study_metadata || metadata;
+        const updatedMetadata = response.data.study_metadata || response.data.metadata || metadata;
         const updatedStudyData = response.data.content?.study_data || studyData;
 
         store.commit("setStudyDetails", {
           study_metadata: {
-            id: studyId || response.data.study_metadata?.id,
+            id: studyId || response.data.study_metadata?.id || response.data.metadata?.id,
             name: updatedMetadata.study_name,
             description: updatedMetadata.study_description,
             created_at: updatedMetadata.created_at,
             updated_at: updatedMetadata.updated_at,
             created_by: updatedMetadata.created_by
           },
-          study: { id: studyId || response.data.study_metadata?.id, ...updatedStudyData.study },
+          study: { id: studyId || response.data.study_metadata?.id || response.data.metadata?.id, ...updatedStudyData.study },
           groups: updatedStudyData.groups,
           visits: updatedStudyData.visits,
           subjectCount: updatedStudyData.subjectCount,
           assignmentMethod: updatedStudyData.assignmentMethod,
           subjects: updatedStudyData.subjects,
-          assignments: updatedStudyData.assignments
+          assignments: updatedStudyData.assignments,
+          selectedModels: updatedStudyData.selectedModels
         });
+
+        // Reload baseline from server so future diffs are accurate
+        await loadBaselineFromServer();
 
         showDialogMessage(studyId ? "Study successfully updated!" : "Study successfully saved!");
       } catch (error) {
@@ -463,12 +897,16 @@ export default {
     }
 
     return {
-      // matrix
+      // state
       visitList,
       groupList,
+      isEditing,
+
+      // matrix nav
       currentVisitIndex,
       prevVisit,
       nextVisit,
+
       // preview
       showPreviewModal,
       previewVisitIndex,
@@ -482,14 +920,17 @@ export default {
       openPreview,
       closePreview,
       previewForm,
+
       // toggles
       onToggle,
       hasAssignment,
-      // dialog
+
+      // dialogs
       showInfo,
       showDialog,
       dialogMessage,
       closeDialog,
+
       // empty-visit modal
       showEmptyVisitsModal,
       emptyVisitIndices,
@@ -497,9 +938,17 @@ export default {
       closeEmptyVisitsModal,
       goToFirstEmptyVisit,
       saveAnyway,
-      // save
+
+      // confirm changes
+      showConfirmChanges,
+      diffResult,
+      cancelConfirm,
+      confirmAndSave,
+      versionDecision,
+
+      // save + route
       saveStudy,
-      goToSaved
+      goToSaved,
     };
   }
 };
@@ -521,7 +970,7 @@ export default {
 /* Header */
 .screen-header {
   position: relative;
-  text-align: center; /* center the header title */
+  text-align: center;
   padding: 4px 4px 0;
 }
 .screen-title {
@@ -530,11 +979,10 @@ export default {
   font-size: 18px;
   color: #101828;
 }
-/* Info icon placed inside header container (top-right) */
 .icon-btn {
-  @include button-reset;
   background: transparent;
   cursor: pointer;
+  border: none;
 }
 .header-info-btn {
   position: absolute;
@@ -600,7 +1048,6 @@ export default {
 }
 
 .nav-btn {
-  @include button-reset;
   background: #ffffff;
   padding: 8px 12px;
   border: 1px solid $border-color;
@@ -667,7 +1114,6 @@ export default {
   font-size: 12px;
   margin-right: 6px;
 }
-/* Group names as plain bold text (same look as model titles) */
 .group-name {
   font-weight: 600;
   color: #101828;
@@ -676,7 +1122,6 @@ export default {
   word-break: break-word;
 }
 
-/* The remaining chip style is still used for visit names only */
 .th-chip {
   display: inline-block;
   font-size: 12px;
@@ -696,7 +1141,7 @@ export default {
   color: #101828;
 }
 
-/* Checkbox using Font Awesome (no gray background when unchecked) */
+/* Checkbox */
 .chk-wrap {
   --size: 18px;
   display: inline-flex;
@@ -706,7 +1151,7 @@ export default {
   height: var(--size);
   position: relative;
   cursor: pointer;
-  background: transparent; /* ensure same as cell background */
+  background: transparent;
 }
 .chk-wrap input {
   opacity: 0;
@@ -718,13 +1163,12 @@ export default {
 .fa-chk {
   font-size: 18px;
   line-height: 1;
-  pointer-events: none; /* clicks hit the label/input */
-  color: #98a2b3;       /* outline color when unchecked */
+  pointer-events: none;
+  color: #98a2b3;
 }
 .chk-wrap input:checked + .fa-chk {
-  color: $primary-color; /* checked */
+  color: $primary-color;
 }
-/* keep keyboard focus ring on the label */
 .chk-wrap:focus-within .fa-chk {
   outline: 2px solid rgba(52, 96, 255, .25);
   outline-offset: 2px;
@@ -742,7 +1186,7 @@ export default {
   padding: 12px;
 }
 
-.protocol-preview-modal {
+.protocol-preview-modal, .validation-modal {
   background: white;
   border-radius: 12px;
   width: 96%;
@@ -829,17 +1273,7 @@ export default {
   box-shadow: 0 8px 18px rgba(52, 96, 255, .25);
 }
 
-/* Validation (empty visits) modal */
-.validation-modal {
-  background: white;
-  border-radius: 12px;
-  width: 520px;
-  max-width: 90vw;
-  padding: 20px;
-  border: 1px solid $border-color;
-  box-shadow: 0 20px 50px rgba(16,24,40,.18);
-}
-
+/* Validation modal */
 .validation-title {
   margin: 0 0 6px;
   font-size: 18px;
@@ -850,8 +1284,6 @@ export default {
   margin: 0 0 10px;
   color: #475467;
 }
-
-/* Prevent long visit names from overflowing in empty-visits list */
 .empty-visits-list {
   margin: 0 0 8px 18px;
   padding: 0;

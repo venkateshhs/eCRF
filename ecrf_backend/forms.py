@@ -49,6 +49,144 @@ def _display_name(u: models.User) -> str:
     return full or u.username or u.email or f"User#{u.id}"
 
 
+# ========= Versioning helpers (bump only when the latest version has data) =========
+
+def _snapshot_template_schema(study_data: dict) -> dict:
+    """
+    Reduce study_data to *structural* parts that decide versioning:
+      - groups (names)
+      - visits (names)
+      - models (selectedModels titles/names)
+      - subjects (id + group)
+      - assignments matrix (M x V x G)
+    """
+    sd = study_data or {}
+    groups = [ (g or {}).get("name", "").strip() for g in (sd.get("groups") or []) ]
+    visits = [ (v or {}).get("name", "").strip() for v in (sd.get("visits") or []) ]
+    models = [ ((m or {}).get("title") or (m or {}).get("name") or "").strip()
+               for m in (sd.get("selectedModels") or []) ]
+    subjects = sorted([
+        (str((s or {}).get("id", "")).strip(), ((s or {}).get("group") or "").strip())
+        for s in (sd.get("subjects") or [])
+    ])
+    assignments = sd.get("assignments") or []
+    return {
+        "groups": groups,
+        "visits": visits,
+        "models": models,
+        "subjects": subjects,
+        "assignments": assignments,
+    }
+
+def _schemas_equal(a: dict, b: dict) -> bool:
+    import json as _json
+    return _json.dumps(a or {}, sort_keys=True) == _json.dumps(b or {}, sort_keys=True)
+
+def _is_structural_change(old_sd: dict, new_sd: dict) -> bool:
+    return not _schemas_equal(_snapshot_template_schema(old_sd or {}), _snapshot_template_schema(new_sd or {}))
+
+def _latest_template_version(db: Session, study_id: int) -> Optional[StudyTemplateVersion]:
+    return (
+        db.query(StudyTemplateVersion)
+          .filter(StudyTemplateVersion.study_id == study_id)
+          .order_by(StudyTemplateVersion.version.desc())
+          .first()
+    )
+
+def _version_has_data(db: Session, study_id: int, version: int) -> bool:
+    return (
+        db.query(models.StudyEntryData)
+          .filter(models.StudyEntryData.study_id == study_id,
+                  models.StudyEntryData.form_version == version)
+          .limit(1)
+          .count() > 0
+    )
+
+def _ensure_initial_version(db: Session, study_id: int, study_data: dict) -> int:
+    latest = _latest_template_version(db, study_id)
+    if latest:
+        return latest.version
+    snap = _snapshot_template_schema(study_data or {})
+    v = StudyTemplateVersion(study_id=study_id, version=1, schema=snap)
+    db.add(v)
+    db.commit()
+    db.refresh(v)
+    return v.version
+
+def _upsert_template_version_on_update(db: Session, study_id: int, new_study_data: dict) -> Dict[str, Any]:
+    """
+    Decide whether to bump or overwrite the latest version.
+    Returns a dict with decision info for frontend UX if needed.
+    """
+    snap_new = _snapshot_template_schema(new_study_data or {})
+    latest = _latest_template_version(db, study_id)
+
+    # No version yet → create v1
+    if not latest:
+        v = StudyTemplateVersion(study_id=study_id, version=1, schema=snap_new)
+        db.add(v)
+        db.commit()
+        db.refresh(v)
+        return {
+            "structural_change": True,
+            "latest_version": 0,
+            "latest_version_has_data": False,
+            "will_bump": False,
+            "decision_version_after": v.version,
+        }
+
+    if _schemas_equal(latest.schema, snap_new):
+        return {
+            "structural_change": False,
+            "latest_version": latest.version,
+            "latest_version_has_data": _version_has_data(db, study_id, latest.version),
+            "will_bump": False,
+            "decision_version_after": latest.version,
+        }
+
+    has_data = _version_has_data(db, study_id, latest.version)
+    if has_data:
+        new_v = StudyTemplateVersion(
+            study_id=study_id,
+            version=latest.version + 1,
+            schema=snap_new
+        )
+        db.add(new_v)
+        db.commit()
+        db.refresh(new_v)
+        return {
+            "structural_change": True,
+            "latest_version": latest.version,
+            "latest_version_has_data": True,
+            "will_bump": True,
+            "decision_version_after": new_v.version,
+        }
+    else:
+        # Overwrite in place if no data captured yet
+        latest.schema = snap_new
+        db.commit()
+        db.refresh(latest)
+        return {
+            "structural_change": True,
+            "latest_version": latest.version,
+            "latest_version_has_data": False,
+            "will_bump": False,
+            "decision_version_after": latest.version,
+        }
+
+
+def _structural_subset(study_data: Dict[str, Any]) -> Dict[str, Any]:
+    # Kept for compatibility; not used for decision anymore
+    if not isinstance(study_data, dict):
+        return {}
+    keys = ["visits", "groups", "selectedModels", "assignments", "subjects"]
+    return {k: study_data.get(k) for k in keys}
+
+def _has_structural_change(old_data: Dict[str, Any], new_data: Dict[str, Any]) -> bool:
+    # Kept for compatibility; not used for decision anymore
+    return _structural_subset(old_data) != _structural_subset(new_data)
+
+
 @router.get("/available-fields")
 async def get_available_fields():
     """
@@ -148,6 +286,13 @@ def create_study(
         except Exception as be:
             logger.error("BIDS export (create) failed for study %s: %s", metadata.id, be)
 
+    # Ensure/initialize v1 template snapshot (structural)
+    try:
+        _ensure_initial_version(db, metadata.id, content.study_data)
+        logger.info("Study %s template versioning initialized", metadata.id)
+    except Exception as ve:
+        logger.error("Failed to init template version for study %s: %s", metadata.id, ve)
+
     return {"metadata": metadata, "content": content}
 
 
@@ -217,6 +362,110 @@ def read_study(
     return {"metadata": metadata, "content": content}
 
 
+@router.get("/studies/{study_id}/versions")
+def list_study_versions(
+    study_id: int,
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+):
+    meta = db.query(models.StudyMetadata).filter(models.StudyMetadata.id == study_id).first()
+    if not meta:
+        raise HTTPException(status_code=404, detail="Study not found")
+    role = (getattr(user.profile, "role", "") or "").strip()
+    is_admin = role == "Administrator"
+    is_owner = (meta.created_by == user.id)
+    if not (is_admin or is_owner):
+        grant = (
+            db.query(models.StudyAccessGrant)
+              .filter_by(study_id=study_id, user_id=user.id)
+              .first()
+        )
+        if not grant or not (grant.permissions or {}).get("view", True):
+            raise HTTPException(status_code=403, detail="Not authorized")
+
+    versions = (
+        db.query(StudyTemplateVersion)
+          .filter(StudyTemplateVersion.study_id == study_id)
+          .order_by(StudyTemplateVersion.version.asc())
+          .all()
+    )
+    return [
+        {"version": v.version, "created_at": v.created_at}
+        for v in versions
+    ]
+
+
+@router.get("/studies/{study_id}/template")
+def get_template_version(
+    study_id: int,
+    version: Optional[int] = Query(None, description="If omitted, returns latest template schema"),
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+):
+    meta = db.query(models.StudyMetadata).filter(models.StudyMetadata.id == study_id).first()
+    if not meta:
+        raise HTTPException(status_code=404, detail="Study not found")
+    _assert_owner_or_admin(meta, user)
+
+    q = db.query(StudyTemplateVersion).filter(StudyTemplateVersion.study_id == study_id)
+    if version is not None:
+        v = q.filter(StudyTemplateVersion.version == version).first()
+        if not v:
+            raise HTTPException(status_code=404, detail=f"Version {version} not found")
+        return {"study_id": study_id, "version": v.version, "schema": v.schema, "created_at": v.created_at}
+
+    latest = q.order_by(StudyTemplateVersion.version.desc()).first()
+    if not latest:
+        raise HTTPException(status_code=404, detail="No versions found")
+    return {"study_id": study_id, "version": latest.version, "schema": latest.schema, "created_at": latest.created_at}
+
+
+# ==== NEW: versioning preview endpoint for the frontend ====
+
+@router.post("/studies/{study_id}/versioning/preview")
+def preview_versioning_decision(
+    study_id: int,
+    study_content: schemas.StudyContentUpdate = Body(..., embed=True),
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+):
+    meta = db.query(models.StudyMetadata).filter(models.StudyMetadata.id == study_id).first()
+    if not meta:
+        raise HTTPException(status_code=404, detail="Study not found")
+    _assert_owner_or_admin(meta, user)
+
+    # Load baseline to compute structural_change for UX
+    content = db.query(models.StudyContent).filter(models.StudyContent.study_id == study_id).first()
+    old_sd = content.study_data if content else {}
+    new_sd = study_content.study_data or {}
+
+    # What would the version manager do?
+    latest = _latest_template_version(db, study_id)
+    latest_version = latest.version if latest else 0
+    latest_has_data = _version_has_data(db, study_id, latest_version) if latest_version else False
+
+    structural_change = _is_structural_change(old_sd, new_sd)
+    if not structural_change:
+        return {
+            "structural_change": False,
+            "latest_version": latest_version,
+            "latest_version_has_data": latest_has_data,
+            "will_bump": False,
+            "decision_version_after": latest_version or 1,
+        }
+
+    # If change exists: bump only if latest has data; else overwrite
+    will_bump = bool(latest and latest_has_data)
+    decision_after = (latest_version + 1) if will_bump else (latest_version or 1)
+
+    return {
+        "structural_change": True,
+        "latest_version": latest_version,
+        "latest_version_has_data": latest_has_data,
+        "will_bump": will_bump,
+        "decision_version_after": decision_after,
+    }
+
 
 @router.put("/studies/{study_id}", response_model=schemas.StudyFull)
 def update_study(
@@ -284,6 +533,30 @@ def update_study(
                 pass
         except Exception as be:
             logger.error("BIDS export (update) failed for study %s: %s", metadata.id, be)
+
+    # Versioning: only bump if latest has data; otherwise overwrite latest
+    try:
+        decision = _upsert_template_version_on_update(db, study_id, content.study_data or {})
+        logger.info(
+            "Versioning decision for study %s: structural_change=%s, will_bump=%s, after_version=%s",
+            study_id, decision.get("structural_change"), decision.get("will_bump"), decision.get("decision_version_after")
+        )
+        if decision.get("will_bump"):
+            try:
+                audit_change_both(
+                    scope="study",
+                    action="template_version_created",
+                    actor=_display_name(user),
+                    extra={"new_version": decision.get("decision_version_after")},
+                    study_id=study_id,
+                    study_name=metadata.study_name,
+                    db=db,
+                    actor_id=user.id,
+                )
+            except Exception:
+                pass
+    except Exception as ve:
+        logger.error("Versioning upsert failed for study %s: %s", study_id, ve)
 
     return {"metadata": metadata, "content": content}
 
@@ -641,6 +914,7 @@ def get_current_form_version(db: Session, study_id: int) -> int:
 def save_study_data(
     study_id: int,
     payload: schemas.StudyDataEntryCreate,
+    version: Optional[int] = Query(None, description="Optional template version to save against"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -661,10 +935,20 @@ def save_study_data(
         if not grant or not (grant.permissions or {}).get("add_data", False):
             raise HTTPException(status_code=403, detail="Not allowed to add data for this study")
 
-    try:
-        form_version = get_current_form_version(db, study_id)
-    except ValueError:
-        form_version = 1
+    if version is not None:
+        exists = (
+            db.query(StudyTemplateVersion)
+              .filter_by(study_id=study_id, version=version)
+              .first()
+        )
+        if not exists:
+            raise HTTPException(status_code=400, detail=f"Template version {version} is not valid for this study")
+        form_version = version
+    else:
+        try:
+            form_version = get_current_form_version(db, study_id)
+        except ValueError:
+            form_version = 1
 
     entry = models.StudyEntryData(
         study_id=study_id,
@@ -868,6 +1152,10 @@ def list_study_data_entries(
     entries_out = [schemas.StudyDataEntryOut.from_orm(e) for e in entries]
 
     return {"total": total, "entries": entries_out}
+
+
+
+
 
 @router.get("/shared-api/{token}/", response_model=schemas.SharedFormAccessOut)
 def access_shared_form_slash(token: str, db: Session = Depends(get_db)):
@@ -1073,6 +1361,7 @@ def shared_create_url_file(
 def shared_upsert_data(
     token: str,
     payload: schemas.SharedStudyDataEntryCreate,
+    version: Optional[int] = Query(None, description="Optional template version to save against"),
     db: Session = Depends(get_db),
 ):
     access = db.query(models.SharedFormAccess).filter_by(token=token).first()
@@ -1086,6 +1375,22 @@ def shared_upsert_data(
     study_id = access.study_id
     s, v, g = access.subject_index, access.visit_index, access.group_index
 
+    # Determine version
+    if version is not None:
+        exists = (
+            db.query(StudyTemplateVersion)
+              .filter_by(study_id=study_id, version=version)
+              .first()
+        )
+        if not exists:
+            raise HTTPException(status_code=400, detail=f"Template version {version} is not valid for this study")
+        form_version = version
+    else:
+        try:
+            form_version = get_current_form_version(db, study_id)
+        except ValueError:
+            form_version = 1
+
     # Upsert latest row at (study, s, v, g)
     entry = (
         db.query(models.StudyEntryData)
@@ -1096,13 +1401,10 @@ def shared_upsert_data(
     if entry:
         entry.data = payload.data
         entry.skipped_required_flags = payload.skipped_required_flags
+        entry.form_version = form_version
         db.commit()
         db.refresh(entry)
     else:
-        try:
-            form_version = get_current_form_version(db, study_id)
-        except ValueError:
-            form_version = 1
         entry = models.StudyEntryData(
             study_id=study_id,
             subject_index=s,
@@ -1332,18 +1634,35 @@ def revoke_study_access(
 
 
 @router.post("/studies/{study_id}/data/bulk")
-def bulk_insert_data(study_id: int, payload: BulkPayload, db: Session = Depends(get_db)):
+def bulk_insert_data(
+    study_id: int,
+    payload: BulkPayload,
+    version: Optional[int] = Query(None, description="Optional template version to save against for all entries"),
+    db: Session = Depends(get_db)
+):
     if not payload.entries:
         return {"inserted": 0, "failed": 0, "errors": []}
 
     now = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
 
+    # Determine form_version to use for this bulk insert
+    if version is not None:
+        exists = (
+            db.query(StudyTemplateVersion)
+              .filter_by(study_id=study_id, version=version)
+              .first()
+        )
+        if not exists:
+            raise HTTPException(status_code=400, detail=f"Template version {version} is not valid for this study")
+        form_version = version
+    else:
+        try:
+            form_version = get_current_form_version(db, study_id)
+        except ValueError:
+            form_version = 1
+
     # Build rows as list of dicts (named binds) → executemany via session.execute
     rows = []
-    try:
-        form_version = get_current_form_version(db, study_id)
-    except ValueError:
-        form_version = 1
     for e in payload.entries:
         rows.append({
             "study_id": study_id,

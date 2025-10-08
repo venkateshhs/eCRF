@@ -119,7 +119,6 @@ class StudyEntryData(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     study_id = Column(Integer, ForeignKey("study_metadata.id", ondelete="CASCADE"), nullable=False)
-    form_version = Column(Integer, nullable=False)
     subject_index = Column(Integer, nullable=False)
     visit_index = Column(Integer, nullable=False)
     group_index = Column(Integer, nullable=False)
@@ -128,6 +127,7 @@ class StudyEntryData(Base):
     skipped_required_flags = Column(JSON, nullable=True)
 
     study = relationship("StudyMetadata", back_populates="entry_data")
+    form_version = Column(Integer, nullable=False, default=1)
 
 class StudyAccessGrant(Base):
     __tablename__ = "study_access_grants"
