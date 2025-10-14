@@ -146,6 +146,51 @@
             </div>
           </div>
 
+          <!-- Template Versions -->
+          <div class="subsection">
+            <h3 class="sub-title">Template Versions</h3>
+            <div class="versions-wrap">
+              <div v-if="versionsLoading" class="muted">Loading versions…</div>
+              <div v-else-if="!versions.length" class="empty-state">No template versions yet.</div>
+
+              <div v-else class="version-list">
+                <div class="version-card" v-for="(v, idx) in versions" :key="`ver-${v.version}`">
+                  <div class="vc-head">
+                    <div class="vc-title">
+                      <span class="tag">v{{ v.version }}</span>
+                      <span class="vc-date">{{ formatDateTime(v.created_at) }}</span>
+                      <span v-if="idx === versions.length - 1" class="pill ok">Latest</span>
+                    </div>
+
+                    <div class="vc-summary" v-if="v.version > 1">
+                      <template v-if="canShowVersionDetails && versionDiffs[v.version]">
+                        <span class="muted">Changes from v{{ v.version - 1 }}:</span>
+                        <span class="vc-summary-line">{{ versionDiffs[v.version].summary }}</span>
+                      </template>
+                      <template v-else>
+                        <span class="muted">Changes from previous version are hidden (insufficient permission).</span>
+                      </template>
+                    </div>
+                  </div>
+
+                  <!-- Details -->
+                  <details v-if="v.version > 1 && canShowVersionDetails && versionDiffs[v.version]">
+                    <summary>Show details</summary>
+                    <div class="vc-details diff-scroll">
+                      <TemplateDiffView
+                        :from="versionSchemas[v.version - 1]"
+                        :to="versionSchemas[v.version]"
+                        compact
+                      />
+                    </div>
+                  </details>
+
+                  <div v-else-if="v.version === 1" class="muted">Initial version.</div>
+                </div>
+              </div>
+            </div>
+          </div>
+
           <!-- Edit Study (PI owner or Admin only) -->
           <div class="edit-row" v-if="canEditStudy">
             <button class="btn-primary" @click="editStudy">Edit Study</button>
@@ -156,7 +201,6 @@
         <div v-else-if="activeTab === 'docs'">
           <h2 class="panel-title center">Study Documents</h2>
 
-          <!-- Existing Study Attachments -->
           <h3 class="sub-title">Existing Study Attachments</h3>
           <div v-if="studyLevelFiles.length" class="doc-list">
             <div v-for="doc in studyLevelFiles" :key="doc.id || doc.file_name" class="doc-item">
@@ -221,7 +265,6 @@
         <div v-else-if="activeTab === 'team'">
           <h2 class="panel-title center">Study Access Management</h2>
 
-          <!-- ACCESS TABLE -->
           <div class="subsection">
             <h3 class="sub-title">Access for this Study</h3>
 
@@ -239,7 +282,6 @@
                   </tr>
                 </thead>
                 <tbody>
-                  <!-- Owner row (always present) -->
                   <tr class="owner-row">
                     <td class="strong">
                       {{ studyMeta.created_by_display || 'Owner' }}
@@ -257,7 +299,6 @@
                     <td v-if="canManageAccess">—</td>
                   </tr>
 
-                  <!-- Explicit grants -->
                   <tr v-for="g in accessList" :key="g.user_id">
                     <td class="strong">{{ g.display_name || g.username || g.email || ('User#' + g.user_id) }}</td>
                     <td>{{ g.email || '—' }}</td>
@@ -270,12 +311,7 @@
                     <td>{{ g.granted_by_display || g.granted_by || '—' }}</td>
                     <td>{{ formatDateTime(g.created_at) || '—' }}</td>
                     <td v-if="canManageAccess">
-                      <button
-                          class="btn-link danger"
-                          :disabled="revokeBusy[g.user_id]"
-                          @click="openRevokeDialog(g)"
-                          title="Revoke access"
-                        >Revoke</button>
+                      <button class="btn-link danger" :disabled="revokeBusy[g.user_id]" @click="openRevokeDialog(g)" title="Revoke access">Revoke</button>
                     </td>
                   </tr>
 
@@ -288,13 +324,7 @@
           </div>
 
           <!-- Revoke confirm dialog -->
-          <div
-            v-if="confirm.visible"
-            class="modal-backdrop"
-            role="dialog"
-            aria-modal="true"
-            @click.self="cancelRevoke"
-          >
+          <div v-if="confirm.visible" class="modal-backdrop" role="dialog" aria-modal="true" @click.self="cancelRevoke">
             <div class="modal" @keydown.esc.prevent="cancelRevoke" tabindex="-1">
               <h3 class="modal-title">Revoke access?</h3>
               <p class="modal-text">
@@ -305,18 +335,14 @@
               </p>
               <div class="modal-actions">
                 <button class="btn-minimal" @click="cancelRevoke">Cancel</button>
-                <button
-                  class="btn-primary danger"
-                  :disabled="revokeBusy[confirm.target?.user_id]"
-                  @click="confirmRevoke"
-                >
+                <button class="btn-primary danger" :disabled="revokeBusy[confirm.target?.user_id]" @click="confirmRevoke">
                   {{ revokeBusy[confirm.target?.user_id] ? 'Revoking…' : 'Revoke' }}
                 </button>
               </div>
             </div>
           </div>
 
-          <!-- GRANT FORM (owner PI or Admin only) -->
+          <!-- GRANT FORM -->
           <div v-if="canManageAccess" class="subsection">
             <h3 class="sub-title">Grant Access</h3>
 
@@ -325,11 +351,7 @@
                 <label class="label">Select User</label>
                 <select v-model="selectedUserId" class="input input-select">
                   <option value="" disabled>Select a user…</option>
-                  <option
-                    v-for="u in grantableUsers"
-                    :key="u.id"
-                    :value="u.id"
-                  >
+                  <option v-for="u in grantableUsers" :key="u.id" :value="u.id">
                     {{ userDisplay(u) }}
                   </option>
                 </select>
@@ -352,7 +374,7 @@
             </div>
           </div>
 
-          <!-- STUDY CONFIGURATIONS (placeholder section) -->
+          <!-- STUDY CONFIGURATIONS (placeholder) -->
           <div class="subsection">
             <h3 class="sub-title">Study Configurations</h3>
             <p class="muted">
@@ -369,9 +391,9 @@
         </div>
 
         <!-- AUDIT LOGS -->
-         <div v-else-if="activeTab === 'audit'">
-           <StudyAuditLogs :study-id="studyId" />
-         </div>
+        <div v-else-if="activeTab === 'audit'">
+          <StudyAuditLogs :study-id="studyId" />
+        </div>
       </section>
     </div>
   </div>
@@ -381,9 +403,11 @@
 import axios from "axios";
 import FieldFileUpload from "@/components/fields/FieldFileUpload.vue";
 import StudyAuditLogs from "@/components/StudyAuditLogs.vue";
+import TemplateDiffView, { computeTemplateDiff, buildVersionSummary } from "@/components/TemplateDiffView.vue";
+
 export default {
   name: "StudyView",
-  components: { FieldFileUpload, StudyAuditLogs },
+  components: { FieldFileUpload, StudyAuditLogs, TemplateDiffView },
   data() {
     return {
       studyId: this.$route.params.id,
@@ -402,6 +426,7 @@ export default {
       studyData: {},
       me: null,
       confirm: { visible: false, target: null },
+
       // tabs
       activeTab: "meta",
       tabs: [
@@ -425,18 +450,19 @@ export default {
       permissionPreset: "data-entry",
       granting: false,
       revokeBusy: {},
+
+      // versions
+      versionsLoading: false,
+      versions: [],
+      versionSchemas: {},   // { [v]: schema }
+      versionDiffs: {},     // { [v]: diff }
+      canShowVersionDetails: true,
     };
   },
   computed: {
-    groups() {
-      return Array.isArray(this.studyData.groups) ? this.studyData.groups : [];
-    },
-    visits() {
-      return Array.isArray(this.studyData.visits) ? this.studyData.visits : [];
-    },
-    subjects() {
-      return Array.isArray(this.studyData.subjects) ? this.studyData.subjects : [];
-    },
+    groups() { return Array.isArray(this.studyData.groups) ? this.studyData.groups : []; },
+    visits() { return Array.isArray(this.studyData.visits) ? this.studyData.visits : []; },
+    subjects() { return Array.isArray(this.studyData.subjects) ? this.studyData.subjects : []; },
     assignmentSize() {
       const a = this.studyData.assignments;
       if (!Array.isArray(a) || !a.length) return null;
@@ -445,62 +471,39 @@ export default {
       const g = v && Array.isArray(a[0][0]) ? a[0][0].length : 0;
       return { m, v, g };
     },
-    studyKVEntries() {
-      return this.objectEntriesFiltered(this.studyData.study);
-    },
+    studyKVEntries() { return this.objectEntriesFiltered(this.studyData.study); },
 
-    // study-level files (strict)
     studyLevelFiles() {
       const arr = Array.isArray(this.allFiles) ? this.allFiles : [];
-      return arr.filter(f =>
-        f.subject_index == null && f.visit_index == null && f.group_index == null
-      );
+      return arr.filter(f => f.subject_index == null && f.visit_index == null && f.group_index == null);
     },
 
+    token() { return this.$store.state.token; },
 
-    token() {
-      return this.$store.state.token;
-    },
-
-    // role helpers
-    myRoleRaw() {
-      return (this.me && (this.me.profile?.role || this.me.role)) || "";
-    },
-    myRole() {
-      return String(this.myRoleRaw).trim();
-    },
-    isAdmin() {
-      return this.myRole.toLowerCase() === "administrator";
-    },
+    // roles
+    myRoleRaw() { return (this.me && (this.me.profile?.role || this.me.role)) || ""; },
+    myRole() { return String(this.myRoleRaw).trim(); },
+    isAdmin() { return this.myRole.toLowerCase() === "administrator"; },
     isPI() {
       const r = this.myRole.toLowerCase();
       return r === "principal investigator" || r === "pi";
     },
-    isPIOrAdmin() {
-      return this.isAdmin || this.isPI;
-    },
+    isPIOrAdmin() { return this.isAdmin || this.isPI; },
 
     // ownership + capabilities
     isOwner() {
       const meId = this.me?.id;
       return meId != null && this.studyMeta.created_by_id != null && Number(meId) === Number(this.studyMeta.created_by_id);
     },
-    canEditStudy() {
-      // Owner PI or Admin can edit
-      return this.isAdmin || this.isOwner;
-    },
-    canManageAccess() {
-      // Only Admin or Owner PI can grant/revoke
-      return this.isAdmin || this.isOwner;
-    },
+    canEditStudy() { return this.isAdmin || this.isOwner; },
+    canManageAccess() { return this.isAdmin || this.isOwner; },
 
-    // Per-subject group assignment table
+    // per-subject table
     subjectAssignments() {
       const subs = this.subjects || [];
       return subs.map((s) => ({ subjectId: s?.id || "", groupName: s?.group || "" }));
     },
 
-    // users that can be granted (exclude owner, already granted, and self if already in)
     grantableUsers() {
       const grantedIds = new Set(this.accessList.map(g => g.user_id));
       if (this.studyMeta.created_by_id != null) grantedIds.add(Number(this.studyMeta.created_by_id));
@@ -512,19 +515,13 @@ export default {
   watch: {
     activeTab(val) {
       if (val === "viewdata") this.goViewData();
-      if (val === "team") {
-        // lazy load users/access when entering team tab
-        this.ensureAccessData();
-      }
+      if (val === "team") this.ensureAccessData();
     },
   },
   methods: {
-    // ---------- tiny helpers ----------
+    // tiny helpers
     userDisplay(u) {
-      const firstLast = [u.first_name || u.profile?.first_name, u.last_name || u.profile?.last_name]
-        .filter(Boolean)
-        .join(" ")
-        .trim();
+      const firstLast = [u.first_name || u.profile?.first_name, u.last_name || u.profile?.last_name].filter(Boolean).join(" ").trim();
       return u.name || u.full_name || firstLast || u.username || u.email || `User#${u.id}`;
     },
     prettyGrantRole(role) {
@@ -536,7 +533,7 @@ export default {
       return role;
     },
 
-    // ---------- layout helpers ----------
+    // layout helpers
     makeDatasetFolder(studyId, studyName) {
       const alnum = (s) => String(s || "").replace(/[^A-Za-z0-9]/g, "");
       const base = (studyName || `study${studyId}`).replace(/ /g, "");
@@ -552,7 +549,7 @@ export default {
       return `Location on disk (relative to backend working directory): ${this.docRelativePath(file)}`;
     },
 
-    // ------- helpers -------
+    // helpers
     scrollToTop() {
       try {
         window.scrollTo({ top: 0, left: 0, behavior: "auto" });
@@ -581,7 +578,7 @@ export default {
     prettyLabel(key) {
       if (!key) return "";
       return String(key)
-        .replace(/[-_]+/g, " ")
+        .replace(/[_-]+/g, " ")
         .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
         .replace(/\s+/g, " ")
         .replace(/^./, s => s.toUpperCase());
@@ -605,14 +602,12 @@ export default {
       return Object.entries(obj || {}).filter(([, v]) => this.hasValue(v));
     },
 
-    // ---------- data fetch ----------
+    // data fetch
     async fetchMe() {
       const token = this.token;
       if (!token) return;
       try {
-        const { data } = await axios.get("/users/me", {
-          headers: { Authorization: `Bearer ${token}` },
-        });
+        const { data } = await axios.get("/users/me", { headers: { Authorization: `Bearer ${token}` } });
         this.me = data || null;
       } catch (e) {
         console.warn("Failed to fetch /users/me:", e?.response?.data || e.message);
@@ -622,31 +617,20 @@ export default {
       const token = this.token;
       if (!token || userId == null) return null;
       try {
-        const { data } = await axios.get(`/users/${userId}`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
+        const { data } = await axios.get(`/users/${userId}`, { headers: { Authorization: `Bearer ${token}` } });
         const u = data || {};
         const firstLast = [u?.profile?.first_name, u?.profile?.last_name].filter(Boolean).join(" ").trim();
         return u.name || u.full_name || firstLast || u.username || u.email || null;
-      } catch (e) {
-        return null;
-      }
+      } catch { return null; }
     },
     async fetchStudy() {
       const token = this.token;
-      if (!token) {
-        this.$router.push("/login");
-        return;
-      }
+      if (!token) { this.$router.push("/login"); return; }
       try {
-        const resp = await axios.get(
-          `/forms/studies/${this.studyId}`,
-          { headers: { Authorization: `Bearer ${token}` } }
-        );
+        const resp = await axios.get(`/forms/studies/${this.studyId}`, { headers: { Authorization: `Bearer ${token}` } });
         const sd = resp.data?.content?.study_data || {};
         const meta = resp.data?.metadata || {};
 
-        // resolve creator name/email
         let createdByDisplay =
           meta.created_by_name ||
           meta.created_by_full_name ||
@@ -671,38 +655,74 @@ export default {
           updated_at: meta.updated_at,
         };
         this.studyData = sd || {};
-      } catch (e) {
-        console.error("Failed to fetch study view:", e);
-      }
+      } catch (e) { console.error("Failed to fetch study view:", e); }
     },
     async fetchStudyFiles() {
       const token = this.token;
       if (!token) return;
       try {
-        const { data } = await axios.get(
-          `/forms/studies/${this.studyId}/files`,
-          { headers: { Authorization: `Bearer ${token}` } }
-        );
+        const { data } = await axios.get(`/forms/studies/${this.studyId}/files`, { headers: { Authorization: `Bearer ${token}` } });
         this.allFiles = Array.isArray(data) ? data : [];
-      } catch (e) {
-        console.warn("Failed to fetch study files:", e?.response?.data || e.message);
-      }
+      } catch (e) { console.warn("Failed to fetch study files:", e?.response?.data || e.message); }
     },
 
-    // ---------- access endpoints ----------
-    async ensureAccessData() {
-      // load users + access in parallel; safe to retry silently
-      await Promise.all([this.fetchAccessList(), this.fetchAllUsers()]);
-    },
-    async fetchAccessList() {
+    // versions
+    async fetchVersionsAndDiffs() {
       const token = this.token;
       if (!token) return;
+      this.versionsLoading = true;
+      this.canShowVersionDetails = true;
       try {
-        const { data } = await axios.get(
-          `/forms/studies/${this.studyId}/access`,
-          { headers: { Authorization: `Bearer ${token}` } }
-        );
-        // expect array; normalize permissions object
+        // list
+        const { data } = await axios.get(`/forms/studies/${this.studyId}/versions`, { headers: { Authorization: `Bearer ${token}` } });
+        const list = Array.isArray(data) ? data : [];
+        this.versions = [...list].sort((a, b) => Number(a.version) - Number(b.version));
+
+        if (!this.versions.length) { this.versionSchemas = {}; this.versionDiffs = {}; return; }
+
+        // schemas
+        const schemas = {};
+        for (const v of this.versions) {
+          try {
+            const resp = await axios.get(`/forms/studies/${this.studyId}/template`, {
+              params: { version: v.version }, headers: { Authorization: `Bearer ${token}` }
+            });
+            schemas[v.version] = resp.data?.schema || {};
+          } catch (e) {
+            if (e?.response?.status === 403) { this.canShowVersionDetails = false; break; }
+            console.warn(`Failed to fetch schema for v${v.version}:`, e?.response?.data || e.message);
+          }
+        }
+        this.versionSchemas = schemas;
+
+        if (!this.canShowVersionDetails) { this.versionDiffs = {}; return; }
+
+        // diffs & summaries
+        const diffs = {};
+        for (const v of this.versions) {
+          const ver = Number(v.version);
+          if (ver <= 1) continue;
+          const prev = this.versionSchemas[ver - 1];
+          const next = this.versionSchemas[ver];
+          if (prev && next) {
+            const d = computeTemplateDiff(prev, next);
+            d.summary = buildVersionSummary(d); // ensure latest summary text
+            diffs[ver] = d;
+          }
+        }
+        this.versionDiffs = diffs;
+      } catch (e) {
+        console.error("fetchVersionsAndDiffs failed:", e?.response?.data || e.message);
+        this.versions = []; this.versionSchemas = {}; this.versionDiffs = {};
+      } finally { this.versionsLoading = false; }
+    },
+
+    // access
+    async ensureAccessData() { await Promise.all([this.fetchAccessList(), this.fetchAllUsers()]); },
+    async fetchAccessList() {
+      const token = this.token; if (!token) return;
+      try {
+        const { data } = await axios.get(`/forms/studies/${this.studyId}/access`, { headers: { Authorization: `Bearer ${token}` } });
         const list = Array.isArray(data) ? data : (data?.items || []);
         this.accessList = list.map((g) => ({
           user_id: g.user_id,
@@ -725,13 +745,9 @@ export default {
       }
     },
     async fetchAllUsers() {
-      const token = this.token;
-      if (!token) return;
+      const token = this.token; if (!token) return;
       try {
-        const { data } = await axios.get(
-          `/users/admin/users`,
-          { headers: { Authorization: `Bearer ${token}` } }
-        );
+        const { data } = await axios.get(`/users/admin/users`, { headers: { Authorization: `Bearer ${token}` } });
         const arr = Array.isArray(data) ? data : (data?.items || []);
         this.allUsers = arr;
       } catch (e) {
@@ -744,45 +760,24 @@ export default {
       this.granting = true;
       const token = this.token;
       try {
-        // Always "Add data only"
-        const payload = {
-          user_id: Number(this.selectedUserId),
-          role: "Investigator", // fixed per spec; future: allow PI/Admin
-          permissions: { view: true, add_data: true, edit_study: false },
-        };
-        await axios.post(
-          `/forms/studies/${this.studyId}/access`,
-          payload,
-          { headers: { Authorization: `Bearer ${token}` } }
-        );
-        this.selectedUserId = "";
-        await this.fetchAccessList();
-      } catch (e) {
-        console.error("grantAccess failed:", e?.response?.data || e.message);
-      } finally {
-        this.granting = false;
-      }
+        const payload = { user_id: Number(this.selectedUserId), role: "Investigator", permissions: { view: true, add_data: true, edit_study: false } };
+        await axios.post(`/forms/studies/${this.studyId}/access`, payload, { headers: { Authorization: `Bearer ${token}` } });
+        this.selectedUserId = ""; await this.fetchAccessList();
+      } catch (e) { console.error("grantAccess failed:", e?.response?.data || e.message); }
+      finally { this.granting = false; }
     },
     async revokeAccess(g) {
       if (!g || g.user_id == null) return;
       const token = this.token;
       this.$set ? this.$set(this.revokeBusy, g.user_id, true) : (this.revokeBusy = { ...this.revokeBusy, [g.user_id]: true });
       try {
-        await axios.delete(
-          `/forms/studies/${this.studyId}/access/${g.user_id}`,
-          { headers: { Authorization: `Bearer ${token}` } }
-        );
+        await axios.delete(`/forms/studies/${this.studyId}/access/${g.user_id}`, { headers: { Authorization: `Bearer ${token}` } });
         await this.fetchAccessList();
-      } catch (e) {
-        console.error("revokeAccess failed:", e?.response?.data || e.message);
-      } finally {
-        const next = { ...this.revokeBusy };
-        delete next[g.user_id];
-        this.revokeBusy = next;
-      }
+      } catch (e) { console.error("revokeAccess failed:", e?.response?.data || e.message); }
+      finally { const next = { ...this.revokeBusy }; delete next[g.user_id]; this.revokeBusy = next; }
     },
 
-    // ---------- nav ----------
+    // nav
     goViewData() {
       this.$router.push({ name: "StudyDataDashboard", params: { id: this.studyId } });
     },
@@ -790,15 +785,9 @@ export default {
       localStorage.removeItem("setStudyDetails");
       localStorage.removeItem("scratchForms");
       const token = this.token;
-      if (!token) {
-        this.$router.push("/login");
-        return;
-      }
+      if (!token) { this.$router.push("/login"); return; }
       try {
-        const resp = await axios.get(
-          `/forms/studies/${this.studyId}`,
-          { headers: { Authorization: `Bearer ${token}` } }
-        );
+        const resp = await axios.get(`/forms/studies/${this.studyId}`, { headers: { Authorization: `Bearer ${token}` } });
         const sd = resp.data.content?.study_data;
         const meta = resp.data.metadata || {};
         if (!sd) return;
@@ -815,12 +804,8 @@ export default {
           );
         }
         const studyInfo = {
-          id: meta.id,
-          name: meta.study_name,
-          description: meta.study_description,
-          created_at: meta.created_at,
-          updated_at: meta.updated_at,
-          created_by: meta.created_by
+          id: meta.id, name: meta.study_name, description: meta.study_description,
+          created_at: meta.created_at, updated_at: meta.updated_at, created_by: meta.created_by
         };
         this.$store.commit("setStudyDetails", {
           study_metadata: studyInfo,
@@ -832,20 +817,12 @@ export default {
           subjects: sd.subjects || [],
           assignments: assignments,
           forms: sd.selectedModels ? [{
-            sections: sd.selectedModels.map(model => ({
-              title: model.title,
-              fields: model.fields,
-              source: "template"
-            }))
+            sections: sd.selectedModels.map(model => ({ title: model.title, fields: model.fields, source: "template" }))
           }] : []
         });
         if (sd.selectedModels) {
           const scratchForms = [{
-            sections: sd.selectedModels.map(model => ({
-              title: model.title,
-              fields: model.fields,
-              source: "template"
-            }))
+            sections: sd.selectedModels.map(model => ({ title: model.title, fields: model.fields, source: "template" }))
           }];
           localStorage.setItem("scratchForms", JSON.stringify(scratchForms));
         }
@@ -929,17 +906,15 @@ export default {
     this.scrollToTop?.();
     await this.fetchMe();
     await this.fetchStudy();
-    await this.fetchStudyFiles();
+    await Promise.all([this.fetchStudyFiles(), this.fetchVersionsAndDiffs()]);
   },
-  beforeRouteEnter(to, from, next) {
-    next((vm) => vm.scrollToTop?.());
-  },
+  beforeRouteEnter(to, from, next) { next((vm) => vm.scrollToTop?.()); },
   beforeRouteUpdate(to, from, next) {
     this.studyId = to.params.id;
     this.scrollToTop?.();
     Promise.resolve()
       .then(() => this.fetchStudy())
-      .then(() => this.fetchStudyFiles())
+      .then(() => Promise.all([this.fetchStudyFiles(), this.fetchVersionsAndDiffs()]))
       .finally(() => next());
   },
 };
@@ -947,50 +922,24 @@ export default {
 
 <style scoped>
 /* Typography base */
-:host, * {
-  font-family: "Inter", system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial, sans-serif;
-  letter-spacing: 0.1px;
-}
+:host, * { font-family: "Inter", system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial, sans-serif; letter-spacing: 0.1px; }
 
-.study-view-layout {
-  display: flex; flex-direction: column; gap: 16px;
-  padding: 24px; background: #f9fafb; min-height: 100%;
-}
+.study-view-layout { display: flex; flex-direction: column; gap: 16px; padding: 24px; background: #f9fafb; min-height: 100%; }
 
 /* Header */
-.sv-header {
-  position: relative;
-  display: grid;
-  grid-template-columns: 1fr auto 1fr;
-  align-items: center;
-  gap: 16px;
-}
-.back-btn {
-  position: absolute;
-  left: 0; top: 50%; transform: translateY(-50%);
-}
+.sv-header { position: relative; display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 16px; }
+.back-btn { position: absolute; left: 0; top: 50%; transform: translateY(-50%); }
 .title-wrap { grid-column: 2 / 3; min-width: 0; text-align: center; }
 .sv-title { margin: 0; font-size: 22px; font-weight: 800; color: #111827; }
 .sv-subtitle { margin: 6px 0 0; color: #6b7280; }
 .header-spacer { width: 56px; height: 1px; }
 
 /* Card layout */
-.card {
-  display: grid; grid-template-columns: 240px 1fr;
-  background: #fff; border: 1px solid #ececec; border-radius: 14px;
-  box-shadow: 0 6px 18px rgba(0,0,0,0.04); overflow: hidden;
-}
+.card { display: grid; grid-template-columns: 240px 1fr; background: #fff; border: 1px solid #ececec; border-radius: 14px; box-shadow: 0 6px 18px rgba(0,0,0,0.04); overflow: hidden; }
 
 /* Vertical tabs */
-.v-tabs {
-  background: #fcfcff; border-right: 1px solid #f0f0f6; padding: 10px;
-  display: flex; flex-direction: column; gap: 8px; min-height: 360px;
-}
-.v-tab {
-  text-align: left; background: #fff; border: 1px solid #ececec; border-radius: 10px;
-  padding: 10px 12px; font-size: 14px; color: #374151; cursor: pointer;
-  transition: background .2s, color .2s, box-shadow .2s, border .2s;
-}
+.v-tabs { background: #fcfcff; border-right: 1px solid #f0f0f6; padding: 10px; display: flex; flex-direction: column; gap: 8px; min-height: 360px; }
+.v-tab { text-align: left; background: #fff; border: 1px solid #ececec; border-radius: 10px; padding: 10px 12px; font-size: 14px; color: #374151; cursor: pointer; transition: background .2s, color .2s, box-shadow .2s, border .2s; }
 .v-tab:hover { background: #f8fafc; }
 .v-tab.active { background: #eef2ff; color: #3538cd; border-color: #e0e7ff; box-shadow: 0 3px 10px rgba(53,56,205,0.08); }
 
@@ -1019,9 +968,7 @@ export default {
 /* Lists for groups/visits */
 .list-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); gap: 10px; }
 .list-card { border: 1px solid #f1f1f1; border-radius: 12px; padding: 10px; background: #fff; }
-.list-card .kv-row {
-  display: grid; grid-template-columns: minmax(120px, 220px) 1fr; gap: 8px; align-items: start;
-}
+.list-card .kv-row { display: grid; grid-template-columns: minmax(120px, 220px) 1fr; gap: 8px; align-items: start; }
 
 /* per-subject table */
 .per-subject-block { margin-top: 14px; }
@@ -1041,18 +988,12 @@ export default {
 
 .doc-path { margin-top: 6px; font-size: 12px; color: #6b7280; display: flex; gap: 6px; align-items: flex-start; }
 .doc-path .label { flex: 0 0 auto; color: #6b7280; }
-.doc-path .file-path {
-  flex: 1 1 auto; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
-  word-break: break-word; overflow-wrap: anywhere; white-space: normal;
-}
+.doc-path .file-path { flex: 1 1 auto; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; word-break: break-word; overflow-wrap: anywhere; white-space: normal; }
 
 /* Attach */
 .attach-row { margin-bottom: 10px; }
 .pending-list { display: grid; grid-template-columns: 1fr; gap: 10px; }
-.pending-item {
-  border: 1px solid #f1f1f1; border-radius: 10px; padding: 10px;
-  background: #fff; display: flex; flex-direction: column; gap: 6px;
-}
+.pending-item { border: 1px solid #f1f1f1; border-radius: 10px; padding: 10px; background: #fff; display: flex; flex-direction: column; gap: 6px; }
 .pi-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .pi-name { font-weight: 600; min-width: 0; word-break: break-word; }
 .pi-size { color: #6b7280; font-size: 12px; }
@@ -1063,18 +1004,10 @@ export default {
 .attach-actions { margin-top: 10px; }
 
 /* Buttons */
-.btn-primary {
-  border-radius: 10px; padding: 10px 12px; font-size: 14px; cursor: pointer;
-  transition: transform .05s, box-shadow .2s, background .2s, color .2s, border .2s;
-  border: 1px solid transparent; background: #111827; color: #fff;
-}
+.btn-primary { border-radius: 10px; padding: 10px 12px; font-size: 14px; cursor: pointer; transition: transform .05s, box-shadow .2s, background .2s, color .2s, border .2s; border: 1px solid transparent; background: #111827; color: #fff; }
 .btn-primary[disabled] { opacity: 0.6; cursor: not-allowed; }
 .btn-primary:hover:not([disabled]) { transform: translateY(-1px); box-shadow: 0 6px 18px rgba(0,0,0,.1); }
-.btn-minimal {
-  background: none; border: 1px solid #e0e0e0; border-radius: 8px;
-  padding: 8px 12px; font-size: 14px; color: #555; cursor: pointer;
-  transition: background 0.3s ease, color 0.3s ease, border-color 0.3s ease;
-}
+.btn-minimal { background: none; border: 1px solid #e0e0e0; border-radius: 8px; padding: 8px 12px; font-size: 14px; color: #555; cursor: pointer; transition: background 0.3s ease, color 0.3s ease, border-color 0.3s ease; }
 .btn-minimal:hover { background: #e8e8e8; color: #000; border-color: #d6d6d6; }
 .edit-row { margin-top: 16px; }
 
@@ -1091,88 +1024,44 @@ export default {
 .access-table thead th { background: #fafafe; color: #374151; font-weight: 600; }
 .access-table tr:last-child td { border-bottom: none; }
 .owner-row { background: #fcfcff; }
-.pill {
-  display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 12px; margin-right: 6px;
-  border: 1px solid #e5e7eb; color: #6b7280; background: #fff;
-}
+.pill { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 12px; margin-right: 6px; border: 1px solid #e5e7eb; color: #6b7280; background: #fff; }
 .pill.ok { color: #065f46; background: #ecfdf5; border-color: #a7f3d0; }
 .pill.muted { color: #6b7280; background: #f9fafb; }
-.tag {
-  margin-left: 8px; font-size: 11px; border-radius: 6px; padding: 2px 6px;
-  background: #eef2ff; color: #3538cd; border: 1px solid #e0e7ff;
-}
-.btn-link {
-  background: transparent; border: none; padding: 0; cursor: pointer; text-decoration: underline;
-}
+.tag { margin-left: 8px; font-size: 11px; border-radius: 6px; padding: 2px 6px; background: #eef2ff; color: #3538cd; border: 1px solid #e0e7ff; }
+.btn-link { background: transparent; border: none; padding: 0; cursor: pointer; text-decoration: underline; }
 .btn-link.danger { color: #b91c1c; }
 
 /* Grant form */
 .grant-grid {
   display: grid; grid-template-columns: repeat(3, minmax(180px, 1fr)); gap: 12px; align-items: center;
-  background: #fff; border: 1px solid #f1f1f1; border-radius: 12px; padding: 12px;
-  align-items: start;
+  background: #fff; border: 1px solid #f1f1f1; border-radius: 12px; padding: 12px; align-items: start;
 }
 .field { display: flex; flex-direction: column; gap: 6px; }
 .label { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: #6b7280; }
-/* Normalize control heights across selects/inputs */
-.input {
-  width: 100%; height: 40px; padding: 8px 10px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 14px; box-sizing: border-box;
-  background: #fff;
-}
+.input { width: 100%; height: 40px; padding: 8px 10px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 14px; box-sizing: border-box; background: #fff; }
 .input-select { appearance: none; -webkit-appearance: none; -moz-appearance: none; background-position: right 10px center; }
 .help { font-size: 12px; color: #6b7280; }
 .actions { display: flex; gap: 8px; align-self: end; }
 
-/* Modal */
-.modal-backdrop {
-  position: fixed; inset: 0; background: rgba(0,0,0,.35);
-  display: flex; align-items: center; justify-content: center; z-index: 1000;
-}
-.modal {
-  background: #fff; border-radius: 12px; padding: 16px; width: 100%; max-width: 420px;
-  box-shadow: 0 10px 30px rgba(0,0,0,.15); outline: none;
-}
+/* Modal (revoke) */
+.modal-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,.35); display: flex; align-items: center; justify-content: center; z-index: 1000; }
+.modal { background: #fff; border-radius: 12px; padding: 16px; width: 100%; max-width: 420px; box-shadow: 0 10px 30px rgba(0,0,0,.15); outline: none; }
 .modal-title { margin: 0 0 8px; font-size: 16px; font-weight: 700; color: #111827; }
 .modal-text { margin: 0 0 14px; color: #374151; font-size: 14px; }
 .modal-actions { display: flex; justify-content: flex-end; gap: 8px; }
 .btn-primary.danger { background: #b91c1c; border-color: #a11a1a; }
 .btn-primary.danger:hover { background: #991b1b; }
-/* Make both headings (labels) the same height and vertically centered */
-.grant-grid .field .label {
-  display: flex;
-  align-items: center;
-  min-height: 20px;         /* consistent label block height */
-  line-height: 1.2;
-  margin-bottom: 4px;       /* tighten spacing above control */
-}
 
-/* Normalize control heights (input + select) */
-.grant-grid .input {
-  height: 40px;
-  padding: 8px 12px;
-  line-height: 1.2;         /* avoids clipping across browsers */
-  box-sizing: border-box;
-}
+/* Versions */
+.versions-wrap { display: block; }
+.version-list { display: grid; grid-template-columns: 1fr; gap: 10px; }
+.version-card { border: 1px solid #f1f1f1; border-radius: 12px; padding: 12px; background: #fff; }
+.vc-head { display: flex; flex-direction: column; gap: 4px; }
+.vc-title { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.vc-date { color: #6b7280; font-size: 12px; }
+.vc-summary { color: #374151; font-size: 13px; margin-top: 2px; }
+.vc-summary-line { display: block; margin-top: 2px; }
 
-/* Normalize native select rendering across browsers */
-.grant-grid .input.input-select {
-  appearance: none;
-  -webkit-appearance: none;
-  -moz-appearance: none;
-  height: 40px;
-  padding-right: 32px;      /* space for caret */
-  background-repeat: no-repeat;
-  background-position: right 10px center;
-}
-
-/* Safari tweak: avoid text clipping inside <select> */
-@supports (-webkit-touch-callout: none) {
-  .grant-grid .input.input-select { line-height: normal; }
-}
-
-/* Align the action button baseline with the selects */
-.grant-grid .actions {
-  align-self: end;
-  padding-top: 24px;        /* nudge to align with control row */
-}
+/* reuse diff-scroll for details block */
+.diff-scroll { overflow: auto; border: 1px solid #f1f1f1; border-radius: 10px; padding: 12px; background: #fff; }
 </style>

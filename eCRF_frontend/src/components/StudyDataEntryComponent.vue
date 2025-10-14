@@ -53,7 +53,7 @@
           <div class="details-block">
             <strong>Study Info:</strong>
             <ul>
-              <li v-for="[key, val] in Object.entries(study.content.study_data.study)" :key="key">
+              <li v-for="[key, val] in studyInfoEntries" :key="key">
                 {{ key }}: {{ val }}
               </li>
             </ul>
@@ -79,42 +79,54 @@
       </div>
 
       <template v-else>
+        <!-- Matrix toolbar: visit filter + helper (left) … info button (far right) -->
         <div class="matrix-toolbar">
-          <div class="visit-filter">
-            <label>Visit filter</label>
-            <select v-model.number="selectedVisitIndex" class="visit-select">
-              <option :value="-1">All visits</option>
-              <option v-for="(v, i) in visitList" :key="'vopt-'+i" :value="i">
-                {{ v.name }}
-              </option>
-            </select>
+          <div class="matrix-toolbar-left">
+            <div class="visit-filter">
+              <label>Visit filter</label>
+              <select v-model.number="selectedVisitIndex" class="visit-select">
+                <option :value="-1">All visits</option>
+                <option v-for="(v, i) in visitList" :key="'vopt-'+i" :value="i">
+                  {{ v.name }}
+                </option>
+              </select>
+            </div>
+
+            <!-- Helper message: to which version we add data -->
+            <div v-if="selectedVersion" class="version-helper" :title="'All new data will be saved on the latest template version'">
+              Saving to Version {{ selectedVersion }}
+            </div>
           </div>
-          <button type="button" class="legend-btn" @click="openStatusLegend" :title="'Legend / Color meaning'">
+
+          <!-- Info icon MUST be extreme right -->
+          <button type="button" class="legend-icon-btn" @click="openStatusLegend" :title="'Legend / Color meaning'">
             <i :class="icons.info"></i>
           </button>
         </div>
 
         <div class="matrix-wrap">
-          <table class="selection-matrix">
+          <table class="selection-matrix" :class="{ fluid: isFluidMatrix }">
             <thead>
               <tr>
-                <th class="subject-col">Subject / Visit</th>
+                <th class="subject-col" :style="subjectColStyle">Subject / Visit</th>
                 <th
                   v-for="vIdx in displayedVisitIndices"
                   :key="'visit-th-' + vIdx"
                   class="visit-col"
+                  :style="visitColStyle"
                 >
                   {{ visitList[vIdx].name }}
                 </th>
               </tr>
             </thead>
             <tbody>
-              <tr v-for="(subject, sIdx) in study.content.study_data.subjects" :key="'sv-row-'+sIdx">
-                <td class="subject-cell">{{ subject.id }}</td>
+              <tr v-for="(subject, sIdx) in sd.subjects" :key="'sv-row-'+sIdx">
+                <td class="subject-cell" :style="subjectColStyle">{{ subject.id }}</td>
                 <td
                   v-for="vIdx in displayedVisitIndices"
                   :key="'visit-td-' + sIdx + '-' + vIdx"
                   class="visit-cell"
+                  :style="visitColStyle"
                 >
                   <button
                     class="select-btn"
@@ -136,8 +148,9 @@
       <div class="bread-crumb">
         <div class="crumb-left">
           <strong>Study:</strong> {{ study.metadata.study_name }}
-          <strong>Subject:</strong> {{ study.content.study_data.subjects[currentSubjectIndex].id }}
+          <strong>Subject:</strong> {{ sd.subjects?.[currentSubjectIndex]?.id }}
           <strong>Visit:</strong> {{ visitList[currentVisitIndex].name }}
+          <span v-if="!isShared && selectedVersion" class="crumb-ver">Saving to Version {{ selectedVersion }}</span>
         </div>
         <button type="button" class="legend-btn" @click="openLegendDialog" :title="'Legend / What does * mean?'">
           <i :class="icons.help || 'fas fa-question-circle'"></i>
@@ -146,7 +159,7 @@
 
       <div class="entry-form-section">
         <h2>
-          Enter Data for Subject: {{ study.content.study_data.subjects[currentSubjectIndex].id }},
+          Enter Data for Subject: {{ sd.subjects?.[currentSubjectIndex]?.id }},
           Visit: “{{ visitList[currentVisitIndex].name }}”
         </h2>
 
@@ -379,7 +392,7 @@
         <h3>Generate Share Link</h3>
         <p>
           Sharing for Subject
-          {{ shareParams.subjectIndex != null ? study.content.study_data.subjects[shareParams.subjectIndex]?.id : 'N/A' }},
+          {{ shareParams.subjectIndex != null ? sd.subjects?.[shareParams.subjectIndex]?.id : 'N/A' }},
           Visit {{ visitList[shareParams.visitIndex]?.name }}
         </p>
         <label>
@@ -493,7 +506,6 @@
     <p>Loading study details…</p>
   </div>
 </template>
-
 <script>
 /* eslint-disable */
 import axios from "axios";
@@ -537,6 +549,7 @@ export default {
       // visit filter UI: -1 => All, else a single visit index
       selectedVisitIndex: -999,  // sentinel to avoid initial flash; set after data load
       VISIT_THRESHOLD: 8,        // If visits > this => default to single-visit view
+      FLUID_VISIT_MAX: 6,        // <= this count → auto-stretch, else fixed width + scroll
 
       // readiness flags
       matrixReady: false,        // gate the matrix until filter is decided + cache is built
@@ -579,10 +592,21 @@ export default {
       // shared link
       shareToken: null,
       sharedPermission: "view",
+      selectedVersion: null,         // always the latest server version (non-shared); shared: omitted
+      studyVersions: [],             // [{version, created_at}]
+      templateCache: new Map(),
     };
   },
 
   computed: {
+    sd() {
+      const sd = this.study && this.study.content && this.study.content.study_data;
+      return sd || { study:{}, visits:[], groups:[], subjects:[], selectedModels:[], assignments:[] };
+    },
+    studyInfoEntries() {
+      const obj = (this.sd && this.sd.study) || {};
+      try { return Object.entries(obj); } catch { return []; }
+    },
     token() { return this.$store.state.token; },
     isShared() { return !!this.$route.params.token; },
     canEdit() { return !this.isShared || this.sharedPermission === "add"; },
@@ -597,7 +621,6 @@ export default {
       return sd?.subjectCount != null ? sd.subjectCount : sd?.subjects?.length || 0;
     },
 
-    // Which visit indices to show in the matrix (All or one)
     displayedVisitIndices() {
       if (!Array.isArray(this.visitList) || this.visitList.length === 0) return [];
       if (this.selectedVisitIndex === -1) {
@@ -607,11 +630,28 @@ export default {
       return [idx];
     },
 
-    // models assigned for the CURRENT visit/group in entry form
+    isFluidMatrix() {
+      return this.displayedVisitIndices.length <= this.FLUID_VISIT_MAX;
+    },
+    subjectColStyle() {
+      if (!this.isFluidMatrix) return {};
+      const pct = 28;
+      return { width: pct + "%", maxWidth: "none", minWidth: "0" };
+    },
+    visitColStyle() {
+      if (!this.isFluidMatrix) return {};
+      const n = Math.max(this.displayedVisitIndices.length, 1);
+      const pct = (72 / n).toFixed(4);
+      return { width: pct + "%", maxWidth: "none", minWidth: "0" };
+    },
+
     assignedModelIndices() {
-      const v = this.currentVisitIndex, g = this.currentGroupIndex;
+      const v = Number.isInteger(this.currentVisitIndex) ? this.currentVisitIndex : 0;
+      const g = Number.isInteger(this.currentGroupIndex) ? this.currentGroupIndex : 0;
       if (v == null || g == null) return [];
-      return this.selectedModels.map((_, mIdx) => mIdx).filter((mIdx) => !!this.assignments[mIdx]?.[v]?.[g]);
+      return this.selectedModels
+        .map((_, mIdx) => mIdx)
+        .filter((mIdx) => !!this.assignments?.[mIdx]?.[v]?.[g]);
     },
 
     blockingErrorsPresent() {
@@ -636,26 +676,30 @@ export default {
     if (this.isShared) {
       const token = this.$route.params.token;
       await this.loadShared(token);
-      // In shared mode, we go straight to entry form; no matrix gating needed
       this.matrixReady = true;
     } else {
       const studyId = this.$route.params.id;
-      await this.loadStudy(studyId);
-      await this.loadExistingEntries(studyId);
 
-      // Prepare caches before first paint of the matrix
+      await this.loadStudy(studyId);
+
+      await this.loadVersions(studyId);
+      this.selectedVersion = (this.studyVersions[this.studyVersions.length - 1]?.version) || 1;
+
+      await this.loadTemplateForSelectedVersion();
+
+      await this.loadExistingEntries(studyId);
+      this.applyVersionView();
+
       this.prepareAssignmentsLookup();
       this.prepareSubjectGroupIndexMap();
       this.buildStatusCache();
 
-      // Decide default visit filter without flashing "All"
       this.selectedVisitIndex = (this.visitList.length > this.VISIT_THRESHOLD) ? 0 : -1;
       this.matrixReady = true;
     }
   },
 
   watch: {
-    // keep caches fresh if backend pushes changes or user saves
     existingEntries: {
       handler() {
         this.buildStatusCache();
@@ -673,14 +717,172 @@ export default {
   },
 
   methods: {
-    // ---- dict key helpers: MUST match Dashboard & payload shape ----
+    // --- helper: include ?version= only when it’s a finite number ---
+    safeVersionParams(v) {
+      const n = Number(v);
+      // only include version when it's a real, positive version
+      return Number.isFinite(n) && n >= 1 ? { version: n } : undefined;
+    },
+
+    // --- NEW: merge versioned template into existing study_data without losing subjects/visits/groups ---
+    mergeStudyDataFromTemplate(schema) {
+      const prev = (this.study && this.study.content && this.study.content.study_data) || {};
+      const incoming = schema || {};
+
+      const merged = {
+        study:          incoming.study          ?? prev.study          ?? {},
+        subjects:       Array.isArray(incoming.subjects)       ? incoming.subjects       : (prev.subjects       || []),
+        groups:         Array.isArray(incoming.groups)         ? incoming.groups         : (prev.groups         || []),
+        visits:         Array.isArray(incoming.visits)         ? incoming.visits         : (prev.visits         || []),
+        selectedModels: Array.isArray(incoming.selectedModels) ? incoming.selectedModels : (prev.selectedModels || []),
+        assignments:    Array.isArray(incoming.assignments)    ? incoming.assignments    : (prev.assignments    || []),
+      };
+
+      const content = (this.study && this.study.content) ? this.study.content : {};
+      this.study = {
+        ...this.study,
+        content: {
+          ...content,
+          study_data: merged
+        }
+      };
+    },
+
+    async loadVersions(studyId) {
+      try {
+        const resp = await axios.get(`/forms/studies/${studyId}/versions`, {
+          headers: { Authorization: `Bearer ${this.token}` }
+        });
+        this.studyVersions = Array.isArray(resp.data) ? resp.data : [];
+        this.studyVersions.sort((a, b) => a.version - b.version);
+      } catch (e) {
+        console.error("[Entry] loadVersions error", e);
+        this.studyVersions = [{ version: 1, created_at: null }];
+      }
+    },
+
+    applyTemplateSchema(schema) {
+      const current = (this.study && this.study.content && this.study.content.study_data) || {};
+
+      const normalized = {
+        study: schema?.study ?? current.study ?? {},
+        subjects: Array.isArray(schema?.subjects) && schema.subjects.length ? schema.subjects : (current.subjects || []),
+        subjectCount: Number.isFinite(schema?.subjectCount) ? schema.subjectCount : (current.subjectCount ?? (current.subjects?.length || 0)),
+        visits: Array.isArray(schema?.visits) && schema.visits.length ? schema.visits : (current.visits || []),
+        groups: Array.isArray(schema?.groups) && schema.groups.length ? schema.groups : (current.groups || []),
+        selectedModels: Array.isArray(schema?.selectedModels) ? schema.selectedModels : (current.selectedModels || []),
+        assignments: Array.isArray(schema?.assignments) ? schema.assignments : (current.assignments || []),
+      };
+
+      if (!this.study) this.study = { metadata: {}, content: { study_data: normalized } };
+      else if (!this.study.content) this.study.content = { study_data: normalized };
+      else this.study.content.study_data = normalized;
+
+      this.initializeEntryData();
+      this.prepareSubjectGroupIndexMap();
+      this.prepareAssignmentsLookup();
+      this.buildStatusCache();
+    },
+
+    async loadTemplateForSelectedVersion() {
+      const studyId = this.study?.metadata?.id;
+      if (!studyId || !this.selectedVersion) return;
+
+      if (this.templateCache.has(this.selectedVersion)) {
+        const cached = this.templateCache.get(this.selectedVersion);
+        this.applyTemplateSchema(cached);
+        return;
+      }
+
+      try {
+        const resp = await axios.get(
+          `/forms/studies/${studyId}/template`,
+          {
+            headers: { Authorization: `Bearer ${this.token}` },
+            params: { version: this.selectedVersion }
+          }
+        );
+        const rawSchema = resp?.data?.schema || {};
+        this.templateCache.set(this.selectedVersion, rawSchema);
+        this.applyTemplateSchema(rawSchema);
+      } catch (e) {
+        console.error("[Entry] loadTemplateForSelectedVersion error", e);
+      }
+    },
+
+    onVersionChange() {
+      this.loadTemplateForSelectedVersion().then(() => {
+        this.applyVersionView();
+        const nS = this.numberOfSubjects;
+        const nV = this.visitList.length;
+        if (this.currentSubjectIndex == null || this.currentSubjectIndex >= nS) this.currentSubjectIndex = Math.min(0, nS - 1);
+        if (this.currentVisitIndex == null || this.currentVisitIndex >= nV) this.currentVisitIndex = Math.min(0, nV - 1);
+        this.selectedVisitIndex = (this.visitList.length > this.VISIT_THRESHOLD) ? 0 : -1;
+      });
+    },
+
+    getBestEntryFor(s, v, g) {
+      const all = (this.existingEntries || []).filter(
+        e => e.subject_index === s && e.visit_index === v && e.group_index === g
+      );
+      if (!all.length) return null;
+
+      const exact = all.find(e => Number(e.form_version) === Number(this.selectedVersion));
+      if (exact) return exact;
+
+      const le = all
+        .filter(e => Number(e.form_version) <= Number(this.selectedVersion))
+        .sort((a, b) => Number(b.form_version) - Number(a.form_version));
+      if (le.length) return le[0];
+
+      return all.slice().sort((a, b) => Number(b.form_version) - Number(a.form_version))[0];
+    },
+
+    applyVersionView() {
+      this.initializeEntryData();
+
+      const nS = this.numberOfSubjects;
+      const nV = this.visitList.length;
+
+      for (let s = 0; s < nS; s++) {
+        const g = this.subjectToGroupIdx[s] ?? 0;
+        for (let v = 0; v < nV; v++) {
+          const best = this.getBestEntryFor(s, v, g);
+          if (!best) continue;
+
+          let arr;
+          if (best.data && !Array.isArray(best.data) && typeof best.data === 'object') {
+            arr = this.dictToArray(best.data);
+          } else {
+            arr = Array.isArray(best.data)
+              ? best.data
+              : this.selectedModels.map(sec => sec.fields.map(f => this.defaultForField(f)));
+          }
+
+          arr = (this.selectedModels || []).map((sec, sIdx) => {
+            const row = Array.isArray(arr[sIdx]) ? arr[sIdx] : [];
+            return (sec.fields || []).map((f, fIdx) =>
+              (row[fIdx] !== undefined) ? row[fIdx] : this.defaultForField(f)
+            );
+          });
+
+          this.entryData[s][v][g] = arr;
+          this.entryIds[s][v][g]   = best.id;
+
+          const storedSkips = best.skipped_required_flags || best.skips;
+          if (Array.isArray(storedSkips)) {
+            this.skipFlags[s][v][g] = storedSkips;
+          }
+        }
+      }
+    },
+
     sectionDictKey(sectionObj) {
       return sectionObj?.title ?? '';
     },
     fieldDictKey(fieldObj, fallbackIndex) {
       return fieldObj?.name ?? fieldObj?.label ?? fieldObj?.key ?? fieldObj?.title ?? `f${fallbackIndex}`;
     },
-    // Convert a [section][field] array to dict { [sectionTitle]: { [fieldKey]: value } }
     arrayToDict(sectionFieldArray) {
       const out = {};
       (this.selectedModels || []).forEach((sec, sIdx) => {
@@ -696,7 +898,22 @@ export default {
       });
       return out;
     },
-    // Convert a dict into our [section][field] array using current selectedModels
+    // Convert [[bool]] shaped skipFlags into { [section]: { [field]: boolean } }
+    flagsArrayToDict(flagsArr) {
+      const out = {};
+      (this.selectedModels || []).forEach((sec, sIdx) => {
+        const sKey = this.sectionDictKey(sec);
+        const row = Array.isArray(flagsArr?.[sIdx]) ? flagsArr[sIdx] : [];
+        const inner = {};
+        (sec.fields || []).forEach((f, fIdx) => {
+          const fKey = this.fieldDictKey(f, fIdx);
+          inner[fKey] = !!row[fIdx];
+        });
+        out[sKey] = inner;
+      });
+      return out;
+    },
+
     dictToArray(dataDict) {
       return (this.selectedModels || []).map((sec, sIdx) => {
         const sKey = this.sectionDictKey(sec);
@@ -709,7 +926,6 @@ export default {
       });
     },
 
-    // --- tiny helpers for Vue 3 reactivity on deep arrays ---
     setDeepValue(s, v, g, m, f, val) {
       this.entryData[s][v][g][m][f] = val;
       this.entryData[s][v][g][m] = [...this.entryData[s][v][g][m]];
@@ -923,7 +1139,6 @@ export default {
         this.prepareAssignmentsLookup();
         this.prepareSubjectGroupIndexMap();
 
-        // lock selection
         this.currentSubjectIndex = payload.subject_index ?? 0;
         this.currentVisitIndex   = payload.visit_index ?? 0;
         this.currentGroupIndex   = payload.group_index ?? 0;
@@ -943,7 +1158,6 @@ export default {
         );
         const payload = Array.isArray(resp.data) ? resp.data : (resp.data?.entries || []);
         this.existingEntries = payload;
-        this.populateFromExisting();
       } catch (err) {
         console.error("Failed to load existing entries", err);
       }
@@ -1017,40 +1231,6 @@ export default {
       this.validationErrors = {};
     },
 
-    populateFromExisting() {
-      this.initializeEntryData();
-      (Array.isArray(this.existingEntries) ? this.existingEntries : []).forEach((e) => {
-        const { subject_index: s, visit_index: v, group_index: g, data, id } = e;
-        if (!(this.entryData[s] && this.entryData[s][v] && this.entryData[s][v][g])) return;
-
-        let arr;
-        if (data && !Array.isArray(data) && typeof data === 'object') {
-          // dict → array
-          arr = this.dictToArray(data);
-        } else {
-          // legacy list-of-lists (tolerated)
-          arr = Array.isArray(data) ? data : this.selectedModels.map(sec => sec.fields.map(f => this.defaultForField(f)));
-        }
-
-        // Ensure dimensions match
-        arr = (this.selectedModels || []).map((sec, sIdx) => {
-          const row = Array.isArray(arr[sIdx]) ? arr[sIdx] : [];
-          return (sec.fields || []).map((f, fIdx) =>
-            (row[fIdx] !== undefined) ? row[fIdx] : this.defaultForField(f)
-          );
-        });
-
-        this.entryData[s][v][g] = arr;
-        this.entryIds[s][v][g] = id;
-
-        const storedSkips = e.skipped_required_flags || e.skips;
-        if (Array.isArray(storedSkips)) {
-          this.skipFlags[s][v][g] = storedSkips;
-        }
-      });
-    },
-
-    // --------- FAST status computation for matrix ----------
     prepareAssignmentsLookup() {
       const nV = this.visitList.length;
       const nG = this.groupList.length;
@@ -1070,72 +1250,73 @@ export default {
     },
     buildStatusCache() {
       this.statusMap = new Map();
-      const entries = Array.isArray(this.existingEntries) ? this.existingEntries : [];
-      for (const e of entries) {
-        const s = e.subject_index;
-        const v = e.visit_index;
-        const g = e.group_index;
-        const key = `${s}|${v}`;
+      const nS = this.numberOfSubjects;
+      const nV = this.visitList.length;
 
-        const flags = e.skipped_required_flags;
-        const hasSkip = !!(Array.isArray(flags) && flags.some(row => Array.isArray(row) && row.some(Boolean)));
-        if (hasSkip) {
-          this.statusMap.set(key, "skipped");
-          continue;
-        }
+      for (let s = 0; s < nS; s++) {
+        const g = this.subjectToGroupIdx[s] ?? 0;
+        for (let v = 0; v < nV; v++) {
+          const e = this.getBestEntryFor(s, v, g);
+          const key = `${s}|${v}`;
 
-        const assigned = (this.assignedLookup?.[v]?.[g]) || [];
-        let total = 0;
-        let filled = 0;
+          if (!e) { this.statusMap.set(key, "none"); continue; }
 
-        if (e.data && !Array.isArray(e.data) && typeof e.data === 'object') {
-          // dict
-          for (const mIdx of assigned) {
-            const sec = this.selectedModels[mIdx] || {};
-            const sKey = this.sectionDictKey(sec);
-            const secObj = e.data[sKey] || {};
-            (sec.fields || []).forEach((f, fIdx) => {
-              const fKey = this.fieldDictKey(f, fIdx);
-              const val = secObj[fKey];
-              total += 1;
-              if (val != null && val !== "") filled += 1;
-            });
+          const flags = e.skipped_required_flags;
+          const hasSkip = !!(Array.isArray(flags) && flags.some(row => Array.isArray(row) && row.some(Boolean)));
+          if (hasSkip) { this.statusMap.set(key, "skipped"); continue; }
+
+          const assigned = (this.assignedLookup?.[v]?.[g]) || [];
+          let total = 0;
+          let filled = 0;
+
+          if (e.data && !Array.isArray(e.data) && typeof e.data === 'object') {
+            for (const mIdx of assigned) {
+              const sec = this.selectedModels[mIdx] || {};
+              const sKey = this.sectionDictKey(sec);
+              const secObj = e.data[sKey] || {};
+              (sec.fields || []).forEach((f, fIdx) => {
+                const fKey = this.fieldDictKey(f, fIdx);
+                const val = secObj[fKey];
+                total += 1;
+                if (val != null && val !== "") filled += 1;
+              });
+            }
+          } else if (Array.isArray(e.data)) {
+            for (const mIdx of assigned) {
+              const row = e.data[mIdx] || [];
+              total += row.length;
+              filled += row.filter(vv => vv != null && vv !== "").length;
+            }
           }
-        } else if (Array.isArray(e.data)) {
-          // legacy array
-          for (const mIdx of assigned) {
-            const row = e.data[mIdx] || [];
-            total += row.length;
-            filled += row.filter(vv => vv != null && vv !== "").length;
-          }
-        }
 
-        if (total === 0) {
-          this.statusMap.set(key, "none");
-        } else if (filled === 0) {
-          this.statusMap.set(key, "none");
-        } else if (filled === total) {
-          this.statusMap.set(key, "complete");
-        } else {
-          this.statusMap.set(key, "partial");
+          if (total === 0 || filled === 0) this.statusMap.set(key, "none");
+          else if (filled === total) this.statusMap.set(key, "complete");
+          else this.statusMap.set(key, "partial");
         }
       }
     },
+
     statusClassFast(sIdx, vIdx) {
-      // Pure O(1) lookup (no extra work per cell)
       const s = this.statusMap.get(`${sIdx}|${vIdx}`) || "none";
       return s === "skipped" ? "status-skipped" : `status-${s}`;
     },
 
     selectCell(sIdx, vIdx) {
-      this.currentSubjectIndex = sIdx;
-      this.currentVisitIndex = vIdx;
-      this.currentGroupIndex = this.subjectToGroupIdx[sIdx] ?? 0;
+      const nS = this.numberOfSubjects;
+      const nV = this.visitList.length;
+
+      this.currentSubjectIndex = Math.min(Math.max(sIdx ?? 0, 0), Math.max(nS - 1, 0));
+      this.currentVisitIndex   = Math.min(Math.max(vIdx ?? 0, 0), Math.max(nV - 1, 0));
+      this.currentGroupIndex   = this.subjectToGroupIdx[this.currentSubjectIndex] ?? 0;
+
+      this.prepareAssignmentsLookup();
+
       this.showSelection = false;
       this.validationErrors = {};
     },
+
     backToSelection() {
-      if (this.isShared) return; // no selection in shared mode
+      if (this.isShared) return;
       this.showSelection = true;
       this.showDetails = false;
       this.currentSubjectIndex = null;
@@ -1480,127 +1661,147 @@ export default {
       }
     },
 
-    async submitData() {
-      if (!this.canEdit) {
-        this.showDialogMessage("This shared link is view-only.");
-        return;
-      }
 
-      this.applyTransformsForSection();
 
-      const ok = this.validateCurrentSection();
-      const blocking = Object.entries(this.validationErrors)
-        .filter(([k, msg]) => {
-          if (!msg) return false;
-          const idx = this.parseKey(k);
-          if (!idx) return true;
-          const { s, v, g, m, f } = idx;
-          const isSkipped = !!(this.skipFlags[s]?.[v]?.[g]?.[m]?.[f]);
-          if (isSkipped) return false;
-          return !/ is required\.$/.test(msg);
-        });
+// replace the whole submitData()
+async submitData() {
+  if (!this.canEdit) {
+    this.showDialogMessage("This shared link is view-only.");
+    return;
+  }
 
-      if (!ok && blocking.length) {
-        this.showDialogMessage("Please fix validation errors before saving.");
-        return;
-      }
+  this.applyTransformsForSection();
 
-      const requiredFailures = this.computeRequiredFailures();
-      if (requiredFailures.length) {
-        this.skipCandidates = requiredFailures;
-        this.skipSelections = requiredFailures.reduce((acc, it) => { acc[it.key] = false; return acc; }, {});
-        this.showSkipDialog = true;
-        return;
-      }
+  const ok = this.validateCurrentSection();
+  const blocking = Object.entries(this.validationErrors)
+    .filter(([k, msg]) => {
+      if (!msg) return false;
+      const idx = this.parseKey(k);
+      if (!idx) return true;
+      const { s, v, g, m, f } = idx;
+      const isSkipped = !!(this.skipFlags[s]?.[v]?.[g]?.[m]?.[f]);
+      if (isSkipped) return false;
+      return !/ is required\.$/.test(msg);
+    });
 
-      try {
-        await this.uploadPendingFilesForCurrentSection();
-      } catch (e) {
-        console.error("File upload/register failed:", e);
-        this.showDialogMessage("File upload failed. Please try again.");
-        return;
-      }
+  if (!ok && blocking.length) {
+    this.showDialogMessage("Please fix validation errors before saving.");
+    return;
+  }
 
-      const s = this.currentSubjectIndex, v = this.currentVisitIndex, g = this.currentGroupIndex;
+  const requiredFailures = this.computeRequiredFailures();
+  if (requiredFailures.length) {
+    this.skipCandidates = requiredFailures;
+    this.skipSelections = requiredFailures.reduce((acc, it) => { acc[it.key] = false; return acc; }, {});
+    this.showSkipDialog = true;
+    return;
+  }
 
-      // CONVERT array → dict for payload
-      const dictData = this.arrayToDict(this.entryData[s][v][g]);
+  try {
+    await this.uploadPendingFilesForCurrentSection();
+  } catch (e) {
+    console.error("File upload/register failed:", e);
+    this.showDialogMessage("File upload failed. Please try again.");
+    return;
+  }
 
-      const payload = {
+  const s = this.currentSubjectIndex, v = this.currentVisitIndex, g = this.currentGroupIndex;
+  const dictData = this.arrayToDict(this.entryData[s][v][g]);
+
+  // IMPORTANT: array -> dict ONLY for shared endpoint (to satisfy Pydantic)
+  const rawSkipFlags = this.skipFlags[s][v][g];
+  const flagsPayload = this.isShared ? this.flagsArrayToDict(rawSkipFlags) : rawSkipFlags;
+
+  const payload = {
+    study_id: this.study?.metadata?.id,
+    subject_index: s,
+    visit_index: v,
+    group_index: g,
+    data: dictData,
+    skipped_required_flags: flagsPayload,
+  };
+
+  try {
+    if (this.isShared) {
+      // Do NOT send ?version=0 — omit version entirely for shared saves
+      const resp = await axios.post(
+        `/forms/shared/${this.shareToken}/data`,
+        payload
+      );
+
+      const saved = {
+        id: resp?.data?.id,
+        study_id: payload.study_id,
+        subject_index: s,
+        visit_index: v,
+        group_index: g,
+        data: dictData,
+        skipped_required_flags: resp?.data?.skipped_required_flags ?? rawSkipFlags,
+        form_version: resp?.data?.form_version ?? this.selectedVersion,
+        created_at: resp?.data?.created_at ?? new Date().toISOString(),
+      };
+      (this.existingEntries = this.existingEntries || []).push(saved);
+
+      this.showDialogMessage("Data saved successfully.");
+      this.applyVersionView();
+      this.updateStatusCacheFor(s, v, g);
+      return;
+    }
+
+    // Non-shared (authenticated) path stays the same; version allowed when >= 1
+    const headers = { headers: { Authorization: `Bearer ${this.token}` } };
+    const existingId = this.entryIds[s][v][g];
+
+    if (existingId) {
+      const resp = await axios.put(
+        `/forms/studies/${this.study.metadata.id}/data_entries/${existingId}`,
+        payload,
+        headers
+      );
+      this.showDialogMessage("Data updated successfully.");
+      const idx = this.existingEntries.findIndex(x => x.id === existingId);
+      if (idx >= 0) this.existingEntries.splice(idx, 1, resp.data);
+    } else {
+      const params = this.safeVersionParams(this.selectedVersion);
+      const resp = await axios.post(
+        `/forms/studies/${this.study.metadata.id}/data`,
+        payload,
+        params ? { ...headers, params } : headers
+      );
+      const newId = resp?.data?.id;
+      this.entryIds[s][v][g] = newId;
+      const saved = {
+        id: newId,
         study_id: this.study.metadata.id,
         subject_index: s,
         visit_index: v,
         group_index: g,
-        data: dictData,                                       // <---- DICT
-        skipped_required_flags: this.skipFlags[s][v][g],      // List[List[bool]]
+        data: dictData,
+        skipped_required_flags: resp?.data?.skipped_required_flags ?? rawSkipFlags,
+        form_version: resp?.data?.form_version ?? this.selectedVersion,
+        created_at: resp?.data?.created_at ?? new Date().toISOString(),
       };
+      (this.existingEntries = this.existingEntries || []).push(saved);
+      this.showDialogMessage("Data saved successfully.");
+    }
 
-      try {
-        if (this.isShared) {
-          await axios.post(
-            `/forms/shared/${this.shareToken}/data`,
-            payload
-          );
-          this.showDialogMessage("Data saved successfully.");
-          return;
-        }
+    this.applyVersionView();
+    this.updateStatusCacheFor(s, v, g);
+  } catch (err) {
+    console.error(err);
+    this.showDialogMessage("Failed to save data. Check console for details.");
+  }
+},
 
-        // Logged-in path (PUT when we have an entry id, else POST)
-        const existingId = this.entryIds[s][v][g];
-        if (existingId) {
-          const resp = await axios.put(
-            `/forms/studies/${this.study.metadata.id}/data_entries/${existingId}`,
-            payload,
-            { headers: { Authorization: `Bearer ${this.token}` } }
-          );
-          this.showDialogMessage("Data updated successfully.");
-          const idx = this.existingEntries.findIndex(x => x.id === existingId);
-          if (idx >= 0) this.existingEntries.splice(idx, 1, resp.data);
-        } else {
-          const resp = await axios.post(
-            `/forms/studies/${this.study.metadata.id}/data`,
-            payload,
-            { headers: { Authorization: `Bearer ${this.token}` } }
-          );
-          const newId = resp?.data?.id;
-          this.entryIds[s][v][g] = newId;
-          const saved = {
-            id: newId,
-            study_id: this.study.metadata.id,
-            subject_index: s,
-            visit_index: v,
-            group_index: g,
-            data: dictData,  // keep local cache consistent
-            skipped_required_flags: resp?.data?.skipped_required_flags ?? this.skipFlags[s][v][g],
-            form_version: resp?.data?.form_version ?? 1,
-            created_at: resp?.data?.created_at ?? new Date().toISOString(),
-          };
-          (this.existingEntries = this.existingEntries || []).push(saved);
-          this.showDialogMessage("Data saved successfully.");
-        }
-
-        // Refresh cached matrix status only for the affected (s,v)
-        this.updateStatusCacheFor(s, v, g);
-      } catch (err) {
-        console.error(err);
-        this.showDialogMessage("Failed to save data. Check console for details.");
-      }
-    },
 
     updateStatusCacheFor(s, v, g) {
-      // Find entry e for (s,v,g)
-      const e = (this.existingEntries || []).find(x => x.subject_index === s && x.visit_index === v && x.group_index === g);
-      if (!e) {
-        this.statusMap.set(`${s}|${v}`, "none");
-        return;
-      }
+      const e = this.getBestEntryFor(s, v, g);
+      const key = `${s}|${v}`;
+      if (!e) { this.statusMap.set(key, "none"); return; }
 
       const flags = e.skipped_required_flags;
       const hasSkip = !!(Array.isArray(flags) && flags.some(row => Array.isArray(row) && row.some(Boolean)));
-      if (hasSkip) {
-        this.statusMap.set(`${s}|${v}`, "skipped");
-        return;
-      }
+      if (hasSkip) { this.statusMap.set(key, "skipped"); return; }
 
       const assigned = (this.assignedLookup?.[v]?.[g]) || [];
       let total = 0, filled = 0;
@@ -1625,9 +1826,9 @@ export default {
         }
       }
 
-      if (total === 0 || filled === 0) this.statusMap.set(`${s}|${v}`, "none");
-      else if (filled === total) this.statusMap.set(`${s}|${v}`, "complete");
-      else this.statusMap.set(`${s}|${v}`, "partial");
+      if (total === 0 || filled === 0) this.statusMap.set(key, "none");
+      else if (filled === total) this.statusMap.set(key, "complete");
+      else this.statusMap.set(key, "partial");
     },
 
     confirmSkipSelection() {
@@ -1681,6 +1882,7 @@ export default {
 };
 </script>
 
+
 <style scoped>
 /* ========= Boot / init messaging ========= */
 .boot-message {
@@ -1700,6 +1902,11 @@ export default {
   gap: 12px;
   margin-bottom: 10px;
 }
+.matrix-toolbar-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
 .visit-filter {
   display: flex;
   flex-direction: column;
@@ -1716,6 +1923,31 @@ export default {
   min-width: 220px;
   background: #fff;
 }
+.version-helper {
+  font-size: 12px;
+  color: #374151;
+  background: #f3f4f6;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  padding: 8px 10px;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+/* Info icon MUST be extreme right */
+.legend-icon-btn {
+  background: transparent;
+  border: none;
+  padding: 4px 6px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  line-height: 1;
+  color: #6b7280;
+  margin-left: auto; /* push to far right */
+}
+.legend-icon-btn:hover { color: #374151; }
+.legend-icon-btn i { font-size: 14px; }
 
 /* ========= Scrollable selection matrix ========= */
 .matrix-wrap {
@@ -1724,14 +1956,19 @@ export default {
   border: 1px solid #e5e7eb;
   border-radius: 8px;
   background: #fff;
+  width: 100%;
 }
 
-/* Make table size to content horizontally so we can scroll */
+/* Make table fill container or scroll based on column count */
 .selection-matrix {
   border-collapse: collapse;
-  width: max-content;      /* allows horizontal scroll if many visits */
+  width: max-content;      /* default: allow horizontal scroll if many visits */
   min-width: 720px;        /* prevent squish/overlap on small screens */
   table-layout: fixed;     /* stable column widths */
+}
+.selection-matrix.fluid {
+  width: 100%;             /* few visits → stretch to container */
+  min-width: 100%;
 }
 
 /* Base table cells */
@@ -1771,23 +2008,30 @@ export default {
   color: #1f2937;
 }
 
-/* Column sizing so buttons never overlap */
+/* Default fixed sizing */
 .subject-col,
 .subject-cell {
   min-width: 200px;
   max-width: 320px;
 }
-
 .visit-col {                  /* header cells for visit columns */
   min-width: 132px;
   max-width: 200px;
   text-align: center;
 }
-
 .visit-cell {                 /* body cells for visit columns */
   width: 140px;
   text-align: center;
   padding: 8px;
+}
+
+/* Fluid mode overrides: remove hard mins so columns can grow */
+.selection-matrix.fluid .subject-col,
+.selection-matrix.fluid .subject-cell,
+.selection-matrix.fluid .visit-col,
+.selection-matrix.fluid .visit-cell {
+  min-width: 0;
+  max-width: none;
 }
 
 /* Buttons sizing and behavior */
@@ -1809,14 +2053,18 @@ export default {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.selection-matrix.fluid .select-btn {
+  min-width: 0;
+  max-width: none; /* allow buttons to expand/shrink with cells */
+}
 .select-btn:active { transform: translateY(1px); }
 .select-btn:hover { opacity: 0.9; }
 
-/* Status colors (pure CSS classes; fast) */
-.select-btn.status-none     { background: #9ca3af; color: #1f2937; } /* neutral gray */
-.select-btn.status-partial  { background: #f59e0b; }                 /* amber */
-.select-btn.status-complete { background: #16a34a; }                 /* green */
-.select-btn.status-skipped  { background: #ef4444; }                 /* red */
+/* Status colors */
+.select-btn.status-none     { background: #9ca3af; color: #1f2937; }
+.select-btn.status-partial  { background: #f59e0b; }
+.select-btn.status-complete { background: #16a34a; }
+.select-btn.status-skipped  { background: #ef4444; }
 
 /* Optional zebra rows for readability */
 .selection-matrix tbody tr:nth-child(odd) .subject-cell { background: #fafafa; }
@@ -1935,20 +2183,6 @@ hr { margin: 12px 0; border: 0; border-top: 1px solid #e5e7eb; }
 .details-block ul { margin: 0 0 12px 16px; padding: 0; }
 .details-block li { font-size: 14px; color: #374151; }
 
-.legend-icon-btn {
-  background: transparent;
-  border: none;
-  padding: 4px 6px;
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  line-height: 1;
-  color: #6b7280;
-  margin-left: auto;
-}
-.legend-icon-btn:hover { color: #374151; }
-.legend-icon-btn i { font-size: 14px; }
-
 /* ========= Breadcrumb ========= */
 .bread-crumb {
   background: #f9fafb;
@@ -1962,7 +2196,15 @@ hr { margin: 12px 0; border: 0; border-top: 1px solid #e5e7eb; }
   align-items: center;
   justify-content: space-between;
 }
-.crumb-left { display: flex; gap: 10px; flex-wrap: wrap; }
+.crumb-left { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+.crumb-ver {
+  background: #eef2ff;
+  border: 1px solid #e0e7ff;
+  color: #3730a3;
+  border-radius: 6px;
+  padding: 3px 8px;
+  font-size: 12px;
+}
 .legend-btn {
   background: transparent;
   border: none;

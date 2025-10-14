@@ -11,7 +11,7 @@ from pathlib import Path
 import json
 import yaml
 from datetime import datetime, timedelta
-
+from .versions import VersionManager
 from .database import get_db
 from . import schemas, crud, models
 from .bids_exporter import (
@@ -35,6 +35,76 @@ router = APIRouter(prefix="/forms", tags=["forms"])
 TEMPLATE_DIR = Path(os.environ.get("ECRF_TEMPLATES_DIR", "")) if os.environ.get("ECRF_TEMPLATES_DIR") \
     else (Path(__file__).resolve().parent / "templates")
 
+def _flags_dict_to_list(flags, selected_models):
+    # Already normalized
+    if isinstance(flags, list):
+        return flags
+    # Accept nulls and odd types
+    if not isinstance(flags, dict):
+        return []
+
+    out = []
+    for sec in (selected_models or []):
+        title = (sec.get("title") or "").strip()
+        row = []
+        fields = sec.get("fields") or []
+        inner = flags.get(title, {}) if isinstance(flags.get(title), dict) else {}
+        for idx, f in enumerate(fields):
+            key = f.get("name") or f.get("label") or f.get("key") or f.get("title") or f"f{idx}"
+            row.append(bool(inner.get(key, False)))
+        out.append(row)
+    return out
+
+
+def _deepcopy_json(obj):
+    try:
+        return json.loads(json.dumps(obj, ensure_ascii=False))
+    except Exception:
+        return {}
+
+def _coerce_snapshot_schema(raw):
+    """
+    Create a *version snapshot* that preserves rich study metadata and models.
+    Also normalizes groups/visits so diffs don't break if arrays are strings.
+    Does NOT affect the saved StudyContent; only the StudyTemplateVersion schema.
+    """
+    snap = _deepcopy_json(raw if isinstance(raw, dict) else {})
+    # ensure study subobject exists
+    if "study" not in snap or not isinstance(snap.get("study"), dict):
+        title = snap.get("title") if isinstance(snap.get("title"), str) else ""
+        description = snap.get("description") if isinstance(snap.get("description"), str) else ""
+        snap["study"] = {"title": title, "description": description}
+
+    # normalize groups/visits into [{name}]
+    def _norm_name_list(key):
+        items = snap.get(key, [])
+        if isinstance(items, list):
+            norm = []
+            for it in items:
+                if isinstance(it, str):
+                    norm.append({"name": it})
+                elif isinstance(it, dict):
+                    # keep dict; ensure it has name/title
+                    if "name" in it and isinstance(it["name"], str):
+                        norm.append(it)
+                    elif "title" in it and isinstance(it["title"], str):
+                        norm.append({"name": it["title"], **{k: v for k, v in it.items() if k != "title"}})
+                    else:
+                        norm.append({"name": str(it)})
+                else:
+                    norm.append({"name": str(it)})
+            snap[key] = norm
+    _norm_name_list("groups")
+    _norm_name_list("visits")
+
+    # ensure selectedModels present; if only legacy "models" names exist, lift them
+    if "selectedModels" not in snap and isinstance(snap.get("models"), list):
+        snap["selectedModels"] = [
+            ({"title": m} if isinstance(m, str) else m) for m in snap["models"]
+        ]
+
+    return snap
+
 
 def _assert_owner_or_admin(meta: models.StudyMetadata, user) -> None:
     if meta.created_by != user.id and getattr(user.profile, "role", None) != "Administrator":
@@ -47,145 +117,6 @@ def _display_name(u: models.User) -> str:
     last  = getattr(getattr(u, "profile", None), "last_name", "") or ""
     full  = (first + " " + last).strip()
     return full or u.username or u.email or f"User#{u.id}"
-
-
-# ========= Versioning helpers (bump only when the latest version has data) =========
-
-def _snapshot_template_schema(study_data: dict) -> dict:
-    """
-    Reduce study_data to *structural* parts that decide versioning:
-      - groups (names)
-      - visits (names)
-      - models (selectedModels titles/names)
-      - subjects (id + group)
-      - assignments matrix (M x V x G)
-    """
-    sd = study_data or {}
-    groups = [ (g or {}).get("name", "").strip() for g in (sd.get("groups") or []) ]
-    visits = [ (v or {}).get("name", "").strip() for v in (sd.get("visits") or []) ]
-    models = [ ((m or {}).get("title") or (m or {}).get("name") or "").strip()
-               for m in (sd.get("selectedModels") or []) ]
-    subjects = sorted([
-        (str((s or {}).get("id", "")).strip(), ((s or {}).get("group") or "").strip())
-        for s in (sd.get("subjects") or [])
-    ])
-    assignments = sd.get("assignments") or []
-    return {
-        "groups": groups,
-        "visits": visits,
-        "models": models,
-        "subjects": subjects,
-        "assignments": assignments,
-    }
-
-def _schemas_equal(a: dict, b: dict) -> bool:
-    import json as _json
-    return _json.dumps(a or {}, sort_keys=True) == _json.dumps(b or {}, sort_keys=True)
-
-def _is_structural_change(old_sd: dict, new_sd: dict) -> bool:
-    return not _schemas_equal(_snapshot_template_schema(old_sd or {}), _snapshot_template_schema(new_sd or {}))
-
-def _latest_template_version(db: Session, study_id: int) -> Optional[StudyTemplateVersion]:
-    return (
-        db.query(StudyTemplateVersion)
-          .filter(StudyTemplateVersion.study_id == study_id)
-          .order_by(StudyTemplateVersion.version.desc())
-          .first()
-    )
-
-def _version_has_data(db: Session, study_id: int, version: int) -> bool:
-    return (
-        db.query(models.StudyEntryData)
-          .filter(models.StudyEntryData.study_id == study_id,
-                  models.StudyEntryData.form_version == version)
-          .limit(1)
-          .count() > 0
-    )
-
-def _ensure_initial_version(db: Session, study_id: int, study_data: dict) -> int:
-    latest = _latest_template_version(db, study_id)
-    if latest:
-        return latest.version
-    snap = _snapshot_template_schema(study_data or {})
-    v = StudyTemplateVersion(study_id=study_id, version=1, schema=snap)
-    db.add(v)
-    db.commit()
-    db.refresh(v)
-    return v.version
-
-def _upsert_template_version_on_update(db: Session, study_id: int, new_study_data: dict) -> Dict[str, Any]:
-    """
-    Decide whether to bump or overwrite the latest version.
-    Returns a dict with decision info for frontend UX if needed.
-    """
-    snap_new = _snapshot_template_schema(new_study_data or {})
-    latest = _latest_template_version(db, study_id)
-
-    # No version yet → create v1
-    if not latest:
-        v = StudyTemplateVersion(study_id=study_id, version=1, schema=snap_new)
-        db.add(v)
-        db.commit()
-        db.refresh(v)
-        return {
-            "structural_change": True,
-            "latest_version": 0,
-            "latest_version_has_data": False,
-            "will_bump": False,
-            "decision_version_after": v.version,
-        }
-
-    if _schemas_equal(latest.schema, snap_new):
-        return {
-            "structural_change": False,
-            "latest_version": latest.version,
-            "latest_version_has_data": _version_has_data(db, study_id, latest.version),
-            "will_bump": False,
-            "decision_version_after": latest.version,
-        }
-
-    has_data = _version_has_data(db, study_id, latest.version)
-    if has_data:
-        new_v = StudyTemplateVersion(
-            study_id=study_id,
-            version=latest.version + 1,
-            schema=snap_new
-        )
-        db.add(new_v)
-        db.commit()
-        db.refresh(new_v)
-        return {
-            "structural_change": True,
-            "latest_version": latest.version,
-            "latest_version_has_data": True,
-            "will_bump": True,
-            "decision_version_after": new_v.version,
-        }
-    else:
-        # Overwrite in place if no data captured yet
-        latest.schema = snap_new
-        db.commit()
-        db.refresh(latest)
-        return {
-            "structural_change": True,
-            "latest_version": latest.version,
-            "latest_version_has_data": False,
-            "will_bump": False,
-            "decision_version_after": latest.version,
-        }
-
-
-def _structural_subset(study_data: Dict[str, Any]) -> Dict[str, Any]:
-    # Kept for compatibility; not used for decision anymore
-    if not isinstance(study_data, dict):
-        return {}
-    keys = ["visits", "groups", "selectedModels", "assignments", "subjects"]
-    return {k: study_data.get(k) for k in keys}
-
-def _has_structural_change(old_data: Dict[str, Any], new_data: Dict[str, Any]) -> bool:
-    # Kept for compatibility; not used for decision anymore
-    return _structural_subset(old_data) != _structural_subset(new_data)
-
 
 @router.get("/available-fields")
 async def get_available_fields():
@@ -238,6 +169,9 @@ def create_study(
     if study_metadata.created_by != user.id:
         raise HTTPException(status_code=403, detail="Not authorized to create study for this user")
 
+    # Keep a *pre-BIDS* snapshot (so labels/IDs aren’t rewritten) for versioning
+    incoming_snapshot = _deepcopy_json(study_content.study_data or {})
+
     try:
         metadata, content = crud.create_study(db, study_metadata, study_content)
     except Exception as e:
@@ -260,27 +194,14 @@ def create_study(
             db.commit()
             db.refresh(content)
             logger.info("BIDS dataset initialized at %s (study_id=%s)", dataset_path, metadata.id)
-
-            # Optional BIDS metadata/changes.txt mirror
-            log_dataset_change_to_changes(
-                metadata.id, metadata.study_name,
-                action="dataset_initialized",
-                actor_id=user.id, actor_name=_display_name(user),
-                detail="Initial BIDS dataset creation"
-            )
-
-            # AUDIT: study created
+            log_dataset_change_to_changes(metadata.id, metadata.study_name, action="dataset_initialized",
+                                          actor_id=user.id, actor_name=_display_name(user),
+                                          detail="Initial BIDS dataset creation")
             try:
-                audit_change_both(
-                    scope="study",
-                    action="study_created",
-                    actor=_display_name(user),
-                    extra={"study_name": metadata.study_name},
-                    study_id=metadata.id,
-                    study_name=metadata.study_name,
-                    db=db,
-                    actor_id=user.id,
-                )
+                audit_change_both(scope="study", action="study_created", actor=_display_name(user),
+                                  extra={"study_name": metadata.study_name},
+                                  study_id=metadata.id, study_name=metadata.study_name,
+                                  db=db, actor_id=user.id)
             except Exception:
                 pass
         except Exception as be:
@@ -288,13 +209,11 @@ def create_study(
 
     # Ensure/initialize v1 template snapshot (structural)
     try:
-        _ensure_initial_version(db, metadata.id, content.study_data)
-        logger.info("Study %s template versioning initialized", metadata.id)
+        VersionManager.ensure_initial_version(db, metadata.id, incoming_snapshot)
     except Exception as ve:
         logger.error("Failed to init template version for study %s: %s", metadata.id, ve)
 
     return {"metadata": metadata, "content": content}
-
 
 
 @router.get("/studies", response_model=List[schemas.StudyMetadataOut])
@@ -419,9 +338,6 @@ def get_template_version(
         raise HTTPException(status_code=404, detail="No versions found")
     return {"study_id": study_id, "version": latest.version, "schema": latest.schema, "created_at": latest.created_at}
 
-
-# ==== NEW: versioning preview endpoint for the frontend ====
-
 @router.post("/studies/{study_id}/versioning/preview")
 def preview_versioning_decision(
     study_id: int,
@@ -434,37 +350,12 @@ def preview_versioning_decision(
         raise HTTPException(status_code=404, detail="Study not found")
     _assert_owner_or_admin(meta, user)
 
-    # Load baseline to compute structural_change for UX
     content = db.query(models.StudyContent).filter(models.StudyContent.study_id == study_id).first()
-    old_sd = content.study_data if content else {}
-    new_sd = study_content.study_data or {}
+    old_sd = (content.study_data if content else {}) or {}
+    new_sd = (study_content.study_data or {}) or {}
 
-    # What would the version manager do?
-    latest = _latest_template_version(db, study_id)
-    latest_version = latest.version if latest else 0
-    latest_has_data = _version_has_data(db, study_id, latest_version) if latest_version else False
-
-    structural_change = _is_structural_change(old_sd, new_sd)
-    if not structural_change:
-        return {
-            "structural_change": False,
-            "latest_version": latest_version,
-            "latest_version_has_data": latest_has_data,
-            "will_bump": False,
-            "decision_version_after": latest_version or 1,
-        }
-
-    # If change exists: bump only if latest has data; else overwrite
-    will_bump = bool(latest and latest_has_data)
-    decision_after = (latest_version + 1) if will_bump else (latest_version or 1)
-
-    return {
-        "structural_change": True,
-        "latest_version": latest_version,
-        "latest_version_has_data": latest_has_data,
-        "will_bump": will_bump,
-        "decision_version_after": decision_after,
-    }
+    decision = VersionManager.preview_decision(db, study_id, old_sd, new_sd)
+    return decision
 
 
 @router.put("/studies/{study_id}", response_model=schemas.StudyFull)
@@ -482,8 +373,12 @@ def update_study(
     if metadata.created_by != user.id and user.profile.role != "Administrator":
         raise HTTPException(status_code=403, detail="Not authorized to update this study")
 
+    # Ensure id present
     if not study_content.study_data.get("id"):
         study_content.study_data["id"] = study_id
+
+    old_sd = _deepcopy_json(content.study_data or {})
+    new_sd_incoming = _deepcopy_json(study_content.study_data or {})
 
     try:
         result = crud.update_study(db, study_id, study_metadata, study_content)
@@ -510,53 +405,43 @@ def update_study(
             logger.info("BIDS dataset updated at %s (study_id=%s)", dataset_path, metadata.id)
 
             # Optional CHANGES mirror
-            log_dataset_change_to_changes(
-                metadata.id, metadata.study_name,
-                action="dataset_structure_updated",
-                actor_id=user.id, actor_name=_display_name(user),
+            log_dataset_change_to_changes(metadata.id, metadata.study_name,
+                                          action="dataset_structure_updated",
+                                          actor_id=user.id, actor_name=_display_name(user),
                 detail="Study metadata/content updated"
             )
 
             # AUDIT: study edited
             try:
-                audit_change_both(
-                    scope="study",
-                    action="study_edited",
-                    actor=_display_name(user),
-                    extra={"study_name": metadata.study_name},
-                    study_id=metadata.id,
-                    study_name=metadata.study_name,
-                    db=db,
-                    actor_id=user.id,
-                )
+                audit_change_both(scope="study", action="study_edited", actor=_display_name(user),
+                                  extra={"study_name": metadata.study_name},
+                                  study_id=metadata.id, study_name=metadata.study_name,
+                                  db=db, actor_id=user.id)
             except Exception:
                 pass
         except Exception as be:
             logger.error("BIDS export (update) failed for study %s: %s", metadata.id, be)
 
-    # Versioning: only bump if latest has data; otherwise overwrite latest
+    # Versioning: bump only if latest has data; otherwise overwrite; clone rows on bump
+    def _audit(action: str, extra: Dict[str, Any]):
+        try:
+            audit_change_both(
+                scope="study",
+                action=action,
+                actor=_display_name(user),
+                extra=extra or {},
+                study_id=metadata.id,
+                study_name=metadata.study_name,
+                db=db,
+                actor_id=user.id,
+            )
+        except Exception:
+            pass
+
     try:
-        decision = _upsert_template_version_on_update(db, study_id, content.study_data or {})
-        logger.info(
-            "Versioning decision for study %s: structural_change=%s, will_bump=%s, after_version=%s",
-            study_id, decision.get("structural_change"), decision.get("will_bump"), decision.get("decision_version_after")
-        )
-        if decision.get("will_bump"):
-            try:
-                audit_change_both(
-                    scope="study",
-                    action="template_version_created",
-                    actor=_display_name(user),
-                    extra={"new_version": decision.get("decision_version_after")},
-                    study_id=study_id,
-                    study_name=metadata.study_name,
-                    db=db,
-                    actor_id=user.id,
-                )
-            except Exception:
-                pass
+        VersionManager.apply_on_update(db, study_id, old_sd, _deepcopy_json(content.study_data or {}), audit_callback=_audit)
     except Exception as ve:
-        logger.error("Versioning upsert failed for study %s: %s", study_id, ve)
+        logger.error("Versioning apply_on_update failed for study %s: %s", study_id, ve)
 
     return {"metadata": metadata, "content": content}
 
@@ -895,26 +780,15 @@ def access_shared_form(
         }
     }
 
-
 # -------------------- Data Entry --------------------
-
 def get_current_form_version(db: Session, study_id: int) -> int:
-    latest_version = (
-        db.query(StudyTemplateVersion)
-        .filter(StudyTemplateVersion.study_id == study_id)
-        .order_by(StudyTemplateVersion.version.desc())
-        .first()
-    )
-    if not latest_version:
-        raise ValueError(f"No template version found for study_id={study_id}")
-    return latest_version.version
-
+    return VersionManager.latest_writable_version(db, study_id)
 
 @router.post("/studies/{study_id}/data", response_model=schemas.StudyDataEntryOut)
 def save_study_data(
     study_id: int,
     payload: schemas.StudyDataEntryCreate,
-    version: Optional[int] = Query(None, description="Optional template version to save against"),
+    version: Optional[int] = Query(None, description="Ignored; data always saved to latest template version"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -926,37 +800,27 @@ def save_study_data(
     is_admin = getattr(getattr(current_user, "profile", None), "role", "") == "Administrator"
     is_owner = study.created_by == current_user.id
     if not (is_admin or is_owner):
-        # Must have an access grant with add_data = True
-        grant = (
-            db.query(models.StudyAccessGrant)
-              .filter_by(study_id=study_id, user_id=current_user.id)
-              .first()
-        )
+        grant = db.query(models.StudyAccessGrant).filter_by(study_id=study_id, user_id=current_user.id).first()
         if not grant or not (grant.permissions or {}).get("add_data", False):
             raise HTTPException(status_code=403, detail="Not allowed to add data for this study")
 
-    if version is not None:
-        exists = (
-            db.query(StudyTemplateVersion)
-              .filter_by(study_id=study_id, version=version)
-              .first()
-        )
-        if not exists:
-            raise HTTPException(status_code=400, detail=f"Template version {version} is not valid for this study")
-        form_version = version
-    else:
-        try:
-            form_version = get_current_form_version(db, study_id)
-        except ValueError:
-            form_version = 1
+    # Only latest version is writable
+    try:
+        form_version = VersionManager.assert_latest_is_used(db, study_id, version)
+    except ValueError as ve:
+        raise HTTPException(status_code=400, detail=str(ve))
 
+    # Always insert a new row (no cross-version overwrite)
+    content = db.query(models.StudyContent).filter(models.StudyContent.study_id == study_id).first()
+    selected_models = ((content.study_data or {}).get("selectedModels") if content and isinstance(content.study_data,
+                                                                                                  dict) else []) or []
     entry = models.StudyEntryData(
         study_id=study_id,
         subject_index=payload.subject_index,
         visit_index=payload.visit_index,
         group_index=payload.group_index,
         data=payload.data,
-        skipped_required_flags=payload.skipped_required_flags,
+        skipped_required_flags=_flags_dict_to_list(payload.skipped_required_flags, selected_models),
         form_version=form_version
     )
     db.add(entry)
@@ -967,15 +831,9 @@ def save_study_data(
     content = db.query(models.StudyContent).filter(models.StudyContent.study_id == study_id).first()
     if upsert_bids_dataset and content:
         try:
-            upsert_bids_dataset(
-                study_id=study.id,
-                study_name=study.study_name,
-                study_description=study.study_description,
-                study_data=content.study_data,
-            )
-            db.query(models.StudyContent).filter(models.StudyContent.id == content.id).update(
-                {"study_data": content.study_data}
-            )
+            upsert_bids_dataset(study_id=study.id, study_name=study.study_name,
+                                study_description=study.study_description, study_data=content.study_data)
+            db.query(models.StudyContent).filter(models.StudyContent.id == content.id).update({"study_data": content.study_data})
             db.commit()
             if write_entry_to_bids:
                 write_entry_to_bids(
@@ -996,26 +854,10 @@ def save_study_data(
                     actor_id=current_user.id,
                     actor_name=_display_name(current_user),
                 )
-                logger.info(
-                    "BIDS eCRF updated for study=%s sub_idx=%s visit_idx=%s entry_id=%s",
-                    study.id, entry.subject_index, entry.visit_index, entry.id
-                )
-            # AUDIT: user adds data
             try:
-                audit_change_both(
-                    scope="study",
-                    action="entry_upserted",
-                    actor=_display_name(current_user),
-                    extra={
-                        "entry_id": entry.id,
-                        "subject_index": entry.subject_index,
-                        "visit_index": entry.visit_index,
-                    },
-                    study_id=study.id,
-                    study_name=study.study_name,
-                    db=db,
-                    actor_id=current_user.id,
-                )
+                audit_change_both(scope="study", action="entry_upserted", actor=_display_name(current_user),
+                                  extra={"entry_id": entry.id, "subject_index": entry.subject_index, "visit_index": entry.visit_index},
+                                  study_id=study.id, study_name=study.study_name, db=db, actor_id=current_user.id)
             except Exception:
                 pass
         except Exception as be:
@@ -1045,7 +887,10 @@ def update_study_data_entry(
     entry.group_index   = payload.group_index
     entry.data          = payload.data
     if payload.skipped_required_flags is not None:
-        entry.skipped_required_flags = payload.skipped_required_flags
+        content = db.query(models.StudyContent).filter(models.StudyContent.study_id == study_id).first()
+        selected_models = ((content.study_data or {}).get("selectedModels") if content and isinstance(
+            content.study_data, dict) else []) or []
+        entry.skipped_required_flags = _flags_dict_to_list(payload.skipped_required_flags, selected_models)
     db.commit()
     db.refresh(entry)
 
@@ -1361,7 +1206,7 @@ def shared_create_url_file(
 def shared_upsert_data(
     token: str,
     payload: schemas.SharedStudyDataEntryCreate,
-    version: Optional[int] = Query(None, description="Optional template version to save against"),
+    version: Optional[int] = Query(None, description="Ignored; data always saved to latest template version"),
     db: Session = Depends(get_db),
 ):
     access = db.query(models.SharedFormAccess).filter_by(token=token).first()
@@ -1375,43 +1220,33 @@ def shared_upsert_data(
     study_id = access.study_id
     s, v, g = access.subject_index, access.visit_index, access.group_index
 
-    # Determine version
-    if version is not None:
-        exists = (
-            db.query(StudyTemplateVersion)
-              .filter_by(study_id=study_id, version=version)
-              .first()
-        )
-        if not exists:
-            raise HTTPException(status_code=400, detail=f"Template version {version} is not valid for this study")
-        form_version = version
-    else:
-        try:
-            form_version = get_current_form_version(db, study_id)
-        except ValueError:
-            form_version = 1
+    try:
+        form_version = VersionManager.assert_latest_is_used(db, study_id, version)
+    except ValueError as ve:
+        raise HTTPException(status_code=400, detail=str(ve))
 
-    # Upsert latest row at (study, s, v, g)
+    # Idempotent within latest only: update if a row for this (s,v,g,latest) exists, else insert
     entry = (
         db.query(models.StudyEntryData)
-          .filter_by(study_id=study_id, subject_index=s, visit_index=v, group_index=g)
+          .filter_by(study_id=study_id, subject_index=s, visit_index=v, group_index=g, form_version=form_version)
           .order_by(models.StudyEntryData.id.desc())
           .first()
     )
+    content = db.query(models.StudyContent).filter(models.StudyContent.study_id == study_id).first()
+    selected_models = ((content.study_data or {}).get("selectedModels") if content and isinstance(content.study_data,
+                                                                                                  dict) else []) or []
     if entry:
         entry.data = payload.data
-        entry.skipped_required_flags = payload.skipped_required_flags
-        entry.form_version = form_version
+        entry.skipped_required_flags =  _flags_dict_to_list(payload.skipped_required_flags, selected_models)
         db.commit()
         db.refresh(entry)
     else:
+
         entry = models.StudyEntryData(
             study_id=study_id,
-            subject_index=s,
-            visit_index=v,
-            group_index=g,
+            subject_index=s, visit_index=v, group_index=g,
             data=payload.data,
-            skipped_required_flags=payload.skipped_required_flags,
+            skipped_required_flags= _flags_dict_to_list(payload.skipped_required_flags, selected_models),
             form_version=form_version
         )
         db.add(entry)
@@ -1423,21 +1258,13 @@ def shared_upsert_data(
     content = db.query(models.StudyContent).filter(models.StudyContent.study_id == study_id).first()
     if upsert_bids_dataset and study and content:
         try:
-            upsert_bids_dataset(
-                study_id=study.id,
-                study_name=study.study_name,
-                study_description=study.study_description,
-                study_data=content.study_data,
-            )
-            db.query(models.StudyContent).filter(models.StudyContent.id == content.id).update(
-                {"study_data": content.study_data}
-            )
+            upsert_bids_dataset(study_id=study.id, study_name=study.study_name,
+                                study_description=study.study_description, study_data=content.study_data)
+            db.query(models.StudyContent).filter(models.StudyContent.id == content.id).update({"study_data": content.study_data})
             db.commit()
             if write_entry_to_bids:
                 write_entry_to_bids(
-                    study_id=study.id,
-                    study_name=study.study_name,
-                    study_description=study.study_description,
+                    study_id=study.id, study_name=study.study_name, study_description=study.study_description,
                     study_data=content.study_data,
                     entry={
                         "id": entry.id,
@@ -1447,31 +1274,12 @@ def shared_upsert_data(
                         "form_version": entry.form_version,
                         "data": entry.data or {}
                     },
-                    actor="Shared link submit",
-                    db=db,
-                    actor_id=None,
-                    actor_name=None,
+                    actor="Shared link submit", db=db, actor_id=None, actor_name=None,
                 )
-                logger.info(
-                    "BIDS eCRF upserted (shared) for study=%s sub_idx=%s visit_idx=%s entry_id=%s",
-                    study.id, entry.subject_index, entry.visit_index, entry.id
-                )
-            # AUDIT: share-link data submission
             try:
-                audit_change_both(
-                    scope="study",
-                    action="share_entry_upserted",
-                    actor="",
-                    extra={
-                        "entry_id": entry.id,
-                        "subject_index": entry.subject_index,
-                        "visit_index": entry.visit_index,
-                    },
-                    study_id=study.id,
-                    study_name=study.study_name,
-                    db=db,
-                    actor_id=None,
-                )
+                audit_change_both(scope="study", action="share_entry_upserted", actor="",
+                                  extra={"entry_id": entry.id, "subject_index": entry.subject_index, "visit_index": entry.visit_index},
+                                  study_id=study.id, study_name=study.study_name, db=db, actor_id=None)
             except Exception:
                 pass
         except Exception as be:
@@ -1637,7 +1445,7 @@ def revoke_study_access(
 def bulk_insert_data(
     study_id: int,
     payload: BulkPayload,
-    version: Optional[int] = Query(None, description="Optional template version to save against for all entries"),
+    version: Optional[int] = Query(None, description="Ignored; bulk inserts always use the latest template version"),
     db: Session = Depends(get_db)
 ):
     if not payload.entries:
@@ -1645,23 +1453,12 @@ def bulk_insert_data(
 
     now = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
 
-    # Determine form_version to use for this bulk insert
-    if version is not None:
-        exists = (
-            db.query(StudyTemplateVersion)
-              .filter_by(study_id=study_id, version=version)
-              .first()
-        )
-        if not exists:
-            raise HTTPException(status_code=400, detail=f"Template version {version} is not valid for this study")
-        form_version = version
-    else:
-        try:
-            form_version = get_current_form_version(db, study_id)
-        except ValueError:
-            form_version = 1
+    # Enforce latest-only
+    try:
+        form_version = VersionManager.assert_latest_is_used(db, study_id, version)
+    except ValueError as ve:
+        raise HTTPException(status_code=400, detail=str(ve))
 
-    # Build rows as list of dicts (named binds) → executemany via session.execute
     rows = []
     for e in payload.entries:
         rows.append({

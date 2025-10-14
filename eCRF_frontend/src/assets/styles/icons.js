@@ -40,6 +40,15 @@ export default {
   paperclip: 'fas fa-paperclip',
   link: 'fas fa-link',
   trash: 'fas fa-trash',
+  infoCircle:     "fas fa-info-circle",
+  minus:          "fas fa-minus",
+  pen:            "fas fa-pen",
+  cogs:           "fas fa-cogs",
+  exchangeAlt:    "fas fa-exchange-alt",
+  toggleOn:       "fas fa-toggle-on",
+  toggleOff:      "fas fa-toggle-off",
+  check:          "fas fa-check",
+  times:          "fas fa-times"
 
 
 };
