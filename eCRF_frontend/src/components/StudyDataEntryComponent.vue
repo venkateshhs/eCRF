@@ -39,14 +39,6 @@
           >
             <i :class="icons.share"></i>
           </button>
-
-          <button
-            class="legend-icon-btn"
-            :title="'Selection status legend'"
-            @click="openStatusLegend"
-          >
-            <i :class="icons.info"></i>
-          </button>
         </div>
 
         <div v-if="showDetails" class="details-content">
@@ -106,7 +98,7 @@
 
         <div class="matrix-wrap">
           <!-- Loading overlay while (re)hydrating visits -->
-          <div v-if="visitLoading" class="busy-overlay"><div class="spinner" /></div>
+          <div v-if="visitLoading" class="busy-overlay"><div class="spinner"></div></div>
 
           <table class="selection-matrix" :class="{ fluid: isFluidMatrix }">
             <thead>
@@ -153,7 +145,7 @@
           <strong>Study:</strong> {{ study.metadata.study_name }}
           <strong>Subject:</strong> {{ sd.subjects?.[currentSubjectIndex]?.id }}
           <strong>Visit:</strong> {{ visitList[currentVisitIndex].name }}
-          <span v-if="!isShared && selectedVersion" class="crumb-ver">Saving to Version {{ selectedVersion }}</span>
+          <span v-if="!isShared && selectedVersion" class="version-helper">Saving to Version {{ selectedVersion }}</span>
         </div>
         <button type="button" class="legend-btn" @click="openLegendDialog" :title="'Legend / What does * mean?'">
           <i :class="icons.help || 'fas fa-question-circle'"></i>
@@ -1511,7 +1503,7 @@ export default {
         if (mode === "slider") {
           const min = cons.percent ? 1 : (Number.isFinite(+cons.min) ? +cons.min : 1);
           const max = cons.percent ? 100 : (Number.isFinite(+cons.max) ? +cons.max : (cons.percent ? 100 : 5));
-          const step = Number.isFinite(+cons.step) && +cons.step > 0 ? +cons.step : 1;
+          const step = Number.isFinite(+cons.step) && +c.step > 0 ? +cons.step : 1;
           if (n < min || n > max) { this.setError(mIdx, fIdx, `${label} must be between ${min} and ${max}.`); return false; }
           if (step >= 1) {
             const k = (n - min) / step;
