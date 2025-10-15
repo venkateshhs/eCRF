@@ -6,6 +6,7 @@ import json
 import logging
 import pathlib
 import shutil
+import sys
 from datetime import datetime
 from typing import Dict, List, Tuple, Optional, Any
 from urllib.parse import urlparse
@@ -18,8 +19,26 @@ logger = logging.getLogger(__name__)
 
 # -------------------- Config --------------------
 
-# Local BIDS root (can be a mounted volume in prod / container)
-BIDS_ROOT = os.getenv("BIDS_ROOT", os.path.abspath("./bids_datasets"))
+def _runtime_base_dir() -> str:
+    """
+    Where should we put persistent data when running:
+      - frozen (PyInstaller): alongside the executable (dist/eCRF)
+      - dev: the project root (parent of ecrf_backend)
+    """
+    try:
+        if getattr(sys, "frozen", False):
+            return os.path.dirname(os.path.abspath(sys.executable))
+        # dev: parent of this file's directory (…/ecrf_backend/..)
+        here = os.path.dirname(os.path.abspath(__file__))
+        return os.path.abspath(os.path.join(here, ".."))
+    except Exception:
+        return os.getcwd()
+
+# Default BIDS root = <base>/ecrf_data/bids_datasets
+_DEFAULT_BIDS_ROOT = os.path.join(_runtime_base_dir(), "ecrf_data", "bids_datasets")
+
+# Allow override via env var if needed
+BIDS_ROOT = os.getenv("BIDS_ROOT", _DEFAULT_BIDS_ROOT)
 
 # Declared BIDS spec version
 BIDS_VERSION = os.getenv("BIDS_VERSION", "1.8.0")
@@ -46,6 +65,7 @@ MIRROR_DERIV_SUBJECT = os.getenv("BIDS_MIRROR_DERIV_SUBJECT", "0") == "1"
 
 # Mirror eCRF entries under each subject’s own folder as well (default ON)
 MIRROR_SUBJECT_FOLDER = os.getenv("BIDS_MIRROR_SUBJECT_FOLDER", "1") == "1"
+
 
 # Columns we’ll drop from any legacy files we rewrite
 LEGACY_DROP = {"group", "group_index", "visit_index", "data.value", "value", "session"}
