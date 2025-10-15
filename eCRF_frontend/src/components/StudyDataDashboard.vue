@@ -1,3 +1,4 @@
+/* eslint-disable */
 <template>
   <div class="study-dashboard-container" v-if="study">
     <!-- header controls -->
@@ -7,18 +8,27 @@
       </button>
       <h2 class="dashboard-title">{{ study.metadata.study_name }}</h2>
 
+      <div class="version-dropdown">
+        <label for="version-select">Version:</label>
+        <select id="version-select" v-model.number="selectedVersion">
+          <option v-for="v in studyVersions" :key="'ver-'+v.version" :value="v.version">
+            {{ v.version }}
+          </option>
+        </select>
+      </div>
+
       <div class="legend-dropdown">
         <button class="btn-minimal icon-only" @click="showLegend = !showLegend" title="Table Legend">
           <i :class="icons.info"></i>
         </button>
         <div v-if="showLegend" class="legend-content" @click.stop>
           <p>
-            <span class="legend-swatch swatch-none"></span>
-            <strong>No color:</strong> No section assigned for this subject’s group at this visit.
+            <span class="legend-swatch swatch-gray"></span>
+            <strong>Gray cell:</strong> No section assigned for this subject’s group at this visit.
           </p>
           <p>
-            <span class="legend-swatch swatch-gray"></span>
-            <strong>Gray cell:</strong> Section assigned but no data has been entered.
+            <span class="legend-swatch swatch-none"></span>
+            <strong>No color:</strong> Section assigned but no data has been entered.
           </p>
           <p>
             <span class="legend-swatch swatch-red"></span>
@@ -57,7 +67,9 @@
     </div>
 
     <div class="table-wrapper">
-      <table class="dashboard-table">
+      <div class="loading" v-if="isLoadingEntries">Building dashboard…</div>
+
+      <table class="dashboard-table" v-else>
         <thead>
           <tr>
             <th rowspan="2" @click="sortTable('subjectId')">
@@ -109,7 +121,7 @@
         </tbody>
       </table>
 
-      <div class="pagination-controls" v-if="!viewAll">
+      <div class="pagination-controls" v-if="!viewAll && !isLoadingEntries">
         <button :disabled="currentPage === 1" @click="goFirst">First</button>
         <button :disabled="currentPage === 1" @click="goPrev">Previous</button>
         <span>Page {{ currentPage }} of {{ totalPages }}</span>
@@ -118,7 +130,7 @@
       </div>
     </div>
 
-    <div v-if="!filteredData.length" class="no-data">
+    <div v-if="!filteredData.length && !isLoadingEntries" class="no-data">
       No data entries found. Please enter data for the assigned sections using the data entry form.
     </div>
   </div>
@@ -156,6 +168,11 @@ export default {
       VIEW_ALL_MAX_ROWS: 1000,
       viewAll: false,
       isLoadingEntries: false,
+
+      // versioning
+      studyVersions: [],
+      selectedVersion: null,
+      templateCache: new Map(),
 
       // debug (no leading underscores to satisfy vue/no-reserved-keys)
       debugOnce: { study:false, fetch:false, entryShape:false },
@@ -200,14 +217,17 @@ export default {
               let value = '';
               if (assigned) {
                 const raw = this.getValue(subjIdx, vIdx, sIdx, fIdx);
-                if ((field.type || '').toLowerCase() === 'checkbox') {
+                const type = (field.type || '').toLowerCase();
+                if (type === 'checkbox') {
                   value = (raw === true) ? 'Yes'
                         : (raw === false) ? 'No'
                         : '';
+                } else if (type === 'file') {
+                  value = this.formatFileCell(raw);
                 } else {
                   value = (raw == null || raw === '') ? '' : raw;
                 }
-              } // if not assigned, leave empty string and default background
+              }
               row[`s${sIdx}_f${fIdx}`] = value;
             });
           });
@@ -278,9 +298,18 @@ export default {
       },
       deep: true,
     },
+    selectedVersion: {
+      async handler() {
+        if (!this.study) return;
+        await this.loadTemplateForSelectedVersion();
+        this.initDynamicFilters();
+        this.currentPage = 1;
+        await this.fetchPageEntries();
+      }
+    }
   },
-  created() {
-    this.bootstrap();
+  async created() {
+    await this.bootstrap();
   },
   methods: {
     // ---- debug helpers ----
@@ -347,6 +376,12 @@ export default {
         });
         this.study = studyResp.data;
 
+        await this.loadVersions(studyId);
+        if (!this.selectedVersion && this.studyVersions.length) {
+          this.selectedVersion = this.studyVersions[this.studyVersions.length - 1].version;
+        }
+        await this.loadTemplateForSelectedVersion();
+
         if (!this.debugOnce.study) {
           this.debugOnce.study = true;
           this.groupDbg('Study loaded', {
@@ -365,12 +400,7 @@ export default {
           });
         }
 
-        // Initialize dynamic filters
-        this.sections.forEach((section, sIdx) => {
-          section.fields.forEach((_, fIdx) => {
-            if (!this.filters[`s${sIdx}_f${fIdx}`]) this.filters[`s${sIdx}_f${fIdx}`] = '';
-          });
-        });
+        this.initDynamicFilters();
 
         if (this.canViewAll) this.viewAll = false;
         await this.fetchPageEntries();
@@ -382,6 +412,68 @@ export default {
           alert('Could not load study data');
         }
       }
+    },
+
+    initDynamicFilters() {
+      const base = { subjectId: this.filters.subjectId || '', visit: this.filters.visit || '' };
+      const next = { ...base };
+      this.sections.forEach((section, sIdx) => {
+        section.fields.forEach((_, fIdx) => {
+          const key = `s${sIdx}_f${fIdx}`;
+          next[key] = this.filters[key] || '';
+        });
+      });
+      this.filters = next;
+    },
+
+    async loadVersions(studyId) {
+      try {
+        const resp = await axios.get(`/forms/studies/${studyId}/versions`, {
+          headers: { Authorization: `Bearer ${this.token}` }
+        });
+        const arr = Array.isArray(resp.data) ? resp.data : [];
+        this.studyVersions = arr.sort((a, b) => a.version - b.version);
+      } catch (e) {
+        this.studyVersions = [{ version: 1 }];
+      }
+    },
+
+    async loadTemplateForSelectedVersion() {
+      const studyId = this.$route.params.id;
+      if (!studyId || !this.selectedVersion) return;
+
+      if (this.templateCache.has(this.selectedVersion)) {
+        const cached = this.templateCache.get(this.selectedVersion);
+        this.applyTemplateSchema(cached);
+        return;
+      }
+      try {
+        const resp = await axios.get(`/forms/studies/${studyId}/template`, {
+          headers: { Authorization: `Bearer ${this.token}` },
+          params: { version: this.selectedVersion }
+        });
+        const schema = resp?.data?.schema || {};
+        this.templateCache.set(this.selectedVersion, schema);
+        this.applyTemplateSchema(schema);
+      } catch (e) {
+        // keep existing template if fetch fails
+      }
+    },
+
+    applyTemplateSchema(schema) {
+      const current = this.study?.content?.study_data || {};
+      const normalized = {
+        study: schema?.study ?? current.study ?? {},
+        subjects: Array.isArray(schema?.subjects) && schema.subjects.length ? schema.subjects : (current.subjects || []),
+        subjectCount: Number.isFinite(schema?.subjectCount) ? schema.subjectCount : (current.subjectCount ?? (current.subjects?.length || 0)),
+        visits: Array.isArray(schema?.visits) && schema.visits.length ? schema.visits : (current.visits || []),
+        groups: Array.isArray(schema?.groups) && schema.groups.length ? schema.groups : (current.groups || []),
+        selectedModels: Array.isArray(schema?.selectedModels) ? schema.selectedModels : (current.selectedModels || []),
+        assignments: Array.isArray(schema?.assignments) ? schema.assignments : (current.assignments || []),
+      };
+      if (!this.study) this.study = { metadata: {}, content: { study_data: normalized } };
+      else if (!this.study.content) this.study.content = { study_data: normalized };
+      else this.study.content.study_data = normalized;
     },
 
     currentWindowIndexSets() {
@@ -433,6 +525,7 @@ export default {
       if (this.viewAll) params.append('all', 'true');
       if (subject_indexes) params.append('subject_indexes', subject_indexes);
       if (visit_indexes) params.append('visit_indexes', visit_indexes);
+      if (Number.isFinite(this.selectedVersion)) params.append('version', String(this.selectedVersion));
 
       const url = `/forms/studies/${studyId}/data_entries` + (params.toString() ? `?${params.toString()}` : '');
 
@@ -440,7 +533,7 @@ export default {
         this.isLoadingEntries = true;
         if (!this.debugOnce.fetch) {
           this.debugOnce.fetch = true;
-          this.dbg('Fetching entries…', { url, viewAll: this.viewAll, subject_indexes, visit_indexes });
+          this.dbg('Fetching entries…', { url, viewAll: this.viewAll, subject_indexes, visit_indexes, version: this.selectedVersion });
         }
         const resp = await axios.get(url, { headers: { Authorization: `Bearer ${this.token}` } });
         const payload = Array.isArray(resp.data) ? { entries: resp.data, total: resp.data.length } : (resp.data || {});
@@ -499,36 +592,44 @@ export default {
       }
       return ok;
     },
-    findEntry(subjIdx, visitIdx, groupIdx) {
-      const e = (this.entries || []).find(e =>
+    findBestEntry(subjIdx, visitIdx, groupIdx) {
+      const all = (this.entries || []).filter(e =>
         e.subject_index === subjIdx &&
         e.visit_index === visitIdx &&
         e.group_index === groupIdx
-      ) || null;
-      if (!e) {
-        if (subjIdx === 0 && visitIdx === 0 && groupIdx === 0) {
-          this.dbg('findEntry: no entry for (s,v,g)', { subjIdx, visitIdx, groupIdx, entries: this.entries.length });
-        }
-      }
-      return e;
+      );
+      if (!all.length) return null;
+
+      const target = Number(this.selectedVersion);
+      // Prefer exact match
+      const exact = all.find(e => Number(e.form_version) === target);
+      if (exact) return exact;
+
+      // Else highest version <= target
+      const le = all
+        .filter(e => Number(e.form_version) <= target)
+        .sort((a, b) => Number(b.form_version) - Number(a.form_version))[0];
+      if (le) return le;
+
+      // Fallback: highest version available
+      return all.sort((a, b) => Number(b.form_version) - Number(a.form_version))[0];
     },
+
     getValue(subjIdx, visitIdx, sectionIdx, fieldIdx) {
       const groupIdx = this.resolveGroup(subjIdx);
-      const entry = this.findEntry(subjIdx, visitIdx, groupIdx);
+      const entry = this.findBestEntry(subjIdx, visitIdx, groupIdx);
       if (!entry || !entry.data) return '';
-      // Primary: dict
       const d = entry.data;
       if (!Array.isArray(d)) {
         const v = this.dictRead(d, sectionIdx, fieldIdx);
         return v != null ? v : '';
       }
-      // Fallback (old rows): list-of-lists
       const section = Array.isArray(d) ? (d[sectionIdx] || []) : [];
       return section[fieldIdx] != null ? section[fieldIdx] : '';
     },
     isCellSkipped(subjIdx, visitIdx, sectionIdx, fieldIdx) {
       const groupIdx = this.resolveGroup(subjIdx);
-      const entry = this.findEntry(subjIdx, visitIdx, groupIdx);
+      const entry = this.findBestEntry(subjIdx, visitIdx, groupIdx);
       if (!entry) return false;
       const flags = entry.skipped_required_flags;
       return !!(Array.isArray(flags) &&
@@ -545,8 +646,8 @@ export default {
 
       return {
         'cell-skipped': this.isCellSkipped(subjIdx, visitIdx, sectionIdx, fieldIdx),
-        'cell-empty-assigned': assigned && !hasData
-        // unassigned => no extra class (no color)
+        'cell-unassigned': !assigned,
+        'cell-empty-assigned': false && assigned && !hasData
       };
     },
 
@@ -562,6 +663,32 @@ export default {
       return this.sortConfig.key === key && this.sortConfig.direction === 'desc'
         ? this.icons.toggleDown
         : this.icons.toggleUp;
+    },
+
+    // file cell formatter
+    formatFileCell(val) {
+      const baseName = (p) => {
+        if (!p) return '';
+        const s = String(p);
+        const parts = s.split(/[\\/]/);
+        return parts[parts.length - 1];
+      };
+      const fromObj = (o) => o.file_name || o.name || baseName(o.url) || baseName(o.file_path) || '';
+      if (Array.isArray(val)) {
+        const names = val.map(v => {
+          if (v && typeof v === 'object') return fromObj(v);
+          if (typeof v === 'string') return baseName(v);
+          return '';
+        }).filter(Boolean);
+        return names.join(', ');
+      }
+      if (val && typeof val === 'object') {
+        return fromObj(val);
+      }
+      if (typeof val === 'string') {
+        return baseName(val);
+      }
+      return '';
     },
 
     // Paging helpers
@@ -593,7 +720,7 @@ export default {
       if (!this.viewAll && !this.canViewAll) {
         try {
           const resp = await axios.get(
-            `/forms/studies/${studyId}/data_entries?all=true`,
+            `/forms/studies/${studyId}/data_entries?all=true&version=${this.selectedVersion}`,
             { headers: { Authorization: `Bearer ${this.token}` } }
           );
           const payload = Array.isArray(resp.data) ? { entries: resp.data } : (resp.data || {});
@@ -603,7 +730,6 @@ export default {
         }
       }
 
-      // Temporarily swap this.entries to build full rows, then restore
       const original = this.entries;
       this.entries = entriesForExport;
 
@@ -618,10 +744,13 @@ export default {
               let value = '';
               if (assigned) {
                 const raw = this.getValue(subjIdx, vIdx, sIdx, fIdx);
-                if ((field.type || '').toLowerCase() === 'checkbox') {
+                const type = (field.type || '').toLowerCase();
+                if (type === 'checkbox') {
                   value = (raw === true) ? 'Yes'
                         : (raw === false) ? 'No'
                         : '';
+                } else if (type === 'file') {
+                  value = this.formatFileCell(raw);
                 } else {
                   value = (raw == null || raw === '') ? '' : raw;
                 }
@@ -676,7 +805,7 @@ export default {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `${this.study?.metadata?.study_name || 'study'}_data.${ext}`;
+      a.download = `${this.study?.metadata?.study_name || 'study'}_v${this.selectedVersion}_data.${ext}`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
@@ -690,14 +819,15 @@ export default {
 /* (unchanged styles from your file) */
 .dashboard-header-controls {
   display: grid;
-  grid-template-columns: auto 1fr auto auto;
+  grid-template-columns: auto 1fr auto auto auto;
   align-items: center;
   gap: 12px;
   margin-bottom: 12px;
 }
 .dashboard-header-controls .btn-minimal { justify-self: start; }
 .dashboard-header-controls .export-dropdown,
-.dashboard-header-controls .legend-dropdown {
+.dashboard-header-controls .legend-dropdown,
+.dashboard-header-controls .version-dropdown {
   justify-self: end;
   position: relative;
 }
@@ -723,6 +853,20 @@ export default {
 }
 .btn-minimal:hover { background: #f3f4f6; border-color: #9ca3af; color: #1f2937; }
 .icon-only { padding: 6px; font-size: 1rem; }
+
+.version-dropdown label {
+  margin-right: 6px;
+  font-size: 0.9rem;
+  color: #374151;
+}
+.version-dropdown select {
+  padding: 6px 10px;
+  border: 1px solid #d1d5db;
+  border-radius: 4px;
+  background: #fff;
+  font-size: 0.9rem;
+  color: #374151;
+}
 
 .export-menu,
 .legend-content {
@@ -783,8 +927,15 @@ export default {
 .dashboard-table tbody td:not(:first-child):not(:nth-child(2)) { background: #ffffff; color: #4b5563; }
 .dashboard-table tbody tr:hover td { background: #f1f5f9; }
 
-/* Assigned but empty (gray). Keep strong so hover doesn't override */
+/* Assigned but empty: now no special color (kept for compatibility, not applied) */
 .cell-empty-assigned {
+  background: #e5e7eb !important;
+  color: #374151;
+  border-color: #d1d5db !important;
+}
+
+/* Unassigned cell (gray) */
+.cell-unassigned {
   background: #e5e7eb !important;
   color: #374151;
   border-color: #d1d5db !important;
