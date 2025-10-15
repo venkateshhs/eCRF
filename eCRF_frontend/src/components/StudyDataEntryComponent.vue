@@ -105,6 +105,9 @@
         </div>
 
         <div class="matrix-wrap">
+          <!-- Loading overlay while (re)hydrating visits -->
+          <div v-if="visitLoading" class="busy-overlay"><div class="spinner" /></div>
+
           <table class="selection-matrix" :class="{ fluid: isFluidMatrix }">
             <thead>
               <tr>
@@ -506,6 +509,7 @@
     <p>Loading study details…</p>
   </div>
 </template>
+
 <script>
 /* eslint-disable */
 import axios from "axios";
@@ -595,6 +599,11 @@ export default {
       selectedVersion: null,         // always the latest server version (non-shared); shared: omitted
       studyVersions: [],             // [{version, created_at}]
       templateCache: new Map(),
+
+      // NEW: performance helpers
+      entriesIndex: new Map(),    // key: "s|v|g" -> [entries sorted desc by form_version]
+      hydrateCache: new Map(),    // key: "s|v|g|version" -> { dataArr, skipFlags, id }
+      visitLoading: false,        // show loading while (re)hydrating visits
     };
   },
 
@@ -681,20 +690,24 @@ export default {
       const studyId = this.$route.params.id;
 
       await this.loadStudy(studyId);
-
       await this.loadVersions(studyId);
+
       this.selectedVersion = (this.studyVersions[this.studyVersions.length - 1]?.version) || 1;
 
       await this.loadTemplateForSelectedVersion();
 
-      await this.loadExistingEntries(studyId);
-      this.applyVersionView();
+      // Decide visit scope first to avoid doing "all visits" work by default
+      this.selectedVisitIndex = (this.visitList.length > this.VISIT_THRESHOLD) ? 0 : -1;
 
+      await this.loadExistingEntries(studyId);
+
+      this.visitLoading = true;
+      this.applyVersionView();
       this.prepareAssignmentsLookup();
       this.prepareSubjectGroupIndexMap();
       this.buildStatusCache();
+      this.visitLoading = false;
 
-      this.selectedVisitIndex = (this.visitList.length > this.VISIT_THRESHOLD) ? 0 : -1;
       this.matrixReady = true;
     }
   },
@@ -702,6 +715,8 @@ export default {
   watch: {
     existingEntries: {
       handler() {
+        if (this.selectedVisitIndex === -999) return;
+        this.rebuildEntriesIndex();
         this.buildStatusCache();
       },
       deep: true,
@@ -710,9 +725,18 @@ export default {
       handler() {
         this.prepareAssignmentsLookup();
         this.prepareSubjectGroupIndexMap();
+        if (this.selectedVisitIndex === -999) return;
         this.buildStatusCache();
       },
       deep: true,
+    },
+    async selectedVisitIndex(newVal) {
+      if (newVal === -999) return;
+      this.visitLoading = true;
+      await this.$nextTick();
+      this.applyVersionView();
+      this.buildStatusCache();
+      this.visitLoading = false;
     },
   },
 
@@ -811,6 +835,7 @@ export default {
     },
 
     onVersionChange() {
+      this.hydrateCache.clear(); // version changed → clear cache
       this.loadTemplateForSelectedVersion().then(() => {
         this.applyVersionView();
         const nS = this.numberOfSubjects;
@@ -821,59 +846,49 @@ export default {
       });
     },
 
+    rebuildEntriesIndex() {
+      const m = new Map();
+      for (const e of (this.existingEntries || [])) {
+        const key = `${e.subject_index}|${e.visit_index}|${e.group_index}`;
+        const arr = m.get(key) || [];
+        arr.push(e);
+        m.set(key, arr);
+      }
+      for (const [k, arr] of m) {
+        arr.sort((a, b) => Number(b.form_version) - Number(a.form_version));
+      }
+      this.entriesIndex = m;
+      this.hydrateCache.clear();
+    },
+
     getBestEntryFor(s, v, g) {
-      const all = (this.existingEntries || []).filter(
-        e => e.subject_index === s && e.visit_index === v && e.group_index === g
-      );
-      if (!all.length) return null;
+      const key = `${s}|${v}|${g}`;
+      const arr = this.entriesIndex.get(key);
+      if (!arr || !arr.length) return null;
 
-      const exact = all.find(e => Number(e.form_version) === Number(this.selectedVersion));
-      if (exact) return exact;
-
-      const le = all
-        .filter(e => Number(e.form_version) <= Number(this.selectedVersion))
-        .sort((a, b) => Number(b.form_version) - Number(a.form_version));
-      if (le.length) return le[0];
-
-      return all.slice().sort((a, b) => Number(b.form_version) - Number(a.form_version))[0];
+      const target = Number(this.selectedVersion);
+      for (const e of arr) {
+        if (Number(e.form_version) === target) return e;
+      }
+      for (const e of arr) {
+        if (Number(e.form_version) <= target) return e;
+      }
+      return arr[0];
     },
 
     applyVersionView() {
-      this.initializeEntryData();
+      // On selection matrix we don't need to hydrate entry data; status cache handles the UI.
+      if (this.showSelection) return;
 
       const nS = this.numberOfSubjects;
       const nV = this.visitList.length;
+      const vIndices = (this.selectedVisitIndex === -1)
+        ? Array.from({ length: nV }, (_, i) => i)
+        : [Math.min(Math.max(this.selectedVisitIndex, 0), Math.max(nV - 1, 0))];
 
       for (let s = 0; s < nS; s++) {
         const g = this.subjectToGroupIdx[s] ?? 0;
-        for (let v = 0; v < nV; v++) {
-          const best = this.getBestEntryFor(s, v, g);
-          if (!best) continue;
-
-          let arr;
-          if (best.data && !Array.isArray(best.data) && typeof best.data === 'object') {
-            arr = this.dictToArray(best.data);
-          } else {
-            arr = Array.isArray(best.data)
-              ? best.data
-              : this.selectedModels.map(sec => sec.fields.map(f => this.defaultForField(f)));
-          }
-
-          arr = (this.selectedModels || []).map((sec, sIdx) => {
-            const row = Array.isArray(arr[sIdx]) ? arr[sIdx] : [];
-            return (sec.fields || []).map((f, fIdx) =>
-              (row[fIdx] !== undefined) ? row[fIdx] : this.defaultForField(f)
-            );
-          });
-
-          this.entryData[s][v][g] = arr;
-          this.entryIds[s][v][g]   = best.id;
-
-          const storedSkips = best.skipped_required_flags || best.skips;
-          if (Array.isArray(storedSkips)) {
-            this.skipFlags[s][v][g] = storedSkips;
-          }
-        }
+        for (const v of vIndices) this.hydrateCell(s, v, g);
       }
     },
 
@@ -926,13 +941,98 @@ export default {
       });
     },
 
+    makeSectionFieldSkeleton() {
+      return (this.selectedModels || []).map(sec => (sec.fields || []).map(f => this.defaultForField(f)));
+    },
+    makeSkipSkeleton() {
+      return (this.selectedModels || []).map(sec => (sec.fields || []).map(() => false));
+    },
+    ensureSlot(s, v, g) {
+      if (!this.entryData[s]) this.entryData[s] = [];
+      if (!this.entryData[s][v]) this.entryData[s][v] = [];
+      if (!this.entryData[s][v][g]) this.entryData[s][v][g] = this.makeSectionFieldSkeleton();
+
+      if (!this.skipFlags[s]) this.skipFlags[s] = [];
+      if (!this.skipFlags[s][v]) this.skipFlags[s][v] = [];
+      if (!this.skipFlags[s][v][g]) this.skipFlags[s][v][g] = this.makeSkipSkeleton();
+
+      if (!this.entryIds[s]) this.entryIds[s] = [];
+      if (!this.entryIds[s][v]) this.entryIds[s][v] = [];
+      if (typeof this.entryIds[s][v][g] === "undefined") this.entryIds[s][v][g] = null;
+    },
+
+    hydrateCell(s, v, g) {
+      const cacheKey = `${s}|${v}|${g}|${this.selectedVersion}`;
+      const cached = this.hydrateCache.get(cacheKey);
+      if (cached) {
+        this.entryData[s] ??= [];
+        this.entryData[s][v] ??= [];
+        this.entryData[s][v][g] = cached.dataArr;
+        this.entryIds[s] ??= [];
+        this.entryIds[s][v] ??= [];
+        this.entryIds[s][v][g] = cached.id;
+        this.skipFlags[s] ??= [];
+        this.skipFlags[s][v] ??= [];
+        this.skipFlags[s][v][g] = cached.skipFlags;
+        return;
+      }
+
+      const best = this.getBestEntryFor(s, v, g);
+      this.ensureSlot(s, v, g);
+      if (!best) {
+        // keep skeleton; also cache to avoid re-checking
+        this.hydrateCache.set(cacheKey, {
+          dataArr: this.entryData[s][v][g],
+          skipFlags: this.skipFlags[s][v][g],
+          id: null,
+        });
+        return;
+      }
+
+      let arr;
+      if (best.data && !Array.isArray(best.data) && typeof best.data === 'object') {
+        arr = this.dictToArray(best.data);
+      } else {
+        arr = Array.isArray(best.data)
+          ? best.data
+          : this.selectedModels.map(sec => sec.fields.map(f => this.defaultForField(f)));
+      }
+
+      arr = (this.selectedModels || []).map((sec, sIdx) => {
+        const row = Array.isArray(arr[sIdx]) ? arr[sIdx] : [];
+        return (sec.fields || []).map((f, fIdx) =>
+          (row[fIdx] !== undefined) ? row[fIdx] : this.defaultForField(f)
+        );
+      });
+
+      this.entryData[s][v][g] = arr;
+      this.entryIds[s][v][g]   = best.id;
+
+      const storedSkips = best.skipped_required_flags || best.skips;
+      this.skipFlags[s][v][g] = Array.isArray(storedSkips) ? storedSkips : this.makeSkipSkeleton();
+
+      this.hydrateCache.set(cacheKey, {
+        dataArr: this.entryData[s][v][g],
+        skipFlags: this.skipFlags[s][v][g],
+        id: best.id,
+      });
+    },
+
     setDeepValue(s, v, g, m, f, val) {
+      this.ensureSlot(s, v, g);
+      if (!Array.isArray(this.entryData[s][v][g][m])) {
+        const fields = (this.selectedModels[m]?.fields || []);
+        this.entryData[s][v][g][m] = fields.map(ff => this.defaultForField(ff));
+      }
       this.entryData[s][v][g][m][f] = val;
-      this.entryData[s][v][g][m] = [...this.entryData[s][v][g][m]];
     },
     setDeepSkip(s, v, g, m, f, on) {
+      this.ensureSlot(s, v, g);
+      if (!Array.isArray(this.skipFlags[s][v][g][m])) {
+        const fields = (this.selectedModels[m]?.fields || []);
+        this.skipFlags[s][v][g][m] = fields.map(() => false);
+      }
       this.skipFlags[s][v][g][m][f] = !!on;
-      this.skipFlags[s][v][g][m] = [...this.skipFlags[s][v][g][m]];
     },
 
     setEntryValue(mIdx, fIdx, val) {
@@ -940,6 +1040,8 @@ export default {
       this.setDeepValue(s, v, g, mIdx, fIdx, val);
       this.clearError(mIdx, fIdx);
       this.validateField(mIdx, fIdx);
+      // invalidate cache for this cell
+      this.hydrateCache.delete(`${s}|${v}|${g}|${this.selectedVersion}`);
     },
 
     errorKey(mIdx, fIdx) {
@@ -1142,6 +1244,7 @@ export default {
         this.currentSubjectIndex = payload.subject_index ?? 0;
         this.currentVisitIndex   = payload.visit_index ?? 0;
         this.currentGroupIndex   = payload.group_index ?? 0;
+        this.ensureSlot(this.currentSubjectIndex, this.currentVisitIndex, this.currentGroupIndex);
         this.showSelection = false;
         this.validationErrors = {};
       } catch (e) {
@@ -1158,9 +1261,9 @@ export default {
         );
         const payload = Array.isArray(resp.data) ? resp.data : (resp.data?.entries || []);
         this.existingEntries = payload;
+        this.rebuildEntriesIndex();
       } catch (err) {
-        console.error("Failed to load existing entries", err);
-      }
+      console.error("Failed to load existing entries", err);}
     },
 
     defaultForField(f, { ignoreDefaults = false } = {}) {
@@ -1187,6 +1290,7 @@ export default {
     clearCurrentSection() {
       if (!this.canEdit) return;
       const s = this.currentSubjectIndex, v = this.currentVisitIndex, g = this.currentGroupIndex;
+      this.ensureSlot(s, v, g);
       this.assignedModelIndices.forEach((mIdx) => {
         const section = this.selectedModels[mIdx];
         section.fields.forEach((f, fIdx) => {
@@ -1201,6 +1305,7 @@ export default {
           this.clearError(mIdx, fIdx);
         });
       });
+      this.hydrateCache.delete(`${s}|${v}|${g}|${this.selectedVersion}`);
     },
 
     initializeEntryData() {
@@ -1210,17 +1315,13 @@ export default {
 
       this.entryData = Array.from({ length: nS }, () =>
         Array.from({ length: nV }, () =>
-          Array.from({ length: nG }, () =>
-            this.selectedModels.map((sect) => sect.fields.map((f) => this.defaultForField(f)))
-          )
+          Array.from({ length: nG }, () => null)
         )
       );
 
       this.skipFlags = Array.from({ length: nS }, () =>
         Array.from({ length: nV }, () =>
-          Array.from({ length: nG }, () =>
-            this.selectedModels.map((sect) => sect.fields.map(() => false))
-          )
+          Array.from({ length: nG }, () => null)
         )
       );
 
@@ -1253,9 +1354,13 @@ export default {
       const nS = this.numberOfSubjects;
       const nV = this.visitList.length;
 
+      const vIndices = (this.selectedVisitIndex === -1)
+        ? Array.from({ length: nV }, (_, i) => i)
+        : [Math.min(Math.max(this.selectedVisitIndex, 0), Math.max(nV - 1, 0))];
+
       for (let s = 0; s < nS; s++) {
         const g = this.subjectToGroupIdx[s] ?? 0;
-        for (let v = 0; v < nV; v++) {
+        for (const v of vIndices) {
           const e = this.getBestEntryFor(s, v, g);
           const key = `${s}|${v}`;
 
@@ -1309,10 +1414,16 @@ export default {
       this.currentVisitIndex   = Math.min(Math.max(vIdx ?? 0, 0), Math.max(nV - 1, 0));
       this.currentGroupIndex   = this.subjectToGroupIdx[this.currentSubjectIndex] ?? 0;
 
+      this.ensureSlot(this.currentSubjectIndex, this.currentVisitIndex, this.currentGroupIndex);
       this.prepareAssignmentsLookup();
 
       this.showSelection = false;
       this.validationErrors = {};
+
+      // ensure form data is hydrated for the chosen visit
+      this.visitLoading = true;
+      this.hydrateCell(this.currentSubjectIndex, this.currentVisitIndex, this.currentGroupIndex);
+      this.visitLoading = false;
     },
 
     backToSelection() {
@@ -1340,15 +1451,16 @@ export default {
       this.setDeepSkip(s, v, g, mIdx, fIdx, on);
     },
 
-    // ---------- VALIDATION ----------
     validateField(mIdx, fIdx) {
+      const s = this.currentSubjectIndex, v = this.currentVisitIndex, g = this.currentGroupIndex;
+      this.ensureSlot(s, v, g);
+
       const def = this.selectedModels[mIdx].fields[fIdx] || {};
       const cons = def.constraints || {};
       const label = def.label || def.name || "This field";
-      const s = this.currentSubjectIndex, v = this.currentVisitIndex, g = this.currentGroupIndex;
       const val = this.entryData[s][v][g][mIdx][fIdx];
       const allowMultiFiles = !!cons.allowMultipleFiles;
-      let isSkipped = !!this.skipFlags[s][v][g][mIdx][fIdx];
+      let isSkipped = !!(this.skipFlags[s]?.[v]?.[g]?.[mIdx]?.[fIdx]);
 
       const isEmpty = () => {
         if (def.type === "checkbox") return val !== true;
@@ -1446,8 +1558,8 @@ export default {
           else if (fmt === "MM-dd-yyyy") { M=+m[1]; d=+m[2]; y=+m[3]; }
           else if (fmt === "dd-MM-yyyy") { d=+m[1]; M=+m[2]; y=+m[3]; }
           else if (fmt === "yyyy-MM-dd") { y=+m[1]; M=+m[2]; d=+m[3]; }
-          else if (fmt === "MM/yyyy" || fmt === "MM-yyyy") { M=+m[1]; y=+m[2]; d=1; }
-          else if (fmt === "yyyy/MM" || fmt === "yyyy-MM") { y=+m[1]; M=+m[2]; d=1; }
+          else if (fmt === "MM/yyyy" || "MM-yyyy") { M=+m[1]; y=+m[2]; d=1; }
+          else if (fmt === "yyyy/MM" || "yyyy-MM") { y=+m[1]; M=+m[2]; d=1; }
           else if (fmt === "yyyy") { y=+m[1]; M=1; d=1; }
           return new Date(y, M-1, d);
         };
@@ -1504,13 +1616,14 @@ export default {
 
     computeRequiredFailures() {
       const s = this.currentSubjectIndex, v = this.currentVisitIndex, g = this.currentGroupIndex;
+      this.ensureSlot(s, v, g);
       const items = [];
       this.assignedModelIndices.forEach((mIdx) => {
         const section = this.selectedModels[mIdx];
         (section.fields || []).forEach((f, fIdx) => {
           const c = f?.constraints || {};
           if (!c.required) return;
-          if (this.skipFlags[s][v][g][mIdx][fIdx]) return;
+          if (this.skipFlags[s]?.[v]?.[g]?.[mIdx]?.[fIdx]) return;
           const val = this.entryData[s][v][g][mIdx][fIdx];
           const empty =
             (f.type === "checkbox" ? val !== true :
@@ -1661,138 +1774,139 @@ export default {
       }
     },
 
+    async submitData() {
+      if (!this.canEdit) {
+        this.showDialogMessage("This shared link is view-only.");
+        return;
+      }
 
+      this.applyTransformsForSection();
 
-// replace the whole submitData()
-async submitData() {
-  if (!this.canEdit) {
-    this.showDialogMessage("This shared link is view-only.");
-    return;
-  }
+      const ok = this.validateCurrentSection();
+      const blocking = Object.entries(this.validationErrors)
+        .filter(([k, msg]) => {
+          if (!msg) return false;
+          const idx = this.parseKey(k);
+          if (!idx) return true;
+          const { s, v, g, m, f } = idx;
+          const isSkipped = !!(this.skipFlags[s]?.[v]?.[g]?.[m]?.[f]);
+          if (isSkipped) return false;
+          return !/ is required\.$/.test(msg);
+        });
 
-  this.applyTransformsForSection();
+      if (!ok && blocking.length) {
+        this.showDialogMessage("Please fix validation errors before saving.");
+        return;
+      }
 
-  const ok = this.validateCurrentSection();
-  const blocking = Object.entries(this.validationErrors)
-    .filter(([k, msg]) => {
-      if (!msg) return false;
-      const idx = this.parseKey(k);
-      if (!idx) return true;
-      const { s, v, g, m, f } = idx;
-      const isSkipped = !!(this.skipFlags[s]?.[v]?.[g]?.[m]?.[f]);
-      if (isSkipped) return false;
-      return !/ is required\.$/.test(msg);
-    });
+      const requiredFailures = this.computeRequiredFailures();
+      if (requiredFailures.length) {
+        this.skipCandidates = requiredFailures;
+        this.skipSelections = requiredFailures.reduce((acc, it) => { acc[it.key] = false; return acc; }, {});
+        this.showSkipDialog = true;
+        return;
+      }
 
-  if (!ok && blocking.length) {
-    this.showDialogMessage("Please fix validation errors before saving.");
-    return;
-  }
-
-  const requiredFailures = this.computeRequiredFailures();
-  if (requiredFailures.length) {
-    this.skipCandidates = requiredFailures;
-    this.skipSelections = requiredFailures.reduce((acc, it) => { acc[it.key] = false; return acc; }, {});
-    this.showSkipDialog = true;
-    return;
-  }
-
-  try {
-    await this.uploadPendingFilesForCurrentSection();
-  } catch (e) {
+      try {
+        await this.uploadPendingFilesForCurrentSection();
+      } catch (e) {
     console.error("File upload/register failed:", e);
-    this.showDialogMessage("File upload failed. Please try again.");
-    return;
-  }
+        this.showDialogMessage("File upload failed. Please try again.");
+        return;
+      }
 
-  const s = this.currentSubjectIndex, v = this.currentVisitIndex, g = this.currentGroupIndex;
-  const dictData = this.arrayToDict(this.entryData[s][v][g]);
+      const s = this.currentSubjectIndex, v = this.currentVisitIndex, g = this.currentGroupIndex;
+      this.ensureSlot(s, v, g);
+      const dictData = this.arrayToDict(this.entryData[s][v][g]);
 
   // IMPORTANT: array -> dict ONLY for shared endpoint (to satisfy Pydantic)
-  const rawSkipFlags = this.skipFlags[s][v][g];
-  const flagsPayload = this.isShared ? this.flagsArrayToDict(rawSkipFlags) : rawSkipFlags;
+      const rawSkipFlags = this.skipFlags[s][v][g];
+      const flagsPayload = this.isShared ? this.flagsArrayToDict(rawSkipFlags) : rawSkipFlags;
 
-  const payload = {
-    study_id: this.study?.metadata?.id,
-    subject_index: s,
-    visit_index: v,
-    group_index: g,
-    data: dictData,
-    skipped_required_flags: flagsPayload,
-  };
-
-  try {
-    if (this.isShared) {
-      // Do NOT send ?version=0 — omit version entirely for shared saves
-      const resp = await axios.post(
-        `/forms/shared/${this.shareToken}/data`,
-        payload
-      );
-
-      const saved = {
-        id: resp?.data?.id,
-        study_id: payload.study_id,
+      const payload = {
+        study_id: this.study?.metadata?.id,
         subject_index: s,
         visit_index: v,
         group_index: g,
         data: dictData,
-        skipped_required_flags: resp?.data?.skipped_required_flags ?? rawSkipFlags,
-        form_version: resp?.data?.form_version ?? this.selectedVersion,
-        created_at: resp?.data?.created_at ?? new Date().toISOString(),
+        skipped_required_flags: flagsPayload,
       };
-      (this.existingEntries = this.existingEntries || []).push(saved);
 
-      this.showDialogMessage("Data saved successfully.");
-      this.applyVersionView();
-      this.updateStatusCacheFor(s, v, g);
-      return;
-    }
+      try {
+        if (this.isShared) {
+      // Do NOT send ?version=0 — omit version entirely for shared saves
+          const resp = await axios.post(
+            `/forms/shared/${this.shareToken}/data`,
+            payload
+          );
+
+          const saved = {
+            id: resp?.data?.id,
+            study_id: payload.study_id,
+            subject_index: s,
+            visit_index: v,
+            group_index: g,
+            data: dictData,
+            skipped_required_flags: resp?.data?.skipped_required_flags ?? rawSkipFlags,
+            form_version: resp?.data?.form_version ?? this.selectedVersion,
+            created_at: resp?.data?.created_at ?? new Date().toISOString(),
+          };
+          (this.existingEntries = this.existingEntries || []).push(saved);
+
+          this.showDialogMessage("Data saved successfully.");
+          this.rebuildEntriesIndex();
+          this.hydrateCache.delete(`${s}|${v}|${g}|${this.selectedVersion}`);
+          this.applyVersionView();
+          this.updateStatusCacheFor(s, v, g);
+          return;
+        }
 
     // Non-shared (authenticated) path stays the same; version allowed when >= 1
-    const headers = { headers: { Authorization: `Bearer ${this.token}` } };
-    const existingId = this.entryIds[s][v][g];
+        const headers = { headers: { Authorization: `Bearer ${this.token}` } };
+        const existingId = this.entryIds[s][v][g];
 
-    if (existingId) {
-      const resp = await axios.put(
-        `/forms/studies/${this.study.metadata.id}/data_entries/${existingId}`,
-        payload,
-        headers
-      );
-      this.showDialogMessage("Data updated successfully.");
-      const idx = this.existingEntries.findIndex(x => x.id === existingId);
-      if (idx >= 0) this.existingEntries.splice(idx, 1, resp.data);
-    } else {
-      const params = this.safeVersionParams(this.selectedVersion);
-      const resp = await axios.post(
-        `/forms/studies/${this.study.metadata.id}/data`,
-        payload,
-        params ? { ...headers, params } : headers
-      );
-      const newId = resp?.data?.id;
-      this.entryIds[s][v][g] = newId;
-      const saved = {
-        id: newId,
-        study_id: this.study.metadata.id,
-        subject_index: s,
-        visit_index: v,
-        group_index: g,
-        data: dictData,
-        skipped_required_flags: resp?.data?.skipped_required_flags ?? rawSkipFlags,
-        form_version: resp?.data?.form_version ?? this.selectedVersion,
-        created_at: resp?.data?.created_at ?? new Date().toISOString(),
-      };
-      (this.existingEntries = this.existingEntries || []).push(saved);
-      this.showDialogMessage("Data saved successfully.");
-    }
+        if (existingId) {
+          const resp = await axios.put(
+            `/forms/studies/${this.study.metadata.id}/data_entries/${existingId}`,
+            payload,
+            headers
+          );
+          this.showDialogMessage("Data updated successfully.");
+          const idx = this.existingEntries.findIndex(x => x.id === existingId);
+          if (idx >= 0) this.existingEntries.splice(idx, 1, resp.data);
+        } else {
+          const params = this.safeVersionParams(this.selectedVersion);
+          const resp = await axios.post(
+            `/forms/studies/${this.study.metadata.id}/data`,
+            payload,
+            params ? { ...headers, params } : headers
+          );
+          const newId = resp?.data?.id;
+          this.entryIds[s][v][g] = newId;
+          const saved = {
+            id: newId,
+            study_id: this.study.metadata.id,
+            subject_index: s,
+            visit_index: v,
+            group_index: g,
+            data: dictData,
+            skipped_required_flags: resp?.data?.skipped_required_flags ?? rawSkipFlags,
+            form_version: resp?.data?.form_version ?? this.selectedVersion,
+            created_at: resp?.data?.created_at ?? new Date().toISOString(),
+          };
+          (this.existingEntries = this.existingEntries || []).push(saved);
+          this.showDialogMessage("Data saved successfully.");
+        }
 
-    this.applyVersionView();
-    this.updateStatusCacheFor(s, v, g);
-  } catch (err) {
+        this.rebuildEntriesIndex();
+        this.hydrateCache.delete(`${s}|${v}|${g}|${this.selectedVersion}`);
+        this.applyVersionView();
+        this.updateStatusCacheFor(s, v, g);
+      } catch (err) {
     console.error(err);
-    this.showDialogMessage("Failed to save data. Check console for details.");
-  }
-},
-
+        this.showDialogMessage("Failed to save data. Check console for details.");
+      }
+    },
 
     updateStatusCacheFor(s, v, g) {
       const e = this.getBestEntryFor(s, v, g);
@@ -1882,7 +1996,6 @@ async submitData() {
 };
 </script>
 
-
 <style scoped>
 /* ========= Boot / init messaging ========= */
 .boot-message {
@@ -1904,7 +2017,7 @@ async submitData() {
 }
 .matrix-toolbar-left {
   display: flex;
-  align-items: center;
+  align-items:  flex-end;
   gap: 12px;
 }
 .visit-filter {
@@ -1932,6 +2045,8 @@ async submitData() {
   padding: 8px 10px;
   line-height: 1;
   white-space: nowrap;
+  padding-bottom: 12px;
+  align-self: flex-end;
 }
 
 /* Info icon MUST be extreme right */
@@ -1951,23 +2066,44 @@ async submitData() {
 
 /* ========= Scrollable selection matrix ========= */
 .matrix-wrap {
-  overflow: auto;          /* both axes scroll when needed */
-  max-height: 70vh;        /* vertical scroll cap */
+  position: relative;      /* for overlay */
+  overflow: auto;
+  max-height: 70vh;
   border: 1px solid #e5e7eb;
   border-radius: 8px;
   background: #fff;
   width: 100%;
 }
 
+/* Loading overlay */
+.busy-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(255,255,255,0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 5;
+}
+.spinner {
+  width: 28px;
+  height: 28px;
+  border: 3px solid #d1d5db;
+  border-top-color: #6b7280;
+  border-radius: 50%;
+  animation: spin 0.9s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
 /* Make table fill container or scroll based on column count */
 .selection-matrix {
   border-collapse: collapse;
-  width: max-content;      /* default: allow horizontal scroll if many visits */
-  min-width: 720px;        /* prevent squish/overlap on small screens */
-  table-layout: fixed;     /* stable column widths */
+  width: max-content;
+  min-width: 720px;
+  table-layout: fixed;
 }
 .selection-matrix.fluid {
-  width: 100%;             /* few visits → stretch to container */
+  width: 100%;
   min-width: 100%;
 }
 
@@ -1991,22 +2127,16 @@ async submitData() {
   color: #1f2937;
 }
 
-/* Subject (first) column sticky for horizontal scroll */
+/* Subject column sticky */
 .subject-col,
 .subject-cell {
   position: sticky;
   left: 0;
-  z-index: 4;                 /* above other cells */
-  background: #ffffff;        /* ensure solid background when scrolled */
+  z-index: 4;
+  background: #ffffff;
   text-align: left;
 }
-
-/* Slightly different background for first header column */
-.subject-col {
-  background: #f3f4f6;
-  font-weight: 600;
-  color: #1f2937;
-}
+.subject-col { background: #f3f4f6; font-weight: 600; color: #1f2937; }
 
 /* Default fixed sizing */
 .subject-col,
@@ -2014,18 +2144,18 @@ async submitData() {
   min-width: 200px;
   max-width: 320px;
 }
-.visit-col {                  /* header cells for visit columns */
+.visit-col {
   min-width: 132px;
   max-width: 200px;
   text-align: center;
 }
-.visit-cell {                 /* body cells for visit columns */
+.visit-cell {
   width: 140px;
   text-align: center;
   padding: 8px;
 }
 
-/* Fluid mode overrides: remove hard mins so columns can grow */
+/* Fluid mode overrides */
 .selection-matrix.fluid .subject-col,
 .selection-matrix.fluid .subject-cell,
 .selection-matrix.fluid .visit-col,
@@ -2034,7 +2164,7 @@ async submitData() {
   max-width: none;
 }
 
-/* Buttons sizing and behavior */
+/* Buttons */
 .select-btn {
   display: inline-block;
   width: 100%;
@@ -2055,35 +2185,23 @@ async submitData() {
 }
 .selection-matrix.fluid .select-btn {
   min-width: 0;
-  max-width: none; /* allow buttons to expand/shrink with cells */
+  max-width: none;
 }
 .select-btn:active { transform: translateY(1px); }
 .select-btn:hover { opacity: 0.9; }
 
-/* Status colors */
 .select-btn.status-none     { background: #9ca3af; color: #1f2937; }
 .select-btn.status-partial  { background: #f59e0b; }
 .select-btn.status-complete { background: #16a34a; }
 .select-btn.status-skipped  { background: #ef4444; }
 
-/* Optional zebra rows for readability */
 .selection-matrix tbody tr:nth-child(odd) .subject-cell { background: #fafafa; }
 .selection-matrix tbody tr:nth-child(odd) td:not(.subject-cell) { background: #fcfcfc; }
 
-/* Nice scrollbars (WebKit) */
-.matrix-wrap::-webkit-scrollbar {
-  height: 10px;
-  width: 10px;
-}
-.matrix-wrap::-webkit-scrollbar-thumb {
-  background: #d1d5db;
-  border-radius: 8px;
-}
-.matrix-wrap::-webkit-scrollbar-thumb:hover {
-  background: #9ca3af;
-}
+.matrix-wrap::-webkit-scrollbar { height: 10px; width: 10px; }
+.matrix-wrap::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 8px; }
+.matrix-wrap::-webkit-scrollbar-thumb:hover { background: #9ca3af; }
 
-/* Small screens: allow tighter columns without overlap */
 @media (max-width: 900px) {
   .visit-col { min-width: 112px; }
   .visit-cell { width: 120px; }
@@ -2159,12 +2277,7 @@ hr { margin: 12px 0; border: 0; border-top: 1px solid #e5e7eb; }
   padding: 6px;
   line-height: 1;
 }
-.share-icon i {
-  font-family: 'Font Awesome 5 Free' !important;
-  font-weight: 900;
-  font-style: normal;
-  display: inline-block;
-}
+.share-icon i { font-family: 'Font Awesome 5 Free' !important; font-weight: 900; font-style: normal; display: inline-block; }
 .share-icon:hover { color: #374151; }
 
 .details-content {
@@ -2174,12 +2287,7 @@ hr { margin: 12px 0; border: 0; border-top: 1px solid #e5e7eb; }
   padding: 16px;
 }
 .details-block { margin-bottom: 16px; }
-.details-block strong {
-  display: block;
-  font-size: 14px;
-  color: #1f2937;
-  margin-bottom: 6px;
-}
+.details-block strong { display: block; font-size: 14px; color: #1f2937; margin-bottom: 6px; }
 .details-block ul { margin: 0 0 12px 16px; padding: 0; }
 .details-block li { font-size: 14px; color: #374151; }
 
@@ -2330,50 +2438,16 @@ select:focus {
   max-width: 90%;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
 }
-.dialog h3 {
-  margin: 0 0 1rem 0;
-  font-size: 1.25rem;
-  font-weight: 600;
-  color: #1f2937;
-}
-.dialog label {
-  display: block;
-  margin-bottom: 0.75rem;
-  font-size: 0.9rem;
-  color: #374151;
-}
+.dialog h3 { margin: 0 0 1rem 0; font-size: 1.25rem; font-weight: 600; color: #1f2937; }
+.dialog label { display: block; margin-bottom: 0.75rem; font-size: 0.9rem; color: #374151; }
 .dialog label select,
-.dialog label input {
-  width: 100%;
-  margin-top: 0.25rem;
-  padding: 0.5rem;
-  border: 1px solid #d1d5db;
-  border-radius: 6px;
-  font-size: 0.9rem;
-}
-.dialog-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 0.5rem;
-  margin-top: 1rem;
-}
+.dialog label input { width: 100%; margin-top: 0.25rem; padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 6px; font-size: 0.9rem; }
+.dialog-actions { display: flex; justify-content: flex-end; gap: 0.5rem; margin-top: 1rem; }
 .dialog-actions button:first-child { background: #e5e7eb; color: #1f2937; }
 .dialog-actions button:last-child { background: #e5e7eb; color: #1f2937; }
-.dialog-actions button {
-  padding: 0.5rem 1rem;
-  border: none;
-  border-radius: 6px;
-  cursor: pointer;
-  font-size: 0.9rem;
-}
+.dialog-actions button { padding: 0.5rem 1rem; border: none; border-radius: 6px; cursor: pointer; font-size: 0.9rem; }
 .dialog-actions button:hover { background: #d1d5db; }
-.dialog p a {
-  display: block;
-  word-break: break-all;
-  margin-top: 1rem;
-  color: #374151;
-  text-decoration: none;
-}
+.dialog p a { display: block; word-break: break-all; margin-top: 1rem; color: #374151; text-decoration: none; }
 .dialog p a:hover { text-decoration: underline; }
 
 /* ========= Mini dialog ========= */
@@ -2394,21 +2468,9 @@ select:focus {
   box-shadow: 0 10px 30px rgba(0,0,0,0.25);
   padding: 12px 12px 10px;
 }
-.mini-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 6px;
-}
+.mini-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
 .mini-title { margin: 0; font-size: 16px; font-weight: 600; color: #111827; }
-.mini-close {
-  background: transparent;
-  border: none;
-  font-size: 16px;
-  line-height: 1;
-  cursor: pointer;
-  color: #6b7280;
-}
+.mini-close { background: transparent; border: none; font-size: 16px; line-height: 1; cursor: pointer; color: #6b7280; }
 .mini-close:hover { color: #111827; }
 .mini-list { margin: 0; padding-left: 18px; color: #374151; font-size: 14px; }
 .mini-list li { margin: 4px 0; }
