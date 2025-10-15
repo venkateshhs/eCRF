@@ -10,23 +10,69 @@ from starlette.responses import FileResponse
 
 BACKEND_IMPORT = "ecrf_backend.main:app"
 
-def runtime_base_dir() -> Path:
+def exe_dir() -> Path:
+    # Folder containing the executable (or this file in dev)
     if getattr(sys, "frozen", False):
-        return Path(getattr(sys, "_MEIPASS", Path(sys.executable).resolve().parent))
+        return Path(sys.executable).resolve().parent
     return Path(__file__).resolve().parent
 
-BASE = runtime_base_dir()
-FRONTEND_DIST = BASE / "eCRF_frontend" / "dist"
-INDEX_HTML = FRONTEND_DIST / "index.html"
+def meipass_dir() -> Path | None:
+    # PyInstaller temp extraction dir (one-file mode)
+    return Path(getattr(sys, "_MEIPASS", "")) if getattr(sys, "frozen", False) else None
+
+EXE_DIR = exe_dir()
+MEIPASS = meipass_dir()
+
+# Search bases for packaged resources
+SEARCH_BASES = [EXE_DIR]
+if MEIPASS:
+    SEARCH_BASES.append(MEIPASS)
+# Our spec places the data trees under EXE_DIR/_internal
+SEARCH_BASES.append(EXE_DIR / "_internal")
+
+def find_frontend_dist() -> Path | None:
+    candidates = [
+        EXE_DIR / "ecrf_frontend" / "dist",
+        EXE_DIR / "eCRF_frontend" / "dist",
+        EXE_DIR / "_internal" / "ecrf_frontend" / "dist",
+        EXE_DIR / "_internal" / "eCRF_frontend" / "dist",
+        MEIPASS / "ecrf_frontend" / "dist" if MEIPASS else None,
+        MEIPASS / "eCRF_frontend" / "dist" if MEIPASS else None,
+    ]
+    for p in filter(None, candidates):
+        if p.exists():
+            return p
+    return None
+
+def find_backend_templates() -> Path | None:
+    candidates = [
+        EXE_DIR / "ecrf_backend" / "templates",
+        EXE_DIR / "_internal" / "ecrf_backend" / "templates",
+        MEIPASS / "ecrf_backend" / "templates" if MEIPASS else None,
+    ]
+    for p in filter(None, candidates):
+        if p.exists():
+            return p
+    return None
+
+# === Writable data dir for the backend ===
+# Put persistent data next to the EXE (not inside MEIPASS)
+DEFAULT_DATA_DIR = EXE_DIR / "ecrf_data"
+os.environ.setdefault("ECRF_DATA_DIR", str(DEFAULT_DATA_DIR))
+
+# Templates env var (read-only assets)
+tpl_dir = find_backend_templates()
+if tpl_dir:
+    os.environ.setdefault("ECRF_TEMPLATES_DIR", str(tpl_dir))
+
+FRONTEND_DIST = find_frontend_dist()
+INDEX_HTML = FRONTEND_DIST / "index.html" if FRONTEND_DIST else None
 
 # Ensure our collected code is discoverable (extra safety in frozen runs)
-if str(BASE) not in sys.path:
-    sys.path.insert(0, str(BASE))
-
-# === NEW: point to ecrf_backend/templates (and keep back-compat) ===
-templates_dir = BASE / "ecrf_backend" / "templates"
-os.environ.setdefault("ECRF_TEMPLATES_DIR", str(templates_dir))
-
+if str(EXE_DIR) not in sys.path:
+    sys.path.insert(0, str(EXE_DIR))
+if str(EXE_DIR / "_internal") not in sys.path:
+    sys.path.insert(0, str(EXE_DIR / "_internal"))
 
 def import_backend_app() -> FastAPI:
     mod_name, _, attr = BACKEND_IMPORT.partition(":")
@@ -42,10 +88,13 @@ def import_backend_app() -> FastAPI:
 def make_root_app() -> FastAPI:
     app = import_backend_app()
 
-    print(f"[eCRF] BASE = {BASE}")
-    print(f"[eCRF] FRONTEND_DIST = {FRONTEND_DIST} (exists={FRONTEND_DIST.exists()})")
+    print(f"[eCRF] EXE_DIR       = {EXE_DIR}")
+    print(f"[eCRF] MEIPASS       = {MEIPASS}")
+    print(f"[eCRF] SEARCH_BASES  = {[str(p) for p in SEARCH_BASES]}")
+    print(f"[eCRF] FRONTEND_DIST = {FRONTEND_DIST} (exists={FRONTEND_DIST.exists() if FRONTEND_DIST else False})")
+    print(f"[eCRF] ECRF_DATA_DIR = {os.environ.get('ECRF_DATA_DIR')}")
 
-    if FRONTEND_DIST.exists():
+    if FRONTEND_DIST and FRONTEND_DIST.exists():
         app.mount("/", StaticFiles(directory=str(FRONTEND_DIST), html=True), name="spa")
 
         @app.middleware("http")
@@ -57,25 +106,26 @@ def make_root_app() -> FastAPI:
             if request.method != "GET" or any(path.startswith(p) for p in API_PREFIXES):
                 return await call_next(request)
             resp = await call_next(request)
-            if resp.status_code == 404 and INDEX_HTML.exists():
+            if resp.status_code == 404 and INDEX_HTML and INDEX_HTML.exists():
                 return FileResponse(str(INDEX_HTML))
             return resp
     else:
         @app.get("/")
         async def _missing_frontend():
-            return {"error": "frontend bundle missing", "expected_path": str(FRONTEND_DIST)}
+            return {"error": "frontend bundle missing", "expected_path": str(FRONTEND_DIST) if FRONTEND_DIST else "not found"}
 
     return app
 
 def pick_port(default: int = 8000) -> int:
+    import socket as _s
     try:
-        with socket.socket() as s:
+        with _s.socket() as s:
             s.bind(("127.0.0.1", default))
         return default
     except OSError:
         for p in range(default + 1, default + 20):
             try:
-                with socket.socket() as s:
+                with _s.socket() as s:
                     s.bind(("127.0.0.1", p))
                 return p
             except OSError:
@@ -89,6 +139,12 @@ def open_browser(url: str):
         pass
 
 def main():
+    # Ensure data dir exists
+    try:
+        Path(os.environ["ECRF_DATA_DIR"]).mkdir(parents=True, exist_ok=True)
+    except Exception:
+        pass
+
     app = make_root_app()
     port = int(os.environ.get("ECRF_PORT", pick_port(8000)))
     url = f"http://127.0.0.1:{port}"

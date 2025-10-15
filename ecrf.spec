@@ -1,6 +1,6 @@
 # ecrf.spec — EXE named 'eCRF-bin' inside folder 'eCRF'; include backend via hiddenimports
 from pathlib import Path
-from PyInstaller.utils.hooks import collect_data_files
+from PyInstaller.utils.hooks import collect_data_files, collect_submodules, copy_metadata
 from PyInstaller.building.build_main import Analysis, PYZ, EXE, COLLECT
 from PyInstaller.building.datastruct import Tree
 
@@ -13,10 +13,31 @@ except NameError:
 
 # 1) Only tuple-style datas in Analysis
 analysis_datas = []
+
+# Add tzdata if available (safe to skip)
+try:
+    analysis_datas += collect_data_files("tzdata")
+except Exception as e:
+    print(f"!! tzdata not found; skipping ({e})")
+
+# Ensure PyJWT (module 'jwt') is included
+# - submodules for runtime imports
+# - distribution metadata for version/runtime checks (if any)
+try:
+    jwt_submods = collect_submodules("jwt")
+    if jwt_submods:
+        print(f"++ collected jwt submodules: {len(jwt_submods)}")
+except Exception as e:
+    print(f"!! could not collect jwt submodules ({e})")
+    jwt_submods = []
+
+try:
+    analysis_datas += copy_metadata("PyJWT")
+except Exception as e:
+    print(f"!! PyJWT metadata missing ({e})")
+
 hiddenimports = [
-    "yaml",
-    "filelock",
-    # ensure backend package is bundled (dynamic import in server.py)
+    # your backend package ensures its modules get scanned
     "ecrf_backend",
     "ecrf_backend.main",
     "ecrf_backend.users",
@@ -29,13 +50,14 @@ hiddenimports = [
     "ecrf_backend.crud",
     "ecrf_backend.auth",
     "ecrf_backend.bids_exporter",
-]
 
-# tzdata is useful on Windows/minimal Linux for zoneinfo. OK to skip on macOS.
-try:
-    analysis_datas += collect_data_files("tzdata")
-except Exception as e:
-    print(f"!! tzdata not found; skipping ({e})")
+    # libs commonly used by FastAPI stacks (harmless if unused)
+    "yaml",
+    "filelock",
+
+    # force-include PyJWT
+    "jwt",
+] + jwt_submods
 
 # 2) Directory trees for COLLECT
 extra_trees = []
@@ -48,11 +70,13 @@ def add_tree(rel_path: str, prefix: str):
     else:
         print(f"!! Missing data tree: {p} (skipping)")
 
-# Frontend bundle (ensure you've run: cd eCRF_frontend && npm run build)
+# Frontend bundle (ensure you've run: cd ecrf_frontend && npm run build)
+# support both casings
+add_tree("ecrf_frontend/dist", "ecrf_frontend/dist")
 add_tree("eCRF_frontend/dist", "eCRF_frontend/dist")
-# Backend resources
-add_tree("ecrf_backend/shacl/templates", "ecrf_backend/shacl/templates")
-add_tree("ecrf_backend/data_models", "ecrf_backend/data_models")
+
+# Backend resources (include templates as server.py references them via ECRF_TEMPLATES_DIR)
+add_tree("ecrf_backend/templates", "ecrf_backend/templates")
 
 a = Analysis(
     ["server.py"],
@@ -93,3 +117,18 @@ dist = COLLECT(
     upx_exclude=[],
     name="eCRF",      # final app folder under dist/
 )
+import os
+from pathlib import Path
+
+# Figure out the file name with platform extension
+exe_name = "eCRF-bin.exe" if os.name == "nt" else "eCRF-bin"
+
+# Default dist folder unless you changed it via CLI
+top_level_exe = Path(HERE, "dist", exe_name)
+
+try:
+    if top_level_exe.exists():
+        top_level_exe.unlink()
+        print(f"-- removed top-level EXE: {top_level_exe}")
+except Exception as e:
+    print(f"!! could not remove {top_level_exe}: {e}")
