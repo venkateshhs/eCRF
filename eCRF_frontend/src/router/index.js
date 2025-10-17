@@ -66,6 +66,12 @@ const routes = [
   name: "StudyDataDashboard",
   component: () => import("@/components/StudyDataDashboard.vue"),
   meta: { requiresAuth: true }
+},
+{
+  path: '/dashboard/import-study',
+  name: 'ImportStudy',
+  component: () => import('@/components/ImportStudy.vue'),
+  meta: { requiresAuth: true }
 }
 //  {
 //    path: "/studies/:id",

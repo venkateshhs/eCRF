@@ -3,7 +3,7 @@
     <div class="screen-header">
       <h2 class="screen-title">Schedule of Assessments</h2>
       <button class="icon-btn header-info-btn" @click="showInfo = true" aria-label="What is Protocol Matrix?">
-        <i class="fas fa-question-circle"></i>
+        <i :class="icons.info"></i>
       </button>
     </div>
 
@@ -29,15 +29,14 @@
         <thead v-if="visitList.length <= 3">
           <tr>
             <th rowspan="2">Data Models</th>
-            <th v-for="(visit, vIdx) in visitList" :key="vIdx" :colspan="groupList.length">
+            <th v-for="(visit, vIdx) in visitList" :key="`vh-${vIdx}`" :colspan="groupList.length">
               <span class="th-title">Visit:</span>
               <span class="th-chip">{{ visit.name }}</span>
             </th>
           </tr>
           <tr>
-            <template v-for="(_, vIdx) in visitList" :key="vIdx">
-              <th v-for="(group, gIdx) in groupList" :key="gIdx">
-                <!-- Group names: plain bold text (no chip) -->
+            <template v-for="(_, vIdx) in visitList" :key="`vg-${vIdx}`">
+              <th v-for="(group, gIdx) in groupList" :key="`vg-${vIdx}-${gIdx}`">
                 <span class="group-name">Group/Cohort: {{ group.name }}</span>
               </th>
             </template>
@@ -48,23 +47,22 @@
         <thead v-else>
           <tr>
             <th>Data Models</th>
-            <th v-for="(group, gIdx) in groupList" :key="gIdx">
-              <!-- Group names: plain bold text (no chip) -->
+            <th v-for="(group, gIdx) in groupList" :key="`g-${gIdx}`">
               <span class="group-name">{{ group.name }}</span>
             </th>
           </tr>
         </thead>
 
         <tbody>
-          <tr v-for="(model, mIdx) in selectedModels" :key="mIdx">
+          <tr v-for="(model, mIdx) in selectedModels" :key="`m-${mIdx}`">
             <td class="model-cell">
               <span class="model-title">{{ model.title }}</span>
             </td>
 
             <!-- Full-matrix cells -->
             <template v-if="visitList.length <= 3">
-              <template v-for="(_, vIdx) in visitList" :key="vIdx">
-                <td v-for="(_, gIdx) in groupList" :key="gIdx">
+              <template v-for="(_, vIdx) in visitList" :key="`row-${mIdx}-v-${vIdx}`">
+                <td v-for="(_, gIdx) in groupList" :key="`cell-${mIdx}-${vIdx}-${gIdx}`">
                   <label class="chk-wrap" :title="`Toggle ${model.title} @ ${visitList[vIdx]?.name} / ${groupList[gIdx]?.name}`">
                     <input
                       type="checkbox"
@@ -72,10 +70,7 @@
                       @change="onToggle(mIdx, vIdx, gIdx, $event.target.checked)"
                     />
                     <!-- Unchecked: outline square; Checked: check-square -->
-                    <i
-                      class="fa-chk"
-                      :class="[assignments[mIdx][vIdx][gIdx] ? 'fas fa-check-square' : 'far fa-square']"
-                    ></i>
+                    <i class="fa-chk" :class="[assignments[mIdx][vIdx][gIdx] ? 'fas fa-check-square' : 'far fa-square']"></i>
                   </label>
                 </td>
               </template>
@@ -83,17 +78,14 @@
 
             <!-- Single-visit cells -->
             <template v-else>
-              <td v-for="(_, gIdx) in groupList" :key="gIdx">
+              <td v-for="(_, gIdx) in groupList" :key="`celln-${mIdx}-${gIdx}`">
                 <label class="chk-wrap" :title="`Toggle ${model.title} @ ${visitList[currentVisitIndex]?.name} / ${groupList[gIdx]?.name}`">
                   <input
                     type="checkbox"
                     :checked="assignments[mIdx][currentVisitIndex][gIdx]"
                     @change="onToggle(mIdx, currentVisitIndex, gIdx, $event.target.checked)"
                   />
-                  <i
-                    class="fa-chk"
-                    :class="[assignments[mIdx][currentVisitIndex][gIdx] ? 'fas fa-check-square' : 'far fa-square']"
-                  ></i>
+                  <i class="fa-chk" :class="[assignments[mIdx][currentVisitIndex][gIdx] ? 'fas fa-check-square' : 'far fa-square']"></i>
                 </label>
               </td>
             </template>
@@ -131,22 +123,22 @@
           <FormPreview :form="previewForm" />
         </div>
         <div class="modal-actions">
-          <button @click="closePreview" class="btn-action">Close</button>
+          <button @click="closePreview" class="btn-option">
+            <i :class="icons.times" class="mr-6"></i> Close
+          </button>
         </div>
       </div>
     </div>
 
     <!-- 4. Custom Dialog for Notifications -->
-    <CustomDialog
-      :message="dialogMessage"
-      :isVisible="showDialog"
-      @close="closeDialog"
-    />
+    <CustomDialog :message="dialogMessage" :isVisible="showDialog" @close="closeDialog" />
 
     <!-- 4a. Info dialog for ProtocolMatrix -->
     <div v-if="showInfo" class="modal-overlay">
       <div class="modal validation-modal">
-        <h3 class="validation-title">What is this screen?</h3>
+        <h3 class="validation-title">
+          <i :class="icons.infoCircle" class="li-icon"></i> What is this screen?
+        </h3>
         <p class="validation-text">
           This matrix helps you decide which <strong>forms/data models</strong> are collected for each
           study <strong>Visit</strong> and <strong>Group/Cohort</strong>. Click a checkbox to assign a form
@@ -158,7 +150,9 @@
           <li><strong>Save</strong> stores your setup. We’ll warn you if a visit has nothing assigned.</li>
         </ul>
         <div class="modal-actions">
-          <button class="btn-primary" @click="showInfo = false">Got it</button>
+          <button class="btn-primary" @click="showInfo = false">
+            <i :class="icons.check" class="mr-6"></i> Got it
+          </button>
         </div>
       </div>
     </div>
@@ -166,21 +160,54 @@
     <!-- 4b. Empty-visit warning modal -->
     <div v-if="showEmptyVisitsModal" class="modal-overlay">
       <div class="modal validation-modal">
-        <h3 class="validation-title">Some visits have no assigned models</h3>
+        <h3 class="validation-title">
+          <i :class="icons.infoCircle" class="li-icon"></i> Some visits have no assigned models
+        </h3>
         <p class="validation-text">
           We found visits without any model assigned. You can go fix them, or save anyway.
         </p>
         <ul class="empty-visits-list">
-          <li v-for="vIdx in emptyVisitIndices" :key="vIdx">
+          <li v-for="vIdx in emptyVisitIndices" :key="`empty-v-${vIdx}`">
             <span class="visit-item-title">Visit {{ vIdx + 1 }} — {{ visitList[vIdx]?.name || 'Visit' }}</span>
           </li>
         </ul>
         <div class="modal-actions">
-          <button class="btn-option" @click="goToFirstEmptyVisit">Go to first empty visit</button>
-          <button class="btn-primary" :disabled="isSavingInProgress" @click="saveAnyway">
-            {{ isSavingInProgress ? 'Saving…' : 'Save anyway' }}
+          <button class="btn-option" @click="goToFirstEmptyVisit">
+            <i :class="icons.exchangeAlt" class="mr-6"></i> Go to first empty visit
           </button>
-          <button class="btn-option" @click="closeEmptyVisitsModal">Cancel</button>
+          <button class="btn-primary" :disabled="isSavingInProgress" @click="saveAnyway">
+            <i :class="icons.check" class="mr-6"></i> {{ isSavingInProgress ? 'Saving…' : 'Save anyway' }}
+          </button>
+          <button class="btn-option" @click="closeEmptyVisitsModal">
+            <i :class="icons.times" class="mr-6"></i> Cancel
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 4c. Confirm Template Changes (scrollable) -->
+    <div v-if="showConfirmChanges" class="modal-overlay">
+      <div class="modal validation-modal confirm-scroll">
+        <h3 class="validation-title">
+          <i :class="icons.infoCircle" class="li-icon"></i> Confirm Template Changes
+        </h3>
+        <p class="validation-text">
+          You made structural changes. Saving will create a <strong>new template version</strong>.
+          Existing data remains attached to its original versions and is not lost.
+        </p>
+
+        <!-- Scrolling area -->
+        <div class="diff-scroll">
+          <TemplateDiffView v-if="snapshotFrom && snapshotTo" :from="snapshotFrom" :to="snapshotTo" />
+        </div>
+
+        <div class="modal-actions sticky-actions">
+          <button class="btn-option" @click="cancelConfirm">
+            <i :class="icons.times" class="mr-6"></i> Cancel
+          </button>
+          <button class="btn-primary" @click="confirmAndSave">
+            <i :class="icons.check" class="mr-6"></i> Confirm &amp; Save
+          </button>
         </div>
       </div>
     </div>
@@ -189,29 +216,25 @@
     <div class="matrix-actions card-surface">
       <button @click="$emit('edit-template')" class="btn-option">Edit Template</button>
       <button @click="saveStudy" class="btn-primary">Save</button>
-      <button
-        @click="openPreview"
-        :disabled="!hasAssignment(currentVisitIndex)"
-        class="btn-option"
-      >
-        Preview
-      </button>
+      <button @click="openPreview" :disabled="!hasAssignment(currentVisitIndex)" class="btn-option">Preview</button>
       <button @click="goToSaved" class="btn-option">View Saved Study</button>
     </div>
   </div>
 </template>
 
 <script>
-import { ref, computed } from "vue";
+import { ref, computed, onMounted } from "vue";
 import { useRouter } from "vue-router";
 import { useStore } from "vuex";
 import axios from "axios";
 import FormPreview from "@/components/FormPreview.vue";
 import CustomDialog from "@/components/CustomDialog.vue";
+import TemplateDiffView, { deepClone, computeTemplateDiff } from "@/components/TemplateDiffView.vue";
+import icons from "@/assets/styles/icons";
 
 export default {
   name: "ProtocolMatrix",
-  components: { FormPreview, CustomDialog },
+  components: { FormPreview, CustomDialog, TemplateDiffView },
   props: {
     visits:         { type: Array, required: true },
     groups:         { type: Array, required: true },
@@ -222,6 +245,8 @@ export default {
   setup(props, { emit }) {
     const router = useRouter();
     const store = useStore();
+
+    const isEditing = computed(() => !!(store.state.studyDetails?.study_metadata?.id));
 
     // Matrix indices
     const currentVisitIndex = ref(0);
@@ -241,24 +266,30 @@ export default {
     const emptyVisitIndices = ref([]);
     const isSavingInProgress = ref(false);
 
-    // Lists with fallback (fallback is used ONLY for display/preview)
+    // Confirm changes
+    const showConfirmChanges = ref(false);
+    const snapshotFrom = ref(null);
+    const snapshotTo   = ref(null);
+
+    // Baseline (server)
+    const baseline = ref(null);
+
+    // Has any data already been saved for this study?
+    const hasAnyData = ref(false);
+
+    // Display lists
     const visitList = computed(() => props.visits.length ? props.visits : [{ name: "All Visits" }]);
     const groupList = computed(() => props.groups.length ? props.groups : [{ name: "All Groups" }]);
 
-    // Toggle a checkbox
     function onToggle(mIdx, vIdx, gIdx, checked) {
       emit("assignment-updated", { mIdx, vIdx, gIdx, checked });
     }
 
     // Matrix nav
-    function prevVisit() {
-      if (currentVisitIndex.value > 0) currentVisitIndex.value--;
-    }
-    function nextVisit() {
-      if (currentVisitIndex.value < visitList.value.length - 1) currentVisitIndex.value++;
-    }
+    function prevVisit() { if (currentVisitIndex.value > 0) currentVisitIndex.value--; }
+    function nextVisit() { if (currentVisitIndex.value < visitList.value.length - 1) currentVisitIndex.value++; }
 
-    // Determine groups for a visit (for preview UX)
+    // Preview helpers
     function groupsForVisit(vIdx) {
       return groupList.value
         .map((_, idx) => idx)
@@ -270,7 +301,6 @@ export default {
     }
     const assignedGroups = computed(() => groupsForVisit(previewVisitIndex.value));
     const previewGroupPos = computed(() => assignedGroups.value.indexOf(previewGroupIndex.value));
-
     function setFirstGroup(vIdx) {
       const arr = groupsForVisit(vIdx);
       previewGroupIndex.value = arr.length ? arr[0] : 0;
@@ -278,26 +308,16 @@ export default {
 
     // Preview nav
     function prevPreviewVisit() {
-      if (previewVisitIndex.value > 0) {
-        previewVisitIndex.value--;
-        setFirstGroup(previewVisitIndex.value);
-      }
+      if (previewVisitIndex.value > 0) { previewVisitIndex.value--; setFirstGroup(previewVisitIndex.value); }
     }
     function nextPreviewVisit() {
-      if (previewVisitIndex.value < visitList.value.length - 1) {
-        previewVisitIndex.value++;
-        setFirstGroup(previewVisitIndex.value);
-      }
+      if (previewVisitIndex.value < visitList.value.length - 1) { previewVisitIndex.value++; setFirstGroup(previewVisitIndex.value); }
     }
     function prevPreviewGroup() {
-      if (previewGroupPos.value > 0) {
-        previewGroupIndex.value = assignedGroups.value[previewGroupPos.value - 1];
-      }
+      if (previewGroupPos.value > 0) { previewGroupIndex.value = assignedGroups.value[previewGroupPos.value - 1]; }
     }
     function nextPreviewGroup() {
-      if (previewGroupPos.value < assignedGroups.value.length - 1) {
-        previewGroupIndex.value = assignedGroups.value[previewGroupPos.value + 1];
-      }
+      if (previewGroupPos.value < assignedGroups.value.length - 1) { previewGroupIndex.value = assignedGroups.value[previewGroupPos.value + 1]; }
     }
 
     // Build preview form
@@ -305,9 +325,7 @@ export default {
       const visitName = visitList.value[previewVisitIndex.value].name;
       const groupName = groupList.value[previewGroupIndex.value].name;
       const sections = props.selectedModels
-        .filter((_, mIdx) =>
-          props.assignments[mIdx][previewVisitIndex.value]?.[previewGroupIndex.value]
-        )
+        .filter((_, mIdx) => props.assignments[mIdx][previewVisitIndex.value]?.[previewGroupIndex.value])
         .map(m => ({ title: m.title, fields: m.fields }));
       return { formName: `Preview: ${visitName} / ${groupName}`, sections };
     });
@@ -332,33 +350,86 @@ export default {
     function computeEmptyVisits() {
       const empties = [];
       const realVisitsCount = props.visits.length;
-      for (let v = 0; v < realVisitsCount; v++) {
-        if (!hasAssignmentInVisit(v)) empties.push(v);
-      }
+      for (let v = 0; v < realVisitsCount; v++) if (!hasAssignmentInVisit(v)) empties.push(v);
       return empties;
     }
 
-    function openPreview() {
-      if (!hasAssignment(currentVisitIndex.value)) return;
-      previewVisitIndex.value = currentVisitIndex.value;
-      setFirstGroup(currentVisitIndex.value);
-      showPreviewModal.value = true;
+    // ---------- SNAPSHOT BUILDERS ----------
+    function buildSnapshotFromBaseline(b) {
+      const base = b || {};
+      return {
+        study: base.study || {},
+        groups: base.groups || [],
+        visits: base.visits || [],
+        subjects: base.subjects || [],
+        selectedModels: base.selectedModels || [],
+        assignments: base.assignments || []
+      };
     }
-    function closePreview() {
-      showPreviewModal.value = false;
+    function buildSnapshotFromCurrent() {
+      const sd = store.state.studyDetails || {};
+      return {
+        study: sd.study || {},
+        groups: deepClone(props.groups || []),
+        visits: deepClone(props.visits || []),
+        subjects: sd.subjects || [],
+        selectedModels: deepClone(props.selectedModels || []),
+        assignments: deepClone(props.assignments || [])
+      };
     }
 
-    // Generic dialog
-    function showDialogMessage(message) {
-      dialogMessage.value = message;
-      showDialog.value = true;
-    }
-    function closeDialog() {
-      showDialog.value = false;
-      dialogMessage.value = "";
+    // ---------- BASELINE & DATA PRESENCE ----------
+    async function loadBaselineFromServer() {
+      const studyId = store.state.studyDetails?.study_metadata?.id;
+      if (!studyId) {
+        baseline.value = buildSnapshotFromCurrent();
+        return;
+      }
+      try {
+        const resp = await axios.get(`/forms/studies/${studyId}`, { headers: { Authorization: `Bearer ${store.state.token}` } });
+        const payload = resp.data || {};
+        const metadata = payload.metadata || {};
+        const studyData = payload.content?.study_data || {};
+
+        baseline.value = {
+          study: {
+            id: metadata.id,
+            title: (studyData.study?.title ?? metadata.study_name) || "",
+            description: (studyData.study?.description ?? metadata.study_description) || ""
+          },
+          groups: studyData.groups || [],
+          visits: studyData.visits || [],
+          subjects: studyData.subjects || [],
+          selectedModels: studyData.selectedModels || [],
+          assignments: studyData.assignments || []
+        };
+      } catch (e) {
+        // fall back to current snapshot
+        baseline.value = buildSnapshotFromCurrent();
+      }
     }
 
-    // Save or update the study in the database
+    async function loadHasAnyData() {
+      const studyId = store.state.studyDetails?.study_metadata?.id;
+      if (!studyId) { hasAnyData.value = false; return; }
+      try {
+        const resp = await axios.get(
+          `/forms/studies/${studyId}/data_entries`,
+          { headers: { Authorization: `Bearer ${store.state.token}` } }
+        );
+        const list = Array.isArray(resp.data) ? resp.data : (resp.data?.entries || []);
+        hasAnyData.value = list.length > 0;
+      } catch (e) {
+        // If we cannot check, assume no data to avoid false prompts
+        hasAnyData.value = false;
+      }
+    }
+
+    onMounted(async () => {
+      await Promise.all([loadBaselineFromServer(), loadHasAnyData()]);
+    });
+
+    // ---------- SAVE ----------
     async function saveStudy() {
       const empties = computeEmptyVisits();
       if (empties.length > 0) {
@@ -366,13 +437,36 @@ export default {
         showEmptyVisitsModal.value = true;
         return;
       }
+
+      if (isEditing.value) {
+        const fromSnap = buildSnapshotFromBaseline(baseline.value);
+        const toSnap   = buildSnapshotFromCurrent();
+        const diff = computeTemplateDiff(fromSnap, toSnap);
+
+        //  Only prompt when we ALREADY have data AND the change is STRUCTURAL.
+        const shouldPrompt = hasAnyData.value && diff.anyStructural;
+        if (shouldPrompt) {
+          snapshotFrom.value = fromSnap;
+          snapshotTo.value   = toSnap;
+          showConfirmChanges.value = true;
+          return;
+        }
+      }
       await saveStudyImpl();
     }
+
+    function showDialogMessage(message) { dialogMessage.value = message; showDialog.value = true; }
+    function closeDialog() { showDialog.value = false; dialogMessage.value = ""; }
+
+    function cancelConfirm() { showConfirmChanges.value = false; }
+    async function confirmAndSave() {
+      showConfirmChanges.value = false;
+      await saveStudyImpl();
+    }
+
     function closeEmptyVisitsModal() { showEmptyVisitsModal.value = false; }
     function goToFirstEmptyVisit() {
-      if (emptyVisitIndices.value.length) {
-        currentVisitIndex.value = emptyVisitIndices.value[0];
-      }
+      if (emptyVisitIndices.value.length) currentVisitIndex.value = emptyVisitIndices.value[0];
       showEmptyVisitsModal.value = false;
     }
     async function saveAnyway() {
@@ -384,7 +478,7 @@ export default {
       }
     }
 
-    // Original save implementation
+    // --- Save impl (unchanged logic aside from baseline refresh) ---
     async function saveStudyImpl() {
       const studyDetails = store.state.studyDetails || {};
       const userId = store.state.user?.id;
@@ -395,60 +489,85 @@ export default {
         return;
       }
 
-      const studyData = {
-        ...studyDetails,
-        visits: props.visits,
-        groups: props.groups,
-        selectedModels: props.selectedModels,
-        assignments: props.assignments
-      };
+      // Use new values first, then fall back to existing, then empty.
+      const existingMeta = studyDetails.study_metadata || {};
+      const metadata = studyId
+        ? {
+            created_by: existingMeta.created_by ?? userId,
+            study_name:
+              studyDetails.study?.title ??
+              existingMeta.study_name ??
+              existingMeta.name ??
+              "",
+            study_description:
+              studyDetails.study?.description ??
+              existingMeta.study_description ??
+              existingMeta.description ??
+              "",
+          }
+        : {
+            created_by: userId,
+            study_name: studyDetails.study?.title ?? "",
+            study_description: studyDetails.study?.description ?? "",
+          };
 
-      let metadata;
-      if (studyId) {
-        const existingMetadata = studyDetails.study_metadata || {};
-        metadata = {
-          created_by: existingMetadata.created_by === userId ? existingMetadata.created_by : userId,
-          study_name: studyDetails.study?.title || existingMetadata.name || "",
-          study_description: existingMetadata.description || studyDetails.study?.description || "",
-          created_at: existingMetadata.created_at || new Date().toISOString(),
-          updated_at: new Date().toISOString()
-        };
-      } else {
-        metadata = {
-          created_by: userId,
-          study_name: studyDetails.study?.title || "",
-          study_description: studyDetails.study?.description || "",
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString()
-        };
-      }
+      // Build schema explicitly — do NOT spread all of studyDetails.
+      const studyData = {
+        study: {
+          ...(studyDetails.study || {}),
+          title:
+            studyDetails.study?.title ??
+            metadata.study_name ??
+            "",
+          description:
+            studyDetails.study?.description ??
+            metadata.study_description ??
+            "",
+        },
+        groups: props.groups,
+        visits: props.visits,
+        subjects: Array.isArray(studyDetails.subjects) ? studyDetails.subjects : [],
+        selectedModels: props.selectedModels,
+        assignments: props.assignments,
+        subjectCount: studyDetails.subjectCount ?? 0,
+        assignmentMethod: studyDetails.assignmentMethod ?? "random",
+      };
 
       const payload = { study_metadata: metadata, study_content: { study_data: studyData } };
       const url = studyId ? `/forms/studies/${studyId}` : "/forms/studies/";
       const method = studyId ? "put" : "post";
 
       try {
-        const response = await axios[method](url, payload, { headers: { Authorization: `Bearer ${store.state.token}` } });
-        const updatedMetadata = response.data.study_metadata || metadata;
+        const headers = { headers: { Authorization: `Bearer ${store.state.token}` } };
+        const response = await axios[method](url, payload, headers);
+
+        const updatedMetadata = response.data.study_metadata || response.data.metadata || metadata;
         const updatedStudyData = response.data.content?.study_data || studyData;
 
+        // Store both `study_name` and `name` so old code paths keep working.
         store.commit("setStudyDetails", {
           study_metadata: {
-            id: studyId || response.data.study_metadata?.id,
+            id: studyId || updatedMetadata?.id,
+            study_name: updatedMetadata.study_name,
             name: updatedMetadata.study_name,
             description: updatedMetadata.study_description,
+            study_description: updatedMetadata.study_description,
             created_at: updatedMetadata.created_at,
             updated_at: updatedMetadata.updated_at,
-            created_by: updatedMetadata.created_by
+            created_by: updatedMetadata.created_by,
           },
-          study: { id: studyId || response.data.study_metadata?.id, ...updatedStudyData.study },
-          groups: updatedStudyData.groups,
-          visits: updatedStudyData.visits,
-          subjectCount: updatedStudyData.subjectCount,
-          assignmentMethod: updatedStudyData.assignmentMethod,
-          subjects: updatedStudyData.subjects,
-          assignments: updatedStudyData.assignments
+          study: { id: studyId || updatedMetadata?.id, ...(updatedStudyData.study || {}) },
+          groups: updatedStudyData.groups || [],
+          visits: updatedStudyData.visits || [],
+          subjectCount: updatedStudyData.subjectCount ?? 0,
+          assignmentMethod: updatedStudyData.assignmentMethod ?? "random",
+          subjects: updatedStudyData.subjects || [],
+          assignments: updatedStudyData.assignments || [],
+          selectedModels: updatedStudyData.selectedModels || [],
         });
+
+        // Refresh baseline AND data presence so subsequent diffs are against latest snapshot
+        await Promise.all([loadBaselineFromServer(), loadHasAnyData()]);
 
         showDialogMessage(studyId ? "Study successfully updated!" : "Study successfully saved!");
       } catch (error) {
@@ -457,18 +576,31 @@ export default {
       }
     }
 
-    // UPDATED: reroute to Dashboard studies list
+    function openPreview() {
+      if (!hasAssignment(currentVisitIndex.value)) return;
+      previewVisitIndex.value = currentVisitIndex.value;
+      setFirstGroup(currentVisitIndex.value);
+      showPreviewModal.value = true;
+    }
+    function closePreview() { showPreviewModal.value = false; }
+
     function goToSaved() {
       router.push({ name: "Dashboard", query: { openStudies: "true" } });
     }
 
     return {
-      // matrix
+      icons,
+
+      // state
       visitList,
       groupList,
+      isEditing,
+
+      // matrix nav
       currentVisitIndex,
       prevVisit,
       nextVisit,
+
       // preview
       showPreviewModal,
       previewVisitIndex,
@@ -482,14 +614,17 @@ export default {
       openPreview,
       closePreview,
       previewForm,
+
       // toggles
       onToggle,
       hasAssignment,
-      // dialog
+
+      // dialogs
       showInfo,
       showDialog,
       dialogMessage,
       closeDialog,
+
       // empty-visit modal
       showEmptyVisitsModal,
       emptyVisitIndices,
@@ -497,9 +632,17 @@ export default {
       closeEmptyVisitsModal,
       goToFirstEmptyVisit,
       saveAnyway,
-      // save
+
+      // confirm changes
+      showConfirmChanges,
+      cancelConfirm,
+      confirmAndSave,
+      snapshotFrom,
+      snapshotTo,
+
+      // save + route
       saveStudy,
-      goToSaved
+      goToSaved,
     };
   }
 };
@@ -519,352 +662,95 @@ export default {
 }
 
 /* Header */
-.screen-header {
-  position: relative;
-  text-align: center; /* center the header title */
-  padding: 4px 4px 0;
-}
-.screen-title {
-  margin: 0 0 4px;
-  font-weight: 800;
-  font-size: 18px;
-  color: #101828;
-}
-/* Info icon placed inside header container (top-right) */
-.icon-btn {
-  @include button-reset;
-  background: transparent;
-  cursor: pointer;
-}
-.header-info-btn {
-  position: absolute;
-  right: 6px;
-  top: 50%;
-  transform: translateY(-50%);
-  font-size: 18px;
-  color: #667085;
-}
+.screen-header { position: relative; text-align: center; padding: 4px 4px 0; }
+.screen-title { margin: 0 0 4px; font-weight: 800; font-size: 18px; color: #101828; }
+.icon-btn { background: transparent; cursor: pointer; border: none; padding: 0; }
+.header-info-btn { position: absolute; right: 6px; top: 50%; transform: translateY(-50%); font-size: 18px; color: #667085; }
 .header-info-btn:hover { color: #111827; }
 
 /* Reusable surface */
-.card-surface {
-  border: 1px solid $border-color;
-  border-radius: 12px;
-  background: #fff;
-  box-shadow: 0 10px 25px rgba(16, 24, 40, 0.06);
-}
+.card-surface { border: 1px solid $border-color; border-radius: 12px; background: #fff; box-shadow: 0 10px 25px rgba(16, 24, 40, 0.06); }
 
 /* Visit Pagination */
 .visit-nav {
-  display: grid;
-  grid-template-columns: 1fr auto 1fr;
-  position: relative;
-  align-items: center;
-  gap: 10px;
-  padding: 10px 12px;
-  border-radius: 12px;
-  background: #f5f6fa;
-  border: 1px solid $border-color;
+  display: grid; grid-template-columns: 1fr auto 1fr;
+  position: relative; align-items: center; gap: 10px; padding: 10px 12px;
+  border-radius: 12px; background: #f5f6fa; border: 1px solid $border-color;
 }
+.visit-nav .nav-btn { justify-self: start; }
+.visit-nav .nav-btn:last-child { justify-self: end; }
 
-.visit-nav .nav-btn {
-  justify-self: start;
-}
-.visit-nav .nav-btn:last-child {
-  justify-self: end;
-}
+.visit-nav-center { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+.visit-counter { font-weight: 700; letter-spacing: 0.2px; color: $text-color; }
 
-.visit-nav-center {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 2px;
-}
-
-.visit-counter {
-  font-weight: 700;
-  letter-spacing: 0.2px;
-  color: $text-color;
-}
-
-.th-chip,
-.visit-name {
-  display: inline-block;
-  white-space: normal;
-  overflow-wrap: anywhere;
-  word-break: break-word;
-  hyphens: auto;
-  line-height: 1.25;
-  max-width: clamp(30ch, 36vw, 64ch);
-  text-align: center;
+.th-chip, .visit-name {
+  display: inline-block; white-space: normal; overflow-wrap: anywhere; word-break: break-word; hyphens: auto; line-height: 1.25;
+  max-width: clamp(30ch, 36vw, 64ch); text-align: center;
 }
 
 .nav-btn {
-  @include button-reset;
-  background: #ffffff;
-  padding: 8px 12px;
-  border: 1px solid $border-color;
-  border-radius: $button-border-radius;
-  cursor: pointer;
-  font-size: 16px;
+  background: #ffffff; padding: 8px 12px; border: 1px solid $border-color; border-radius: $button-border-radius; cursor: pointer; font-size: 16px;
   transition: transform .05s ease, box-shadow .2s ease, background .2s ease;
 }
-.nav-btn:hover:not(:disabled) {
-  background: #f8fafc;
-  box-shadow: 0 4px 10px rgba(16,24,40,.08);
-}
-.nav-btn:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
+.nav-btn:hover:not(:disabled) { background: #f8fafc; box-shadow: 0 4px 10px rgba(16,24,40,.08); }
+.nav-btn:disabled { opacity: 0.6; cursor: not-allowed; }
 
 /* Matrix */
-.table-container {
-  overflow: auto;
-}
+.table-container { overflow: auto; }
+.protocol-table { width: 100%; border-collapse: separate; border-spacing: 0; background: white; border-radius: 12px; overflow: hidden; }
+.protocol-table thead th { position: sticky; top: 0; z-index: 1; background: #f8fafc; border-bottom: 1px solid $border-color; white-space: normal; vertical-align: middle; }
+.protocol-table th, .protocol-table td { border-right: 1px solid $border-color; border-bottom: 1px solid $border-color; padding: 12px; text-align: center; font-size: 14px; }
+.protocol-table th:first-child, .protocol-table td:first-child { border-left: 1px solid $border-color; }
+.protocol-table tr:nth-child(even) td { background: #fbfdff; }
+.protocol-table tbody tr:hover td { background: #eef6ff; }
+.th-title { color: #667085; font-size: 12px; margin-right: 6px; }
+.group-name { font-weight: 600; color: #101828; white-space: normal; overflow-wrap: anywhere; word-break: break-word; }
+.th-chip { display: inline-block; font-size: 12px; background: #eef2ff; color: #3538cd; border: 1px solid #e0e7ff; padding: 1px 8px; border-radius: 999px; }
+.model-cell { text-align: left; background: #fff; }
+.model-title { font-weight: 600; color: #101828; }
 
-.protocol-table {
-  width: 100%;
-  border-collapse: separate;
-  border-spacing: 0;
-  background: white;
-  border-radius: 12px;
-  overflow: hidden;
-}
+/* Checkbox using Font Awesome */
+.chk-wrap { --size: 18px; display: inline-flex; align-items: center; justify-content: center; width: var(--size); height: var(--size); position: relative; cursor: pointer; background: transparent; }
+.chk-wrap input { opacity: 0; width: var(--size); height: var(--size); position: absolute; margin: 0; }
+.fa-chk { font-size: 18px; line-height: 1; pointer-events: none; color: #98a2b3; }
+.chk-wrap input:checked + .fa-chk { color: $primary-color; }
+.chk-wrap:focus-within .fa-chk { outline: 2px solid rgba(52, 96, 255, .25); outline-offset: 2px; }
 
-.protocol-table thead th {
-  position: sticky;
-  top: 0;
-  z-index: 1;
-  background: #f8fafc;
-  border-bottom: 1px solid $border-color;
-  white-space: normal;
-  vertical-align: middle;
-}
+/* Modals */
+.modal-overlay { position: fixed; inset: 0; background: rgba(0, 12, 34, 0.45); display: flex; justify-content: center; align-items: center; z-index: 1000; padding: 12px; }
+.protocol-preview-modal, .validation-modal { background: white; border-radius: 12px; width: 96%; max-width: 900px; padding: 20px; box-shadow: 0 20px 50px rgba(16,24,40,.18); }
+.validation-title { margin: 0 0 6px; font-size: 18px; font-weight: 800; color: #101828; display: flex; align-items: center; gap: 8px; }
+.validation-text { margin: 0 0 10px; color: #475467; }
+.modal-actions { display: flex; justify-content: flex-end; gap: 12px; margin-top: 16px; }
 
-.protocol-table th,
-.protocol-table td {
-  border-right: 1px solid $border-color;
-  border-bottom: 1px solid $border-color;
+/* Confirm changes scroll handling */
+.confirm-scroll { max-width: 1100px; }
+.diff-scroll {
+  max-height: 60vh;         /* vertical scroll */
+  overflow-y: auto;
+  overflow-x: auto;          /* horizontal scroll */
+  border: 1px solid $border-color;
+  border-radius: 10px;
   padding: 12px;
-  text-align: center;
-  font-size: 14px;
-}
-.protocol-table th:first-child,
-.protocol-table td:first-child {
-  border-left: 1px solid $border-color;
-}
-
-.protocol-table tr:nth-child(even) td {
-  background: #fbfdff;
-}
-.protocol-table tbody tr:hover td {
-  background: #eef6ff;
-}
-
-.th-title {
-  color: #667085;
-  font-size: 12px;
-  margin-right: 6px;
-}
-/* Group names as plain bold text (same look as model titles) */
-.group-name {
-  font-weight: 600;
-  color: #101828;
-  white-space: normal;
-  overflow-wrap: anywhere;
-  word-break: break-word;
-}
-
-/* The remaining chip style is still used for visit names only */
-.th-chip {
-  display: inline-block;
-  font-size: 12px;
-  background: #eef2ff;
-  color: #3538cd;
-  border: 1px solid #e0e7ff;
-  padding: 1px 8px;
-  border-radius: 999px;
-}
-
-.model-cell {
-  text-align: left;
   background: #fff;
 }
-.model-title {
-  font-weight: 600;
-  color: #101828;
-}
 
-/* Checkbox using Font Awesome (no gray background when unchecked) */
-.chk-wrap {
-  --size: 18px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: var(--size);
-  height: var(--size);
-  position: relative;
-  cursor: pointer;
-  background: transparent; /* ensure same as cell background */
-}
-.chk-wrap input {
-  opacity: 0;
-  width: var(--size);
-  height: var(--size);
-  position: absolute;
-  margin: 0;
-}
-.fa-chk {
-  font-size: 18px;
-  line-height: 1;
-  pointer-events: none; /* clicks hit the label/input */
-  color: #98a2b3;       /* outline color when unchecked */
-}
-.chk-wrap input:checked + .fa-chk {
-  color: $primary-color; /* checked */
-}
-/* keep keyboard focus ring on the label */
-.chk-wrap:focus-within .fa-chk {
-  outline: 2px solid rgba(52, 96, 255, .25);
-  outline-offset: 2px;
-}
-
-/* Preview Modal */
-.modal-overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 12, 34, 0.45);
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  z-index: 1000;
-  padding: 12px;
-}
-
-.protocol-preview-modal {
-  background: white;
-  border-radius: 12px;
-  width: 96%;
-  max-width: 900px;
-  padding: 20px;
-  box-shadow: 0 20px 50px rgba(16,24,40,.18);
-}
-
-.preview-header {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin-bottom: 16px;
-  font-size: 14px;
-  background: #f2f4f7;
-  padding: 12px;
-  border-radius: 10px;
-  border: 1px solid $border-color;
-}
-
-.preview-label {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-weight: 600;
-  color: #344054;
-}
-
-.spacer { flex: 1; }
-
-.preview-content {
-  background: white;
-  padding: 16px;
-  border: 1px solid $border-color;
-  border-radius: 10px;
-  max-height: 60vh;
-  overflow-y: auto;
-}
-
-.modal-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 12px;
-  margin-top: 16px;
-}
+/* Sticky footer inside confirm dialog */
+.sticky-actions { position: sticky; bottom: 0; background: #fff; padding-top: 12px; margin-top: 12px; border-top: 1px solid $border-color; }
 
 /* Footer */
-.matrix-actions {
-  position: sticky;
-  bottom: 0;
-  padding: 14px;
-  display: flex;
-  justify-content: flex-end;
-  gap: 12px;
-  z-index: 10;
-}
+.matrix-actions { position: sticky; bottom: 0; padding: 14px; display: flex; justify-content: flex-end; gap: 12px; z-index: 10; background: #fff; border: 1px solid $border-color; border-radius: 12px; }
+.btn-option, .btn-primary { padding: $button-padding; border-radius: $button-border-radius; cursor: pointer; font-size: 14px; border: 1px solid transparent; transition: transform .05s ease, box-shadow .2s ease, background .2s ease, color .2s ease, border-color .2s ease; }
+.btn-option { background: #ffffff; border: 1px solid $border-color; color: #111827; }
+.btn-option:hover { background: #f8fafc; box-shadow: 0 6px 14px rgba(16,24,40,.08); }
+.btn-primary { background: $primary-color; color: #fff; }
+.btn-primary:hover { background: darken($primary-color, 6%); box-shadow: 0 8px 18px rgba(52, 96, 255, .25); }
 
-.btn-option,
-.btn-primary {
-  padding: $button-padding;
-  border-radius: $button-border-radius;
-  cursor: pointer;
-  font-size: 14px;
-  border: 1px solid transparent;
-  transition: transform .05s ease, box-shadow .2s ease, background .2s ease, color .2s ease, border-color .2s ease;
-}
+/* Empty-visit list */
+.empty-visits-list { margin: 0 0 8px 18px; padding: 0; list-style: disc; color: #344054; max-height: 40vh; overflow-y: auto; }
+.empty-visits-list .visit-item-title { display: inline-block; white-space: normal; overflow-wrap: anywhere; word-break: break-word; line-height: 1.3; }
 
-.btn-option {
-  background: #ffffff;
-  border: 1px solid $border-color;
-  color: #111827;
-}
-.btn-option:hover {
-  background: #f8fafc;
-  box-shadow: 0 6px 14px rgba(16,24,40,.08);
-}
-
-.btn-primary {
-  background: $primary-color;
-  color: #fff;
-}
-.btn-primary:hover {
-  background: darken($primary-color, 6%);
-  box-shadow: 0 8px 18px rgba(52, 96, 255, .25);
-}
-
-/* Validation (empty visits) modal */
-.validation-modal {
-  background: white;
-  border-radius: 12px;
-  width: 520px;
-  max-width: 90vw;
-  padding: 20px;
-  border: 1px solid $border-color;
-  box-shadow: 0 20px 50px rgba(16,24,40,.18);
-}
-
-.validation-title {
-  margin: 0 0 6px;
-  font-size: 18px;
-  font-weight: 800;
-  color: #101828;
-}
-.validation-text {
-  margin: 0 0 10px;
-  color: #475467;
-}
-
-/* Prevent long visit names from overflowing in empty-visits list */
-.empty-visits-list {
-  margin: 0 0 8px 18px;
-  padding: 0;
-  list-style: disc;
-  color: #344054;
-  max-height: 40vh;
-  overflow-y: auto;
-}
-.empty-visits-list .visit-item-title {
-  display: inline-block;
-  white-space: normal;
-  overflow-wrap: anywhere;
-  word-break: break-word;
-  line-height: 1.3;
-}
+/* Small utility */
+.li-icon { margin-right: 6px; }
+.mr-6 { margin-right: 6px; }
 </style>

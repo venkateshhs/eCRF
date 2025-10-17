@@ -1,3 +1,4 @@
+/* eslint-disable */
 <template>
   <div class="study-dashboard-container" v-if="study">
     <!-- header controls -->
@@ -7,16 +8,31 @@
       </button>
       <h2 class="dashboard-title">{{ study.metadata.study_name }}</h2>
 
+      <div class="version-dropdown">
+        <label for="version-select">Version:</label>
+        <select id="version-select" v-model.number="selectedVersion">
+          <option v-for="v in studyVersions" :key="'ver-'+v.version" :value="v.version">
+            {{ v.version }}
+          </option>
+        </select>
+      </div>
+
       <div class="legend-dropdown">
         <button class="btn-minimal icon-only" @click="showLegend = !showLegend" title="Table Legend">
           <i :class="icons.info"></i>
         </button>
         <div v-if="showLegend" class="legend-content" @click.stop>
-          <p><strong>-</strong>: No section is assigned to this subject's group for this visit.</p>
-          <p><strong>(No data)</strong>: Section is assigned, but no data has been entered. Use the data entry form to add data.</p>
           <p>
-            <span class="legend-swatch cell-skipped"></span>
-            <strong>Red cell</strong>: Required field was <em>skipped</em> when saving.
+            <span class="legend-swatch swatch-gray"></span>
+            <strong>Gray cell:</strong> No section assigned for this subject’s group at this visit.
+          </p>
+          <p>
+            <span class="legend-swatch swatch-none"></span>
+            <strong>No color:</strong> Section assigned but no data has been entered.
+          </p>
+          <p>
+            <span class="legend-swatch swatch-red"></span>
+            <strong>Red cell:</strong> Required field was <em>skipped</em> when saving.
           </p>
           <p>Data is displayed for each subject under the visit and section assigned to their group.</p>
         </div>
@@ -51,7 +67,9 @@
     </div>
 
     <div class="table-wrapper">
-      <table class="dashboard-table">
+      <div class="loading" v-if="isLoadingEntries">Building dashboard…</div>
+
+      <table class="dashboard-table" v-else>
         <thead>
           <tr>
             <th rowspan="2" @click="sortTable('subjectId')">
@@ -70,7 +88,7 @@
             <template v-for="(section, sIdx) in sections" :key="'hdr-fld-'+sIdx">
               <template v-for="(field, fIdx) in section.fields" :key="'hdr-fld-'+sIdx+'-'+fIdx">
                 <th @click="sortTable(`s${sIdx}_f${fIdx}`)">
-                  {{ field.label }}
+                  {{ field.label || field.name || field.title || `Field ${fIdx+1}` }}
                   <i :class="sortIcon(`s${sIdx}_f${fIdx}`)"></i>
                 </th>
               </template>
@@ -81,7 +99,7 @@
             <th><input v-model="filters.visit" placeholder="Filter Visit"></th>
             <template v-for="(section, sIdx) in sections" :key="'filter-sec-'+sIdx">
               <template v-for="(field, fIdx) in section.fields" :key="'filter-fld-'+sIdx+'-'+fIdx">
-                <th><input v-model="filters[`s${sIdx}_f${fIdx}`]" :placeholder="`Filter ${field.label}`"></th>
+                <th><input v-model="filters[`s${sIdx}_f${fIdx}`]" :placeholder="`Filter ${field.label || field.name || field.title || (fIdx+1)}`"></th>
               </template>
             </template>
           </tr>
@@ -103,7 +121,7 @@
         </tbody>
       </table>
 
-      <div class="pagination-controls" v-if="!viewAll">
+      <div class="pagination-controls" v-if="!viewAll && !isLoadingEntries">
         <button :disabled="currentPage === 1" @click="goFirst">First</button>
         <button :disabled="currentPage === 1" @click="goPrev">Previous</button>
         <span>Page {{ currentPage }} of {{ totalPages }}</span>
@@ -112,7 +130,7 @@
       </div>
     </div>
 
-    <div v-if="!filteredData.length" class="no-data">
+    <div v-if="!filteredData.length && !isLoadingEntries" class="no-data">
       No data entries found. Please enter data for the assigned sections using the data entry form.
     </div>
   </div>
@@ -150,6 +168,14 @@ export default {
       VIEW_ALL_MAX_ROWS: 1000,
       viewAll: false,
       isLoadingEntries: false,
+
+      // versioning
+      studyVersions: [],
+      selectedVersion: null,
+      templateCache: new Map(),
+
+      // debug (no leading underscores to satisfy vue/no-reserved-keys)
+      debugOnce: { study:false, fetch:false, entryShape:false },
     };
   },
   computed: {
@@ -166,7 +192,6 @@ export default {
       return this.sections.map(sec => sec.fields?.length || 0);
     },
 
-    // Total theoretical grid rows (subjects × visits)
     totalGridRows() {
       return (this.subjects?.length || 0) * (this.visits?.length || 0);
     },
@@ -174,7 +199,6 @@ export default {
       return this.totalGridRows > 0 && this.totalGridRows <= this.VIEW_ALL_MAX_ROWS;
     },
 
-    // Build rows for the current visible window.
     filteredData() {
       let data = [];
       const { subjectIdxPageSet, visitIdxPageSet } = this.currentWindowIndexSets();
@@ -190,17 +214,18 @@ export default {
           this.sections.forEach((section, sIdx) => {
             const assigned = this.isAssigned(sIdx, vIdx, groupIdx);
             section.fields.forEach((field, fIdx) => {
-              let value;
-              if (!assigned) {
-                value = '-';
-              } else {
+              let value = '';
+              if (assigned) {
                 const raw = this.getValue(subjIdx, vIdx, sIdx, fIdx);
-                if (field.type === 'checkbox') {
+                const type = (field.type || '').toLowerCase();
+                if (type === 'checkbox') {
                   value = (raw === true) ? 'Yes'
                         : (raw === false) ? 'No'
-                        : '(No data)';
+                        : '';
+                } else if (type === 'file') {
+                  value = this.formatFileCell(raw);
                 } else {
-                  value = (raw == null || raw === '') ? '(No data)' : raw;
+                  value = (raw == null || raw === '') ? '' : raw;
                 }
               }
               row[`s${sIdx}_f${fIdx}`] = value;
@@ -228,17 +253,10 @@ export default {
       // Sorting
       if (this.sortConfig.key) {
         const key = this.sortConfig.key;
-        // eslint-disable-next-line no-unused-labels
-        aconst_dir: 1;
         const dir = this.sortConfig.direction === 'asc' ? 1 : -1;
         data.sort((a, b) => {
           let valA = a[key] ?? '';
           let valB = b[key] ?? '';
-          // keep '-' and '(No data)' near the end
-          if (valA === '-' && valB !== '-') return 1 * dir;
-          if (valB === '-' && valA !== '-') return -1 * dir;
-          if (valA === '(No data)' && valB !== '(No data)') return 1 * dir;
-          if (valB === '(No data)' && valA !== '(No data)') return -1 * dir;
           valA = String(valA).toLowerCase();
           valB = String(valB).toLowerCase();
           if (valA < valB) return -1 * dir;
@@ -280,11 +298,76 @@ export default {
       },
       deep: true,
     },
+    selectedVersion: {
+      async handler() {
+        if (!this.study) return;
+        await this.loadTemplateForSelectedVersion();
+        this.initDynamicFilters();
+        this.currentPage = 1;
+        await this.fetchPageEntries();
+      }
+    }
   },
-  created() {
-    this.bootstrap();
+  async created() {
+    await this.bootstrap();
   },
   methods: {
+    // ---- debug helpers ----
+    dbg(...args){ console.log('[Dashboard]', ...args); },
+    groupDbg(label, obj){ console.groupCollapsed('[Dashboard]', label); console.log(obj); console.groupEnd(); },
+    normalizeKey(k){ return String(k || '').trim().toLowerCase(); },
+    listKeys(obj){ return Object.keys(obj || {}); },
+
+    // ---- dict helpers (section/field keys consistent with save) ----
+    sectionDictKey(sectionObj) {
+      return sectionObj?.title ?? '';
+    },
+    fieldDictKey(fieldObj, fallbackIndex) {
+      // include 'id' fallback
+      return fieldObj?.name ?? fieldObj?.key ?? fieldObj?.id ?? fieldObj?.label ?? fieldObj?.title ?? `f${fallbackIndex}`;
+    },
+    // tolerant getter: exact match, else case/trim-insensitive fallback (logs on miss)
+    dictRead(dataDict, sIdx, fIdx) {
+      if (!dataDict || typeof dataDict !== 'object' || Array.isArray(dataDict)) return undefined;
+
+      const sec = this.sections[sIdx];
+      const fld = sec?.fields?.[fIdx];
+
+      const sKey = this.sectionDictKey(sec);
+      const fKey = this.fieldDictKey(fld, fIdx);
+
+      let secObj = dataDict[sKey];
+      // fallback section key (case/trim-insensitive)
+      if (!secObj) {
+        const wanted = this.normalizeKey(sKey);
+        const hitKey = Object.keys(dataDict).find(k => this.normalizeKey(k) === wanted);
+        if (hitKey) {
+          secObj = dataDict[hitKey];
+          this.dbg('Section key fallback used:', { expected: sKey, matched: hitKey });
+        }
+      }
+      if (!secObj || typeof secObj !== 'object') {
+        this.dbg('dictRead: section not found', { sIdx, sKey, available: this.listKeys(dataDict) });
+        return undefined;
+      }
+
+      if (Object.prototype.hasOwnProperty.call(secObj, fKey)) return secObj[fKey];
+
+      // fallback field key (case/trim-insensitive)
+      const wantedField = this.normalizeKey(fKey);
+      const hitField = Object.keys(secObj).find(k => this.normalizeKey(k) === wantedField);
+      if (hitField) {
+        this.dbg('Field key fallback used:', { sKey, expectedField: fKey, matchedField: hitField });
+        return secObj[hitField];
+      }
+
+      this.dbg('dictRead: field not found', {
+        sIdx, fIdx, sKey, fKey,
+        availableFields: this.listKeys(secObj)
+      });
+      return undefined;
+    },
+
     async bootstrap() {
       const studyId = this.$route.params.id;
       try {
@@ -293,12 +376,31 @@ export default {
         });
         this.study = studyResp.data;
 
-        // Initialize dynamic filters
-        this.sections.forEach((section, sIdx) => {
-          section.fields.forEach((_, fIdx) => {
-            if (!this.filters[`s${sIdx}_f${fIdx}`]) this.filters[`s${sIdx}_f${fIdx}`] = '';
+        await this.loadVersions(studyId);
+        if (!this.selectedVersion && this.studyVersions.length) {
+          this.selectedVersion = this.studyVersions[this.studyVersions.length - 1].version;
+        }
+        await this.loadTemplateForSelectedVersion();
+
+        if (!this.debugOnce.study) {
+          this.debugOnce.study = true;
+          this.groupDbg('Study loaded', {
+            studyId,
+            subjects: this.subjects.length,
+            visits: this.visits.length,
+            sections: this.sections.map((s, i) => ({
+              i, title: s.title,
+              fieldKeys: (s.fields || []).map((f, j) => this.fieldDictKey(f, j))
+            })),
+            assignmentsShape: {
+              m: this.sections.length,
+              v: this.visits.length,
+              g: (this.study?.content?.study_data?.groups || []).length
+            }
           });
-        });
+        }
+
+        this.initDynamicFilters();
 
         if (this.canViewAll) this.viewAll = false;
         await this.fetchPageEntries();
@@ -310,6 +412,68 @@ export default {
           alert('Could not load study data');
         }
       }
+    },
+
+    initDynamicFilters() {
+      const base = { subjectId: this.filters.subjectId || '', visit: this.filters.visit || '' };
+      const next = { ...base };
+      this.sections.forEach((section, sIdx) => {
+        section.fields.forEach((_, fIdx) => {
+          const key = `s${sIdx}_f${fIdx}`;
+          next[key] = this.filters[key] || '';
+        });
+      });
+      this.filters = next;
+    },
+
+    async loadVersions(studyId) {
+      try {
+        const resp = await axios.get(`/forms/studies/${studyId}/versions`, {
+          headers: { Authorization: `Bearer ${this.token}` }
+        });
+        const arr = Array.isArray(resp.data) ? resp.data : [];
+        this.studyVersions = arr.sort((a, b) => a.version - b.version);
+      } catch (e) {
+        this.studyVersions = [{ version: 1 }];
+      }
+    },
+
+    async loadTemplateForSelectedVersion() {
+      const studyId = this.$route.params.id;
+      if (!studyId || !this.selectedVersion) return;
+
+      if (this.templateCache.has(this.selectedVersion)) {
+        const cached = this.templateCache.get(this.selectedVersion);
+        this.applyTemplateSchema(cached);
+        return;
+      }
+      try {
+        const resp = await axios.get(`/forms/studies/${studyId}/template`, {
+          headers: { Authorization: `Bearer ${this.token}` },
+          params: { version: this.selectedVersion }
+        });
+        const schema = resp?.data?.schema || {};
+        this.templateCache.set(this.selectedVersion, schema);
+        this.applyTemplateSchema(schema);
+      } catch (e) {
+        // keep existing template if fetch fails
+      }
+    },
+
+    applyTemplateSchema(schema) {
+      const current = this.study?.content?.study_data || {};
+      const normalized = {
+        study: schema?.study ?? current.study ?? {},
+        subjects: Array.isArray(schema?.subjects) && schema.subjects.length ? schema.subjects : (current.subjects || []),
+        subjectCount: Number.isFinite(schema?.subjectCount) ? schema.subjectCount : (current.subjectCount ?? (current.subjects?.length || 0)),
+        visits: Array.isArray(schema?.visits) && schema.visits.length ? schema.visits : (current.visits || []),
+        groups: Array.isArray(schema?.groups) && schema.groups.length ? schema.groups : (current.groups || []),
+        selectedModels: Array.isArray(schema?.selectedModels) ? schema.selectedModels : (current.selectedModels || []),
+        assignments: Array.isArray(schema?.assignments) ? schema.assignments : (current.assignments || []),
+      };
+      if (!this.study) this.study = { metadata: {}, content: { study_data: normalized } };
+      else if (!this.study.content) this.study.content = { study_data: normalized };
+      else this.study.content.study_data = normalized;
     },
 
     currentWindowIndexSets() {
@@ -361,16 +525,38 @@ export default {
       if (this.viewAll) params.append('all', 'true');
       if (subject_indexes) params.append('subject_indexes', subject_indexes);
       if (visit_indexes) params.append('visit_indexes', visit_indexes);
+      if (Number.isFinite(this.selectedVersion)) params.append('version', String(this.selectedVersion));
+
+      const url = `/forms/studies/${studyId}/data_entries` + (params.toString() ? `?${params.toString()}` : '');
 
       try {
         this.isLoadingEntries = true;
-        const resp = await axios.get(
-          `/forms/studies/${studyId}/data_entries` + (params.toString() ? `?${params.toString()}` : ''),
-          { headers: { Authorization: `Bearer ${this.token}` } }
-        );
-        // entries include: id, subject_index, visit_index, group_index, data, skipped_required_flags, form_version, created_at
-        this.entries = resp.data.entries || [];
-        this.totalEntries = resp.data.total ?? this.entries.length;
+        if (!this.debugOnce.fetch) {
+          this.debugOnce.fetch = true;
+          this.dbg('Fetching entries…', { url, viewAll: this.viewAll, subject_indexes, visit_indexes, version: this.selectedVersion });
+        }
+        const resp = await axios.get(url, { headers: { Authorization: `Bearer ${this.token}` } });
+        const payload = Array.isArray(resp.data) ? { entries: resp.data, total: resp.data.length } : (resp.data || {});
+        this.entries = payload.entries || [];
+        this.totalEntries = payload.total ?? this.entries.length;
+
+        if (!this.debugOnce.entryShape) {
+          this.debugOnce.entryShape = true;
+          const sample = (this.entries || []).slice(0, 3).map(e => ({
+            id: e.id,
+            s: e.subject_index, v: e.visit_index, g: e.group_index,
+            dataType: Array.isArray(e.data) ? 'array' : (e.data && typeof e.data === 'object') ? 'dict' : typeof e.data,
+            topKeys: e.data && typeof e.data === 'object' && !Array.isArray(e.data) ? Object.keys(e.data) : null
+          }));
+          this.groupDbg('Entries fetched', {
+            count: this.entries.length,
+            sample
+          });
+          if (sample[0]?.topKeys) {
+            this.dbg('First entry dict section keys:', sample[0].topKeys);
+          }
+        }
+
       } catch (err) {
         console.error('Failed to load entries:', err);
         this.entries = [];
@@ -381,7 +567,7 @@ export default {
 
     goBack() {
       const id = this.$route.params.id;
-      this.$router.push({ name: 'StudyView', params: { id } });
+      this.$router.push({ name: "StudyView", params: { id } });
     },
     toggleExportMenu() {
       this.showExportMenu = !this.showExportMenu;
@@ -392,29 +578,58 @@ export default {
       const subjGroup = (this.subjects[subjIdx]?.group || '').trim().toLowerCase();
       const grpList = this.study?.content?.study_data?.groups || [];
       const idx = grpList.findIndex(g => (g.name || '').trim().toLowerCase() === subjGroup);
+      if (idx < 0) {
+        this.dbg('resolveGroup: subject group not found, defaulting to 0', {
+          subjectIndex: subjIdx, subjectGroup: subjGroup, availableGroups: grpList.map(g => g.name)
+        });
+      }
       return idx >= 0 ? idx : 0;
     },
     isAssigned(sectionIdx, visitIdx, groupIdx) {
-      return !!(this.study?.content?.study_data?.assignments?.[sectionIdx]?.[visitIdx]?.[groupIdx]);
+      const ok = !!(this.study?.content?.study_data?.assignments?.[sectionIdx]?.[visitIdx]?.[groupIdx]);
+      if (!ok && (sectionIdx === 0) && (visitIdx === 0) && (groupIdx === 0)) {
+        this.dbg('isAssigned=false example', { sectionIdx, visitIdx, groupIdx });
+      }
+      return ok;
     },
-    findEntry(subjIdx, visitIdx, groupIdx) {
-      return this.entries.find(e =>
+    findBestEntry(subjIdx, visitIdx, groupIdx) {
+      const all = (this.entries || []).filter(e =>
         e.subject_index === subjIdx &&
         e.visit_index === visitIdx &&
         e.group_index === groupIdx
-      ) || null;
+      );
+      if (!all.length) return null;
+
+      const target = Number(this.selectedVersion);
+      // Prefer exact match
+      const exact = all.find(e => Number(e.form_version) === target);
+      if (exact) return exact;
+
+      // Else highest version <= target
+      const le = all
+        .filter(e => Number(e.form_version) <= target)
+        .sort((a, b) => Number(b.form_version) - Number(a.form_version))[0];
+      if (le) return le;
+
+      // Fallback: highest version available
+      return all.sort((a, b) => Number(b.form_version) - Number(a.form_version))[0];
     },
+
     getValue(subjIdx, visitIdx, sectionIdx, fieldIdx) {
       const groupIdx = this.resolveGroup(subjIdx);
-      const entry = this.findEntry(subjIdx, visitIdx, groupIdx);
-      if (!entry || !Array.isArray(entry.data)) return '';
-      const section = entry.data[sectionIdx] || [];
+      const entry = this.findBestEntry(subjIdx, visitIdx, groupIdx);
+      if (!entry || !entry.data) return '';
+      const d = entry.data;
+      if (!Array.isArray(d)) {
+        const v = this.dictRead(d, sectionIdx, fieldIdx);
+        return v != null ? v : '';
+      }
+      const section = Array.isArray(d) ? (d[sectionIdx] || []) : [];
       return section[fieldIdx] != null ? section[fieldIdx] : '';
     },
     isCellSkipped(subjIdx, visitIdx, sectionIdx, fieldIdx) {
       const groupIdx = this.resolveGroup(subjIdx);
-      if (!this.isAssigned(sectionIdx, visitIdx, groupIdx)) return false;
-      const entry = this.findEntry(subjIdx, visitIdx, groupIdx);
+      const entry = this.findBestEntry(subjIdx, visitIdx, groupIdx);
       if (!entry) return false;
       const flags = entry.skipped_required_flags;
       return !!(Array.isArray(flags) &&
@@ -422,8 +637,17 @@ export default {
                 flags[sectionIdx][fieldIdx] === true);
     },
     cellClass(subjIdx, visitIdx, sectionIdx, fieldIdx) {
+      const groupIdx = this.resolveGroup(subjIdx);
+      const assigned = this.isAssigned(sectionIdx, visitIdx, groupIdx);
+      const raw = assigned ? this.getValue(subjIdx, visitIdx, sectionIdx, fieldIdx) : '';
+      const field = this.sections?.[sectionIdx]?.fields?.[fieldIdx] || {};
+      const isCheckbox = (field.type || '').toLowerCase() === 'checkbox';
+      const hasData = isCheckbox ? (raw === true || raw === false) : !(raw == null || raw === '');
+
       return {
         'cell-skipped': this.isCellSkipped(subjIdx, visitIdx, sectionIdx, fieldIdx),
+        'cell-unassigned': !assigned,
+        'cell-empty-assigned': false && assigned && !hasData
       };
     },
 
@@ -441,11 +665,41 @@ export default {
         : this.icons.toggleUp;
     },
 
+    // file cell formatter
+    formatFileCell(val) {
+      const baseName = (p) => {
+        if (!p) return '';
+        const s = String(p);
+        const parts = s.split(/[\\/]/);
+        return parts[parts.length - 1];
+      };
+      const fromObj = (o) => o.file_name || o.name || baseName(o.url) || baseName(o.file_path) || '';
+      if (Array.isArray(val)) {
+        const names = val.map(v => {
+          if (v && typeof v === 'object') return fromObj(v);
+          if (typeof v === 'string') return baseName(v);
+          return '';
+        }).filter(Boolean);
+        return names.join(', ');
+      }
+      if (val && typeof val === 'object') {
+        return fromObj(val);
+      }
+      if (typeof val === 'string') {
+        return baseName(val);
+      }
+      return '';
+    },
+
     // Paging helpers
-    goFirst() { this.currentPage = 1; },
-    goPrev()  { if (this.currentPage > 1) this.currentPage--; },
-    goNext()  { if (this.currentPage < this.totalPages) this.currentPage++; },
-    goLast()  { this.currentPage = this.totalPages; },
+    goFirst() { this.currentPage = 1; }
+    ,
+    goPrev()  { if (this.currentPage > 1) this.currentPage--; }
+    ,
+    goNext()  { if (this.currentPage < this.totalPages) this.currentPage++; }
+    ,
+    goLast()  { this.currentPage = this.totalPages; }
+    ,
 
     // Exports
     async exportCSV() {
@@ -466,16 +720,16 @@ export default {
       if (!this.viewAll && !this.canViewAll) {
         try {
           const resp = await axios.get(
-            `/forms/studies/${studyId}/data_entries?all=true`,
+            `/forms/studies/${studyId}/data_entries?all=true&version=${this.selectedVersion}`,
             { headers: { Authorization: `Bearer ${this.token}` } }
           );
-          entriesForExport = resp.data.entries || [];
+          const payload = Array.isArray(resp.data) ? { entries: resp.data } : (resp.data || {});
+          entriesForExport = payload.entries || [];
         } catch (e) {
           console.error('Failed to fetch all entries for export, using current page only.', e);
         }
       }
 
-      // Temporarily swap this.entries to build full rows, then restore
       const original = this.entries;
       this.entries = entriesForExport;
 
@@ -487,17 +741,18 @@ export default {
           this.sections.forEach((section, sIdx) => {
             const assigned = this.isAssigned(sIdx, vIdx, groupIdx);
             section.fields.forEach((field, fIdx) => {
-              let value;
-              if (!assigned) {
-                value = '-';
-              } else {
+              let value = '';
+              if (assigned) {
                 const raw = this.getValue(subjIdx, vIdx, sIdx, fIdx);
-                if (field.type === 'checkbox') {
+                const type = (field.type || '').toLowerCase();
+                if (type === 'checkbox') {
                   value = (raw === true) ? 'Yes'
                         : (raw === false) ? 'No'
-                        : '(No data)';
+                        : '';
+                } else if (type === 'file') {
+                  value = this.formatFileCell(raw);
                 } else {
-                  value = (raw == null || raw === '') ? '(No data)' : raw;
+                  value = (raw == null || raw === '') ? '' : raw;
                 }
               }
               row[`s${sIdx}_f${fIdx}`] = value;
@@ -513,7 +768,7 @@ export default {
     downloadDelimited(rows, kind) {
       const quote = v => `"${String(v).replace(/"/g, '""')}"`;
       const hdr1 = ['Subject ID', 'Visit', ...this.sections.flatMap((s, i) => Array(this.fieldsPerSection[i]).fill(s.title))];
-      const hdr2 = ['', '', ...this.sections.flatMap(sec => sec.fields.map(f => f.label))];
+      const hdr2 = ['', '', ...this.sections.flatMap(sec => sec.fields.map(f => f.label || f.name || f.title))];
 
       const lines = [];
       lines.push(hdr1.map(quote).join(','));
@@ -550,7 +805,7 @@ export default {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `${this.study?.metadata?.study_name || 'study'}_data.${ext}`;
+      a.download = `${this.study?.metadata?.study_name || 'study'}_v${this.selectedVersion}_data.${ext}`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
@@ -561,16 +816,18 @@ export default {
 </script>
 
 <style scoped>
+/* (unchanged styles from your file) */
 .dashboard-header-controls {
   display: grid;
-  grid-template-columns: auto 1fr auto auto;
+  grid-template-columns: auto 1fr auto auto auto;
   align-items: center;
   gap: 12px;
   margin-bottom: 12px;
 }
 .dashboard-header-controls .btn-minimal { justify-self: start; }
 .dashboard-header-controls .export-dropdown,
-.dashboard-header-controls .legend-dropdown {
+.dashboard-header-controls .legend-dropdown,
+.dashboard-header-controls .version-dropdown {
   justify-self: end;
   position: relative;
 }
@@ -597,6 +854,20 @@ export default {
 .btn-minimal:hover { background: #f3f4f6; border-color: #9ca3af; color: #1f2937; }
 .icon-only { padding: 6px; font-size: 1rem; }
 
+.version-dropdown label {
+  margin-right: 6px;
+  font-size: 0.9rem;
+  color: #374151;
+}
+.version-dropdown select {
+  padding: 6px 10px;
+  border: 1px solid #d1d5db;
+  border-radius: 4px;
+  background: #fff;
+  font-size: 0.9rem;
+  color: #374151;
+}
+
 .export-menu,
 .legend-content {
   position: absolute;
@@ -621,11 +892,17 @@ export default {
   width: 14px;
   height: 14px;
   margin-right: 6px;
-  border: 1px solid #ef4444;
+  border: 1px solid #d1d5db;
   vertical-align: -2px;
-  background: #fee2e2;
+  background: #ffffff;
 }
 
+/* legend variants */
+.swatch-none { background: #ffffff; border-color: #d1d5db; }
+.swatch-gray { background: #e5e7eb; border-color: #9ca3af; }
+.swatch-red  { background: #fee2e2; border-color: #ef4444; }
+
+/* table */
 .table-controls {
   display: flex; justify-content: space-between; align-items: center; margin: 8px 0;
   color: #4b5563; font-size: 0.9rem;
@@ -650,11 +927,25 @@ export default {
 .dashboard-table tbody td:not(:first-child):not(:nth-child(2)) { background: #ffffff; color: #4b5563; }
 .dashboard-table tbody tr:hover td { background: #f1f5f9; }
 
-/* Skipped cell (aligns with 'status-skipped' red) */
+/* Assigned but empty: now no special color (kept for compatibility, not applied) */
+.cell-empty-assigned {
+  background: #e5e7eb !important;
+  color: #374151;
+  border-color: #d1d5db !important;
+}
+
+/* Unassigned cell (gray) */
+.cell-unassigned {
+  background: #e5e7eb !important;
+  color: #374151;
+  border-color: #d1d5db !important;
+}
+
+/* Skipped cell (red) */
 .cell-skipped {
-  background: #fee2e2 !important; /* red-200 */
-  color: #991b1b;                 /* red-800 */
-  border-color: #ef4444 !important; /* red-500 */
+  background: #fee2e2 !important;
+  color: #991b1b;
+  border-color: #ef4444 !important;
   font-weight: 600;
 }
 

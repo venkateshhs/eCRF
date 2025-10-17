@@ -1,6 +1,7 @@
 from datetime import datetime
+from typing import Any, Optional, Dict, List, Literal
+
 from pydantic import BaseModel, EmailStr, constr, Field
-from typing import Any, Optional, Dict, List
 
 
 class UserBase(BaseModel):
@@ -18,6 +19,18 @@ class UserCreate(UserBase, UserProfileBase):
     password: constr(min_length=8)
 
 
+class AdminUserCreate(BaseModel):
+    username: constr(min_length=3, max_length=50)
+    email: EmailStr
+    password: constr(min_length=8)
+    first_name: constr(min_length=1, max_length=50)
+    last_name: constr(min_length=1, max_length=50)
+    role: constr(min_length=1, max_length=50)
+
+    class Config:
+        from_attributes = True
+
+
 class UserResponse(UserBase):
     id: int
     profile: UserProfileBase
@@ -31,7 +44,16 @@ class LoginRequest(BaseModel):
     password: str
 
 
-# Study Metadata Schemas
+class UserRegister(BaseModel):
+    username: constr(min_length=3, max_length=50)
+    email: EmailStr
+    password: constr(min_length=8)
+    first_name: constr(min_length=1, max_length=50)
+    last_name: constr(min_length=1, max_length=50)
+
+
+# -------------------- Study Metadata / Content --------------------
+
 class StudyMetadataBase(BaseModel):
     study_name: str
     study_description: Optional[str] = None
@@ -95,7 +117,6 @@ class FileBase(BaseModel):
 
 class FileCreate(FileBase):
     study_id: int
-    # NEW
     subject_index: Optional[int] = None
     visit_index: Optional[int] = None
     group_index: Optional[int] = None
@@ -128,8 +149,10 @@ class EventOut(BaseModel):
     action: str
     timestamp: datetime
     details: Dict[str, Any]
+
     class Config:
-        orm_mode = True
+        from_attributes = True
+
 
 class EventCreate(BaseModel):
     study_id: Optional[int] = None
@@ -140,75 +163,65 @@ class EventCreate(BaseModel):
 
 
 class ShareLinkCreate(BaseModel):
-    study_id:       int
-    subject_index:  int
-    visit_index:    int
+    study_id: int
+    subject_index: int
+    visit_index: int
     group_index: int
-    permission:     str = Field("view", patternx="^(view|add)$")
-    max_uses:       int = Field(1, gt=0)
-    expires_in_days:int = Field(7, gt=0)
+    permission: Literal["view", "add"] = "view"
+    max_uses: int = Field(1, gt=0)
+    expires_in_days: int = Field(7, gt=0)
 
-
-class Study(BaseModel):
-    metadata: Dict[str, Any]  # Contains fields like study_name, study_description, etc.
-    content: Dict[str, Dict[str, Any]]
 
 class SharedFormAccessOut(BaseModel):
-    study_id:      int
+    study_id: int
     subject_index: int
-    visit_index:   int
+    visit_index: int
     group_index: int
-    permission:    str
-    study:    Any   # or a more precise type
-
-
-    class Config:
-        orm_mode = True
-
-
-class AdminUserCreate(BaseModel):
-    username:    constr(min_length=3, max_length=50)
-    email:       EmailStr
-    password:    constr(min_length=8)
-    first_name:  constr(min_length=1, max_length=50)
-    last_name:   constr(min_length=1, max_length=50)
-    role:        constr(min_length=1, max_length=50)
-
+    permission: str
+    study: Any
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
-class RoleUpdate(BaseModel):
-    role: constr(min_length=1, max_length=50)
+
+# -------------------- Study Template Versions --------------------
+# Avoid shadowing BaseModel.schema by naming the attribute differently
+# and exposing it on the wire as "schema" via aliases.
 
 class StudyTemplateVersionBase(BaseModel):
     version: int
-    content: Any  # flexible field for JSON structure
+    template_schema: Any = Field(
+        default_factory=dict,
+        validation_alias="schema",
+        serialization_alias="schema",
+    )
+
+    class Config:
+        from_attributes = True
+
 
 class StudyTemplateVersionCreate(StudyTemplateVersionBase):
     pass
+
 
 class StudyTemplateVersionOut(StudyTemplateVersionBase):
     id: int
     created_at: datetime
 
     class Config:
-        orm_mode = True
+        from_attributes = True
+
+
+# -------------------- Data Entry --------------------
 
 class StudyDataEntryCreate(BaseModel):
-    study_id: int
+    # study_id comes from the path (/studies/{study_id}/data)
     subject_index: int
     visit_index: int
     group_index: int
-    data: list
-    skipped_required_flags: Optional[List[List[bool]]] = None
+    data: Dict[str, Any] = Field(default_factory=dict)
+    skipped_required_flags: Optional[List[List[bool]]]
 
-class StudyDataEntryOut(StudyDataEntryCreate):
-    id: int
-    created_at: datetime
-
-    class Config:
-        orm_mode = True
 
 class StudyDataEntryOut(BaseModel):
     id: int
@@ -217,28 +230,39 @@ class StudyDataEntryOut(BaseModel):
     subject_index: int
     visit_index: int
     group_index: int
-    data: List[Any]
-    skipped_required_flags: Optional[List[List[bool]]] = None
+    data: Dict[str, Any]
+    skipped_required_flags: Optional[List[List[bool]]]
     created_at: datetime
 
     class Config:
         from_attributes = True
 
+
 class StudyDataEntryUpdate(BaseModel):
-    data: Optional[List[Any]] = None
-    skipped_required_flags: Optional[List[List[bool]]] = None
+    data: Optional[Dict[str, Any]] = None
+    skipped_required_flags: Optional[List[List[bool]]]
+
 
 class PaginatedStudyDataEntries(BaseModel):
     total: int
     entries: List[StudyDataEntryOut]
+
     class Config:
         from_attributes = True
 
 
+class SharedStudyDataEntryCreate(BaseModel):
+    data: Dict[str, Any]
+    skipped_required_flags: Optional[Dict[str, Any]] = None
+
+
+# -------------------- Access Grants --------------------
+
 class StudyAccessGrantCreate(BaseModel):
     user_id: int
-    role: Optional[str] = None   # optional, for display only
-    permissions: Optional[Dict[str, bool]] = None  # defaults applied server-side
+    role: Optional[str] = None
+    permissions: Optional[Dict[str, bool]] = None
+
 
 class StudyAccessGrantOut(BaseModel):
     user_id: int
@@ -254,17 +278,10 @@ class StudyAccessGrantOut(BaseModel):
     class Config:
         from_attributes = True
 
-
-class SharedStudyDataEntryCreate(BaseModel):
-    data: List[Any]
-    skipped_required_flags: Optional[List[List[bool]]] = None
+class RoleUpdate(BaseModel):
+    role: constr(min_length=1, max_length=50)
 
 
-#this is to fecilitate when new user is being created and users cannot set their role explicitly
-#so in backend we are keeping it as Investigator as the default role
-class UserRegister(BaseModel):
-    username: constr(min_length=3, max_length=50)
-    email: EmailStr
-    password: constr(min_length=8)
-    first_name: constr(min_length=1, max_length=50)
-    last_name: constr(min_length=1, max_length=50)
+
+class BulkPayload(BaseModel):
+    entries: List[StudyDataEntryCreate]
