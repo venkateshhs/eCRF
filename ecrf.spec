@@ -11,12 +11,12 @@ except NameError:
     import os
     HERE = Path(os.getcwd()).resolve()
 
-# 1) Only tuple-style datas in Analysis
-analysis_datas = []
+# 1) Only tuple-style data in Analysis
+analysis_data = []
 
 # Add tzdata if available (safe to skip)
 try:
-    analysis_datas += collect_data_files("tzdata")
+    analysis_data += collect_data_files("tzdata")
 except Exception as e:
     print(f"!! tzdata not found; skipping ({e})")
 
@@ -32,7 +32,7 @@ except Exception as e:
     jwt_submods = []
 
 try:
-    analysis_datas += copy_metadata("PyJWT")
+    analysis_data += copy_metadata("PyJWT")
 except Exception as e:
     print(f"!! PyJWT metadata missing ({e})")
 
@@ -82,7 +82,7 @@ a = Analysis(
     ["server.py"],
     pathex=[str(HERE)],
     binaries=[],
-    datas=analysis_datas,   # tuples only
+    data=analysis_data,   # tuples only
     hiddenimports=hiddenimports,
     hookspath=[],
     hooksconfig={},
@@ -101,7 +101,7 @@ exe = EXE(
     a.scripts,
     a.binaries,
     a.zipfiles,
-    a.datas,
+    a.data,
     name="eCRF-bin",
     console=True,  # set False to hide the console window
 )
@@ -110,7 +110,7 @@ dist = COLLECT(
     exe,
     a.binaries,
     a.zipfiles,
-    a.datas,
+    a.data,
     *extra_trees,     # Trees go here
     strip=False,
     upx=False,
