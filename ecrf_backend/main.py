@@ -75,14 +75,16 @@ def _seed_default_users_if_empty() -> None:
             return
 
         admin_pw = os.getenv("ECRF_DEFAULT_ADMIN_PASSWORD", "Admin123!")
-        pi_pw    = os.getenv("ECRF_DEFAULT_PI_PASSWORD",    "Pi123!")
-        inv_pw   = os.getenv("ECRF_DEFAULT_INV_PASSWORD",   "Investigator123!")
+        # Keeping only admin as the default User and with Administrator privileges.
+        # Users are advised to change password later and create new Users with different privileges
+        #pi_pw    = os.getenv("ECRF_DEFAULT_PI_PASSWORD",    "Pi123!")
+        #inv_pw   = os.getenv("ECRF_DEFAULT_INV_PASSWORD",   "Investigator123!")
 
         _ensure_default_user(db, "admin",        "admin@example.com",        admin_pw, "Admin",        "User", "Administrator")
-        _ensure_default_user(db, "pi_user",           "pi@example.com",           pi_pw,    "Principal",    "Investigator", "Principal Investigator")
-        _ensure_default_user(db, "investigator", "investigator@example.com", inv_pw,   "Investigator", "User", "Investigator")
+        #_ensure_default_user(db, "pi_user",           "pi@example.com",           pi_pw,    "Principal",    "Investigator", "Principal Investigator")
+        #_ensure_default_user(db, "investigator", "investigator@example.com", inv_pw,   "Investigator", "User", "Investigator")
 
-        logger.info("Default users seeded (admin, pi, investigator).")
+        logger.info("Default users seeded (admin).")
     except Exception as e:
         logger.error(f"Default user seed failed: {e}")
         db.rollback()
