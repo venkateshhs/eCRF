@@ -1,6 +1,6 @@
 <template>
   <div>
-    <h2>Step 2: Define Groups/Cohorts</h2>
+    <h2>Step 2: Define Groups</h2>
 
     <BaseNumberField
       v-model="count"

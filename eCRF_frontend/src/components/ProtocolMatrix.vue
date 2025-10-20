@@ -37,7 +37,7 @@
           <tr>
             <template v-for="(_, vIdx) in visitList" :key="`vg-${vIdx}`">
               <th v-for="(group, gIdx) in groupList" :key="`vg-${vIdx}-${gIdx}`">
-                <span class="group-name">Group/Cohort: {{ group.name }}</span>
+                <span class="group-name">Group: {{ group.name }}</span>
               </th>
             </template>
           </tr>
@@ -109,7 +109,7 @@
           <!-- Group nav -->
           <button @click="prevPreviewGroup" :disabled="previewGroupPos === 0" class="nav-btn">&lt;</button>
           <span class="preview-label">
-            Group/Cohort:
+            Group:
             <span class="th-chip">{{ groupList[assignedGroups[previewGroupPos]].name }}</span>
           </span>
           <button
@@ -141,7 +141,7 @@
         </h3>
         <p class="validation-text">
           This matrix helps you decide which <strong>forms/data models</strong> are collected for each
-          study <strong>Visit</strong> and <strong>Group/Cohort</strong>. Click a checkbox to assign a form
+          study <strong>Visit</strong> and <strong>Group</strong>. Click a checkbox to assign a form
           to that visit and group. Use the arrows to move between visits when there are many.
         </p>
         <ul class="empty-visits-list">
