@@ -65,7 +65,7 @@
 
         <!-- SHACL -->
         <div v-if="activeTab === 'shacl'">
-          <ShaclComponents :shaclComponents="shaclComponents" />
+          <ShaclComponents :shaclComponents="shaclComponents" @takeover="onShaclTakeover" />
         </div>
       </div>
 
@@ -560,6 +560,25 @@ export default {
     await this.loadDataModels();
   },
   methods: {
+
+  onShaclTakeover(section) {
+    // section = { title, fields }
+    const insertAt = Math.min(this.activeSection + 1, this.currentForm.sections.length);
+    const sec = {
+      title: section.title,
+      fields: (section.fields || []).map(f => ({
+        ...f,
+        constraints: f.constraints || {}
+      })),
+      collapsed: false,
+      source: "shacl"
+    };
+    this.forms[this.currentFormIndex].sections.splice(insertAt, 0, sec);
+    this.activeSection = insertAt;
+    this.$nextTick(() => this.focusSection(insertAt));
+    this.adjustAssignments();
+  },
+
     goBack() { this.$router.back() },
     prettyModelTitle(s) { return this.$formatLabel ? this.$formatLabel(s) : String(s || '') },
     modelIcon(title) {

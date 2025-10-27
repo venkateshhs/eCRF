@@ -7,6 +7,7 @@ from fastapi.security import OAuth2PasswordBearer
 from jwt import decode, ExpiredSignatureError, InvalidTokenError
 from sqlalchemy.orm import Session
 from typing import List, Optional
+from pydantic import BaseModel, Field
 
 from . import schemas, models
 from .schemas import LoginRequest, UserResponse, UserRegister
@@ -38,6 +39,58 @@ def _display_name(u: Optional[models.User]) -> str:
     full = (first + " " + last).strip()
     return full or u.username or u.email or f"User#{u.id}"
 
+
+def get_current_user(
+    authorization: str = Header(None),
+    db: Session = Depends(get_db)
+) -> models.User:
+    """
+    Header-based JWT decoding helper for protected endpoints (no audit).
+    """
+    if not authorization:
+        raise HTTPException(status_code=401, detail="Authorization header missing")
+    if not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Authorization header must start with 'Bearer '")
+
+    token = authorization.split("Bearer ")[1]
+    try:
+        payload = decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        username = payload.get("sub")
+        exp = payload.get("exp")
+        if not username or not exp:
+            raise HTTPException(status_code=401, detail="Invalid token payload")
+        if datetime.utcnow().timestamp() > exp:
+            raise HTTPException(status_code=401, detail="Token expired")
+
+        user = db.query(models.User).filter(models.User.username == username).first()
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+        logger.info("User %s authenticated successfully.", user.username)
+        return user
+
+    except ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="Token expired")
+    except InvalidTokenError:
+        raise HTTPException(status_code=401, detail="Invalid token")
+
+
+@router.get("/me", response_model=UserResponse)
+def get_current_user_oauth(
+    token: str = Depends(oauth2_scheme),
+    db: Session = Depends(get_db)
+):
+    """
+    OAuth2PasswordBearer-based /me endpoint (no audit).
+    """
+    payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+    username = payload.get("sub")
+    if username is None:
+        raise HTTPException(status_code=401, detail="Invalid token")
+
+    user = get_user_by_username(db, username)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    return user
 
 @router.post("/register", response_model=UserResponse)
 def register_user(user_data: UserRegister, db: Session = Depends(get_db)):
@@ -114,88 +167,67 @@ def login_user(request: LoginRequest, db: Session = Depends(get_db)):
     return {"access_token": token, "token_type": "bearer"}
 
 
+# Request body model (accepts either just new_password, or username + new_password)
+class ChangePasswordRequest(BaseModel):
+    new_password: str = Field(..., alias="new_password")
+    username: Optional[str] = None
+
+
+PASSWORD_RE = re.compile(r"^(?=.*[0-9])(?=.*[!@#$%^&*])[A-Za-z\d!@#$%^&*]{8,}$")
+
+
 @router.post("/change-password")
-def change_password(username: str, new_password: str, db: Session = Depends(get_db)):
-    logger.info("Password change request for user: %s", username)
+def change_password(
+    payload: ChangePasswordRequest,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    """
+    Change password for the current user (default).
+    Admins may optionally include 'username' in the body to change another user's password.
+    Body JSON: { "new_password": "...", "username": "optional" }
+    """
+    target_username = payload.username or getattr(current_user, "username", None)
+    if not target_username:
+        raise HTTPException(status_code=400, detail="Username resolution failed.")
 
-    user = get_user_by_username(db, username)
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found.")
-
-    # Validate new password (no logging of password characters)
-    password_regex = re.compile(r"^(?=.*[0-9])(?=.*[!@#$%^&*])[A-Za-z\d!@#$%^&*]{8,}$")
-    if not password_regex.match(new_password):
+    if not PASSWORD_RE.match(payload.new_password):
         raise HTTPException(
             status_code=400,
             detail="Password must be at least 8 characters, include a number, and a special character.",
         )
 
-    # Hash and update the new password
-    user.password = hash_password(new_password)
-    db.commit()
-    logger.info("Password successfully changed for user: %s", username)
+    # Only allow changing own password, unless current user is Administrator
+    is_admin = (getattr(current_user, "profile", None) and
+                getattr(current_user.profile, "role", "") == "Administrator")
+    if payload.username and not is_admin and payload.username != current_user.username:
+        raise HTTPException(status_code=403, detail="Not authorized to change another user's password.")
 
-    # AUDIT: password changed
+    user = get_user_by_username(db, target_username)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found.")
+
+    user.password = hash_password(payload.new_password)
+    db.commit()
+
+    logger.info("Password successfully changed for user: %s", target_username)
+
+    # AUDIT
     try:
+        actor_display = getattr(current_user, "username", "unknown")
         audit_change_both(
             scope="system",
             action="user_password_changed",
-            actor=_display_name(user),
-            extra={"username": username},
+            actor=actor_display,
+            extra={"username": target_username},
             db=db,
-            actor_id=user.id,
+            actor_id=getattr(current_user, "id", None),
+            actor_name=actor_display,
         )
     except Exception:
         pass
 
     return {"message": "Password changed successfully"}
-
-
-@router.get("/me", response_model=UserResponse)
-def get_current_user_oauth(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
-    """
-    OAuth2PasswordBearer-based /me endpoint (no audit).
-    """
-    payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-    username = payload.get("sub")
-    if username is None:
-        raise HTTPException(status_code=401, detail="Invalid token")
-
-    user = get_user_by_username(db, username)
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-    return user
-
-
-def get_current_user(authorization: str = Header(None), db: Session = Depends(get_db)) -> models.User:
-    """
-    Header-based JWT decoding helper for protected endpoints (no audit).
-    """
-    if not authorization:
-        raise HTTPException(status_code=401, detail="Authorization header missing")
-    if not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Authorization header must start with 'Bearer '")
-
-    token = authorization.split("Bearer ")[1]
-    try:
-        payload = decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        username = payload.get("sub")
-        exp = payload.get("exp")
-        if not username or not exp:
-            raise HTTPException(status_code=401, detail="Invalid token payload")
-        if datetime.utcnow().timestamp() > exp:
-            raise HTTPException(status_code=401, detail="Token expired")
-
-        user = db.query(models.User).filter(models.User.username == username).first()
-        if not user:
-            raise HTTPException(status_code=404, detail="User not found")
-        logger.info("User %s authenticated successfully.", user.username)
-        return user
-
-    except ExpiredSignatureError:
-        raise HTTPException(status_code=401, detail="Token expired")
-    except InvalidTokenError:
-        raise HTTPException(status_code=401, detail="Invalid token")
 
 
 @router.get("/admin/users", response_model=List[schemas.UserResponse])
@@ -230,7 +262,7 @@ def admin_create_user(
 
     profile = models.UserProfile(
         user_id   = user.id,
-        first_name=new.first_name,
+        first_name= new.first_name,
         last_name = new.last_name,
         role      = new.role
     )
