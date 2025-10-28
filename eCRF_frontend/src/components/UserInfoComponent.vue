@@ -99,7 +99,19 @@
 
         <!-- USER MANAGEMENT -->
         <section v-else-if="currentTab === 'management' && isAdmin" class="section">
-          <h2 class="section-title">User Management</h2>
+          <div class="header-row">
+            <h2 class="section-title">User Management</h2>
+            <button
+              class="icon-btn"
+              type="button"
+              aria-label="User roles information"
+              title="What do the roles mean?"
+              @click="showRoleInfo = true"
+            >
+              <!-- FIX: render font-awesome classes on an <i>, not as a dynamic component -->
+              <i :class="icons.info" class="info-icon" aria-hidden="true"></i>
+            </button>
+          </div>
 
           <!-- Tab-level scroll container -->
           <div class="section-scroll">
@@ -204,6 +216,35 @@
                 </div>
               </div>
             </div>
+
+            <!-- Role info dialog -->
+            <div v-if="showRoleInfo" class="dialog">
+              <div class="dialog-box">
+                <h3 class="dialog-title">User Roles & Permissions</h3>
+                <div class="dialog-text left">
+                  <ul class="role-list">
+                    <li>
+                      <strong>Administrator</strong> - Full system-wide access. Can manage users and all studies.
+                      Implicit access to every study. Cannot be granted per-study access (not needed).
+                    </li>
+                    <li>
+                      <strong>Principal Investigator</strong> - For assigned studies, can view data and typically
+                      manage study structure when permitted. Can also create and edit their own studies. No system user management rights.
+                    </li>
+                    <li>
+                      <strong>Investigator</strong> - For assigned studies, can view and add data. Cannot edit study structure.
+                    </li>
+                    <li>
+                      <strong>No Access</strong> - Account exists but cannot access the application.
+                    </li>
+                  </ul>
+                </div>
+                <div class="dialog-actions">
+                  <button class="btn primary" @click="showRoleInfo = false">OK</button>
+                </div>
+              </div>
+            </div>
+            <!-- /Role info dialog -->
           </div>
         </section>
 
@@ -371,6 +412,7 @@
 
 <script>
 import axios from "axios";
+import icons from "@/assets/styles/icons";
 import StudySettings from "@/components/StudySettings.vue";
 
 export default {
@@ -408,6 +450,9 @@ export default {
       pendingUser: null,
       pendingRole: null,
 
+      // Role info dialog
+      showRoleInfo: false,
+
       // Study Access (Admin)
       studies: [],
       selectedStudyId: "",
@@ -424,6 +469,7 @@ export default {
       showRevokeDialog: false,
       revokeTargetId: null,
       revokeTargetDisplay: "",
+      icons,
     };
   },
   computed: {
@@ -769,6 +815,35 @@ export default {
 }
 .emph { font-weight: 600; }
 
+/* Header row with icon on right */
+.header-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+}
+.icon-btn {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  padding: 0;
+}
+.icon-btn:hover .info-icon {
+  color: #4338ca;
+}
+
+.info-icon {
+  font-size: 14px; /* works better for FA */
+  color: #4b5563;
+  line-height: 1;
+}
+
 /* Tab-level scroll for large tabs */
 .section-scroll {
   display: grid;
@@ -1011,7 +1086,10 @@ export default {
 }
 .dialog-title { margin: 0 0 8px 0; font-weight: 700; font-size: 1.15rem; }
 .dialog-text { margin: 0 0 14px 0; color: #374151; }
+.dialog-text.left { text-align: left; }
 .dialog-actions { display: flex; gap: 10px; justify-content: center; }
+.role-list { margin: 0; padding-left: 18px; }
+.role-list li { margin: 6px 0; }
 
 /* Responsive */
 @media (max-width: 980px) {
