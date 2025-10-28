@@ -11,6 +11,7 @@
       <!-- ───────── Available Fields ───────── -->
       <div v-if="!showMatrix" class="available-fields">
         <h2>Available Fields</h2>
+
         <div class="tabs">
           <button
             :class="{ active: activeTab === 'template' }"
@@ -28,28 +29,51 @@
 
         <!-- TEMPLATE -->
         <div v-if="activeTab === 'template'" class="template-fields">
+         <div class="available-fields-search">
+            <input
+              type="text"
+              v-model="searchQuery"
+              placeholder="Search available fields..."
+              class="search-input"
+              aria-label="Search available fields"
+            />
+          </div>
+
           <p class="template-instruction">
             Click a model to pick properties
           </p>
 
           <div
-            v-for="model in dataModels"
+            v-for="model in filteredDataModels"
             :key="model.title"
             class="template-button"
+            :class="{ 'highlighted-model': searchQuery && (model.fields?.length || titleMatches(model.title)) }"
             @click="openModelDialog(model)"
           >
             <div class="template-header">
               <i :class="modelIcon(model.title)"></i>
-              {{ prettyModelTitle(model.title) }}
+              <span v-html="highlight(model.title)"></span>
             </div>
             <div class="template-description">
               {{ model.description || "No description available." }}
             </div>
+
+            <!-- When searching, preview the matching fields for clarity -->
+            <ul v-if="searchQuery && model.fields && model.fields.length" class="match-preview">
+              <li v-for="f in previewMatches(model.fields)" :key="f.name">
+                <span v-html="highlight(f.label || prettyModelTitle(f.name))"></span>
+              </li>
+            </ul>
+          </div>
+
+          <!-- Empty state when no matches -->
+          <div v-if="searchQuery && filteredDataModels.length === 0" class="no-matches">
+            No matches found for "<strong>{{ searchQuery }}</strong>".
           </div>
         </div>
 
         <!-- CUSTOM -->
-        <div v-if="activeTab === 'custom'" class="custom-fields">
+        <div v-else-if="activeTab === 'custom'" class="custom-fields">
           <div
             v-for="field in generalFields"
             :key="field.name || field.label"
@@ -64,7 +88,7 @@
         </div>
 
         <!-- SHACL -->
-        <div v-if="activeTab === 'shacl'">
+        <div v-else-if="activeTab === 'shacl'">
           <ShaclComponents :shaclComponents="shaclComponents" @takeover="onShaclTakeover" />
         </div>
       </div>
@@ -436,8 +460,6 @@
   </div>
 </template>
 
-
-
 <script>
 import axios from "axios";
 import yaml from "js-yaml";
@@ -452,7 +474,7 @@ import FieldRadioGroup from "@/components/fields/FieldRadioGroup.vue";
 import FieldTime from "@/components/fields/FieldTime.vue";
 import FieldSlider from "@/components/fields/FieldSlider.vue";
 import FieldLinearScale from "@/components/fields/FieldLinearScale.vue";
-import FieldFileUpload from "@/components/fields/FieldFileUpload.vue"; // NEW
+import FieldFileUpload from "@/components/fields/FieldFileUpload.vue";
 import { normalizeConstraints, coerceDefaultForType } from "@/utils/constraints";
 
 export default {
@@ -501,7 +523,8 @@ export default {
       showInputDialog: false,
       inputDialogMessage: "",
       inputDialogValue: "",
-      inputDialogCallback: null
+      inputDialogCallback: null,
+      searchQuery: ""
     };
   },
   computed: {
@@ -510,6 +533,26 @@ export default {
     currentForm()   { return this.forms[this.currentFormIndex] || { sections: [] }; },
     selectedModels(){
       return this.currentForm.sections.map(sec => ({ title: sec.title, fields: sec.fields }));
+    },
+    filteredDataModels() {
+      const models = this.dataModels || [];
+      const q = (this.searchQuery || "").trim().toLowerCase();
+
+      if (!q) return models;
+
+      return models
+        .map(m => {
+          const titleMatches = (m.title || "").toLowerCase().includes(q);
+          const matchingFields = (m.fields || []).filter(f =>
+            (f.label || "").toLowerCase().includes(q) ||
+            (f.name  || "").toLowerCase().includes(q)
+          );
+          if (titleMatches || matchingFields.length) {
+            return { ...m, fields: matchingFields.length ? matchingFields : m.fields };
+          }
+          return null;
+        })
+        .filter(Boolean);
     }
   },
   watch: {
@@ -519,6 +562,12 @@ export default {
     forms: {
       deep: true,
       handler(f) { localStorage.setItem("scratchForms", JSON.stringify(f)); }
+    },
+    // If user leaves the template tab, clear the search to avoid confusion when returning
+    activeTab(newVal) {
+      if (newVal !== 'template' && this.searchQuery) {
+        this.searchQuery = "";
+      }
     }
   },
   async mounted() {
@@ -560,24 +609,22 @@ export default {
     await this.loadDataModels();
   },
   methods: {
-
-  onShaclTakeover(section) {
-    // section = { title, fields }
-    const insertAt = Math.min(this.activeSection + 1, this.currentForm.sections.length);
-    const sec = {
-      title: section.title,
-      fields: (section.fields || []).map(f => ({
-        ...f,
-        constraints: f.constraints || {}
-      })),
-      collapsed: false,
-      source: "shacl"
-    };
-    this.forms[this.currentFormIndex].sections.splice(insertAt, 0, sec);
-    this.activeSection = insertAt;
-    this.$nextTick(() => this.focusSection(insertAt));
-    this.adjustAssignments();
-  },
+    onShaclTakeover(section) {
+      const insertAt = Math.min(this.activeSection + 1, this.currentForm.sections.length);
+      const sec = {
+        title: section.title,
+        fields: (section.fields || []).map(f => ({
+          ...f,
+          constraints: f.constraints || {}
+        })),
+        collapsed: false,
+        source: "shacl"
+      };
+      this.forms[this.currentFormIndex].sections.splice(insertAt, 0, sec);
+      this.activeSection = insertAt;
+      this.$nextTick(() => this.focusSection(insertAt));
+      this.adjustAssignments();
+    },
 
     goBack() { this.$router.back() },
     prettyModelTitle(s) { return this.$formatLabel ? this.$formatLabel(s) : String(s || '') },
@@ -588,6 +635,31 @@ export default {
     fieldIcon(label) {
       const key = String(label || '').toLowerCase().replace(/[^a-z0-9]/g, '');
       return this.icons[key] || 'fas fa-dot-circle';
+    },
+
+    // highlight helper for search matches
+    highlight(text) {
+      const q = (this.searchQuery || "").trim();
+      if (!q) return this.escapeHtml(text || "");
+      try {
+        const re = new RegExp(`(${q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")})`, "ig");
+        return this.escapeHtml(text || "").replace(re, "<mark>$1</mark>");
+      } catch {
+        return this.escapeHtml(text || "");
+      }
+    },
+    titleMatches(title) {
+      const q = (this.searchQuery || "").trim().toLowerCase();
+      return q && (String(title || "").toLowerCase().includes(q));
+    },
+    previewMatches(fields) {
+      return (fields || []).slice(0, 5);
+    },
+    escapeHtml(s) {
+      return String(s || "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;");
     },
 
     onSectionClick(i) {
@@ -649,8 +721,9 @@ export default {
     },
 
     openModelDialog(model) {
-      this.currentModel = model;
-      this.selectedProps = model.fields.map(() => false);
+      const full = this.dataModels.find(d => d.title === model.title) || model;
+      this.currentModel = full;
+      this.selectedProps = full.fields.map(() => false);
       this.showModelDialog = true;
     },
     takeoverModel() {
@@ -752,34 +825,32 @@ export default {
       }
 
       // File defaults (NEW)
-        if (base.type === 'file') {
-          base.value = null;
-          base.icon = base.icon || icons.paperclip;
-
-          const provided = base.constraints || {};
+      if (base.type === 'file') {
+        base.value = null;
+        base.icon = base.icon || icons.paperclip;
+        const provided = base.constraints || {};
           // default modality from label (or fallback to name)
-          const fallbackMod = (String(base.label || '').trim()) || base.name;
+        const fallbackMod = (String(base.label || '').trim()) || base.name;
 
-          base.constraints = {
-            helpText: provided.helpText || "",
-            required: !!provided.required,
-            readonly: !!provided.readonly,
-            allowedFormats: Array.isArray(provided.allowedFormats)
-              ? provided.allowedFormats.map(String).map(s => s.trim()).filter(Boolean)
-              : [],
-            maxSizeMB: (Number.isFinite(provided.maxSizeMB) && Number(provided.maxSizeMB) > 0)
-              ? Number(provided.maxSizeMB)
-              : undefined,
-            storagePreference: (provided.storagePreference === "url") ? "url" : "local",
+        base.constraints = {
+          helpText: provided.helpText || "",
+          required: !!provided.required,
+          readonly: !!provided.readonly,
+          allowedFormats: Array.isArray(provided.allowedFormats)
+            ? provided.allowedFormats.map(String).map(s => s.trim()).filter(Boolean)
+            : [],
+          maxSizeMB: (Number.isFinite(provided.maxSizeMB) && Number(provided.maxSizeMB) > 0)
+            ? Number(provided.maxSizeMB)
+            : undefined,
+          storagePreference: (provided.storagePreference === "url") ? "url" : "local",
             //  Default to label/name when user hasn’t picked any modality
-            modalities: (Array.isArray(provided.modalities) && provided.modalities.length)
-              ? provided.modalities
-              : [fallbackMod],
+          modalities: (Array.isArray(provided.modalities) && provided.modalities.length)
+            ? provided.modalities
+            : [fallbackMod],
             // default true when not specified
-            allowMultipleFiles: (provided.allowMultipleFiles === undefined) ? true : !!provided.allowMultipleFiles
-          };
-        }
-
+          allowMultipleFiles: (provided.allowMultipleFiles === undefined) ? true : !!provided.allowMultipleFiles
+        };
+      }
 
       sec.fields.push(base);
     },
@@ -804,7 +875,6 @@ export default {
         }
       }
     },
-
 
     enforceNumberDigitLimits(sectionIndex, fieldIndex, evt, onBlur = false) {
       const field = this.currentForm.sections[sectionIndex].fields[fieldIndex];
@@ -888,10 +958,10 @@ export default {
 
         // If user hasn’t selected any modality, default to field label
         if (!cleaned.modalities.length) {
-            const fallback = (String(f.label || '').trim()) || f.name;
-            cleaned.modalities = [fallback];
-            console.log("[ScratchForm] Constraints: defaulted modalities to", cleaned.modalities, "for", fallback);
-          }
+          const fallback = (String(f.label || '').trim()) || f.name;
+          cleaned.modalities = [fallback];
+          console.log("[ScratchForm] Constraints: defaulted modalities to", cleaned.modalities, "for", fallback);
+        }
 
         f.constraints = cleaned;
         // Keep current value as-is; builder doesn’t persist files
@@ -954,7 +1024,6 @@ export default {
           norm.dateFormat = fmt;
         }
 
-        // —— merge file-specific constraints explicitly to avoid normalization stripping them
         if (originalType === 'file') {
           const fileKeys = [
             "allowedFormats","maxSizeMB","allowLocal","allowUrl","storagePreference","modalities","allowMultipleFiles"
@@ -965,7 +1034,7 @@ export default {
           });
           f.constraints = { ...norm, ...extra };
         } else {
-        f.constraints = { ...norm };
+          f.constraints = { ...norm };
         }
 
         if (
@@ -1110,7 +1179,6 @@ export default {
 };
 </script>
 
-
 <style lang="scss" scoped>
 @import "@/assets/styles/_base.scss";
 
@@ -1149,6 +1217,25 @@ export default {
   max-height: calc(100vh - 60px);
   overflow-y: auto;
   overflow-x: hidden;
+}
+
+.available-fields-search {
+  margin: 0 0 12px 0;
+  display: flex;
+  justify-content: center;
+}
+.search-input {
+  width: 94%;
+  padding: 8px 10px;
+  border: 1px solid $border-color;
+  border-radius: 6px;
+  font-size: 14px;
+  background: #fff;
+}
+.search-input:focus {
+  outline: none;
+  border-color: $primary-color;
+  box-shadow: 0 0 0 3px rgba($primary-color, 0.1);
 }
 
 .tabs {
@@ -1333,9 +1420,28 @@ textarea { resize: vertical; }
 .input-dialog-field { width:100%; padding:8px; margin-top:5px; }
 
 /* Template buttons */
-.template-button { display:flex; flex-direction:column; align-items:flex-start; justify-content:flex-start; width:100%; padding:10px 12px; margin:6px 0; background-color:#f9fafb; border:1px solid #d1d5db; border-radius:6px; cursor:pointer; transition: background .2s, box-shadow .2s; box-sizing:border-box; }
+.template-button { display:flex; flex-direction:column; align-items:flex-start; justify-content:flex-start; width:100%; padding:10px 12px; margin:6px 0; background-color:#f9fafb; border:1px solid #d1d5db; border-radius:6px; cursor:pointer; transition: background .2s, box-shadow .2s, border-color .2s; box-sizing:border-box; }
 .template-button:hover { background-color:#f3f4f6; box-shadow:0 2px 6px rgba(0,0,0,0.05); }
-.template-header { display:flex; align-items:center; font-weight:600; font-size:14px; color:#111827; margin-bottom:4px; }
-.template-header i { margin-right:8px; font-size:16px; color:#374151; }
+.template-header { display:flex; align-items:center; font-weight:600; font-size:14px; color:#111827; margin-bottom:4px; gap:8px; }
+.template-header i { font-size:16px; color:#374151; }
 .template-description { font-size:12px; color:#6b7280; line-height:1.4; overflow-wrap:anywhere; }
+
+/* Search highlight */
+.highlighted-model { border-color: $primary-color; background: #f3f6ff; }
+
+/* Matched fields preview list */
+.match-preview {
+  margin: 6px 0 0 22px;
+  padding-left: 14px;
+  list-style: disc;
+  color: #374151;
+  font-size: 12px;
+}
+
+/* Empty state */
+.no-matches {
+  margin-top: 10px;
+  font-size: 13px;
+  color: #6b7280;
+}
 </style>
