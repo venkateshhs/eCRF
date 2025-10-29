@@ -116,8 +116,8 @@
             </button>
 
             <div class="obi-stats" v-if="obiQuery.trim().length >= 2">
-              <span v-if="!obiLoading">
-                Showing {{ obiResults.length }} / {{ requestedLimit }} (max 200)
+              <span v-if="!obiLoading" class="obi-count">
+                {{ obiResults.length }} result{{ obiResults.length===1?'':'s' }}
               </span>
               <span v-else>Loading…</span>
             </div>
@@ -169,7 +169,7 @@
           <div class="obi-more" v-if="obiQuery.trim().length >= 2">
             <button
               class="btn-more"
-              :disabled="requestedLimit >= limitMax || obiLoading"
+              :disabled="obiLoading || !canShowMore"
               @click="showMore"
               title="Load more results"
             >
@@ -629,8 +629,7 @@ export default {
 
       // Limit controls
       requestedLimit: 50,
-      limitStep: 50,
-      limitMax: 200
+      limitStep: 50
     };
   },
   computed: {
@@ -657,6 +656,10 @@ export default {
           return null;
         })
         .filter(Boolean);
+    },
+    canShowMore() {
+      const qOk = this.obiQuery.trim().length >= 2;
+      return qOk && (this.obiResults.length >= this.requestedLimit) && !this.obiLoading;
     }
   },
   watch: {
@@ -768,8 +771,7 @@ export default {
       }
     },
     showMore() {
-      if (this.requestedLimit >= this.limitMax) return;
-      this.requestedLimit = Math.min(this.requestedLimit + this.limitStep, this.limitMax);
+      this.requestedLimit = this.requestedLimit + this.limitStep;
       this.fetchObiTerms();
     },
     obiHighlight(text) {
@@ -1627,6 +1629,8 @@ export default {
   font-size: 12px;
 }
 .btn-more:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.obi-count { font-size: 12px; color: #6b7280; }
 
 /* FORM AREA */
 .form-area {

@@ -204,7 +204,7 @@ def _score_match(q: str, term: Dict) -> int:
 @router.get("/search")
 def search_terms(
     query: str = Query(..., min_length=2),
-    limit: int = Query(50, ge=1, le=200),
+    limit: int = Query(50, ge=1),
 ) -> Dict:
     _load_terms_if_needed()
     q = (query or "").strip()
