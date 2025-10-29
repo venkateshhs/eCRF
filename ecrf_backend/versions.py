@@ -3,49 +3,29 @@
 # --- How structural-change detection works (versions.py) ---
 #
 # We only bump the template version when the *structure* of a study changes.
-# To decide this, we compare a minimal, normalized snapshot of the old and
-# new study_data. Non-structural edits (e.g., study title/description text)
+# To decide this, we compare a minimal, normalized snapshot of old vs new study_data.
+# the snapshot now includes per-model field *shape* (name, type, options, and
+# validation-affecting constraints). Display-only props (labels/helpText/placeholders)
 # do not trigger a bump.
 #
-# 1) Build "structural snapshots"
-#    We convert both old_sd and new_sd into a compact dict via _snapshot_structural():
-#      {
-#        "groups": [ "<group-name>", ... ],
-#        "visits": [ "<visit-name>", ... ],
-#        "models": [ "<selected-model-title>", ... ],
-#        "subjects": [ ("<subject-id>", "<group-name>"), ... ]  # sorted
-#        "assignments": [[[bool,...],...], ...]  # M × V × G matrix
-#      }
+# Structural changes:
+#   - Add/remove/rename groups or visits (by name)
+#   - Add/remove/reorder models or fields; field name/type change
+#   - Options change for select/radio
+#   - Validation-affecting constraint changes (required, pattern, min/max…)
+#   - Assignments matrix changes (shape or values)
+# Non-structural:
+#   - Study title/description text
+#   - Group/visit descriptions
+#   - Field label/description/placeholder
+#   - constraints.helpText
 #
-#    Normalization details:
-#      - groups/visits: accept lists of dicts or strings; extract `name`/`title`,
-#        trim whitespace, and keep names in order.
-#      - selected models: accept dicts or strings; use `title` (or `name`) trimmed.
-#      - subjects: accept modern [{id, group}], legacy [["ID","Group"]], or list of strings;
-#        we normalize to dicts, then to a sorted list of (id, group) tuples for stable compare.
-#      - assignments: included as-is (the 3D boolean matrix).
+# Decisions:
+#   - If structural AND latest has data  => bump to v+1 (clone rows forward)
+#   - If structural AND latest has no data => overwrite latest schema in place
+#   - If NON-structural => refresh latest schema in place (so UI sees updates)
 #
-# 2) Equality check
-#    We compare the two snapshots with JSON string equality using sorted keys:
-#      structural_change = not _schemas_equal(snapshot_old, snapshot_new)
-#    If they differ → structural_change = True; otherwise False.
-#
-# 3) What counts as “structural”
-#    - Adding/removing/renaming groups or visits (by name)
-#    - Changing the selected models set (by model titles)
-#    - Adding/removing subjects (by subject id, and their mapped group)
-#    - Any change to the assignments matrix shape or values (M × V × G)
-#
-# 4) What does NOT count
-#    - Study metadata like title/description/owner/timestamps
-#    - Descriptions on groups/visits
-#    - Field label/placeholder text inside models (unless the model set itself changes)
-#
-# 5) Where it’s used
-#    - VersionManager.preview_decision(): computes structural_change and decides whether
-#      to bump the version (only if the current latest version already has data).
-#    - VersionManager.apply_on_update(): applies that decision after the study is saved,
-#      creating a new StudyTemplateVersion on bump and cloning existing data forward.
+
 
 from __future__ import annotations
 from typing import Any, Dict, List, Optional, Tuple
@@ -94,23 +74,79 @@ def _subjects_as_objs(sd: Dict[str, Any]) -> List[Dict[str, Any]]:
         return [{**x, "id": _norm_str((x or {}).get("id")), "group": _norm_str((x or {}).get("group"))} for x in subs]
     return []
 
-def _selected_models_titles(sd: Dict[str, Any]) -> List[str]:
+def _selected_models_list(sd: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Return selectedModels as a list of dicts {title, fields=[...]}, normalizing simple strings."""
     models = sd.get("selectedModels") or sd.get("models") or []
-    out: List[str] = []
+    out: List[Dict[str, Any]] = []
     if isinstance(models, list):
         for m in models:
             if isinstance(m, dict):
-                out.append(_norm_str(m.get("title") or m.get("name")))
+                title = m.get("title") or m.get("name")
+                fields = m.get("fields") or []
+                out.append({"title": _norm_str(title), "fields": fields})
             else:
-                out.append(_norm_str(m))
+                out.append({"title": _norm_str(m), "fields": []})
     return out
 
+# --- Structural signature helpers ---
+
+_STRUCTURAL_CONSTRAINT_KEYS = {
+    "required", "pattern", "min", "max", "minLength", "maxLength",
+    "step", "allowMultiple", "integerOnly", "dateFormat", "minDate", "maxDate",
+}
+
+def _field_signature(f: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Build a minimal, order-stable structural signature for a field.
+    Includes name, type, relevant constraints, and options (for select/radio).
+    Ignores labels/placeholders/helpText/value (display-only).
+    """
+    name = f.get("name") or f.get("label") or f.get("key") or f.get("title")
+    ftype = f.get("type") or ""
+    sig: Dict[str, Any] = {
+        "name": _norm_str(name),
+        "type": _norm_str(ftype),
+    }
+
+    # Constraints that affect validation/shape
+    cons = f.get("constraints") or {}
+    cons_sig = {k: cons.get(k) for k in sorted(_STRUCTURAL_CONSTRAINT_KEYS) if k in cons}
+    if cons_sig:
+        sig["constraints"] = cons_sig
+
+    # Options matter for select/radio choices
+    if ftype in ("select", "radio"):
+        opts = f.get("options") or []
+        if isinstance(opts, list):
+            # normalize options to strings (accept dicts/strings)
+            norm_opts: List[str] = []
+            for o in opts:
+                if isinstance(o, dict):
+                    # try common keys first
+                    val = o.get("value") or o.get("label") or o.get("name") or o.get("title") or str(o)
+                    norm_opts.append(_norm_str(val))
+                else:
+                    norm_opts.append(_norm_str(o))
+            sig["options"] = norm_opts
+
+    return sig
+
+def _model_signature(m: Dict[str, Any]) -> Dict[str, Any]:
+    title = _norm_str(m.get("title") or m.get("name"))
+    fields = m.get("fields") or []
+    field_sigs = [_field_signature(f) for f in fields if isinstance(f, dict)]
+    return {"title": title, "fields": field_sigs}
+
 def _snapshot_structural(sd: Dict[str, Any]) -> Dict[str, Any]:
-    """Minimal structure used for equality checks & versioning decisions."""
+    """
+    Minimal structure used for equality checks & versioning decisions.
+    NEW: includes per-model field signatures.
+    """
+    model_sigs = [_model_signature(m) for m in _selected_models_list(sd)]
     return {
         "groups": _names_from_objs(sd.get("groups") or []),
         "visits": _names_from_objs(sd.get("visits") or []),
-        "models": _selected_models_titles(sd),
+        "models": model_sigs,
         "subjects": sorted([(x.get("id",""), x.get("group","")) for x in _subjects_as_objs(sd)]),
         "assignments": sd.get("assignments") or [],
     }
@@ -121,7 +157,7 @@ def _schemas_equal(a: Dict[str, Any], b: Dict[str, Any]) -> bool:
 
 def _coerce_rich_snapshot(sd: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Snapshot that preserves rich metadata for UI diffs:
+    Snapshot that preserves rich metadata for UI/template retrieval:
     study, groups (with descriptions), visits (with descriptions),
     subjects {id, group}, selectedModels {title, fields}, assignments …
     """
@@ -260,15 +296,33 @@ class VersionManager:
         StudyTemplateVersion and clones data forward if needed.
         """
         decision = VersionManager.preview_decision(db, study_id, old_sd, new_sd)
-
-        # No structural change → nothing else to do (still audit metadata edits upstream)
-        if not decision["structural_change"]:
-            return decision
-
         latest = VersionManager.latest(db, study_id)
         latest_version = latest.version if latest else 0
         rich_snap = _coerce_rich_snapshot(new_sd or {})
 
+        # Non-structural change -> refresh latest snapshot in place (NEW)
+        if not decision["structural_change"]:
+            if latest:
+                latest.schema = rich_snap
+                db.commit()
+                db.refresh(latest)
+                if audit_callback:
+                    audit_callback("version_snapshot_refreshed", {"version": latest.version})
+                logger.info("Refreshed template v%s in place for study_id=%s (non-structural)", latest.version, study_id)
+                decision["decision_version_after"] = latest.version
+                return decision
+            # No latest → initialize v1
+            v1 = models.StudyTemplateVersion(study_id=study_id, version=1, schema=rich_snap)
+            db.add(v1)
+            db.commit()
+            db.refresh(v1)
+            if audit_callback:
+                audit_callback("template_initialized", {"version": v1.version})
+            logger.info("Initialized template v1 on update for study_id=%s", study_id)
+            decision["decision_version_after"] = v1.version
+            return decision
+
+        # Structural change:
         if decision["will_bump"]:
             # Create new version
             new_v = models.StudyTemplateVersion(
@@ -289,7 +343,7 @@ class VersionManager:
             decision["decision_version_after"] = new_v.version
             return decision
 
-        # Overwrite latest in-place (no data yet)
+        # Structural but no data on latest -> overwrite latest in place
         if latest:
             latest.schema = rich_snap
             db.commit()
@@ -300,7 +354,7 @@ class VersionManager:
             decision["decision_version_after"] = latest.version
             return decision
 
-        # No latest → initialize v1
+        # No latest at all -> initialize v1
         v1 = models.StudyTemplateVersion(study_id=study_id, version=1, schema=rich_snap)
         db.add(v1)
         db.commit()
