@@ -12,6 +12,7 @@ from .users import router as users_router
 from .forms import router as forms_router
 from .api import router as api_router
 from .audit import router as audit_router
+from .obi_api import router as obi_router
 app = FastAPI()
 
 # CORS (not needed for packaged same-origin, but fine for dev)
@@ -34,7 +35,7 @@ app.include_router(users_router)
 app.include_router(forms_router)
 app.include_router(api_router)
 app.include_router(audit_router)
-
+app.include_router(obi_router)
 # Tables
 Base.metadata.create_all(bind=engine)
 
