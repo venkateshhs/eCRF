@@ -22,6 +22,10 @@
             @click="activeTab = 'custom'"
           >Custom Fields</button>
           <button
+            :class="{ active: activeTab === 'obi' }"
+            @click="activeTab = 'obi'"
+          >Ontology (OBI)</button>
+          <button
             :class="{ active: activeTab === 'shacl' }"
             @click="activeTab = 'shacl'"
           >SHACL Components</button>
@@ -29,7 +33,7 @@
 
         <!-- TEMPLATE -->
         <div v-if="activeTab === 'template'" class="template-fields">
-         <div class="available-fields-search">
+          <div class="available-fields-search">
             <input
               type="text"
               v-model="searchQuery"
@@ -42,33 +46,34 @@
           <p class="template-instruction">
             Click a model to pick properties
           </p>
+          <div class="tab-results">
+            <div
+              v-for="model in filteredDataModels"
+              :key="model.title"
+              class="template-button"
+              :class="{ 'highlighted-model': searchQuery && (model.fields?.length || titleMatches(model.title)) }"
+              @click="openModelDialog(model)"
+            >
+              <div class="template-header">
+                <i :class="modelIcon(model.title)"></i>
+                <span v-html="highlight(model.title)"></span>
+              </div>
+              <div class="template-description">
+                {{ model.description || "No description available." }}
+              </div>
 
-          <div
-            v-for="model in filteredDataModels"
-            :key="model.title"
-            class="template-button"
-            :class="{ 'highlighted-model': searchQuery && (model.fields?.length || titleMatches(model.title)) }"
-            @click="openModelDialog(model)"
-          >
-            <div class="template-header">
-              <i :class="modelIcon(model.title)"></i>
-              <span v-html="highlight(model.title)"></span>
+              <!-- When searching, preview the matching fields for clarity -->
+              <ul v-if="searchQuery && model.fields && model.fields.length" class="match-preview">
+                <li v-for="f in previewMatches(model.fields)" :key="f.name">
+                  <span v-html="highlight(f.label || prettyModelTitle(f.name))"></span>
+                </li>
+              </ul>
             </div>
-            <div class="template-description">
-              {{ model.description || "No description available." }}
-            </div>
-
-            <!-- When searching, preview the matching fields for clarity -->
-            <ul v-if="searchQuery && model.fields && model.fields.length" class="match-preview">
-              <li v-for="f in previewMatches(model.fields)" :key="f.name">
-                <span v-html="highlight(f.label || prettyModelTitle(f.name))"></span>
-              </li>
-            </ul>
-          </div>
 
           <!-- Empty state when no matches -->
-          <div v-if="searchQuery && filteredDataModels.length === 0" class="no-matches">
-            No matches found for "<strong>{{ searchQuery }}</strong>".
+            <div v-if="searchQuery && filteredDataModels.length === 0" class="no-matches">
+              No matches found for "<strong>{{ searchQuery }}</strong>".
+            </div>
           </div>
         </div>
 
@@ -84,6 +89,92 @@
             <div class="field-info">
               <span class="field-label">{{ field.label }}</span>
             </div>
+          </div>
+        </div>
+
+        <!-- OBI -->
+        <div v-else-if="activeTab === 'obi'" class="obi-fields">
+          <div class="available-fields-search">
+            <input
+              type="text"
+              v-model="obiQuery"
+              placeholder="Search OBI terms…"
+              class="search-input"
+              aria-label="Search OBI terms"
+              @input="onObiInput"
+            />
+          </div>
+
+          <div class="obi-toolbar">
+            <button
+              class="btn-add-selected"
+              :disabled="selectedTermIds.size === 0"
+              @click="addSelectedObiTerms"
+              title="Add selected OBI terms as fields"
+            >
+              Add Selected ({{ selectedTermIds.size }})
+            </button>
+
+            <div class="obi-stats" v-if="obiQuery.trim().length >= 2">
+              <span v-if="!obiLoading" class="obi-count">
+                {{ obiResults.length }} result{{ obiResults.length===1?'':'s' }}
+              </span>
+              <span v-else>Loading…</span>
+            </div>
+          </div>
+
+          <!-- Scroll only the results, not the whole sidebar -->
+          <div class="tab-results obi-list">
+            <div
+              v-for="t in obiResults"
+              :key="t.id"
+              class="obi-term-row"
+            >
+              <!-- Row 1: tiny checkbox at top-left -->
+              <div class="obi-term-top">
+                <input
+                  type="checkbox"
+                  class="obi-checkbox-small"
+                  :checked="selectedTermIds.has(t.id)"
+                  @change="onToggleObiTerm(t.id, $event)"
+                  :aria-label="`Select ${t.label}`"
+                />
+                <span class="obi-selected-pill" v-if="selectedTermIds.has(t.id)">Selected</span>
+              </div>
+
+              <!-- Row 2: full result -->
+              <div class="obi-term-body" @click="toggleByBody(t.id)">
+                <div class="obi-term-label" v-html="obiHighlight(t.label)"></div>
+                <div class="obi-term-meta">
+                  <span class="obi-id">{{ t.id }}</span>
+                </div>
+                <div v-if="t.definition" class="obi-def" v-html="obiHighlight(t.definition)"></div>
+                <div v-if="t.synonyms && t.synonyms.length" class="obi-syn">
+                  <strong>Synonyms:</strong>
+                  <span v-html="obiHighlight(formatSynonyms(t.synonyms))"></span>
+                </div>
+              </div>
+            </div>
+
+            <div v-if="obiError" class="obi-error">{{ obiError }}</div>
+            <div v-if="!obiLoading && !obiResults.length && obiQuery.trim().length >= 2" class="obi-empty">
+              No terms found.
+            </div>
+            <div v-if="obiQuery.trim().length < 2" class="obi-hint">
+              Type at least 2 characters to search OBI.
+            </div>
+          </div>
+
+          <!-- Show more -->
+          <div class="obi-more" v-if="obiQuery.trim().length >= 2">
+            <button
+              class="btn-more"
+              :disabled="obiLoading || !canShowMore"
+              @click="showMore"
+              title="Load more results"
+            >
+              Show more
+            </button>
           </div>
         </div>
 
@@ -283,7 +374,7 @@
                       :readonly="!!field.constraints?.readonly"
                     />
 
-                    <!-- FILE (new) -->
+                    <!-- FILE -->
                     <FieldFileUpload
                       v-else-if="field.type === 'file'"
                       v-model="field.value"
@@ -524,7 +615,21 @@ export default {
       inputDialogMessage: "",
       inputDialogValue: "",
       inputDialogCallback: null,
-      searchQuery: ""
+
+      // Template search
+      searchQuery: "",
+
+      // OBI search state
+      obiQuery: "",
+      obiResults: [],
+      obiLoading: false,
+      obiError: "",
+      selectedTermIds: new Set(),
+      obiDebounceTimer: null,
+
+      // Limit controls
+      requestedLimit: 50,
+      limitStep: 50
     };
   },
   computed: {
@@ -537,9 +642,7 @@ export default {
     filteredDataModels() {
       const models = this.dataModels || [];
       const q = (this.searchQuery || "").trim().toLowerCase();
-
       if (!q) return models;
-
       return models
         .map(m => {
           const titleMatches = (m.title || "").toLowerCase().includes(q);
@@ -553,6 +656,10 @@ export default {
           return null;
         })
         .filter(Boolean);
+    },
+    canShowMore() {
+      const qOk = this.obiQuery.trim().length >= 2;
+      return qOk && (this.obiResults.length >= this.requestedLimit) && !this.obiLoading;
     }
   },
   watch: {
@@ -565,8 +672,9 @@ export default {
     },
     // If user leaves the template tab, clear the search to avoid confusion when returning
     activeTab(newVal) {
-      if (newVal !== 'template' && this.searchQuery) {
-        this.searchQuery = "";
+      if (newVal !== 'template' && this.searchQuery) this.searchQuery = "";
+      if (newVal !== 'obi') {
+        this.resetObiState();
       }
     }
   },
@@ -609,6 +717,126 @@ export default {
     await this.loadDataModels();
   },
   methods: {
+    /* ---------- OBI search ---------- */
+    resetObiState() {
+      this.obiQuery = "";
+      this.obiResults = [];
+      this.obiError = "";
+      this.selectedTermIds = new Set();
+      this.requestedLimit = 50;
+      clearTimeout(this.obiDebounceTimer);
+      this.obiDebounceTimer = null;
+    },
+    onObiInput() {
+      // new query → reset limit to default
+      this.requestedLimit = 50;
+      clearTimeout(this.obiDebounceTimer);
+      this.obiDebounceTimer = setTimeout(() => {
+        this.fetchObiTerms();
+      }, 250);
+    },
+    async fetchObiTerms() {
+      const q = (this.obiQuery || "").trim();
+      if (q.length < 2) {
+        this.obiResults = [];
+        this.obiError = "";
+        return;
+      }
+      this.obiLoading = true;
+      this.obiError = "";
+      try {
+        const { data } = await axios.get("/ontology/obi/search", {
+          params: { query: q, limit: this.requestedLimit }
+        });
+        const arr = Array.isArray(data?.results) ? data.results : [];
+        const seen = new Set();
+        const out = [];
+        arr.forEach(term => {
+          const id = String(term.id || "").trim();
+          if (!id || seen.has(id)) return;
+          seen.add(id);
+          out.push({
+            id,
+            label: String(term.name || "").trim() || id,
+            definition: String(term.def || "").trim(),
+            synonyms: Array.isArray(term.synonyms) ? term.synonyms : []
+          });
+        });
+        this.obiResults = out;
+      } catch (e) {
+        this.obiError = e?.response?.data?.detail || e.message || "Search failed.";
+        this.obiResults = [];
+      } finally {
+        this.obiLoading = false;
+      }
+    },
+    showMore() {
+      this.requestedLimit = this.requestedLimit + this.limitStep;
+      this.fetchObiTerms();
+    },
+    obiHighlight(text) {
+      const q = (this.obiQuery || "").trim();
+      const src = String(text || "");
+      if (!q) return this.escapeHtml(src);
+      try {
+        const re = new RegExp(`(${q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")})`, "ig");
+        return this.escapeHtml(src).replace(re, "<mark>$1</mark>");
+      } catch {
+        return this.escapeHtml(src);
+      }
+    },
+    formatSynonyms(list) {
+      // keep it reasonable in UI
+      const arr = (list || []).slice(0, 6);
+      return arr.join(", ");
+    },
+    onToggleObiTerm(termId, evt) {
+      const next = new Set(this.selectedTermIds);
+      if (evt?.target?.checked) next.add(termId);
+      else next.delete(termId);
+      this.selectedTermIds = new Set(next);
+    },
+    toggleByBody(termId) {
+      const next = new Set(this.selectedTermIds);
+      if (next.has(termId)) next.delete(termId);
+      else next.add(termId);
+      this.selectedTermIds = next;
+    },
+    addSelectedObiTerms() {
+      if (!this.currentForm.sections.length) this.addNewSection();
+      const si = this.activeSection;
+      const sec = this.currentForm.sections[si];
+      if (sec.collapsed) this.toggleSection(si);
+
+      const selected = this.obiResults.filter(t => this.selectedTermIds.has(t.id));
+      if (!selected.length) return;
+
+      const now = Date.now();
+      selected.forEach((t, idx) => {
+        const safe = this.slugify(t.label || t.id || "obi_term");
+        sec.fields.push({
+          name: `${safe}_${now}_${idx}`,
+          label: t.label || t.id,
+          type: "text",
+          value: "",
+          placeholder: "",
+          constraints: {
+            helpText: `${t.id}${t.definition ? " — " + t.definition : ""}`
+          }
+        });
+      });
+
+      this.selectedTermIds = new Set();
+      this.openGenericDialog(`Added ${selected.length} OBI field(s) to "${sec.title}".`);
+    },
+    slugify(s) {
+      return String(s || "")
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "_")
+        .replace(/^_+|_+$/g, "");
+    },
+
+    /* ---------- Existing functionality ---------- */
     onShaclTakeover(section) {
       const insertAt = Math.min(this.activeSection + 1, this.currentForm.sections.length);
       const sec = {
@@ -642,7 +870,7 @@ export default {
       const q = (this.searchQuery || "").trim();
       if (!q) return this.escapeHtml(text || "");
       try {
-        const re = new RegExp(`(${q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")})`, "ig");
+        const re = new RegExp(`(${q.replace(/[.*+?^${}()|[\\]\\\\]/g, "\\$&")})`, "ig");
         return this.escapeHtml(text || "").replace(re, "<mark>$1</mark>");
       } catch {
         return this.escapeHtml(text || "");
@@ -824,7 +1052,7 @@ export default {
         base.placeholder = base.placeholder || base.constraints.dateFormat;
       }
 
-      // File defaults (NEW)
+      // File defaults
       if (base.type === 'file') {
         base.value = null;
         base.icon = base.icon || icons.paperclip;
@@ -1034,7 +1262,7 @@ export default {
           });
           f.constraints = { ...norm, ...extra };
         } else {
-          f.constraints = { ...norm };
+        f.constraints = { ...norm };
         }
 
         if (
@@ -1214,9 +1442,9 @@ export default {
   padding: 20px;
   border: 1px solid $border-color;
   border-radius: 8px;
-  max-height: calc(100vh - 60px);
-  overflow-y: auto;
-  overflow-x: hidden;
+  /* don't scroll whole sidebar */
+  max-height: none;
+  overflow: visible;
 }
 
 .available-fields-search {
@@ -1238,21 +1466,26 @@ export default {
   box-shadow: 0 0 0 3px rgba($primary-color, 0.1);
 }
 
+/* Wrap tabs to prevent overflow & SHACL breakage */
 .tabs {
   display: flex;
-  gap: 10px;
-  margin-bottom: 15px;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
 }
-
 .tabs button {
-  padding: 10px;
+  padding: 8px;
   border: 1px solid $border-color;
   background: $secondary-color;
-  border-radius: 4px;
-  flex: 1;
+  border-radius: 6px;
+  flex: 1 1 48%;
+  min-width: 120px;
   cursor: pointer;
+  font-size: 12px;
+  line-height: 1.2;
+  white-space: normal;
+  word-wrap: break-word;
 }
-
 .tabs button.active {
   background: $primary-color;
   color: white;
@@ -1261,20 +1494,31 @@ export default {
 
 .template-fields,
 .custom-fields,
-.shacl {
+.shacl,
+.obi-fields {
   padding: 10px 0;
 }
 
+/* Scroll area for lists (template & OBI) only) */
+.tab-results {
+  max-height: 60vh;
+  overflow-y: auto;
+  padding-right: 4px; /* keep scrollbar off text */
+}
+
+/* TEMPLATE */
 .template-instruction {
   font-style: italic;
   margin-bottom: 10px;
 }
-
-.class-item.clickable {
-  cursor: pointer;
-  padding: 5px 0;
-  font-weight: bold;
-}
+.template-button { display:flex; flex-direction:column; align-items:flex-start; justify-content:flex-start; width:100%; padding:10px 12px; margin:6px 0; background-color:#f9fafb; border:1px solid #d1d5db; border-radius:6px; cursor:pointer; transition: background .2s, box-shadow .2s, border-color .2s; box-sizing:border-box; }
+.template-button:hover { background-color:#f3f4f6; box-shadow:0 2px 6px rgba(0,0,0,0.05); }
+.template-header { display:flex; align-items:center; font-weight:600; font-size:14px; color:#111827; margin-bottom:4px; gap:8px; }
+.template-header i { font-size:16px; color:#374151; }
+.template-description { font-size:12px; color: #6b7280; line-height:1.4; overflow-wrap:anywhere; }
+.highlighted-model { border-color: $primary-color; background: #f3f6ff; }
+.match-preview { margin: 6px 0 0 22px; padding-left: 14px; list-style: disc; color: #374151; font-size: 12px; }
+.no-matches { margin-top: 10px; font-size: 13px; color: #6b7280; }
 
 /* CUSTOM FIELDS */
 .custom-fields .available-field-button {
@@ -1289,12 +1533,104 @@ export default {
   cursor: pointer;
   transition: background 0.2s;
 }
-.custom-fields .available-field-button:hover {
-  background: #e3effd;
+.custom-fields .available-field-button:hover { background: #e3effd; }
+.custom-fields .field-label { flex: 1; }
+
+/* OBI styles */
+.obi-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
 }
-.custom-fields .field-label {
-  flex: 1;
+.btn-add-selected {
+  background: $primary-color;
+  color: white;
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: none;
+  cursor: pointer;
 }
+.btn-add-selected:disabled { opacity: 0.5; cursor: not-allowed; }
+.obi-list { /* uses .tab-results scrolling */ }
+
+.obi-term-row {
+  margin: 8px 0;
+  border-radius: 8px;
+  background: #fafafa;
+  border: 1px solid #e5e7eb;
+  display: grid;
+  grid-template-rows: auto 1fr; /* two rows */
+  grid-template-columns: 1fr;   /* body spans full width in row 2 */
+}
+
+/* Row 1: tiny checkbox left */
+.obi-term-top {
+  padding: 6px 8px 0 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.obi-checkbox-small {
+  width: 16px;
+  height: 16px;
+  accent-color: $primary-color;
+}
+.obi-selected-pill {
+  background: #eef6ff;
+  color: #0b62d6;
+  border: 1px solid #cfe2ff;
+  border-radius: 9999px;
+  padding: 2px 8px;
+  font-size: 11px;
+}
+
+/* Row 2: full result */
+.obi-term-body {
+  padding: 6px 10px 10px 10px;
+  cursor: pointer;
+}
+.obi-term-label {
+  font-weight: 600;
+  color: #111827;
+  word-break: break-word;
+}
+.obi-term-meta {
+  font-size: 12px;
+  color: #6b7280;
+  margin: 2px 0 4px;
+  word-break: break-all;
+}
+.obi-id { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.obi-def, .obi-syn {
+  font-size: 12px;
+  color: #374151;
+  white-space: normal;
+  word-wrap: anywhere;
+}
+.obi-term-body mark,
+.template-button mark {
+  background: #fff3cd;
+  padding: 0 2px;
+  border-radius: 2px;
+}
+
+.obi-error { color: #b91c1c; margin-top: 6px; }
+.obi-empty, .obi-hint { font-size: 12px; color: #6b7280; margin-top: 6px; }
+
+.obi-more { margin-top: 8px; display: flex; justify-content: center; }
+.btn-more {
+  background: #eef2ff;
+  border: 1px solid #c7d2fe;
+  border-radius: 6px;
+  padding: 6px 12px;
+  cursor: pointer;
+  font-size: 12px;
+}
+.btn-more:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.obi-count { font-size: 12px; color: #6b7280; }
 
 /* FORM AREA */
 .form-area {
@@ -1346,7 +1682,7 @@ export default {
   box-shadow: 0 1px 2px rgba(0,0,0,0.04);
   transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.05s ease;
 }
-.form-group:hover { border-color: rgba(0,0,0,0.12); box-shadow: 0 6px 12px rgba(0,0,0,0.06); }
+.form-group:hover { border-color: rgba(0,0,0,0.12); box-shadow:0 6px 12px rgba(0,0,0,0.06); }
 .form-group:focus-within { border-color: rgba($primary-color, 0.6); box-shadow: 0 0 0 3px rgba($primary-color, 0.12); }
 
 .field-header { display:flex; justify-content:space-between; align-items:flex-start; gap:8px; margin-bottom:8px; }
@@ -1418,30 +1754,4 @@ textarea { resize: vertical; }
 .preview-content { flex:1; background:white; padding:10px; overflow-y:auto; }
 .modal-actions { display:flex; justify-content:flex-end; gap:10px; margin-top:10px; }
 .input-dialog-field { width:100%; padding:8px; margin-top:5px; }
-
-/* Template buttons */
-.template-button { display:flex; flex-direction:column; align-items:flex-start; justify-content:flex-start; width:100%; padding:10px 12px; margin:6px 0; background-color:#f9fafb; border:1px solid #d1d5db; border-radius:6px; cursor:pointer; transition: background .2s, box-shadow .2s, border-color .2s; box-sizing:border-box; }
-.template-button:hover { background-color:#f3f4f6; box-shadow:0 2px 6px rgba(0,0,0,0.05); }
-.template-header { display:flex; align-items:center; font-weight:600; font-size:14px; color:#111827; margin-bottom:4px; gap:8px; }
-.template-header i { font-size:16px; color:#374151; }
-.template-description { font-size:12px; color:#6b7280; line-height:1.4; overflow-wrap:anywhere; }
-
-/* Search highlight */
-.highlighted-model { border-color: $primary-color; background: #f3f6ff; }
-
-/* Matched fields preview list */
-.match-preview {
-  margin: 6px 0 0 22px;
-  padding-left: 14px;
-  list-style: disc;
-  color: #374151;
-  font-size: 12px;
-}
-
-/* Empty state */
-.no-matches {
-  margin-top: 10px;
-  font-size: 13px;
-  color: #6b7280;
-}
 </style>
