@@ -25,7 +25,6 @@ eCRF_backend/archive/dts_store/schemas/
 ecrf_data/
 logs/
 testing/.DS_Store
-shacl-tulip/
 
 # Project-specific
 public/favicon.ico
