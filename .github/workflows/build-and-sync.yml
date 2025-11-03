@@ -1,0 +1,137 @@
+name: build-and-sync-to-case-e
+
+on:
+  push:
+    branches: [ main ]     # build on every push to main
+    tags: [ "v*", "release-*" ]  # optional: also on tags
+  workflow_dispatch: {}
+
+concurrency:
+  group: ecrf-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build binaries
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ macos-latest, windows-latest ]
+        python: [ "3.11" ]
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout eCRF
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Build frontend
+        working-directory: ecrf_frontend
+        run: |
+          npm ci
+          npm run build
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pyinstaller
+
+      - name: PyInstaller build
+        run: pyinstaller -y ecrf.spec
+
+      # Package artifacts uniformly
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          # dist\eCRF contains eCRF-bin.exe and bundled files
+          Compress-Archive -Path dist\eCRF\* -DestinationPath eCRF-win.zip
+      - name: Package (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          # dist/eCRF contains eCRF-bin and bundled files
+          tar -C dist -czf eCRF-mac.tar.gz eCRF
+
+      - name: Upload artifact (Windows)
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ecrf-win
+          path: eCRF-win.zip
+          retention-days: 7
+
+      - name: Upload artifact (macOS)
+        if: runner.os == 'macOS'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ecrf-mac
+          path: dist/eCRF-mac.tar.gz
+          retention-days: 7
+
+  sync:
+    name: Sync to case-e
+    needs: [ build ]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download mac artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ecrf-mac
+          path: artifacts/macos
+
+      - name: Download win artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ecrf-win
+          path: artifacts/windows
+
+      - name: Checkout case-e (target repo)
+        uses: actions/checkout@v4
+        with:
+          repository: venkateshhs/case-e
+          token: ${{ secrets.CASEE_PUSH_TOKEN }}
+          fetch-depth: 0
+
+      - name: Prepare folders
+        run: |
+          mkdir -p builds/latest/macos
+          mkdir -p builds/latest/windows
+          rm -f builds/latest/macos/*
+          rm -f builds/latest/windows/*
+
+          # copy fresh packages
+          cp -f ../artifacts/macos/eCRF-mac.tar.gz builds/latest/macos/
+          cp -f ../artifacts/windows/eCRF-win.zip   builds/latest/windows/
+
+
+          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            TAG="${GITHUB_REF_NAME}"
+            mkdir -p "builds/${TAG}/macos" "builds/${TAG}/windows"
+            cp -f builds/latest/macos/eCRF-mac.tar.gz "builds/${TAG}/macos/"
+            cp -f builds/latest/windows/eCRF-win.zip "builds/${TAG}/windows/"
+          fi
+
+      - name: Commit & push to case-e
+        env:
+          GIT_AUTHOR_NAME: github-actions[bot]
+          GIT_AUTHOR_EMAIL: github-actions[bot]@users.noreply.github.com
+          GIT_COMMITTER_NAME: github-actions[bot]
+          GIT_COMMITTER_EMAIL: github-actions[bot]@users.noreply.github.com
+        run: |
+          git add builds
+          if git diff --cached --quiet; then
+            echo "No changes to commit."
+            exit 0
+          fi
+          MSG="chore: sync eCRF builds from ${GITHUB_SHA::7} [skip ci]"
+          git commit -m "$MSG"
+          git push
