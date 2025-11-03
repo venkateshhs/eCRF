@@ -33,8 +33,6 @@ public/favicon.ico
 
 ecrf_frontend/node_modules/
 ecrf_frontend/.DS_Store
-ecrf_frontend/babel.config.js
-ecrf_frontend/jsconfig.json
 ecrf_frontend/public/favicon.ico
 
 eCRF_frontend/node_modules/
