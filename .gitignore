@@ -1,0 +1,45 @@
+# macOS + IDE
+.DS_Store
+.idea/
+
+# Python
+__pycache__/
+.venv/
+venv/
+
+# Node / Frontend
+node_modules/
+package-lock*.json
+
+# Build artifacts
+build/
+dist/
+
+# Monorepo dirs
+bids_datasets/
+ecrf_backend/.DS_Store
+ecrf_backend/__pycache__/
+ecrf_backend/logs/
+ecrf_backend/uploads/
+ecrf_backend/archive/dts_store/schemas/
+ecrf_data/
+logs/
+testing/.DS_Store
+shacl-tulip/
+
+# Project-specific
+public/favicon.ico
+
+
+ecrf_frontend/node_modules/
+ecrf_frontend/.DS_Store
+ecrf_frontend/babel.config.js
+ecrf_frontend/jsconfig.json
+ecrf_frontend/public/favicon.ico
+
+eCRF_frontend/node_modules/
+eCRF_frontend/.DS_Store
+eCRF_frontend/babel.config.js
+eCRF_frontend/jsconfig.json
+eCRF_frontend/public/favicon.ico
+
