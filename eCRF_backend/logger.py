@@ -9,7 +9,7 @@ os.makedirs("logs", exist_ok=True)
 log_filename = datetime.now().strftime("logs/%Y-%m-%d_%H-%M-%S_logs.log")
 
 # Create a custom logger
-logger = logging.getLogger("ecrf_backend")
+logger = logging.getLogger("eCRF_backend")
 
 # Set the default logging level
 logger.setLevel(logging.DEBUG)

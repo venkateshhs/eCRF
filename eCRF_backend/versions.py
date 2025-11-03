@@ -1,4 +1,4 @@
-# ecrf_backend/versions.py
+# eCRF_backend/versions.py
 
 # --- How structural-change detection works (versions.py) ---
 #

@@ -1,4 +1,4 @@
-# ecrf_backend/database.py
+# eCRF_backend/database.py
 import os
 import sys
 from pathlib import Path
@@ -19,7 +19,7 @@ def _runtime_data_dir() -> Path:
     Priority:
       1) ECRF_DATA_DIR (set by server.py at runtime)
       2) Next to the executable (PyInstaller frozen)
-      3) Repo/dev fallback: ecrf_backend/data next to this file
+      3) Repo/dev fallback: eCRF_backend/data next to this file
     """
     env = os.environ.get("ECRF_DATA_DIR")
     if env:

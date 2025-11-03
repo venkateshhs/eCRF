@@ -1,4 +1,4 @@
-# ecrf_backend/users.py
+# eCRF_backend/users.py
 from datetime import datetime
 import jwt
 import re

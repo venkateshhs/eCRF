@@ -1,8 +1,8 @@
-# ecrf_backend/api/obi_api.py
+# eCRF_backend/api/obi_api.py
 """
 OBI ontology search API (fast, deduped).
 
-- Prefers local: ecrf_backend/templates/obi.obo.txt
+- Prefers local: eCRF_backend/templates/obi.obo.txt
 - Fallback: http://purl.obolibrary.org/obo/obi.obo
 - Parses [Term] only, skips obsolete
 - DE-DUPS by ID with merge (synonyms union, longest definition)
