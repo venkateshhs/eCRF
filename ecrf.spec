@@ -37,19 +37,18 @@ except Exception as e:
     print(f"!! PyJWT metadata missing ({e})")
 
 hiddenimports = [
-    # your backend package ensures its modules get scanned
-    "ecrf_backend",
-    "ecrf_backend.main",
-    "ecrf_backend.users",
-    "ecrf_backend.forms",
-    "ecrf_backend.api",
-    "ecrf_backend.models",
-    "ecrf_backend.schemas",
-    "ecrf_backend.database",
-    "ecrf_backend.logger",
-    "ecrf_backend.crud",
-    "ecrf_backend.auth",
-    "ecrf_backend.bids_exporter",
+    "eCRF_backend",
+    "eCRF_backend.main",
+    "eCRF_backend.users",
+    "eCRF_backend.forms",
+    "eCRF_backend.api",
+    "eCRF_backend.models",
+    "eCRF_backend.schemas",
+    "eCRF_backend.database",
+    "eCRF_backend.logger",
+    "eCRF_backend.crud",
+    "eCRF_backend.auth",
+    "eCRF_backend.bids_exporter",
 
     # libs commonly used by FastAPI stacks (harmless if unused)
     "yaml",
@@ -76,13 +75,13 @@ add_tree("ecrf_frontend/dist", "ecrf_frontend/dist")
 add_tree("eCRF_frontend/dist", "eCRF_frontend/dist")
 
 # Backend resources (include templates as server.py references them via ECRF_TEMPLATES_DIR)
-add_tree("ecrf_backend/templates", "ecrf_backend/templates")
+add_tree("eCRF_backend/templates", "eCRF_backend/templates")
 
 a = Analysis(
     ["server.py"],
-    pathex=[str(HERE)],
+    pathex=[str(HERE), str(HERE / "eCRF_backend")],   # include the backend on sys.path
     binaries=[],
-    data=analysis_data,   # tuples only
+    datas=analysis_data,
     hiddenimports=hiddenimports,
     hookspath=[],
     hooksconfig={},
@@ -101,7 +100,7 @@ exe = EXE(
     a.scripts,
     a.binaries,
     a.zipfiles,
-    a.data,
+    a.datas,
     name="eCRF-bin",
     console=True,  # set False to hide the console window
 )
@@ -110,21 +109,20 @@ dist = COLLECT(
     exe,
     a.binaries,
     a.zipfiles,
-    a.data,
-    *extra_trees,     # Trees go here
+    a.datas,
+    *extra_trees,          # Trees go here
     strip=False,
     upx=False,
     upx_exclude=[],
-    name="eCRF",      # final app folder under dist/
+    name="eCRF",           # final app folder under dist/
 )
-import os
-from pathlib import Path
 
-# Figure out the file name with platform extension
-exe_name = "eCRF-bin.exe" if os.name == "nt" else "eCRF-bin"
+# Optional: remove top-level EXE if PyInstaller ever leaves one alongside the folder
+import os as _os
+from pathlib import Path as _Path
 
-# Default dist folder unless you changed it via CLI
-top_level_exe = Path(HERE, "dist", exe_name)
+exe_name = "eCRF-bin.exe" if _os.name == "nt" else "eCRF-bin"
+top_level_exe = _Path(HERE, "dist", exe_name)
 
 try:
     if top_level_exe.exists():

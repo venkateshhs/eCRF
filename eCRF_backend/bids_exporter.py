@@ -23,12 +23,12 @@ def _runtime_base_dir() -> str:
     """
     Where should we put persistent data when running:
       - frozen (PyInstaller): alongside the executable (dist/eCRF)
-      - dev: the project root (parent of ecrf_backend)
+      - dev: the project root (parent of eCRF_backend)
     """
     try:
         if getattr(sys, "frozen", False):
             return os.path.dirname(os.path.abspath(sys.executable))
-        # dev: parent of this file's directory (…/ecrf_backend/..)
+        # dev: parent of this file's directory (…/eCRF_backend/..)
         here = os.path.dirname(os.path.abspath(__file__))
         return os.path.abspath(os.path.join(here, ".."))
     except Exception:

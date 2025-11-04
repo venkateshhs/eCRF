@@ -8,7 +8,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.requests import Request
 from starlette.responses import FileResponse
 
-BACKEND_IMPORT = "ecrf_backend.main:app"
+BACKEND_IMPORT = "eCRF_backend.main:app"
 
 def exe_dir() -> Path:
     # Folder containing the executable (or this file in dev)
@@ -32,11 +32,11 @@ SEARCH_BASES.append(EXE_DIR / "_internal")
 
 def find_frontend_dist() -> Path | None:
     candidates = [
-        EXE_DIR / "ecrf_frontend" / "dist",
         EXE_DIR / "eCRF_frontend" / "dist",
-        EXE_DIR / "_internal" / "ecrf_frontend" / "dist",
+        EXE_DIR / "eCRF_frontend" / "dist",
         EXE_DIR / "_internal" / "eCRF_frontend" / "dist",
-        MEIPASS / "ecrf_frontend" / "dist" if MEIPASS else None,
+        EXE_DIR / "_internal" / "eCRF_frontend" / "dist",
+        MEIPASS / "eCRF_frontend" / "dist" if MEIPASS else None,
         MEIPASS / "eCRF_frontend" / "dist" if MEIPASS else None,
     ]
     for p in filter(None, candidates):
@@ -46,9 +46,9 @@ def find_frontend_dist() -> Path | None:
 
 def find_backend_templates() -> Path | None:
     candidates = [
-        EXE_DIR / "ecrf_backend" / "templates",
-        EXE_DIR / "_internal" / "ecrf_backend" / "templates",
-        MEIPASS / "ecrf_backend" / "templates" if MEIPASS else None,
+        EXE_DIR / "eCRF_backend" / "templates",
+        EXE_DIR / "_internal" / "eCRF_backend" / "templates",
+        MEIPASS / "eCRF_backend" / "templates" if MEIPASS else None,
     ]
     for p in filter(None, candidates):
         if p.exists():

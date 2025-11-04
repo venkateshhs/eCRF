@@ -122,7 +122,7 @@
 
 <script>
 import { ref, onMounted, computed } from "vue";
-import { ShapesDataset } from "shacl-tulip";
+import { ShapesDataset } from 'shacl-tulip';
 
 export default {
   name: "ShaclComponents",

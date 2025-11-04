@@ -1,4 +1,4 @@
-# ecrf_backend/main.py — drop-in
+# eCRF_backend/main.py — drop-in
 import os
 from fastapi import FastAPI
 from starlette.middleware.cors import CORSMiddleware

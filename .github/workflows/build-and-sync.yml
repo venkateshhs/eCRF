@@ -6,6 +6,11 @@ on:
     tags: [ "v*", "release-*" ]  # optional: also on tags
   workflow_dispatch: {}
 
+# Needed so workflows can create/update releases if switch to GITHUB_TOKEN.
+permissions:
+  contents: write
+  packages: read
+
 concurrency:
   group: ecrf-build-${{ github.ref }}
   cancel-in-progress: true
@@ -28,6 +33,8 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
+          cache: 'npm'
+          cache-dependency-path: ecrf_frontend/package-lock.json
 
       - name: Build frontend
         working-directory: ecrf_frontend
@@ -39,6 +46,8 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python }}
+          cache: 'pip'
+          cache-dependency-path: requirements.txt
 
       - name: Install deps
         run: |
@@ -53,12 +62,13 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          # dist\eCRF contains eCRF-bin.exe and bundled files
+          # dist\eCRF contains the built app + dependencies
           Compress-Archive -Path dist\eCRF\* -DestinationPath eCRF-win.zip
+
       - name: Package (macOS)
         if: runner.os == 'macOS'
         run: |
-          # dist/eCRF contains eCRF-bin and bundled files
+          # Pack the 'eCRF' folder under dist into a tar.gz at repo root
           tar -C dist -czf eCRF-mac.tar.gz eCRF
 
       - name: Upload artifact (Windows)
@@ -68,14 +78,16 @@ jobs:
           name: ecrf-win
           path: eCRF-win.zip
           retention-days: 7
+          if-no-files-found: error
 
       - name: Upload artifact (macOS)
         if: runner.os == 'macOS'
         uses: actions/upload-artifact@v4
         with:
           name: ecrf-mac
-          path: dist/eCRF-mac.tar.gz
+          path: eCRF-mac.tar.gz
           retention-days: 7
+          if-no-files-found: error
 
   sync:
     name: Sync to case-e
@@ -94,30 +106,73 @@ jobs:
           name: ecrf-win
           path: artifacts/windows
 
-      - name: Checkout case-e (target repo)
+      - name: Checkout case-e
         uses: actions/checkout@v4
         with:
           repository: venkateshhs/case-e
-          token: ${{ secrets.CASEE_PUSH_TOKEN }}
           fetch-depth: 0
+          token: ${{ secrets.CASEE_PUSH_TOKEN }}
 
-      - name: Prepare folders
+
+      - name: Download mac artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ecrf-mac
+          repository: venkateshhs/eCRF
+          run-id: 19062103139
+          path: artifacts/macos
+
+      - name: Download win artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ecrf-win
+          repository: venkateshhs/eCRF
+          run-id: 19062103139
+          path: artifacts/windows
+
+      - name: Stage into builds/
+        env:
+          SHORT_SHA: ${{ github.sha }}
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
         run: |
-          mkdir -p builds/latest/macos
-          mkdir -p builds/latest/windows
-          rm -f builds/latest/macos/*
-          rm -f builds/latest/windows/*
+          set -euo pipefail
+          mkdir -p builds/latest/{macos,windows}
+          cp -f artifacts/macos/eCRF-mac.tar.gz   builds/latest/macos/
+          cp -f artifacts/windows/eCRF-win.zip    builds/latest/windows/
 
-          # copy fresh packages
-          cp -f ../artifacts/macos/eCRF-mac.tar.gz builds/latest/macos/
-          cp -f ../artifacts/windows/eCRF-win.zip   builds/latest/windows/
+          # checksums
+          (cd builds/latest/macos   && sha256sum eCRF-mac.tar.gz  > eCRF-mac.tar.gz.sha256)
+          (cd builds/latest/windows && sha256sum eCRF-win.zip     > eCRF-win.zip.sha256)
+        
+          # manifest.json 
+          NOW="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+          cat > builds/latest/manifest.json <<EOF
+          {
+            "created_at": "${NOW}",
+            "commit": "${SHORT_SHA}",
+            "ref_type": "${REF_TYPE}",
+            "ref_name": "${REF_NAME}",
+            "artifacts": {
+              "macos": {
+                "file": "eCRF-mac.tar.gz",
+                "sha256_file": "eCRF-mac.tar.gz.sha256"
+              },
+              "windows": {
+                "file": "eCRF-win.zip",
+                "sha256_file": "eCRF-win.zip.sha256"
+              }
+            }
+          }
+          EOF
 
-
-          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
-            TAG="${GITHUB_REF_NAME}"
+          # If this is a tag, also create versioned folders and copy everything
+          if [[ "${REF_TYPE}" == "tag" ]]; then
+            TAG="${REF_NAME}"
             mkdir -p "builds/${TAG}/macos" "builds/${TAG}/windows"
-            cp -f builds/latest/macos/eCRF-mac.tar.gz "builds/${TAG}/macos/"
-            cp -f builds/latest/windows/eCRF-win.zip "builds/${TAG}/windows/"
+            cp -f builds/latest/macos/eCRF-mac.tar.gz* "builds/${TAG}/macos/"
+            cp -f builds/latest/windows/eCRF-win.zip* "builds/${TAG}/windows/"
+            cp -f builds/latest/manifest.json "builds/${TAG}/"
           fi
 
       - name: Commit & push to case-e
@@ -127,11 +182,37 @@ jobs:
           GIT_COMMITTER_NAME: github-actions[bot]
           GIT_COMMITTER_EMAIL: github-actions[bot]@users.noreply.github.com
         run: |
+          set -euo pipefail
           git add builds
           if git diff --cached --quiet; then
             echo "No changes to commit."
             exit 0
           fi
-          MSG="chore: sync eCRF builds from ${GITHUB_SHA::7} [skip ci]"
+          MSG="sync eCRF builds from ${GITHUB_SHA::7} [skip ci]"
           git commit -m "$MSG"
           git push
+
+      # Create/Update "Latest" release in venkateshhs/case-e and upload assets
+      - name: Publish/Update GitHub Release (Latest) on case-e
+        uses: ncipollo/release-action@v1
+        with:
+          token: ${{ secrets.CASEE_PUSH_TOKEN }}   # fine-grained PAT with Contents: Read/Write on case-e
+          owner: venkateshhs
+          repo: case-e
+          tag: latest
+          name: Latest
+          commit: main                 # branch in case-e
+          makeLatest: true
+          allowUpdates: true
+          replacesArtifacts: true
+          removeArtifacts: true
+          draft: false
+          prerelease: false
+          body: |
+            Automated sync from eCRF @ ${{ github.sha }}
+          artifacts: |
+            builds/latest/macos/eCRF-mac.tar.gz
+            builds/latest/macos/eCRF-mac.tar.gz.sha256
+            builds/latest/windows/eCRF-win.zip
+            builds/latest/windows/eCRF-win.zip.sha256
+          artifactErrorsFailBuild: true
