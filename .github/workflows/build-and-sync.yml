@@ -195,16 +195,17 @@ jobs:
       # Create/Update "Latest" release in venkateshhs/case-e and upload assets
       - name: Publish/Update GitHub Release (Latest) on case-e
         uses: ncipollo/release-action@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.CASEE_PUSH_TOKEN }}   # PAT with Contents: read/write on case-e
         with:
-          repo: venkateshhs/case-e
+          token: ${{ secrets.CASEE_PUSH_TOKEN }}   # fine-grained PAT with Contents: Read/Write on case-e
+          owner: venkateshhs
+          repo: case-e
           tag: latest
           name: Latest
-          commit: main                 # target commitish in case-e
+          commit: main                 # branch in case-e
           makeLatest: true
           allowUpdates: true
           replacesArtifacts: true
+          removeArtifacts: true
           draft: false
           prerelease: false
           body: |
