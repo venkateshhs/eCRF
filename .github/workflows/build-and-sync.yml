@@ -101,32 +101,40 @@ jobs:
           name: ecrf-win
           path: artifacts/windows
 
-      - name: Checkout case-e (target repo)
+      - name: Checkout case-e
         uses: actions/checkout@v4
         with:
           repository: venkateshhs/case-e
-          token: ${{ secrets.CASEE_PUSH_TOKEN }}
           fetch-depth: 0
 
-      - name: Prepare folders and copy builds
-        env:
-          REF_TYPE: ${{ github.ref_type }}
-          REF_NAME: ${{ github.ref_name }}
-          SHORT_SHA: ${{ github.sha }}
+      # now download artifacts (they won't be wiped)
+      - name: Download mac artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ecrf-mac
+          repository: venkateshhs/eCRF
+          run-id: 19062103139
+          path: artifacts/macos
+
+      - name: Download win artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ecrf-win
+          repository: venkateshhs/eCRF
+          run-id: 19062103139
+          path: artifacts/windows
+
+      - name: Stage into builds/
         run: |
           set -euo pipefail
-          mkdir -p builds/latest/macos builds/latest/windows
-          rm -f builds/latest/macos/* || true
-          rm -f builds/latest/windows/* || true
-
-          # copy fresh packages (artifacts are sibling paths inside the same workspace)
+          mkdir -p builds/latest/{macos,windows}
           cp -f artifacts/macos/eCRF-mac.tar.gz   builds/latest/macos/
           cp -f artifacts/windows/eCRF-win.zip    builds/latest/windows/
 
           # checksums
           (cd builds/latest/macos   && sha256sum eCRF-mac.tar.gz  > eCRF-mac.tar.gz.sha256)
           (cd builds/latest/windows && sha256sum eCRF-win.zip     > eCRF-win.zip.sha256)
-
+        
           # manifest.json (tiny, no external tools)
           NOW="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
           cat > builds/latest/manifest.json <<EOF
