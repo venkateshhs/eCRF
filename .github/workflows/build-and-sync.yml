@@ -6,6 +6,11 @@ on:
     tags: [ "v*", "release-*" ]  # optional: also on tags
   workflow_dispatch: {}
 
+# Needed so workflows can create/update releases if switch to GITHUB_TOKEN.
+permissions:
+  contents: write
+  packages: read
+
 concurrency:
   group: ecrf-build-${{ github.ref }}
   cancel-in-progress: true
@@ -186,3 +191,27 @@ jobs:
           MSG="sync eCRF builds from ${GITHUB_SHA::7} [skip ci]"
           git commit -m "$MSG"
           git push
+
+      # Create/Update "Latest" release in venkateshhs/case-e and upload assets
+      - name: Publish/Update GitHub Release (Latest) on case-e
+        uses: ncipollo/release-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.CASEE_PUSH_TOKEN }}   # PAT with Contents: read/write on case-e
+        with:
+          repo: venkateshhs/case-e
+          tag: latest
+          name: Latest
+          commit: main                 # target commitish in case-e
+          makeLatest: true
+          allowUpdates: true
+          replacesArtifacts: true
+          draft: false
+          prerelease: false
+          body: |
+            Automated sync from eCRF @ ${{ github.sha }}
+          artifacts: |
+            builds/latest/macos/eCRF-mac.tar.gz
+            builds/latest/macos/eCRF-mac.tar.gz.sha256
+            builds/latest/windows/eCRF-win.zip
+            builds/latest/windows/eCRF-win.zip.sha256
+          artifactErrorsFailBuild: true
