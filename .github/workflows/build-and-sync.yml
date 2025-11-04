@@ -125,6 +125,10 @@ jobs:
           path: artifacts/windows
 
       - name: Stage into builds/
+        env:
+          SHORT_SHA: ${{ github.sha }}
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
         run: |
           set -euo pipefail
           mkdir -p builds/latest/{macos,windows}
@@ -135,7 +139,7 @@ jobs:
           (cd builds/latest/macos   && sha256sum eCRF-mac.tar.gz  > eCRF-mac.tar.gz.sha256)
           (cd builds/latest/windows && sha256sum eCRF-win.zip     > eCRF-win.zip.sha256)
         
-          # manifest.json (tiny, no external tools)
+          # manifest.json 
           NOW="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
           cat > builds/latest/manifest.json <<EOF
           {
