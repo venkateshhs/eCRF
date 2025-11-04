@@ -106,6 +106,7 @@ jobs:
         with:
           repository: venkateshhs/case-e
           fetch-depth: 0
+          token: ${{ secrets.CASE_E_PUSH_TOKEN }}
 
       # now download artifacts (they won't be wiped)
       - name: Download mac artifact
