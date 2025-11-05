@@ -21,6 +21,7 @@ from .bids_exporter import (
     audit_change_both,          # unified audit (DB + BIDS)
     audit_access_change_both,   # unified access audit
     log_dataset_change_to_changes,  # optional BIDS CHANGES mirror
+    bump_bids_version,          # NEW: clone versioned BIDS tree safely on template bump
 )
 from .logger import logger
 from .models import User, StudyTemplateVersion
@@ -380,6 +381,15 @@ def update_study(
     old_sd = _deepcopy_json(content.study_data or {})
     new_sd_incoming = _deepcopy_json(study_content.study_data or {})
 
+    # capture previous latest template version
+    prev_v_row = (
+        db.query(StudyTemplateVersion)
+          .filter(StudyTemplateVersion.study_id == study_id)
+          .order_by(StudyTemplateVersion.version.desc())
+          .first()
+    )
+    prev_latest_v = int(prev_v_row.version) if prev_v_row else 1
+
     try:
         result = crud.update_study(db, study_id, study_metadata, study_content)
     except Exception as e:
@@ -443,6 +453,20 @@ def update_study(
     except Exception as ve:
         logger.error("Versioning apply_on_update failed for study %s: %s", study_id, ve)
 
+    # Detect template version bump and copy BIDS tree non-destructively
+    new_v_row = (
+        db.query(StudyTemplateVersion)
+          .filter(StudyTemplateVersion.study_id == study_id)
+          .order_by(StudyTemplateVersion.version.desc())
+          .first()
+    )
+    new_latest_v = int(new_v_row.version) if new_v_row else prev_latest_v
+    if new_latest_v > prev_latest_v:
+        try:
+            bump_bids_version(metadata.id, metadata.study_name, prev_latest_v, new_latest_v)
+        except Exception as be:
+            logger.error("BIDS version bump copy failed for study %s: %s", study_id, be)
+
     return {"metadata": metadata, "content": content}
 
 
@@ -493,6 +517,9 @@ def upload_file(
         # Mirror into BIDS
         content = db.query(models.StudyContent).filter(models.StudyContent.study_id == study_id).first()
         study_data = content.study_data if content else {}
+
+        current_form_version = VersionManager.latest_writable_version(db, study_id)
+
         stage_file_for_modalities(
             study_id=study.id,
             study_name=study.study_name,
@@ -508,6 +535,7 @@ def upload_file(
             db=db,
             actor_id=user.id,
             actor_name=_display_name(user),
+            form_version=current_form_version,
         )
 
         # DB record
@@ -605,6 +633,9 @@ def create_url_file(
     try:
         content = db.query(models.StudyContent).filter(models.StudyContent.study_id == study_id).first()
         study_data = content.study_data if content else {}
+
+        current_form_version = VersionManager.latest_writable_version(db, study_id)
+
         stage_file_for_modalities(
             study_id=study.id,
             study_name=study.study_name,
@@ -620,6 +651,7 @@ def create_url_file(
             db=db,
             actor_id=user.id,
             actor_name=_display_name(user),
+            form_version=current_form_version,
         )
     except Exception as be:
         logger.error("BIDS mirror (URL) failed for study %s: %s", study_id, be)
@@ -1047,6 +1079,9 @@ def shared_upload_file(
 
         content = db.query(models.StudyContent).filter(models.StudyContent.study_id == study.id).first()
         study_data = content.study_data if content else {}
+
+        current_form_version = VersionManager.latest_writable_version(db, study.id)
+
         stage_file_for_modalities(
             study_id=study.id,
             study_name=study.study_name,
@@ -1062,6 +1097,7 @@ def shared_upload_file(
             db=db,
             actor_id=None,
             actor_name=None,
+            form_version=current_form_version,
         )
 
         file_data = schemas.FileCreate(
@@ -1164,6 +1200,9 @@ def shared_create_url_file(
     try:
         content = db.query(models.StudyContent).filter(models.StudyContent.study_id == study.id).first()
         study_data = content.study_data if content else {}
+
+        current_form_version = VersionManager.latest_writable_version(db, study.id)
+
         stage_file_for_modalities(
             study_id=study.id,
             study_name=study.study_name,
@@ -1179,6 +1218,7 @@ def shared_create_url_file(
             db=db,
             actor_id=None,
             actor_name=None,
+            form_version=current_form_version,
         )
     except Exception as be:
         logger.error("Shared BIDS mirror (URL) failed for study %s: %s", study.id, be)
