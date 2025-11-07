@@ -131,6 +131,7 @@
                 <th>Created At</th>
                 <th>Updated At</th>
                 <th>Actions</th>
+                <th class="menu-col"></th>
               </tr>
             </thead>
             <tbody>
@@ -139,10 +140,10 @@
                 <td>{{ study.study_description }}</td>
                 <td>{{ formatDateTime(study.created_at) }}</td>
                 <td>{{ formatDateTime(study.updated_at) }}</td>
-                <td>
+
+                <!-- Actions: vertical buttons -->
+                <td class="actions-cell">
                   <div class="action-buttons">
-                    <!-- Removed Edit Study from dashboard per request -->
-                    <!-- Add Data: Admin, PI, Investigator -->
                     <button
                       v-if="isAdmin || isPI || isInvestigator"
                       @click="addData(study)"
@@ -157,6 +158,32 @@
                     >
                       View Study
                     </button>
+                  </div>
+                </td>
+                <td class="menu-cell">
+                  <div class="row-menu-wrap">
+                    <button
+                      class="icon-ellipsis"
+                      @click.stop="toggleRowMenu(study.id)"
+                      :aria-expanded="openMenuId === study.id ? 'true' : 'false'"
+                      aria-haspopup="menu"
+                      :aria-label="`More actions for ${study.study_name}`"
+                    >
+                      <i :class="icons.ellipsis" aria-hidden="true"></i>
+                    </button>
+
+                    <div
+                      v-if="openMenuId === study.id"
+                      class="menu-dropdown"
+                      role="menu"
+                    >
+                      <button class="menu-item" role="menuitem" @click="handleExportStudy(study)">
+                        Export study
+                      </button>
+                      <button class="menu-item" role="menuitem" @click="handleMergeStudy(study)">
+                        Merge study
+                      </button>
+                    </div>
                   </div>
                 </td>
               </tr>
@@ -185,6 +212,7 @@ export default {
       icons,
       // Toggle primary action style: 'cards' or 'buttons'
       actionStyle: 'cards',
+      openMenuId: null,
     };
   },
   watch: {
@@ -258,11 +286,9 @@ export default {
         const { data } = await axios.get("/forms/studies", {
           headers: { Authorization: `Bearer ${token}` },
         });
-        console.log('Fetched studies:', JSON.stringify(data, null, 2));
         this.studies = data;
       } catch (e) {
         console.error('Failed to load studies:', e);
-        console.log('Error details:', e.response?.data || e.message);
         if (e.response?.status === 401) {
           alert("Session expired.");
           this.$router.push("/login");
@@ -292,11 +318,9 @@ export default {
           `/forms/studies/${study.id}`,
           { headers: { Authorization: `Bearer ${token}` } }
         );
-        console.log('Fetched study details:', JSON.stringify(resp.data, null, 2));
         const sd = resp.data.content?.study_data;
         const meta = resp.data.metadata || {};
         if (!sd) {
-          console.error('Study content is empty');
           alert("Study content is empty.");
           return;
         }
@@ -304,7 +328,6 @@ export default {
         // Initialize assignments
         let assignments = Array.isArray(sd.assignments) ? sd.assignments : [];
         if (!assignments.length && sd.selectedModels?.length) {
-          console.warn('Assignments missing in backend response, initializing empty assignments');
           const m = sd.selectedModels.length;
           const v = sd.visits?.length || 0;
           const g = sd.groups?.length || 0;
@@ -314,7 +337,6 @@ export default {
             )
           );
         }
-        console.log('Loaded assignments from backend:', JSON.stringify(assignments, null, 2));
 
         const studyInfo = {
           id: meta.id,
@@ -358,7 +380,6 @@ export default {
         this.$router.push({ name: "CreateStudy", params: { id: study.id } });
       } catch (e) {
         console.error('Failed to load study details:', e);
-        console.log('Error details:', e.response?.data || e.message);
         alert("Failed to load study details.");
       }
     },
@@ -377,6 +398,28 @@ export default {
       this.$store.commit("setToken", null);
       this.$router.push("/login");
     },
+
+    // --- 3-dot menu handlers (separate column) ---
+    toggleRowMenu(id) {
+      this.openMenuId = this.openMenuId === id ? null : id;
+    },
+    handleDocClick(e) {
+      if (!this.$el.contains(e.target)) {
+        this.openMenuId = null;
+      } else {
+        const btn = e.target.closest('.icon-ellipsis');
+        const dd  = e.target.closest('.menu-dropdown');
+        if (!btn && !dd) this.openMenuId = null;
+      }
+    },
+    handleExportStudy(study) {
+      this.openMenuId = null;
+      this.$router.push(`/dashboard/export-study/${study.id}`);
+    },
+    handleMergeStudy(study) {
+      this.openMenuId = null;
+      this.$router.push(`/dashboard/merge-study/${study.id}`);
+    },
   },
   mounted() {
     if (this.$route.path === "/dashboard") {
@@ -388,6 +431,10 @@ export default {
       this.showStudyOptions = true;
       this.loadStudies();
     }
+    document.addEventListener('click', this.handleDocClick, true);
+  },
+  beforeUnmount() {
+    document.removeEventListener('click', this.handleDocClick, true);
   },
 };
 </script>
@@ -684,12 +731,75 @@ export default {
   background-color: #f9f9f9;
 }
 
-/* Action Buttons in table */
-.action-buttons {
+/* Actions column: vertical buttons */
+.actions-cell .action-buttons {
   display: flex;
-  gap: 10px;
-  flex-wrap: wrap;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+  min-width: 180px;
+  max-width: 240px;
 }
+.action-buttons .btn-equal {
+  width: 100%;
+  justify-content: center;
+  text-align: center;
+}
+
+/* Unnamed menu column (rightmost) */
+.study-table th.menu-col,
+.study-table td.menu-cell {
+  width: 56px;
+  text-align: right;
+}
+
+/* 3-dot icon + dropdown */
+.row-menu-wrap { position: relative; display: inline-block; }
+.icon-ellipsis {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 34px;
+  width: 36px;
+  border: 1px solid #e0e0e0;
+  border-radius: 6px;
+  background: #fff;
+  cursor: pointer;
+  transition: background 0.2s ease, border-color 0.2s ease;
+}
+.icon-ellipsis:hover {
+  background: #f3f4f6;
+  border-color: #d6d6d6;
+}
+.icon-ellipsis i {
+  font-size: 14px;
+  color: #555;
+}
+
+.menu-dropdown {
+  position: absolute;
+  right: 0;
+  top: 40px;
+  min-width: 160px;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  box-shadow: 0 10px 25px rgba(0,0,0,0.08);
+  padding: 6px;
+  z-index: 5;
+}
+.menu-item {
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  padding: 8px 10px;
+  border-radius: 6px;
+  font-size: 14px;
+  color: #111827;
+  cursor: pointer;
+}
+.menu-item:hover { background: #f3f4f6; }
 
 /* Minimalistic Button Style */
 .btn-minimal {
@@ -720,8 +830,6 @@ export default {
 }
 .action-buttons .btn-equal {
   min-width: 130px;
-  justify-content: center;
-  text-align: center;
 }
 @media (max-width: 768px) {
   .dashboard-layout {

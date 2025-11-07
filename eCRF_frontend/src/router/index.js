@@ -72,7 +72,9 @@ const routes = [
   name: 'ImportStudy',
   component: () => import('@/components/ImportStudy.vue'),
   meta: { requiresAuth: true }
-}
+},
+{ path: '/dashboard/export-study/:id', name: 'ExportStudy', component: () => import('@/components/ExportStudy.vue') }
+
 //  {
 //    path: "/studies/:id",
 //    name: "StudyDataEntry",

@@ -48,7 +48,8 @@ export default {
   toggleOn:       "fas fa-toggle-on",
   toggleOff:      "fas fa-toggle-off",
   check:          "fas fa-check",
-  times:          "fas fa-times"
+  times:          "fas fa-times",
+  ellipsis : "fas fa-ellipsis-v",
 
 
 };
