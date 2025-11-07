@@ -18,10 +18,10 @@ from .bids_exporter import (
     upsert_bids_dataset,
     write_entry_to_bids,
     stage_file_for_modalities,
-    audit_change_both,          # unified audit (DB + BIDS)
-    audit_access_change_both,   # unified access audit
+    audit_change_both,  # unified audit (DB + BIDS)
+    audit_access_change_both,  # unified access audit
     log_dataset_change_to_changes,  # optional BIDS CHANGES mirror
-    bump_bids_version,          # NEW: clone versioned BIDS tree safely on template bump
+    bump_bids_version, bulk_write_entries_to_bids,  # NEW: clone versioned BIDS tree safely on template bump
 )
 from .logger import logger
 from .models import User, StudyTemplateVersion
@@ -1480,7 +1480,6 @@ def revoke_study_access(
     except Exception:
         pass
 
-
 @router.post("/studies/{study_id}/data/bulk")
 def bulk_insert_data(
     study_id: int,
@@ -1491,14 +1490,14 @@ def bulk_insert_data(
     if not payload.entries:
         return {"inserted": 0, "failed": 0, "errors": []}
 
-    now = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
-
     # Enforce latest-only
     try:
         form_version = VersionManager.assert_latest_is_used(db, study_id, version)
     except ValueError as ve:
         raise HTTPException(status_code=400, detail=str(ve))
 
+    # Prepare rows for one executemany insert
+    now = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
     rows = []
     for e in payload.entries:
         rows.append({
@@ -1513,15 +1512,87 @@ def bulk_insert_data(
         })
 
     sql = text("""
-            INSERT INTO study_entry_data
-              (study_id, form_version, subject_index, visit_index, group_index, data, created_at, skipped_required_flags)
-            VALUES (:study_id, :form_version, :subject_index, :visit_index, :group_index, :data, :created_at, :skipped_required_flags)
-        """)
+        INSERT INTO study_entry_data
+          (study_id, form_version, subject_index, visit_index, group_index, data, created_at, skipped_required_flags)
+        VALUES (:study_id, :form_version, :subject_index, :visit_index, :group_index, :data, :created_at, :skipped_required_flags)
+    """)
 
     try:
-        db.execute(sql, rows)   # list of dicts → executemany
+        db.execute(sql, rows)   # executemany
         db.commit()
-        return {"inserted": len(rows), "failed": 0, "errors": []}
     except Exception as ex:
         db.rollback()
         raise HTTPException(status_code=400, detail=f"Bulk insert failed: {ex}")
+
+    inserted_count = len(rows)
+
+    # Load study context for BIDS
+    study = db.query(models.StudyMetadata).filter(models.StudyMetadata.id == study_id).first()
+    content = db.query(models.StudyContent).filter(models.StudyContent.study_id == study_id).first()
+    if not study or not content:
+        # unlikely, but keep safe
+        return {"inserted": inserted_count, "failed": 0, "errors": []}
+
+    # Re-select just-inserted rows for this request, then one batched BIDS write
+    just_inserted = (
+        db.query(models.StudyEntryData)
+          .filter(
+              models.StudyEntryData.study_id == study_id,
+              models.StudyEntryData.form_version == form_version,
+              models.StudyEntryData.created_at == now,
+          )
+          .order_by(models.StudyEntryData.id.asc())
+          .all()
+    )
+
+    def _json_or_passthrough(x):
+        if isinstance(x, (dict, list)):
+            return x
+        try:
+            return json.loads(x)
+        except Exception:
+            return x
+
+    entries_for_bids = []
+    for r in just_inserted:
+        entries_for_bids.append({
+            "id": r.id,
+            "subject_index": int(r.subject_index),
+            "visit_index": int(r.visit_index),
+            "group_index": int(r.group_index),
+            "form_version": int(r.form_version),
+            "data": _json_or_passthrough(r.data) or {},
+            "skipped_required_flags": _json_or_passthrough(r.skipped_required_flags) or [],
+        })
+
+    # Ensure dataset structure once (cheap if existing)
+    try:
+        upsert_bids_dataset(
+            study_id=study.id,
+            study_name=study.study_name,
+            study_description=study.study_description,
+            study_data=content.study_data or {},
+        )
+    except Exception:
+        # Non-fatal; bulk BIDS write will attempt again as needed
+        pass
+
+    # One fast BIDS write
+    try:
+        bulk_write_entries_to_bids(
+            study_id=study.id,
+            study_name=study.study_name,
+            study_description=study.study_description,
+            study_data=content.study_data or {},
+            entries=entries_for_bids,
+            form_version=form_version,
+            db=db,
+            actor="Bulk import",
+        )
+    except Exception as be:
+        # Do not roll back DB; report error but keep inserted count
+        return {"inserted": inserted_count, "failed": inserted_count, "errors": [f"BIDS mirror failed: {be}"]}
+
+    return {"inserted": inserted_count, "failed": 0, "errors": []}
+
+

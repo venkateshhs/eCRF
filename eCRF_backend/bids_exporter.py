@@ -1139,6 +1139,237 @@ def write_entry_to_bids(
     )
     return tsv_path
 
+def bulk_write_entries_to_bids(
+    *,
+    study_id: int,
+    study_name: str,
+    study_description: Optional[str],
+    study_data: dict,
+    entries: List[Dict[str, Any]],           # each: {id, subject_index, visit_index, group_index, form_version, data, skipped_required_flags}
+    form_version: int,
+    db=None,
+    actor: Optional[str] = "Bulk import",
+    actor_id: Optional[int] = None,
+    actor_name: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    High-throughput BIDS writer for bulk imports:
+      - Ensures dataset + v<form_version> exist once
+      - Loads vNNN/eCRF/entries.tsv once, upserts all entries in-memory, writes once
+      - Writes per-subject mirrors once per subject (optional, MIRROR_SUBJECT_FOLDER)
+      - Rebuilds participants.tsv once
+      - Emits a single audit summary
+    Returns: {"written": N, "subjects_touched": M}
+    """
+    dataset_path = _dataset_path(study_id, study_name)
+    ver_dir = _version_dir(dataset_path, form_version)
+    _ensure_dir(ver_dir)
+    _ensure_latest_pointer(dataset_path, form_version)
+    _migrate_root_contents_into_version(dataset_path, form_version if form_version else 1)
+
+    # Get versioned schema (fallback to provided)
+    schema_for_version = None
+    if db is not None and hasattr(VersionManager, "get_version_schema"):
+        try:
+            schema_for_version = VersionManager.get_version_schema(db, study_id, form_version)
+        except Exception:
+            schema_for_version = None
+    sd = schema_for_version or _json_clone(study_data if isinstance(study_data, dict) else {})
+
+    # Ensure maps & catalog ONCE for this versioned schema
+    _build_or_load_subject_map(sd)
+    _build_or_load_session_map(sd)
+    catalog = _build_or_load_column_catalog(sd)
+    catalog_cols = [str(it["name"]) for it in catalog]
+
+    # ---------- Load dataset-level eCRF/entries.tsv once ----------
+    pheno_dir = os.path.join(ver_dir, "eCRF")
+    _ensure_dir(pheno_dir)
+    entries_tsv = os.path.join(pheno_dir, "entries.tsv")
+    headers, rows = _read_tsv_rows(entries_tsv)
+    # Build quick index by entry_id
+    rows_by_id: Dict[str, Dict[str, str]] = {}
+    for r in rows:
+        key = str(r.get("entry_id", "")).strip()
+        if key:
+            rows_by_id[key] = r
+
+    # Determine headers union for dataset-level file
+    union_cols = (set(headers) | set(FIXED_ENTRY_HEADERS) | set(catalog_cols)) - LEGACY_DROP
+    ordered_headers = (
+        FIXED_ENTRY_HEADERS +
+        [c for c in catalog_cols if c in union_cols] +
+        [h for h in headers if h not in FIXED_ENTRY_HEADERS and h not in catalog_cols and h in union_cols]
+    )
+
+    # ---------- Per-subject mirror accumulation (lazy read & single write) ----------
+    subject_files: Dict[str, Dict[str, Any]] = {}  # path -> {"headers": List[str], "rows_by_id": Dict[str, Dict[str,str]]}
+
+    def _get_subject_store(participant_id: str, visit_index: Optional[int]) -> Tuple[str, Dict[str, Any]]:
+        ses_folder = _session_folder(sd, visit_index)
+        base_dir = os.path.join(ver_dir, participant_id, ses_folder) if ses_folder else os.path.join(ver_dir, participant_id)
+        target_dir = os.path.join(base_dir, "eCRF")
+        _ensure_dir(target_dir)
+        sub_tsv = os.path.join(target_dir, "entries.tsv")
+        if sub_tsv not in subject_files:
+            h, r = _read_tsv_rows(sub_tsv)
+            subject_files[sub_tsv] = {
+                "headers": h[:],
+                "rows_by_id": {str(x.get("entry_id","")).strip(): x for x in r if str(x.get("entry_id","")).strip()},
+            }
+        return sub_tsv, subject_files[sub_tsv]
+
+    # ---------- Process all entries in memory ----------
+    subjects_touched = set()
+    now_iso = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    for e in entries:
+        try:
+            entry_id_str   = str(e.get("id"))
+            subject_index  = int(e.get("subject_index", 0) or 0)
+            visit_index    = int(e.get("visit_index", 0) or 0)
+
+            group_index_from_subject = _resolve_group_index_from_subject(sd, subject_index)
+            group_index = group_index_from_subject
+            if group_index is None:
+                gi_payload = e.get("group_index", None)
+                group_index = int(gi_payload) if (gi_payload is not None and str(gi_payload).isdigit()) else None
+
+            subj_num       = _resolve_bids_subject_label(sd, subject_index)
+            participant_id = f"sub-{_alnum(subj_num)}"
+            visit_name     = _get_visit_name(sd, visit_index)
+            group_name     = _resolve_group_name(sd, subject_index, group_index)
+
+            status = _compute_entry_status(sd, {
+                "subject_index": subject_index,
+                "visit_index": visit_index,
+                "group_index": group_index,
+                "data": e.get("data"),
+                "skipped_required_flags": e.get("skipped_required_flags"),
+            })
+
+            base_row = {
+                "participant_id": participant_id,
+                "visit_name": visit_name,
+                "group_name": group_name or "",
+                "entry_id": entry_id_str,
+                "form_version": str(form_version),
+                "last_updated": now_iso,
+                "status": status,
+            }
+
+            # Data columns (respect assignments)
+            data_cols: Dict[str, str] = {}
+            assigned_cols_for_subject_row: List[str] = []
+            for item in catalog:
+                sIdx = int(item["sIdx"])
+                fIdx = int(item["fIdx"])
+                col  = str(item["name"])
+                if _is_assigned(sd, sIdx, visit_index, group_index):
+                    val = _value_from_entry({"data": e.get("data")}, sIdx, fIdx, sd)
+                    if val is None:
+                        continue
+                    if isinstance(val, (list, dict)):
+                        data_cols[col] = json.dumps(val, ensure_ascii=False)
+                    elif val is True:
+                        data_cols[col] = "Yes"
+                    elif val is False:
+                        data_cols[col] = "No"
+                    else:
+                        data_cols[col] = str(val)
+                    assigned_cols_for_subject_row.append(col)
+
+            new_row = {**base_row, **data_cols}
+
+            # ---- upsert into dataset-level entries.tsv map ----
+            if entry_id_str in rows_by_id:
+                row = rows_by_id[entry_id_str]
+                for k in FIXED_ENTRY_HEADERS:
+                    row[k] = new_row.get(k, row.get(k))
+                for col in catalog_cols:
+                    if col in new_row:
+                        row[col] = new_row[col]
+                for legacy in LEGACY_DROP:
+                    row.pop(legacy, None)
+            else:
+                for legacy in LEGACY_DROP:
+                    new_row.pop(legacy, None)
+                rows_by_id[entry_id_str] = new_row
+
+            # ---- per-subject mirror (optional) ----
+            if MIRROR_SUBJECT_FOLDER:
+                sub_path, store = _get_subject_store(participant_id, visit_index)
+                s_headers_old = store["headers"]
+                s_rows_map = store["rows_by_id"]
+
+                # Subject headers = FIXED + union(assigned cols across writes), preserve old extras
+                s_headers_desired = FIXED_ENTRY_HEADERS + assigned_cols_for_subject_row
+                s_union = (set(s_headers_old) | set(s_headers_desired)) - LEGACY_DROP
+                # Keep FIXED order, then keep old order for the rest
+                s_headers_new = (
+                    [h for h in FIXED_ENTRY_HEADERS if h in s_union] +
+                    [h for h in s_headers_old if h not in FIXED_ENTRY_HEADERS and h in s_union] +
+                    [h for h in s_headers_desired if h not in s_headers_old and h in s_union]
+                )
+                store["headers"] = s_headers_new
+
+                if entry_id_str in s_rows_map:
+                    r = s_rows_map[entry_id_str]
+                    for k in FIXED_ENTRY_HEADERS:
+                        r[k] = new_row.get(k, r.get(k))
+                    for col in assigned_cols_for_subject_row:
+                        r[col] = new_row.get(col, r.get(col))
+                    # drop anything not in headers
+                    for k in list(r.keys()):
+                        if k not in s_headers_new:
+                            r.pop(k, None)
+                else:
+                    filtered = {k: v for k, v in new_row.items() if k in s_headers_new}
+                    s_rows_map[entry_id_str] = filtered
+
+            subjects_touched.add(participant_id)
+        except Exception as ex:
+            # Keep bulk robust: continue other rows; single-row issues won’t abort all
+            logger.warning("bulk_write_entries_to_bids: skip one row due to %s", ex)
+            continue
+
+    # ---------- Write dataset-level entries.tsv once ----------
+    out_rows = list(rows_by_id.values())
+    _write_tsv_rows(entries_tsv, ordered_headers, out_rows)
+    _write_csv_mirror_from_tsv(entries_tsv)
+
+    # ---------- Write per-subject files once ----------
+    if MIRROR_SUBJECT_FOLDER:
+        for sub_tsv, store in subject_files.items():
+            s_rows = list(store["rows_by_id"].values())
+            _write_tsv_rows(sub_tsv, store["headers"], s_rows)
+            _write_csv_mirror_from_tsv(sub_tsv)
+
+    # ---------- Rebuild participants.tsv ONCE for this version ----------
+    _rebuild_participants_tsv_for_schema(dataset_path, sd, version=form_version)
+
+    # One save & one audit summary
+    _datalad_save(dataset_path, msg=f"Bulk upsert {len(entries)} entries (v={form_version:03d})")
+    try:
+        audit_change_both(
+            db=db,
+            study_id=study_id,
+            study_name=study_name,
+            action="bulk_entry_upsert",
+            actor_id=actor_id,
+            actor_name=actor_name or actor,
+            detail={
+                "count": len(entries),
+                "version": form_version,
+                "subjects_touched": sorted(subjects_touched),
+            },
+        )
+    except Exception:
+        pass
+
+    return {"written": len(entries), "subjects_touched": len(subjects_touched)}
+
+
 # -------------------- File staging (version-aware) --------------------
 
 def _session_folder(study_data: dict, visit_index: Optional[int]) -> Optional[str]:
