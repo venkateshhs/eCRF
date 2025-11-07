@@ -108,14 +108,11 @@
               title="What do the roles mean?"
               @click="showRoleInfo = true"
             >
-              <!-- FIX: render font-awesome classes on an <i>, not as a dynamic component -->
               <i :class="icons.info" class="info-icon" aria-hidden="true"></i>
             </button>
           </div>
 
-          <!-- Tab-level scroll container -->
           <div class="section-scroll">
-            <!-- Create User -->
             <div class="section-box">
               <h3 class="sub-title">Create New User</h3>
               <form @submit.prevent="handleCreateUser" class="form grid-2">
@@ -159,7 +156,6 @@
               </form>
             </div>
 
-            <!-- Users Table -->
             <div class="section-box">
               <h3 class="sub-title">Existing Users</h3>
               <div class="table-wrap">
@@ -203,7 +199,6 @@
               </div>
             </div>
 
-            <!-- Role change dialog -->
             <div v-if="showRoleDialog" class="dialog">
               <div class="dialog-box">
                 <p>
@@ -217,7 +212,6 @@
               </div>
             </div>
 
-            <!-- Role info dialog -->
             <div v-if="showRoleInfo" class="dialog">
               <div class="dialog-box">
                 <h3 class="dialog-title">User Roles & Permissions</h3>
@@ -253,7 +247,6 @@
           <h2 class="section-title">Study Access Management</h2>
 
           <div class="section-scroll">
-            <!-- Study selector -->
             <div class="section-box">
               <h3 class="sub-title">Select Study</h3>
               <div class="form grid-2">
@@ -271,7 +264,6 @@
               <p v-if="studyAccessErr" class="msg err">{{ studyAccessErr }}</p>
             </div>
 
-            <!-- Grant / Update Access -->
             <div v-if="selectedStudyId" class="section-box">
               <h3 class="sub-title">
                 Grant or Update Access — <span class="emph">{{ selectedStudyName }}</span>
@@ -329,7 +321,6 @@
               </form>
             </div>
 
-            <!-- Current Access Table -->
             <div v-if="selectedStudyId" class="section-box">
               <h3 class="sub-title">Current Access</h3>
               <div class="table-wrap">
@@ -388,7 +379,6 @@
               </div>
             </div>
 
-            <!-- Revoke dialog -->
             <div v-if="showRevokeDialog" class="dialog">
               <div class="dialog-box">
                 <h3 class="dialog-title">Revoke Study Access</h3>
@@ -457,7 +447,7 @@ export default {
       studies: [],
       selectedStudyId: "",
       studyAccess: [],
-      allUsers: [],        // all users from API
+      allUsers: [],
       selectedUserId: "",
       permView: true,
       permAdd: true,
@@ -465,7 +455,7 @@ export default {
       studyAccessMsg: null,
       studyAccessErr: null,
 
-      // Revoke dialog (custom)
+      // Revoke dialog
       showRevokeDialog: false,
       revokeTargetId: null,
       revokeTargetDisplay: "",
@@ -500,11 +490,9 @@ export default {
       return this.selectedStudy ? this.selectedStudy.study_name : "this study";
     },
     selectedStudyOwnerId() {
-      // owners shouldn't be targettable for revoke/grant
       return this.selectedStudy ? Number(this.selectedStudy.created_by || 0) : 0;
     },
     grantableUsers() {
-      // hide admins and (for safety) de-dupe list
       const seen = new Set();
       const list = (this.allUsers || []).filter((u) => {
         const isAdmin = (u?.profile?.role || "") === "Administrator";
@@ -514,7 +502,6 @@ export default {
         seen.add(key);
         return true;
       });
-      // optional: also hide owner from dropdown (they always have full access)
       return list.filter((u) => u.id !== this.selectedStudyOwnerId);
     },
   },
@@ -524,7 +511,6 @@ export default {
       await this.$store.dispatch("fetchUserData");
       this.user = this.$store.getters.getUser;
     }
-    // if admin, load all users + all studies
     if (this.isAdmin) {
       await Promise.all([this.fetchUsers(), this.fetchAllUsers(), this.fetchStudies()]);
     }
@@ -534,7 +520,6 @@ export default {
       return { Authorization: `Bearer ${this.$store.state.token}` };
     },
 
-    /* Change Password */
     togglePasswordVisibility() {
       this.showPassword = !this.showPassword;
     },
@@ -566,7 +551,6 @@ export default {
       }
     },
 
-    /* Admin: Users */
     async fetchUsers() {
       this.userMgmtError = null;
       try {
@@ -625,7 +609,6 @@ export default {
       }
     },
 
-    /* Role dialog */
     onInitiateRoleChange(user, newRole) {
       this.pendingUser = user;
       this.pendingRole = newRole;
@@ -651,7 +634,6 @@ export default {
       this.pendingUser = this.pendingRole = null;
     },
 
-    /* Admin: Study Access */
     async fetchStudies() {
       try {
         const resp = await axios.get("/forms/studies", { headers: this.authHeader() });
@@ -691,7 +673,6 @@ export default {
         this.studyAccessErr = "Owner already has full access.";
         return;
       }
-      // prevent granting to admins (UI filtered already)
       const sel = this.allUsers.find((u) => u.id === uid);
       if ((sel?.profile?.role || "") === "Administrator") {
         this.studyAccessErr = "Administrators already have full access; no grant is needed.";
@@ -762,41 +743,64 @@ export default {
   box-sizing: border-box;
 }
 
-/* Vertical layout */
 .layout {
   display: grid;
-  grid-template-columns: 220px 1fr;
+  grid-template-columns: 1fr;         /* single column */
+  grid-template-rows: auto 1fr;       /* tabbar row + content row */
   gap: 16px;
 }
 
-/* Sidebar */
+/* Sidebar becomes a horizontal tabbar */
 .sidebar {
+  grid-column: 1 / -1;
+  grid-row: 1;
   background: #ffffff;
   border: 1px solid #e5e7eb;
   border-radius: 10px;
-  padding: 10px;
-  display: grid;
-  gap: 8px;
-  height: fit-content;
+  padding: 8px;
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 6px;
   position: sticky;
   top: 16px;
+  z-index: 5;
+  overflow-x: auto;           /* allow horizontal scroll if many tabs */
+  scrollbar-width: thin;
+  width: 100%;
 }
+
+/* Tab button: horizontal pill */
 .tab-btn {
-  padding: 10px 12px;
-  border-radius: 8px;
-  border: 1px solid #e5e7eb;
+  padding: 10px 14px;
+  border-radius: 999px;
+  border: 1px solid transparent;
   background: #f9fafb;
   cursor: pointer;
-  font-weight: 500;
-  text-align: left;
+  font-weight: 600;
+  text-align: center;
+  white-space: nowrap;
+  transition: background 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+  flex: 1 1 0;
+  max-width: none;
+  text-align: center;
+}
+.tab-btn:hover {
+  background: #f3f4f6;
 }
 .tab-btn.active {
   background: #eef2ff;
   border-color: #c7d2fe;
+  box-shadow: 0 0 0 3px rgba(99,102,241,0.15);
 }
 
 /* Content area */
-.content { display: grid; gap: 14px; }
+.content {
+  grid-column: 1 / -1;
+  grid-row: 2;
+  display: grid;
+  gap: 14px;
+}
 .section { display: grid; gap: 14px; }
 
 /* ONLY container headings are bold */
@@ -804,13 +808,13 @@ export default {
   text-align: center;
   margin: 0 0 6px 0;
   font-size: 1.4rem;
-  font-weight: 700; /* keep bold here */
+  font-weight: 700;
   color: #111827;
 }
 .sub-title {
   margin: 0 0 8px 0;
   font-size: 1.05rem;
-  font-weight: 500; /* not bold */
+  font-weight: 500;
   color: #1f2937;
 }
 .emph { font-weight: 600; }
@@ -834,15 +838,8 @@ export default {
   place-items: center;
   padding: 0;
 }
-.icon-btn:hover .info-icon {
-  color: #4338ca;
-}
-
-.info-icon {
-  font-size: 14px; /* works better for FA */
-  color: #4b5563;
-  line-height: 1;
-}
+.icon-btn:hover .info-icon { color: #4338ca; }
+.info-icon { font-size: 14px; color: #4b5563; line-height: 1; }
 
 /* Tab-level scroll for large tabs */
 .section-scroll {
@@ -913,7 +910,7 @@ export default {
 .form-field label {
   font-size: 0.92rem;
   color: #374151;
-  font-weight: 500; /* not bold */
+  font-weight: 500;
 }
 .form-field input,
 .form-field select {
@@ -940,12 +937,7 @@ export default {
   gap: 18px;
   flex-wrap: wrap;
 }
-.chk {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  user-select: none;
-}
+.chk { display: inline-flex; align-items: center; gap: 8px; user-select: none; }
 .chk input { transform: translateY(1px); }
 
 /* Input row (password show/hide) */
@@ -966,23 +958,12 @@ export default {
   font-size: 0.95rem;
   white-space: nowrap;
 }
-.btn.primary {
-  background: #4f46e5;
-  color: #fff;
-}
+.btn.primary { background: #4f46e5; color: #fff; }
 .btn.primary:hover { background: #4338ca; }
-.btn.ghost {
-  background: #f3f4f6;
-  color: #111827;
-  border-color: #e5e7eb;
-}
+.btn.ghost { background: #f3f4f6; color: #111827; border-color: #e5e7eb; }
 .btn.ghost:hover { background: #e5e7eb; }
 
-.form-actions {
-  display: flex;
-  gap: 10px;
-  justify-content: center;
-}
+.form-actions { display: flex; gap: 10px; justify-content: center; }
 
 /* Messages */
 .msg { text-align: center; margin-top: 4px; font-size: 0.95rem; }
@@ -994,7 +975,7 @@ export default {
 .table-wrap {
   max-height: 56vh;
   overflow-y: auto;
-  overflow-x: hidden; /* prevent horizontal scroll */
+  overflow-x: hidden;
   border-radius: 8px;
   border: 1px solid #e5e7eb;
 }
@@ -1002,29 +983,22 @@ export default {
   width: 100%;
   border-collapse: collapse;
   background: #fff;
-  table-layout: fixed; /* wrapping behavior */
+  table-layout: fixed;
 }
 .table th, .table td {
   padding: 10px 12px;
   border-bottom: 1px solid #f1f5f9;
   text-align: left;
   vertical-align: top;
-  font-weight: 500; /* not bold looking */
+  font-weight: 500;
   white-space: normal;
   word-break: break-word;
   overflow-wrap: anywhere;
 }
-.table thead th {
-  background: #f9fafb;
-  color: #374151;
-}
+.table thead th { background: #f9fafb; color: #374151; }
 
 /* Wrap helper */
-.wrap {
-  white-space: normal !important;
-  word-break: break-word !important;
-  overflow-wrap: anywhere !important;
-}
+.wrap { white-space: normal !important; word-break: break-word !important; overflow-wrap: anywhere !important; }
 
 /* Role cell + select */
 .role-td { width: 180px; vertical-align: middle; }
@@ -1036,9 +1010,7 @@ export default {
   border: 1px solid #d1d5db; border-radius: 8px; background: #fff;
   font-size: 0.95rem; color: #111827; box-sizing: border-box;
 }
-.role-select:focus {
-  border-color: #6366f1; box-shadow: 0 0 0 3px rgba(99,102,241,0.15); outline: none;
-}
+.role-select:focus { border-color: #6366f1; box-shadow: 0 0 0 3px rgba(99,102,241,0.15); outline: none; }
 .select-caret { position: absolute; right: 10px; pointer-events: none; font-size: 0.9rem; color: #6b7280; }
 
 /* Permission chips */
@@ -1052,11 +1024,7 @@ export default {
   font-size: 0.85rem;
   color: #6b7280;
 }
-.perm-chip.on {
-  border-color: #c7d2fe;
-  background: #eef2ff;
-  color: #3730a3;
-}
+.perm-chip.on { border-color: #c7d2fe; background: #eef2ff; color: #3730a3; }
 .owner-pill {
   margin-left: 8px;
   padding: 0 8px;
@@ -1091,13 +1059,18 @@ export default {
 .role-list { margin: 0; padding-left: 18px; }
 .role-list li { margin: 6px 0; }
 
-/* Responsive */
+/* Responsive (tabs already horizontal; just ensure spacing) */
 @media (max-width: 980px) {
-  .layout { grid-template-columns: 1fr; }
-  .sidebar { position: static; display: flex; gap: 8px; }
-  .tab-btn { flex: 1; text-align: center; }
-  .grid-2 { grid-template-columns: 1fr; }
+  .sidebar {
+    border-radius: 10px;
+    gap: 6px;
+    top: 8px;
+  }
+  .tab-btn { padding: 8px 12px; font-size: 0.95rem; }
   .kv { grid-template-columns: 140px 1fr; }
   .table-wrap { max-height: 50vh; }
+  @media (max-width: 520px) {
+  .tab-btn { flex: 1 0 160px; } /* equal-ish width, allow scroll */
+}
 }
 </style>
