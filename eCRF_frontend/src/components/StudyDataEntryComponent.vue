@@ -1503,7 +1503,7 @@ export default {
         if (mode === "slider") {
           const min = cons.percent ? 1 : (Number.isFinite(+cons.min) ? +cons.min : 1);
           const max = cons.percent ? 100 : (Number.isFinite(+cons.max) ? +cons.max : (cons.percent ? 100 : 5));
-          const step = Number.isFinite(+cons.step) && +c.step > 0 ? +cons.step : 1;
+          const step = Number.isFinite(+cons.step) && +cons.step > 0 ? +cons.step : 1;
           if (n < min || n > max) { this.setError(mIdx, fIdx, `${label} must be between ${min} and ${max}.`); return false; }
           if (step >= 1) {
             const k = (n - min) / step;
