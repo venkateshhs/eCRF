@@ -79,7 +79,14 @@ const routes = [
   name: 'ImportStudyTemplate',
   component: () => import('@/components/ImportStudyTemplate.vue'),
   meta: { requiresAuth: true }
+},
+{
+  path: '/dashboard/merge-study/:id',
+  name: 'MergeStudy',
+  component: () => import('@/components/MergeStudy.vue'),
+  props: true
 }
+
 
 //  {
 //    path: "/studies/:id",
