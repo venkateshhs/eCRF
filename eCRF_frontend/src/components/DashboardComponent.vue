@@ -3,7 +3,7 @@
     <!-- Header -->
     <header class="dashboard-header">
       <div class="logo-container">
-        <img src="../assets/logo.png" alt="Logo" class="logo" />
+        <img src="../assets/Logo_CaseE.png" alt="Logo" class="logo" />
       </div>
 
       <div class="user-actions">
