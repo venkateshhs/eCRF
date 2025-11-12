@@ -95,10 +95,7 @@
                         <span class="label">Section</span>
                         <strong class="value">{{ sec }}</strong>
                         <span class="counts" v-if="countsBySection[sid+'|'+vn+'|'+sec]">
-                          <span
-                            class="badge conflict"
-                            v-if="countsBySection[sid+'|'+vn+'|'+sec].conflict"
-                          >
+                          <span class="badge conflict" v-if="countsBySection[sid+'|'+vn+'|'+sec].conflict">
                             {{ countsBySection[sid+'|'+vn+'|'+sec].conflict }}
                           </span>
                         </span>
@@ -124,10 +121,10 @@
           </div>
 
           <div class="compare-actions">
-            <button class="btn-option" :disabled="!sectionRows.length" @click.stop.prevent="keepAllExisting">Keep existing</button>
-            <button class="btn-option" :disabled="!sectionRows.length" @click.stop.prevent="acceptAllIncoming">Accept all incoming</button>
-            <button class="btn-option" :disabled="!sectionRows.length" @click.stop.prevent="acceptIncomingWhereEmpty">Accept where empty</button>
-            <button class="btn-primary" :disabled="!canCommitSection" @click.stop.prevent="commitCurrentSelection">
+            <button class="btn-option" :disabled="!sectionRows.length" @click="keepAllExisting">Keep existing</button>
+            <button class="btn-option" :disabled="!sectionRows.length" @click="acceptAllIncoming">Accept all incoming</button>
+            <button class="btn-option" :disabled="!sectionRows.length" @click="acceptIncomingWhereEmpty">Accept where empty</button>
+            <button class="btn-primary" :disabled="!canCommitSection" @click="commitCurrentSelection">
               {{ isCommitting ? 'Merging…' : 'Commit Section' }}
             </button>
             <button class="btn-minimal" @click="toggleFullscreen" :title="isFullscreen ? 'Exit full size' : 'Enlarge'">
@@ -225,7 +222,7 @@
       </section>
     </div>
 
-    <!-- Sticky footer: outside diff container -->
+    <!-- Sticky footer -->
     <div class="global-commit" v-if="hasIncoming">
       <div class="gc-left">
         <div class="sel-path">
@@ -244,10 +241,10 @@
         </div>
       </div>
       <div class="gc-right">
-        <button class="btn-primary" :disabled="!canCommitSection" @click.stop.prevent="commitCurrentSelection">
+        <button class="btn-primary" :disabled="!canCommitSection" @click="commitCurrentSelection">
           {{ isCommitting ? 'Merging…' : 'Merge & Commit' }}
         </button>
-        <button class="btn-option" :disabled="!sectionRows.length || isCommitting" @click.stop.prevent="resetCurrentDecisions">Reset</button>
+        <button class="btn-option" :disabled="!sectionRows.length || isCommitting" @click="resetCurrentDecisions">Reset</button>
       </div>
     </div>
 
@@ -276,16 +273,21 @@ export default {
       visits: [],
       groups: [],
       subjectToGroupIdx: [],
-      modelByTitle: new Map(),
-      canonMaps: new Map(),
 
+      // template index
+      sectionIndex: new Map(),       // title -> { displayByCanon, fieldNameByCanon }
+      sectionTitleByCanon: new Map(),// canon(sectionTitle) -> sectionTitle (exact template title)
+
+      // server entries
       entries: [],
       entriesIndex: new Map(),
 
-      incoming: {},        // sid -> visitName -> { sections: { [sec]: { [rawField]: val } }, groupName }
+      // incoming parsed file
+      incoming: {},        // sid -> visitName -> { sections: { [secTitle]: { [rawField]: val } }, groupName }
       decisions: {},       // key -> 'incoming' | 'existing' | 'none'
       showConflictsOnly: false,
 
+      // selection in UI
       sel: { subjectId: "", visitName: "", sectionName: "" },
 
       parseInfo: { ok: false, message: "" },
@@ -299,8 +301,6 @@ export default {
   computed: {
     hasIncoming() { return Object.keys(this.incoming || {}).length > 0; },
     treeSubjects() { return Object.keys(this.incoming || {}).sort(); },
-
-    // we allow commit whenever a section is selected (UX: never blocked)
     canCommitSection() { return this.sectionRows.length > 0 && !this.isCommitting; },
 
     countsBySubject() {
@@ -342,21 +342,20 @@ export default {
       const { sIdx, vIdx, gIdx } = this.resolveSVG(sid, vn);
       if (sIdx < 0 || vIdx < 0) return [];
 
-      const exAll = this.entryToDictNormalized(this.entriesIndex.get(`${sIdx}|${vIdx}|${gIdx}`));
-      const inAll = this.incomingNormalized();
+      const existingDict = this.entryToDictNormalized(this.entriesIndex.get(`${sIdx}|${vIdx}|${gIdx}`));
+      const incomingDict = this.incomingNormalized();
 
-      const exSec = (exAll[sec] || {});
-      const inSec = (inAll[sid]?.[vn]?.sections?.[sec] || {});
+      const exSec = (existingDict[sec] || {});
+      const inSec = (incomingDict[sid]?.[vn]?.sections?.[sec] || {});
 
-      const fieldCanons = Array.from(new Set([...Object.keys(exSec), ...Object.keys(inSec)])).sort();
+      const allCanons = Array.from(new Set([...Object.keys(exSec), ...Object.keys(inSec)])).sort();
 
       const rows = [];
-      for (const canon of fieldCanons) {
-        const { display } = this.lookupCanon(sec, canon) || { display: this.prettyFromCanon(canon) };
+      for (const canon of allCanons) {
+        const display = this.displayFor(sec, canon);
         const existing = exSec[canon];
         const incoming = inSec[canon];
 
-        // hide “both empty”
         if (!this.hasValue(existing) && !this.hasValue(incoming)) continue;
 
         const rawState = this.decideState(existing, incoming);
@@ -378,9 +377,7 @@ export default {
         });
       }
 
-      // Auto-decide non-conflicts to keep buttons enabled and UX simple
       this.$nextTick(() => this.ensureAutoDecisions(rows));
-
       return this.showConflictsOnly ? rows.filter(r => r.state === "conflict") : rows;
     },
 
@@ -399,9 +396,18 @@ export default {
     await this.loadStudy();
     await this.loadEntries();
     this.indexEntries();
-    this.buildTemplateMaps();
+    this.buildSectionIndex();
   },
   methods: {
+      normalizeCheckbox(val) {
+      if (val === true) return true;
+      if (val === false) return false;
+      if (val == null || String(val).trim() === '') return ''; // preserve empty
+      const s = String(val).trim().toLowerCase();
+      if (['true','yes','1','y','on','checked'].includes(s)) return true;
+      if (['false','no','0','n','off','unchecked'].includes(s)) return false;
+      return '';
+    },
     // ---------- Navigation ----------
     goBack() { this.$router.push({ name: "Dashboard", query: { openStudies: "true" } }); },
     selectSubject(sid) {
@@ -441,8 +447,9 @@ export default {
           const gi = (this.groups || []).findIndex(g => (g.name || "").toLowerCase().trim() === gn);
           return gi >= 0 ? gi : 0;
         });
+        console.log('[Merge] Study loaded', { subjects: this.subjects.length, visits: this.visits.length, groups: this.groups.length });
       } catch (e) {
-        console.error(e);
+        console.error('[Merge] Failed to load study:', e);
         this.showDialogMessage("Failed to load study.");
       }
     },
@@ -452,8 +459,9 @@ export default {
           headers: { Authorization: `Bearer ${this.$store.state.token}` }
         });
         this.entries = Array.isArray(data) ? data : (data?.entries || []);
+        console.log('[Merge] Loaded entries', this.entries.length);
       } catch (e) {
-        console.error(e);
+        console.error('[Merge] Failed to load entries:', e);
         this.entries = [];
       }
     },
@@ -467,63 +475,66 @@ export default {
       this.entriesIndex = m;
     },
 
-    // ---------- Template → canonical maps ----------
-    buildTemplateMaps() {
-      const models = this.study?.content?.study_data?.selectedModels || [];
-      this.modelByTitle = new Map();
-      this.canonMaps = new Map();
+    // ---------- Template index & section title mapping ----------
+    buildSectionIndex() {
+      this.sectionIndex = new Map();
+      this.sectionTitleByCanon = new Map();
 
-      for (const sec of models) {
+      const models = this.study?.content?.study_data?.selectedModels || [];
+      models.forEach((sec) => {
         const title = sec?.title || "";
-        if (!title) continue;
-        this.modelByTitle.set(title, sec);
+        if (!title) return;
 
         const displayByCanon = {};
-        const canonByAny = {};
+        const fieldNameByCanon = {};
+        const fieldTypeByCanon = {};
+
+        // section title canonical map (for CSV section → template section)
+        this.sectionTitleByCanon.set(this.canonKey(title), title);
 
         (sec.fields || []).forEach((f, idx) => {
           const label = f?.label || f?.title || f?.name || `Field ${idx + 1}`;
-          const name  = f?.name  || label;
-
-          const canon = this.canonKey(name);
-          displayByCanon[canon] = label;
-
-          const variants = new Set([
+          const name  = f?.name  || label; // key used by data-entry save path
+          const type  = (f?.type || '').toLowerCase();
+          // candidates that should map to this field (for matching CSV + existing)
+          const candidates = new Set([
             name,
             label,
             f?.title || "",
             this.humanizeCamel(name),
             this.humanizeCamel(label),
-            name.replace(/_assay_.*/i, "").replace(/_\d+$/,""),
-            label.replace(/_assay_.*/i, "").replace(/_\d+$/,"")
           ].filter(Boolean));
 
-          for (const v of variants) {
-            canonByAny[this.canonKey(v)] = canon;
+          for (const c of candidates) {
+          const canon = this.canonKey(c);
+          fieldNameByCanon[canon] = name;
+          fieldTypeByCanon[canon] = type;
           }
+          // UI display map: show label for the main canon
+          displayByCanon[this.canonKey(name)] = label;
         });
 
-        this.canonMaps.set(title, { displayByCanon, canonByAny });
-      }
+        this.sectionIndex.set(title, { displayByCanon, fieldNameByCanon });
+      });
+
+      console.log('[Merge] Section index built for', this.sectionIndex.size, 'sections');
     },
-    lookupCanon(sectionTitle, canon) {
-      const m = this.canonMaps.get(sectionTitle);
-      if (!m) return null;
-      const display = m.displayByCanon?.[canon];
-      return display ? { display } : null;
+
+    mapSectionTitle(raw) {
+      const mapped = this.sectionTitleByCanon.get(this.canonKey(raw));
+      return mapped || raw;
     },
-    canonFromAny(sectionTitle, rawKey) {
-      const m = this.canonMaps.get(sectionTitle);
-      if (!m) return this.canonKey(rawKey);
-      return m.canonByAny[this.canonKey(rawKey)] || this.canonKey(rawKey);
+
+    displayFor(sectionTitle, canon) {
+      const m = this.sectionIndex.get(sectionTitle);
+      return (m?.displayByCanon?.[canon]) || this.prettyFromCanon(canon);
     },
+
+    // ---------- Normalization helpers ----------
     canonKey(s) {
-      if (s == null) return "";
-      return String(s)
+      return String(s ?? "")
         .toLowerCase()
-        .replace(/_assay_.*/g, "")
-        .replace(/[\W_]+/g, "")
-        .replace(/\d{6,}/g, "");
+        .replace(/[\W_]+/g, ''); // strip non-alphanumerics
     },
     humanizeCamel(s) {
       if (!s) return "";
@@ -534,18 +545,26 @@ export default {
       return w.replace(/\b\w/g, c => c.toUpperCase());
     },
     prettyFromCanon(canon) { return this.humanizeCamel(canon); },
+    hasValue(v) { return v !== null && v !== undefined && String(v).trim() !== ""; },
+    displayVal(v) { return this.hasValue(v) ? String(v) : ""; },
 
-    // ---------- Normalize dicts ----------
-    normalizeSectionDict(sectionTitle, secDictRaw) {
+    // Normalize a section dict (incoming or existing) to: { canon -> value }, filtering unknown fields
+    normalizeSectionDict(sectionTitle, rawSectionDict) {
       const out = {};
-      if (!secDictRaw || typeof secDictRaw !== "object") return out;
-      for (const k of Object.keys(secDictRaw)) {
-        const canon = this.canonFromAny(sectionTitle, k);
-        const val = secDictRaw[k];
-        if (!(canon in out) || this.hasValue(val)) out[canon] = val;
+      if (!rawSectionDict || typeof rawSectionDict !== 'object') return out;
+
+      const idx = this.sectionIndex.get(sectionTitle);
+      for (const rawKey of Object.keys(rawSectionDict)) {
+        const c = this.canonKey(rawKey);
+        const val = rawSectionDict[rawKey];
+        if (idx?.fieldNameByCanon?.[c]) {
+          if (!(c in out) || this.hasValue(val)) out[c] = val;
+        }
       }
       return out;
     },
+
+    // existing entry (server) -> { sectionTitle -> { canon -> value } }
     entryToDictNormalized(entry) {
       const models = this.study?.content?.study_data?.selectedModels || [];
       const out = {};
@@ -556,27 +575,30 @@ export default {
 
       if (entry.data && !Array.isArray(entry.data) && typeof entry.data === "object") {
         for (const sec of models) {
-          const secName = sec.title;
-          const secObj = entry.data?.[secName] || {};
-          out[secName] = this.normalizeSectionDict(secName, secObj);
+          const secTitle = sec.title;
+          const secObj = entry.data?.[secTitle] || {};
+          out[secTitle] = this.normalizeSectionDict(secTitle, secObj);
         }
         return out;
       }
 
+      // array-shape fallback (older entries)
       const arr = Array.isArray(entry.data) ? entry.data : [];
       models.forEach((sec, sIdx) => {
-        const secName = sec.title;
+        const secTitle = sec.title;
         const row = Array.isArray(arr[sIdx]) ? arr[sIdx] : [];
         const dict = {};
         (sec.fields || []).forEach((f, fIdx) => {
           const rawKey = f?.name || f?.label || f?.title || `Field ${fIdx + 1}`;
-          const canon = this.canonFromAny(secName, rawKey);
-          dict[canon] = row[fIdx] != null ? row[fIdx] : "";
+          const c = this.canonKey(rawKey);
+          dict[c] = row[fIdx] != null ? row[fIdx] : "";
         });
-        out[secName] = dict;
+        out[secTitle] = dict;
       });
       return out;
     },
+
+    // incoming (parsed file) -> { subjectId -> visitName -> { sections: { sectionTitle -> { canon -> value } }, groupName } }
     incomingNormalized() {
       const out = {};
       for (const sid of Object.keys(this.incoming || {})) {
@@ -585,8 +607,9 @@ export default {
           const row = this.incoming[sid][vn];
           const secOut = {};
           const secMap = row?.sections || {};
-          for (const secName of Object.keys(secMap)) {
-            secOut[secName] = this.normalizeSectionDict(secName, secMap[secName]);
+          for (const rawSecName of Object.keys(secMap)) {
+            const secTitle = this.mapSectionTitle(rawSecName);
+            secOut[secTitle] = this.normalizeSectionDict(secTitle, secMap[rawSecName]);
           }
           out[sid][vn] = { sections: secOut, groupName: row.groupName || "" };
         }
@@ -654,11 +677,14 @@ export default {
       let currentSection = "";
       for (let col = 0; col < H1.length; col++) {
         if ([cSubject,cVisit,cGroup].includes(col)) continue;
-        const sec = (H0[col] || "").trim();
-        if (sec) currentSection = sec;
+        const secRaw = (H0[col] || "").trim();
+        if (secRaw) currentSection = secRaw;
         const field = (H1[col] || "").trim();
         if (!currentSection || !field) continue;
-        colMap.push({ col, section: currentSection, field });
+
+        // Map the section title to the template's title now
+        const mappedSection = this.mapSectionTitle(currentSection);
+        colMap.push({ col, section: mappedSection, field });
       }
       if (!colMap.length) {
         this.parseInfo = { ok: false, message: "No (section, field) columns found." };
@@ -701,6 +727,7 @@ export default {
       const sec0 = (sid0 && vn0) ? Object.keys(incoming[sid0][vn0].sections || {})[0] : "";
       this.sel = { subjectId: sid0 || "", visitName: vn0 || "", sectionName: sec0 || "" };
       this.decisions = {};
+      console.log('[Merge] Parsed file; initial selection', this.sel);
     },
 
     // ---------- Tree helpers ----------
@@ -757,7 +784,7 @@ export default {
       const hv = (v) => v !== null && v !== undefined && String(v).trim() !== "";
       if (!hv(existing) && !hv(incoming)) return "same";
       if (hv(existing) && hv(incoming)) return this.valuesEqual(existing, incoming) ? "same" : "conflict";
-      return hv(incoming) ? "add" : "same"; // existing-only non-empty → "same"
+      return hv(incoming) ? "add" : "same";
     },
     valuesEqual(a, b) {
       const hv = (v) => v !== null && v !== undefined && String(v).trim() !== "";
@@ -768,8 +795,7 @@ export default {
       if (!Number.isNaN(na) && !Number.isNaN(nb)) return na === nb;
       return aa === bb;
     },
-    hasValue(v) { return v !== null && v !== undefined && String(v).trim() !== ""; },
-    displayVal(v) { return this.hasValue(v) ? String(v) : ""; }, /* empty, no em-dash */
+
     rowClass(row) {
       return {
         conflict: row.state === "conflict",
@@ -781,7 +807,7 @@ export default {
     // ---------- Decisions ----------
     ensureAutoDecisions(rows = this.sectionRows) {
       for (const r of rows) {
-        if (this.decisions[r.key]) continue; // don't override manual choice
+        if (this.decisions[r.key]) continue;
         const hasEx = this.hasValue(r.existing);
         const hasIn = this.hasValue(r.incoming);
         if (hasIn && !hasEx) this.setDecision(r.key, "incoming");
@@ -789,7 +815,6 @@ export default {
       }
     },
     setDecision(key, choice) {
-      // Vue 3: no $set — assign a new object to ensure reactivity as a fallback
       const next = { ...this.decisions, [key]: choice };
       this.decisions = next;
     },
@@ -820,31 +845,52 @@ export default {
     },
 
     // ---------- Commit ----------
+    normalizeCell(v) { return v == null ? "" : String(v).trim(); },
+
+    // Build skipped flags (m x n) from template
     makeSkipSkeleton() {
       const models = this.study?.content?.study_data?.selectedModels || [];
       return models.map(sec => (sec.fields || []).map(() => false));
     },
-    denormalizeForSave(normDictBySection) {
+
+    // Convert normalized dict (canon -> value) back to server dict using template field.name keys
+    denormalizeForSave(normBySection) {
       const out = {};
-      for (const secName of Object.keys(normDictBySection || {})) {
-        const sec = normDictBySection[secName] || {};
-        const m = this.canonMaps.get(secName);
-        const row = {};
-        for (const canon of Object.keys(sec)) {
-          const label = m?.displayByCanon?.[canon] || this.prettyFromCanon(canon);
-          row[label] = sec[canon];
+      for (const rawSecName of Object.keys(normBySection || {})) {
+        const secTitle = this.mapSectionTitle(rawSecName);
+        const secDictCanon = normBySection[rawSecName] || {};
+        const map = this.sectionIndex.get(secTitle);
+        if (!map) {
+          // Unknown section to template: skip entirely
+          continue;
         }
-        out[secName] = row;
+        const row = {};
+        for (const canon of Object.keys(secDictCanon)) {
+          const fieldKey = map.fieldNameByCanon?.[canon]; // prefer template field.name
+          if (!fieldKey) continue;
+          const fType = map.fieldTypeByCanon?.[canon];
+          const val = secDictCanon[canon];
+          if (fType === 'checkbox') val = this.normalizeCheckbox(val);
+          row[fieldKey] = val;
+        }
+        if (Object.keys(row).length > 0) {
+          out[secTitle] = row; // only include non-empty sections
+        }
       }
       return out;
     },
+
     async commitCurrentSelection() {
       const sid = this.sel.subjectId, vn = this.sel.visitName, sec = this.sel.sectionName;
-      if (!sid || !vn || !sec || !this.sectionRows.length) return;
+      if (!sid || !vn || !sec || !this.sectionRows.length) {
+        console.log('[Merge] Commit skipped: selection incomplete or no rows', { sid, vn, sec, rows: this.sectionRows.length });
+        return;
+      }
 
       const { sIdx, vIdx, gIdx } = this.resolveSVG(sid, vn);
       if (sIdx < 0 || vIdx < 0) {
         this.showDialogMessage("Selected Subject/Visit not found in study.");
+        console.warn('[Merge] Subject/Visit not found', { sid, vn, sIdx, vIdx });
         return;
       }
 
@@ -852,20 +898,19 @@ export default {
       const baseDict = this.entryToDictNormalized(existing);
       baseDict[sec] ||= {};
 
-      // apply decisions (default: keep existing for conflicts)
+      // apply decisions
       for (const r of this.sectionRows) {
         const decision = this.decisions[r.key];
         if (decision === "incoming") baseDict[sec][r.canon] = r.incoming;
         else if (decision === "existing") baseDict[sec][r.canon] = this.hasValue(r.existing) ? r.existing : "";
         else if (decision === "none") baseDict[sec][r.canon] = "";
         else {
-          // no explicit choice: resolve by heuristic
-          if (r.state === "add") baseDict[sec][r.canon] = r.incoming;           // incoming only
-          else if (r.state === "conflict") baseDict[sec][r.canon] = r.existing; // safe default
-          // 'same' → leave as is
+          if (r.state === "add") baseDict[sec][r.canon] = r.incoming;
+          else if (r.state === "conflict") baseDict[sec][r.canon] = r.existing;
         }
       }
 
+      // to server shape (section title -> field.name -> value), skipping unknown/empty sections
       const payload = {
         study_id: this.studyId,
         subject_index: sIdx,
@@ -875,14 +920,19 @@ export default {
         skipped_required_flags: this.makeSkipSkeleton(),
       };
 
+      console.log('[Merge] COMMIT payload', JSON.parse(JSON.stringify(payload)));
+
       this.isCommitting = true;
       try {
         const headers = { headers: { Authorization: `Bearer ${this.$store.state.token}` } };
         if (existing?.id) {
           await axios.put(`/forms/studies/${this.studyId}/data_entries/${existing.id}`, payload, headers);
+          console.log('[Merge] PUT OK', existing.id);
         } else {
-          await axios.post(`/forms/studies/${this.studyId}/data`, payload, headers);
+          const { data } = await axios.post(`/forms/studies/${this.studyId}/data`, payload, headers);
+          console.log('[Merge] POST OK', data?.id);
         }
+
         await this.loadEntries();
         this.indexEntries();
 
@@ -890,24 +940,13 @@ export default {
         for (const r of this.sectionRows) this.clearDecision(r.key);
 
         this.showDialogMessage("Merged successfully.");
-        // re-seed defaults for any remaining “add” rows
         this.$nextTick(() => this.ensureAutoDecisions());
       } catch (e) {
-        console.error(e);
-        this.showDialogMessage("Merge failed. Please check the console for details.");
+        console.error('[Merge] Commit failed:', e?.response?.data || e);
+        this.showDialogMessage("Merge failed. See console.");
       } finally {
         this.isCommitting = false;
       }
-    },
-
-    // ---------- Misc ----------
-    normalizeCell(v) { return v == null ? "" : String(v).trim(); },
-    clearIncoming() {
-      this.incoming = {};
-      this.decisions = {};
-      this.sel = { subjectId: "", visitName: "", sectionName: "" };
-      this.parseInfo = { ok: false, message: "" };
-      this.showConflictsOnly = false;
     },
   }
 };
@@ -1015,7 +1054,7 @@ export default {
   height: auto;
   background: #fff;
 }
-.compare-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 8px; }
+.compare-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .path { display: flex; gap: 6px; align-items: center; color: #374151; flex-wrap: wrap; }
 .sep { color: #9ca3af; }
 .compare-actions { display: flex; gap: 8px; align-items: center; }
