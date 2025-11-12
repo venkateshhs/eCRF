@@ -120,7 +120,7 @@
             <span>Section:</span> <strong>{{ sel.sectionName || '—' }}</strong>
           </div>
 
-          <div class="compare-actions">
+        <div class="compare-actions">
             <button class="btn-option" :disabled="!sectionRows.length" @click="keepAllExisting">Keep existing</button>
             <button class="btn-option" :disabled="!sectionRows.length" @click="acceptAllIncoming">Accept all incoming</button>
             <button class="btn-option" :disabled="!sectionRows.length" @click="acceptIncomingWhereEmpty">Accept where empty</button>
@@ -275,7 +275,7 @@ export default {
       subjectToGroupIdx: [],
 
       // template index
-      sectionIndex: new Map(),       // title -> { displayByCanon, fieldNameByCanon }
+      sectionIndex: new Map(),       // title -> { displayByCanon, fieldNameByCanon, fieldTypeByCanon }
       sectionTitleByCanon: new Map(),// canon(sectionTitle) -> sectionTitle (exact template title)
 
       // server entries
@@ -283,7 +283,7 @@ export default {
       entriesIndex: new Map(),
 
       // incoming parsed file
-      incoming: {},        // sid -> visitName -> { sections: { [secTitle]: { [rawField]: val } }, groupName }
+      incoming: {},        // sid -> visitName -> { sections: { [secTitle]: { [rawFieldOrLabel]: val } }, groupName }
       decisions: {},       // key -> 'incoming' | 'existing' | 'none'
       showConflictsOnly: false,
 
@@ -399,7 +399,7 @@ export default {
     this.buildSectionIndex();
   },
   methods: {
-      normalizeCheckbox(val) {
+    normalizeCheckbox(val) {
       if (val === true) return true;
       if (val === false) return false;
       if (val == null || String(val).trim() === '') return ''; // preserve empty
@@ -496,6 +496,7 @@ export default {
           const label = f?.label || f?.title || f?.name || `Field ${idx + 1}`;
           const name  = f?.name  || label; // key used by data-entry save path
           const type  = (f?.type || '').toLowerCase();
+
           // candidates that should map to this field (for matching CSV + existing)
           const candidates = new Set([
             name,
@@ -506,15 +507,17 @@ export default {
           ].filter(Boolean));
 
           for (const c of candidates) {
-          const canon = this.canonKey(c);
-          fieldNameByCanon[canon] = name;
-          fieldTypeByCanon[canon] = type;
+            const canon = this.canonKey(c);
+            fieldNameByCanon[canon] = name;       // map many -> one name
+            fieldTypeByCanon[this.canonKey(name)] = type; // type keyed by name’s canon
           }
-          // UI display map: show label for the main canon
+
+          // UI display map: show label for the canon(name)
           displayByCanon[this.canonKey(name)] = label;
         });
 
-        this.sectionIndex.set(title, { displayByCanon, fieldNameByCanon });
+        // IMPORTANT: store fieldTypeByCanon too (used later for checkbox handling, etc.)
+        this.sectionIndex.set(title, { displayByCanon, fieldNameByCanon, fieldTypeByCanon });
       });
 
       console.log('[Merge] Section index built for', this.sectionIndex.size, 'sections');
@@ -548,23 +551,31 @@ export default {
     hasValue(v) { return v !== null && v !== undefined && String(v).trim() !== ""; },
     displayVal(v) { return this.hasValue(v) ? String(v) : ""; },
 
-    // Normalize a section dict (incoming or existing) to: { canon -> value }, filtering unknown fields
+    /**
+     * Normalize a section dict (incoming labels or existing names) to:
+     *   { canon(field.name) -> value }
+     * We ALWAYS key by canon(field.name) to avoid duplicates (label vs name).
+     */
     normalizeSectionDict(sectionTitle, rawSectionDict) {
       const out = {};
       if (!rawSectionDict || typeof rawSectionDict !== 'object') return out;
 
       const idx = this.sectionIndex.get(sectionTitle);
+      if (!idx) return out;
+
       for (const rawKey of Object.keys(rawSectionDict)) {
-        const c = this.canonKey(rawKey);
+        const cRaw = this.canonKey(rawKey);
+        const fieldName = idx.fieldNameByCanon?.[cRaw]; // resolve to template field.name
+        if (!fieldName) continue;
+
+        const canonName = this.canonKey(fieldName);     // <-- single source of truth
         const val = rawSectionDict[rawKey];
-        if (idx?.fieldNameByCanon?.[c]) {
-          if (!(c in out) || this.hasValue(val)) out[c] = val;
-        }
+        if (!(canonName in out) || this.hasValue(val)) out[canonName] = val;
       }
       return out;
     },
 
-    // existing entry (server) -> { sectionTitle -> { canon -> value } }
+    // existing entry (server) -> { sectionTitle -> { canon(field.name) -> value } }
     entryToDictNormalized(entry) {
       const models = this.study?.content?.study_data?.selectedModels || [];
       const out = {};
@@ -577,7 +588,17 @@ export default {
         for (const sec of models) {
           const secTitle = sec.title;
           const secObj = entry.data?.[secTitle] || {};
-          out[secTitle] = this.normalizeSectionDict(secTitle, secObj);
+          // Build a dict by field.name, then normalize once more
+          const byName = {};
+          (sec.fields || []).forEach((f) => {
+            const name = f?.name || "";
+            const label = f?.label || f?.title || "";
+            if (!name) return;
+            let v = secObj[name];
+            if (v === undefined) v = secObj[label]; // tolerate legacy label-saved records
+            if (v !== undefined) byName[name] = v;
+          });
+          out[secTitle] = this.normalizeSectionDict(secTitle, byName);
         }
         return out;
       }
@@ -587,18 +608,17 @@ export default {
       models.forEach((sec, sIdx) => {
         const secTitle = sec.title;
         const row = Array.isArray(arr[sIdx]) ? arr[sIdx] : [];
-        const dict = {};
+        const byName = {};
         (sec.fields || []).forEach((f, fIdx) => {
-          const rawKey = f?.name || f?.label || f?.title || `Field ${fIdx + 1}`;
-          const c = this.canonKey(rawKey);
-          dict[c] = row[fIdx] != null ? row[fIdx] : "";
+          const name = f?.name || f?.label || f?.title || `Field ${fIdx + 1}`;
+          byName[name] = row[fIdx] != null ? row[fIdx] : "";
         });
-        out[secTitle] = dict;
+        out[secTitle] = this.normalizeSectionDict(secTitle, byName);
       });
       return out;
     },
 
-    // incoming (parsed file) -> { subjectId -> visitName -> { sections: { sectionTitle -> { canon -> value } }, groupName } }
+    // incoming (parsed file) -> { subjectId -> visitName -> { sections: { sectionTitle -> { canon(field.name) -> value } }, groupName } }
     incomingNormalized() {
       const out = {};
       for (const sid of Object.keys(this.incoming || {})) {
@@ -672,7 +692,7 @@ export default {
         return;
       }
 
-      // Map columns to (section, field) with sticky section cells
+      // Map columns to (section, field label/name) with sticky section cells
       const colMap = [];
       let currentSection = "";
       for (let col = 0; col < H1.length; col++) {
@@ -682,9 +702,9 @@ export default {
         const field = (H1[col] || "").trim();
         if (!currentSection || !field) continue;
 
-        // Map the section title to the template's title now
+        // Map the section title to the template's title now (tolerant)
         const mappedSection = this.mapSectionTitle(currentSection);
-        colMap.push({ col, section: mappedSection, field });
+        colMap.push({ col, section: mappedSection, field }); // keep raw "field" (label or name); we normalize later
       }
       if (!colMap.length) {
         this.parseInfo = { ok: false, message: "No (section, field) columns found." };
@@ -707,6 +727,7 @@ export default {
         for (const m of colMap) {
           const v = row[m.col];
           incoming[sid][vn].sections[m.section] ||= {};
+          // NOTE: we keep raw header here (label or name). normalizeSectionDict will map to canon(field.name).
           incoming[sid][vn].sections[m.section][m.field] = this.normalizeCell(v);
         }
         dataRows++;
@@ -853,23 +874,22 @@ export default {
       return models.map(sec => (sec.fields || []).map(() => false));
     },
 
-    // Convert normalized dict (canon -> value) back to server dict using template field.name keys
+    // Convert normalized dict (canon(field.name) -> value) back to server dict using template field.name keys
     denormalizeForSave(normBySection) {
       const out = {};
       for (const rawSecName of Object.keys(normBySection || {})) {
         const secTitle = this.mapSectionTitle(rawSecName);
         const secDictCanon = normBySection[rawSecName] || {};
         const map = this.sectionIndex.get(secTitle);
-        if (!map) {
-          // Unknown section to template: skip entirely
-          continue;
-        }
+        if (!map) continue;
+
         const row = {};
         for (const canon of Object.keys(secDictCanon)) {
-          const fieldKey = map.fieldNameByCanon?.[canon]; // prefer template field.name
+          const fieldKey = map.fieldNameByCanon?.[canon]; // template field.name
           if (!fieldKey) continue;
+
           const fType = map.fieldTypeByCanon?.[canon];
-          const val = secDictCanon[canon];
+          let val = secDictCanon[canon];                 // <-- let (not const)
           if (fType === 'checkbox') val = this.normalizeCheckbox(val);
           row[fieldKey] = val;
         }
