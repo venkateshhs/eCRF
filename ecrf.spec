@@ -36,6 +36,14 @@ try:
 except Exception as e:
     print(f"!! PyJWT metadata missing ({e})")
 
+try:
+    sa_submods = collect_submodules("sqlalchemy")
+    if sa_submods:
+        print(f"++ collected sqlalchemy submodules: {len(sa_submods)}")
+except Exception as e:
+    print(f"!! could not collect sqlalchemy submodules ({e})")
+    sa_submods = []
+
 hiddenimports = [
     "eCRF_backend",
     "eCRF_backend.main",
@@ -56,6 +64,7 @@ hiddenimports = [
 
     # force-include PyJWT
     "jwt",
+    "sqlalchemy",
 ] + jwt_submods
 
 # 2) Directory trees for COLLECT
