@@ -199,7 +199,7 @@
                       role="menu"
                     >
                       <button class="menu-item" role="menuitem" @click="handleExportStudy(study)">
-                        Export study
+                        Export Study Template
                       </button>
                       <button class="menu-item" role="menuitem" @click="handleMergeStudy(study)">
                         Merge study
