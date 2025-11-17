@@ -19,10 +19,9 @@ from .crud import record_event as _db_record_event  # (db, user_id, study_id, su
 logger = logging.getLogger(__name__)
 
 # -------------------- Config --------------------
-
 def _runtime_base_dir() -> str:
     """
-    Where should we put persistent data when running:
+    Base path used when ECRF_DATA_DIR is not provided:
       - frozen (PyInstaller): alongside the executable (dist/eCRF)
       - dev: the project root (parent of eCRF_backend)
     """
@@ -35,11 +34,22 @@ def _runtime_base_dir() -> str:
     except Exception:
         return os.getcwd()
 
-# Default BIDS root = <base>/ecrf_data/bids_datasets
-_DEFAULT_BIDS_ROOT = os.path.join(_runtime_base_dir(), "ecrf_data", "bids_datasets")
+
+# If server.py set ECRF_DATA_DIR (from the config / GUI),
+# we consider that the primary "data root" for everything.
+_ECRF_DATA_DIR = os.getenv("ECRF_DATA_DIR")
+
+if _ECRF_DATA_DIR:
+    # Default BIDS root = <ECRF_DATA_DIR>/bids_datasets
+    _DEFAULT_BIDS_ROOT = os.path.join(_ECRF_DATA_DIR, "bids_datasets")
+else:
+    # Backward-compatible fallback:
+    # Default BIDS root = <base>/ecrf_data/bids_datasets
+    _DEFAULT_BIDS_ROOT = os.path.join(_runtime_base_dir(), "ecrf_data", "bids_datasets")
 
 # Allow override via env var if needed
 BIDS_ROOT = os.getenv("BIDS_ROOT", _DEFAULT_BIDS_ROOT)
+
 
 # Declared BIDS spec version
 BIDS_VERSION = os.getenv("BIDS_VERSION", "1.8.0")
