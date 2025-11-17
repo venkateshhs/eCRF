@@ -234,6 +234,24 @@
         <div class="section-header">
           <h3>Resolve conflicts</h3>
           <div class="section-actions">
+            <!-- NEW: Subject filter dropdown -->
+            <div class="subject-filter">
+              <label for="conflict-subject-filter">Subject:</label>
+              <select
+                id="conflict-subject-filter"
+                v-model="selectedConflictSubject"
+              >
+                <option value="ALL">All</option>
+                <option
+                  v-for="sid in conflictSubjectOptions"
+                  :key="sid"
+                  :value="sid"
+                >
+                  {{ sid }}
+                </option>
+              </select>
+            </div>
+
             <button
               class="btn-option sm"
               @click="applyDecisionToAll('incoming')"
@@ -271,7 +289,7 @@
             </thead>
             <tbody>
               <tr
-                v-for="c in conflicts"
+                v-for="c in visibleConflicts"
                 :key="c.key"
               >
                 <td>{{ c.subjectId }}</td>
@@ -433,6 +451,9 @@ export default {
       conflicts: [],                 // [{ key, svgKey, subjectId, visitName, sectionTitle, fieldCanon, fieldLabel, existingValue, incomingValue, existingVersion, incomingVersion }]
       decisions: {},                 // conflictKey -> 'existing' | 'incoming'
 
+      // NEW: subject filter for conflicts table
+      selectedConflictSubject: "ALL",
+
       parseInfo: { ok: false, message: "" },
       isMerging: false,
 
@@ -489,6 +510,20 @@ export default {
       return (
         this.currentTemplateSummary.sections !== this.importedTemplateSummary.sections ||
         this.currentTemplateSummary.fields !== this.importedTemplateSummary.fields
+      );
+    },
+    // NEW: distinct subject IDs present in conflicts
+    conflictSubjectOptions() {
+      const set = new Set(this.conflicts.map((c) => String(c.subjectId)));
+      return Array.from(set).sort();
+    },
+    // NEW: conflicts filtered by selected subject for the table only
+    visibleConflicts() {
+      if (!this.selectedConflictSubject || this.selectedConflictSubject === "ALL") {
+        return this.conflicts;
+      }
+      return this.conflicts.filter(
+        (c) => String(c.subjectId) === String(this.selectedConflictSubject)
       );
     },
   },
@@ -770,6 +805,7 @@ export default {
       this.parseInfo = { ok: false, message: "" };
       this.scopeMode = "all";
       this.selectedSubjectIds = [];
+      this.selectedConflictSubject = "ALL";
     },
     async onBundleFile(ev) {
       const f = ev.target.files && ev.target.files[0];
@@ -1042,6 +1078,7 @@ export default {
 
       this.conflicts = conflicts;
       this.decisions = {};
+      this.selectedConflictSubject = "ALL";
       // Auto decisions based on version (higher version wins by default)
       for (const c of conflicts) {
         const eV = Number(c.existingVersion || 0);
@@ -1360,6 +1397,7 @@ export default {
 .section-actions {
   display: flex;
   gap: 8px;
+  align-items: center;
 }
 .mt {
   margin-top: 12px;
@@ -1496,6 +1534,21 @@ export default {
   align-items: center;
   gap: 4px;
   font-size: 12px;
+}
+
+/* Subject filter in conflicts header */
+.subject-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+}
+.subject-filter select {
+  padding: 4px 8px;
+  border-radius: 6px;
+  border: 1px solid #d1d5db;
+  font-size: 12px;
+  background: #fff;
 }
 
 /* Merge summary badge */
