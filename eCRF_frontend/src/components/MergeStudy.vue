@@ -4,264 +4,397 @@
     <div class="back-header-row">
       <div class="back-button-container">
         <button class="btn-minimal" @click="goBack">
-          <i :class="icons.back" aria-hidden="true"></i> Back
+          <i :class="icons.back" aria-hidden="true"></i>
+          <span>Back</span>
         </button>
       </div>
-      <h2 class="existing-studies-title">Merge Study Data</h2>
+      <h2 class="existing-studies-title">Merge Study Bundle</h2>
     </div>
 
-    <!-- Study meta + file chooser -->
+    <!-- Study meta -->
     <div class="top-bar card-surface">
       <div class="meta">
-        <div class="meta-title">Study: <strong>{{ meta.study_name || '—' }}</strong></div>
-        <div class="meta-sub" v-if="meta.study_description">{{ meta.study_description }}</div>
+        <div class="meta-title">
+          Study: <strong>{{ meta.study_name || '—' }}</strong>
+        </div>
+        <div class="meta-sub" v-if="meta.study_description">
+          {{ meta.study_description }}
+        </div>
         <div class="meta-stats">
           Subjects: {{ subjects.length }} · Visits: {{ visits.length }} · Groups: {{ groups.length }}
         </div>
       </div>
 
       <div class="actions">
-        <input ref="fileInput" type="file" accept=".csv,.xlsx,.xls" class="file-hidden" @change="onFile" />
-        <button class="btn-primary" @click="triggerFile">Choose File</button>
-        <button class="btn-option" :disabled="!hasIncoming" @click="clearIncoming">Clear</button>
+        <input
+          ref="fileInput"
+          type="file"
+          accept=".zip"
+          class="file-hidden"
+          @change="onBundleFile"
+        />
+        <button class="btn-primary" @click="triggerFile">
+          Choose bundle (.zip)
+        </button>
+        <button
+          class="btn-option"
+          :disabled="!hasBundle"
+          @click="clearBundle"
+        >
+          Clear
+        </button>
       </div>
     </div>
 
-    <div v-if="parseInfo.message" class="parse-banner" :class="parseInfo.ok ? 'ok' : 'warn'">
+    <!-- Parsing / validation banner -->
+    <div
+      v-if="parseInfo.message"
+      class="parse-banner"
+      :class="parseInfo.ok ? 'ok' : 'warn'"
+    >
       {{ parseInfo.message }}
     </div>
 
-    <div class="main-layout" v-if="hasIncoming">
-      <!-- Left: tree -->
-      <aside class="tree-panel card-surface">
-        <div class="tree-head">
-          <div class="tree-title">Incoming</div>
-          <label class="chk">
-            <input type="checkbox" v-model="showConflictsOnly" /> Conflicts only
+    <!-- Nothing loaded yet -->
+    <div v-if="!hasBundle" class="empty-state card-surface">
+      <p class="empty-title">Import a study bundle</p>
+      <p class="empty-text">
+        Select the ZIP file created by <code>downloadStudyBundle</code>. It
+        should contain <code>template_vX.json</code> and
+        <code>data_vX.csv</code>.
+      </p>
+      <ul class="empty-list">
+        <li>Default: merge data for all subjects.</li>
+        <li>Advanced: restrict import to specific subjects.</li>
+        <li>If there are conflicts, you’ll get a simple left/right resolution UI.</li>
+      </ul>
+    </div>
+
+    <!-- Main layout once bundle is parsed -->
+    <div v-else class="main-layout">
+      <!-- Left column: bundle + template info -->
+      <section class="card-surface left-column">
+        <!-- Bundle summary -->
+        <div class="section-header">
+          <h3>Bundle summary</h3>
+        </div>
+        <div class="summary-grid">
+          <div class="summary-item">
+            <div class="label">Bundle file</div>
+            <div class="value">{{ bundleFileName }}</div>
+          </div>
+          <div class="summary-item">
+            <div class="label">Imported version</div>
+            <div class="value">
+              v{{ bundleVersion || '—' }}
+            </div>
+          </div>
+          <div class="summary-item">
+            <div class="label">Rows in CSV</div>
+            <div class="value">
+              {{ bundleRowCount }}
+            </div>
+          </div>
+          <div class="summary-item">
+            <div class="label">Subjects in bundle</div>
+            <div class="value">
+              {{ bundleSubjectIds.length }}
+            </div>
+          </div>
+          <div class="summary-item">
+            <div class="label">Visits in bundle</div>
+            <div class="value">
+              {{ bundleVisitNames.length }}
+            </div>
+          </div>
+        </div>
+
+        <!-- Template comparison -->
+        <div class="section-header mt">
+          <h3>Template comparison</h3>
+        </div>
+        <div class="template-compare">
+          <div class="compare-row">
+            <div class="label">Current template sections</div>
+            <div class="value">{{ currentTemplateSummary.sections }}</div>
+          </div>
+          <div class="compare-row">
+            <div class="label">Imported template sections</div>
+            <div class="value">{{ importedTemplateSummary.sections }}</div>
+          </div>
+          <div class="compare-row">
+            <div class="label">Current template fields</div>
+            <div class="value">{{ currentTemplateSummary.fields }}</div>
+          </div>
+          <div class="compare-row">
+            <div class="label">Imported template fields</div>
+            <div class="value">{{ importedTemplateSummary.fields }}</div>
+          </div>
+          <div
+            v-if="templateMismatch"
+            class="template-warning"
+          >
+            Template structure does not match. Merge is disabled to avoid data
+            loss. Please align template versions before importing this bundle.
+          </div>
+        </div>
+
+        <!-- Scope selection (whole study vs per subject) -->
+        <div class="section-header mt">
+          <h3>Scope</h3>
+        </div>
+        <div class="scope-card">
+          <label class="radio-row">
+            <input
+              type="radio"
+              value="all"
+              v-model="scopeMode"
+            />
+            <span>Merge whole study (all subjects in bundle)</span>
           </label>
-        </div>
+          <label class="radio-row">
+            <input
+              type="radio"
+              value="subset"
+              v-model="scopeMode"
+            />
+            <span>Merge specific subjects</span>
+          </label>
 
-        <div class="tree-scroll">
-          <ul class="tree">
-            <li v-for="sid in treeSubjects" :key="sid" class="tree-subject">
-              <button
-                class="tree-row subject"
-                :class="{ active: sid === sel.subjectId }"
-                @click="selectSubject(sid)"
-                :title="sid"
+          <div
+            v-if="scopeMode === 'subset'"
+            class="subject-select"
+          >
+            <p class="helper">
+              Select subjects from the bundle to include in this merge.
+            </p>
+            <div class="subject-list">
+              <label
+                v-for="sid in bundleSubjectIds"
+                :key="sid"
+                class="subject-pill"
               >
-                <span class="label">Subject</span>
-                <strong class="value">{{ sid }}</strong>
-                <span class="counts" v-if="countsBySubject[sid]">
-                  <span class="badge conflict" v-if="countsBySubject[sid].conflict">
-                    {{ countsBySubject[sid].conflict }}
-                  </span>
-                </span>
-              </button>
-
-              <ul v-if="sid === sel.subjectId">
-                <li
-                  v-for="vn in treeVisitsForSubject(sid)"
-                  :key="sid + '|' + vn"
-                  class="tree-visit"
-                >
-                  <button
-                    class="tree-row visit"
-                    :class="{ active: vn === sel.visitName }"
-                    @click="selectVisit(vn)"
-                    :title="vn"
-                  >
-                    <span class="label">Visit</span>
-                    <strong class="value">{{ vn }}</strong>
-                    <span class="counts" v-if="countsByVisit[sid+'|'+vn]">
-                      <span class="badge conflict" v-if="countsByVisit[sid+'|'+vn].conflict">
-                        {{ countsByVisit[sid+'|'+vn].conflict }}
-                      </span>
-                    </span>
-                  </button>
-
-                  <ul v-if="vn === sel.visitName">
-                    <li
-                      v-for="sec in treeSectionsFor(sid, vn)"
-                      :key="sid + '|' + vn + '|' + sec"
-                      class="tree-section"
-                    >
-                      <button
-                        class="tree-row section"
-                        :class="{ active: sec === sel.sectionName }"
-                        @click="selectSection(sec)"
-                        :title="sec"
-                      >
-                        <span class="label">Section</span>
-                        <strong class="value">{{ sec }}</strong>
-                        <span class="counts" v-if="countsBySection[sid+'|'+vn+'|'+sec]">
-                          <span class="badge conflict" v-if="countsBySection[sid+'|'+vn+'|'+sec].conflict">
-                            {{ countsBySection[sid+'|'+vn+'|'+sec].conflict }}
-                          </span>
-                        </span>
-                      </button>
-                    </li>
-                  </ul>
-                </li>
-              </ul>
-            </li>
-          </ul>
-        </div>
-      </aside>
-
-      <!-- Right: side-by-side compare -->
-      <section class="compare-panel card-surface" :class="{ fullscreen: isFullscreen }" ref="comparePanel" tabindex="-1">
-        <div class="compare-head">
-          <div class="path">
-            <span>Subject:</span> <strong>{{ sel.subjectId || '—' }}</strong>
-            <span class="sep">·</span>
-            <span>Visit:</span> <strong>{{ sel.visitName || '—' }}</strong>
-            <span class="sep">·</span>
-            <span>Section:</span> <strong>{{ sel.sectionName || '—' }}</strong>
-          </div>
-
-        <div class="compare-actions">
-            <button class="btn-option" :disabled="!sectionRows.length" @click="keepAllExisting">Keep existing</button>
-            <button class="btn-option" :disabled="!sectionRows.length" @click="acceptAllIncoming">Accept all incoming</button>
-            <button class="btn-option" :disabled="!sectionRows.length" @click="acceptIncomingWhereEmpty">Accept where empty</button>
-            <button class="btn-primary" :disabled="!canCommitSection" @click="commitCurrentSelection">
-              {{ isCommitting ? 'Merging…' : 'Commit Section' }}
+                <input
+                  type="checkbox"
+                  :value="sid"
+                  v-model="selectedSubjectIds"
+                />
+                <span>{{ sid }}</span>
+              </label>
+            </div>
+            <button
+              class="btn-minimal sm"
+              @click="selectAllSubjects"
+            >
+              Select all
             </button>
-            <button class="btn-minimal" @click="toggleFullscreen" :title="isFullscreen ? 'Exit full size' : 'Enlarge'">
-              <i :class="isFullscreen ? (icons.compress || 'fas fa-compress') : (icons.expand || 'fas fa-expand')" aria-hidden="true"></i>
-              <span>{{ isFullscreen ? 'Exit' : 'Enlarge' }}</span>
+            <button
+              class="btn-minimal sm"
+              @click="clearSelectedSubjects"
+            >
+              Clear
             </button>
           </div>
         </div>
 
-        <div v-if="!sectionRows.length" class="empty-note big">
-          Select a Section from the left to compare values.
+        <!-- Merge summary -->
+        <div class="section-header mt">
+          <h3>Merge summary</h3>
+        </div>
+        <div class="summary-grid">
+          <div class="summary-item">
+            <div class="label">Entries to import</div>
+            <div class="value">{{ importEntryCount }}</div>
+          </div>
+          <div class="summary-item">
+            <div class="label">Conflicting fields</div>
+            <div class="value">
+              <span
+                :class="{
+                  'badge-pill': true,
+                  conflict: conflicts.length > 0,
+                  ok: conflicts.length === 0
+                }"
+              >
+                {{ conflicts.length }}
+              </span>
+            </div>
+          </div>
+          <div class="summary-item">
+            <div class="label">Auto-merge possible</div>
+            <div class="value">
+              {{ autoMergePossible ? 'Yes (no conflicts)' : 'No (review needed)' }}
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Right column: conflicts table (only if conflicts) -->
+      <section class="card-surface right-column" v-if="conflicts.length">
+        <div class="section-header">
+          <h3>Resolve conflicts</h3>
+          <div class="section-actions">
+            <button
+              class="btn-option sm"
+              @click="applyDecisionToAll('incoming')"
+            >
+              Use incoming (right) for all
+            </button>
+            <button
+              class="btn-option sm"
+              @click="applyDecisionToAll('existing')"
+            >
+              Keep existing (left) for all
+            </button>
+          </div>
         </div>
 
-        <div v-else class="split-view" @keydown.esc="ensureExitFullscreen">
-          <div class="col col-existing">
-            <div class="col-title">Existing</div>
-            <table class="val-table">
-              <thead>
-                <tr>
-                  <th style="width: 38%;">Field</th>
-                  <th>Value</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr v-for="row in sectionRows" :key="row.key" :class="rowClass(row)">
-                  <td class="field-name">
-                    {{ row.display }}
-                    <span class="resolved-pill" v-if="row.resolved">Resolved</span>
-                  </td>
-                  <td class="value-cell">{{ displayVal(row.existing) }}</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
+        <p class="helper">
+          These fields have different values in the current study and in the imported
+          bundle. Choose whether to keep the existing value (left) or use the incoming
+          value (right). Default decisions are based on the higher
+          <code>form_version</code>.
+        </p>
 
-          <div class="col col-incoming">
-            <div class="col-title">Incoming</div>
-            <table class="val-table">
-              <thead>
-                <tr>
-                  <th style="width: 38%;">Field</th>
-                  <th>
-                    Value
-                    <span class="hint">(choose)</span>
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr v-for="row in sectionRows" :key="row.key" :class="rowClass(row)">
-                  <td class="field-name">
-                    {{ row.display }}
-                    <span class="resolved-pill" v-if="row.resolved">Resolved</span>
-                  </td>
-                  <td class="value-cell">
-                    <div class="value">{{ displayVal(row.incoming) }}</div>
-                    <div class="resolve">
-                      <label class="radio">
-                        <input
-                          type="radio"
-                          :name="row.radioName"
-                          value="incoming"
-                          :checked="decisions[row.key] === 'incoming'"
-                          @change="setDecision(row.key, 'incoming')"
-                        />
-                        Use incoming
-                      </label>
-                      <label class="radio" :class="{ muted: !hasValue(row.existing) }">
-                        <input
-                          type="radio"
-                          :name="row.radioName"
-                          value="existing"
-                          :checked="decisions[row.key] === 'existing'"
-                          @change="setDecision(row.key, 'existing')"
-                        />
-                        Keep existing
-                      </label>
-                      <label class="radio" v-if="!hasValue(row.existing) && !hasValue(row.incoming)">
-                        <input
-                          type="radio"
-                          :name="row.radioName"
-                          value="none"
-                          :checked="decisions[row.key] === 'none'"
-                          @change="setDecision(row.key, 'none')"
-                        />
-                        Leave empty
-                      </label>
-                      <button class="btn-minimal" v-if="decisions[row.key]" @click="clearDecision(row.key)">Clear</button>
+        <div class="conflict-table-wrapper">
+          <table class="conflict-table">
+            <thead>
+              <tr>
+                <th>Subject</th>
+                <th>Visit</th>
+                <th>Section</th>
+                <th>Field</th>
+                <th>Existing (left)</th>
+                <th>Incoming (right)</th>
+                <th>Choice</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr
+                v-for="c in conflicts"
+                :key="c.key"
+              >
+                <td>{{ c.subjectId }}</td>
+                <td>{{ c.visitName }}</td>
+                <td>{{ c.sectionTitle }}</td>
+                <td>{{ c.fieldLabel }}</td>
+                <td>
+                  <div class="val-cell">
+                    <div class="val-main">
+                      {{ displayVal(c.existingValue) }}
                     </div>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
+                    <div class="val-meta">
+                      v{{ c.existingVersion || '—' }}
+                    </div>
+                  </div>
+                </td>
+                <td>
+                  <div class="val-cell">
+                    <div class="val-main">
+                      {{ displayVal(c.incomingValue) }}
+                    </div>
+                    <div class="val-meta">
+                      v{{ c.incomingVersion || '—' }}
+                    </div>
+                  </div>
+                </td>
+                <td>
+                  <div class="choice-row">
+                    <label class="radio-inline">
+                      <input
+                        type="radio"
+                        :name="c.key"
+                        value="existing"
+                        :checked="decisions[c.key] === 'existing'"
+                        @change="setDecision(c.key, 'existing')"
+                      />
+                      Left
+                    </label>
+                    <label class="radio-inline">
+                      <input
+                        type="radio"
+                        :name="c.key"
+                        value="incoming"
+                        :checked="decisions[c.key] === 'incoming'"
+                        @change="setDecision(c.key, 'incoming')"
+                      />
+                      Right
+                    </label>
+                  </div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
         </div>
+      </section>
+
+      <!-- No conflicts: small notice on right -->
+      <section
+        v-else
+        class="card-surface right-column"
+      >
+        <div class="section-header">
+          <h3>No conflicts</h3>
+        </div>
+        <p class="helper">
+          All incoming values are either identical to existing data or filling empty
+          fields. Clicking <strong>Merge</strong> will safely update or create
+          entries without overwriting conflicting data.
+        </p>
       </section>
     </div>
 
     <!-- Sticky footer -->
-    <div class="global-commit" v-if="hasIncoming">
+    <div class="global-commit" v-if="hasBundle">
       <div class="gc-left">
-        <div class="sel-path">
-          <span>Subject:</span> <strong>{{ sel.subjectId || '—' }}</strong>
-          <span class="sep">·</span>
-          <span>Visit:</span> <strong>{{ sel.visitName || '—' }}</strong>
-          <span class="sep">·</span>
-          <span>Section:</span> <strong>{{ sel.sectionName || '—' }}</strong>
+        <div class="sel-summary">
+          <span>Subjects in scope:</span>
+          <strong>
+            {{
+              scopeMode === 'all'
+                ? bundleSubjectIds.length
+                : selectedSubjectIds.length
+            }}
+          </strong>
+          <span class="dot">·</span>
+          <span>Conflicts:</span>
+          <strong>{{ conflicts.length }}</strong>
         </div>
-        <div class="sel-counts" v-if="sectionRows.length">
-          Unresolved Conflicts: <strong>{{ currentCounts.conflict }}</strong>
-          <span class="dot">·</span>
-          Adds: <strong>{{ currentCounts.add }}</strong>
-          <span class="dot">·</span>
-          Same/Resolved: <strong>{{ currentCounts.same }}</strong>
+        <div class="sel-sub" v-if="!autoMergePossible">
+          Decisions made:
+          <strong>{{ decidedConflictCount }}</strong> /
+          <strong>{{ conflicts.length }}</strong>
         </div>
       </div>
       <div class="gc-right">
-        <button class="btn-primary" :disabled="!canCommitSection" @click="commitCurrentSelection">
-          {{ isCommitting ? 'Merging…' : 'Merge & Commit' }}
+        <button
+          class="btn-primary"
+          :disabled="!canMerge"
+          @click="performMerge"
+        >
+          {{ isMerging ? 'Merging…' : (autoMergePossible ? 'Merge' : 'Merge with decisions') }}
         </button>
-        <button class="btn-option" :disabled="!sectionRows.length || isCommitting" @click="resetCurrentDecisions">Reset</button>
       </div>
     </div>
 
-    <CustomDialog :message="dialogMessage" :isVisible="showDialog" @close="closeDialog" />
+    <CustomDialog
+      :message="dialogMessage"
+      :isVisible="showDialog"
+      @close="closeDialog"
+    />
   </div>
 </template>
 
 <script>
 /* eslint-disable */
 import axios from "axios";
+import JSZip from "jszip";
 import * as Papa from "papaparse";
-import * as XLSX from "xlsx";
 import CustomDialog from "@/components/CustomDialog.vue";
 import icons from "@/assets/styles/icons";
 
 export default {
-  name: "MergeStudy",
+  name: "MergeStudyBundle",
   components: { CustomDialog },
   data() {
     return {
@@ -274,121 +407,89 @@ export default {
       groups: [],
       subjectToGroupIdx: [],
 
-      // template index
+      // template index (from current study)
       sectionIndex: new Map(),       // title -> { displayByCanon, fieldNameByCanon, fieldTypeByCanon }
-      sectionTitleByCanon: new Map(),// canon(sectionTitle) -> sectionTitle (exact template title)
+      sectionTitleByCanon: new Map(),// canon(sectionTitle) -> sectionTitle
 
-      // server entries
+      // existing entries (server)
       entries: [],
-      entriesIndex: new Map(),
+      entriesIndex: new Map(),       // svgKey -> latest entry
 
-      // incoming parsed file
-      incoming: {},        // sid -> visitName -> { sections: { [secTitle]: { [rawFieldOrLabel]: val } }, groupName }
-      decisions: {},       // key -> 'incoming' | 'existing' | 'none'
-      showConflictsOnly: false,
+      // imported bundle
+      hasBundle: false,
+      bundleFileName: "",
+      bundleVersion: null,
+      bundleRowCount: 0,
+      bundleSubjectIds: [],
+      bundleVisitNames: [],
+      importedSchema: null,          // schema from template_vX.json
+      incomingEntries: {},           // svgKey -> { subject_index, visit_index, group_index, data, form_version }
 
-      // selection in UI
-      sel: { subjectId: "", visitName: "", sectionName: "" },
+      // scope
+      scopeMode: "all",              // 'all' | 'subset'
+      selectedSubjectIds: [],
+
+      // conflicts
+      conflicts: [],                 // [{ key, svgKey, subjectId, visitName, sectionTitle, fieldCanon, fieldLabel, existingValue, incomingValue, existingVersion, incomingVersion }]
+      decisions: {},                 // conflictKey -> 'existing' | 'incoming'
 
       parseInfo: { ok: false, message: "" },
-      isFullscreen: false,
-      isCommitting: false,
+      isMerging: false,
 
       showDialog: false,
       dialogMessage: "",
     };
   },
   computed: {
-    hasIncoming() { return Object.keys(this.incoming || {}).length > 0; },
-    treeSubjects() { return Object.keys(this.incoming || {}).sort(); },
-    canCommitSection() { return this.sectionRows.length > 0 && !this.isCommitting; },
-
-    countsBySubject() {
-      const out = {};
-      for (const sid of Object.keys(this.incoming)) {
-        let c = { conflict: 0, add: 0, same: 0 };
-        for (const vn of Object.keys(this.incoming[sid])) {
-          const s = this.countFor(sid, vn);
-          c.conflict += s.conflict; c.add += s.add; c.same += s.same;
-        }
-        out[sid] = c;
-      }
-      return out;
+    importEntryCount() {
+      return Object.keys(this.incomingEntries || {}).length;
     },
-    countsByVisit() {
-      const out = {};
-      for (const sid of Object.keys(this.incoming)) {
-        for (const vn of Object.keys(this.incoming[sid])) {
-          out[`${sid}|${vn}`] = this.countFor(sid, vn);
-        }
-      }
-      return out;
+    autoMergePossible() {
+      return this.conflicts.length === 0;
     },
-    countsBySection() {
-      const out = {};
-      for (const sid of Object.keys(this.incoming)) {
-        for (const vn of Object.keys(this.incoming[sid])) {
-          const secs = Object.keys(this.incoming[sid][vn]?.sections || {});
-          for (const sec of secs) out[`${sid}|${vn}|${sec}`] = this.countFor(sid, vn, sec);
-        }
-      }
-      return out;
+    decidedConflictCount() {
+      return this.conflicts.filter((c) => !!this.decisions[c.key]).length;
     },
-
-    sectionRows() {
-      const sid = this.sel.subjectId, vn = this.sel.visitName, sec = this.sel.sectionName;
-      if (!sid || !vn || !sec) return [];
-
-      const { sIdx, vIdx, gIdx } = this.resolveSVG(sid, vn);
-      if (sIdx < 0 || vIdx < 0) return [];
-
-      const existingDict = this.entryToDictNormalized(this.entriesIndex.get(`${sIdx}|${vIdx}|${gIdx}`));
-      const incomingDict = this.incomingNormalized();
-
-      const exSec = (existingDict[sec] || {});
-      const inSec = (incomingDict[sid]?.[vn]?.sections?.[sec] || {});
-
-      const allCanons = Array.from(new Set([...Object.keys(exSec), ...Object.keys(inSec)])).sort();
-
-      const rows = [];
-      for (const canon of allCanons) {
-        const display = this.displayFor(sec, canon);
-        const existing = exSec[canon];
-        const incoming = inSec[canon];
-
-        if (!this.hasValue(existing) && !this.hasValue(incoming)) continue;
-
-        const rawState = this.decideState(existing, incoming);
-        const key = `${sid}|${vn}|${sec}|${canon}`;
-        const decision = this.decisions[key];
-
-        const resolved = (rawState === "conflict" && !!decision) ? true : false;
-        const state = resolved ? "same" : rawState;
-
-        rows.push({
-          key,
-          radioName: `choose|${sid}|${vn}|${sec}|${canon}`,
-          display,
-          canon,
-          existing,
-          incoming,
-          resolved,
-          state,
-        });
+    canMerge() {
+      if (!this.hasBundle) return false;
+      if (this.templateMismatch) return false;
+      if (this.scopeMode === "subset" && this.selectedSubjectIds.length === 0) return false;
+      if (!this.autoMergePossible && this.decidedConflictCount < this.conflicts.length) {
+        return false;
       }
-
-      this.$nextTick(() => this.ensureAutoDecisions(rows));
-      return this.showConflictsOnly ? rows.filter(r => r.state === "conflict") : rows;
+      return !this.isMerging;
     },
-
-    currentCounts() {
-      let c = { conflict: 0, add: 0, same: 0 };
-      for (const r of this.sectionRows) {
-        if (r.state === "conflict") c.conflict++;
-        else if (r.state === "add") c.add++;
-        else c.same++;
-      }
-      return c;
+    // simple summaries for template comparison
+    currentTemplateSummary() {
+      const sd = this.study?.content?.study_data || {};
+      const sections = sd.selectedModels || [];
+      let fieldCount = 0;
+      sections.forEach((sec) => {
+        fieldCount += (sec.fields || []).length;
+      });
+      return {
+        sections: sections.length,
+        fields: fieldCount,
+      };
+    },
+    importedTemplateSummary() {
+      const schema = this.importedSchema || {};
+      const sections = Array.isArray(schema.selectedModels) ? schema.selectedModels : [];
+      let fieldCount = 0;
+      sections.forEach((sec) => {
+        fieldCount += (sec.fields || []).length;
+      });
+      return {
+        sections: sections.length,
+        fields: fieldCount,
+      };
+    },
+    templateMismatch() {
+      // very conservative: require same number of sections and fields
+      return (
+        this.currentTemplateSummary.sections !== this.importedTemplateSummary.sections ||
+        this.currentTemplateSummary.fields !== this.importedTemplateSummary.fields
+      );
     },
   },
   async created() {
@@ -399,69 +500,51 @@ export default {
     this.buildSectionIndex();
   },
   methods: {
-    normalizeCheckbox(val) {
-      if (val === true) return true;
-      if (val === false) return false;
-      if (val == null || String(val).trim() === '') return ''; // preserve empty
-      const s = String(val).trim().toLowerCase();
-      if (['true','yes','1','y','on','checked'].includes(s)) return true;
-      if (['false','no','0','n','off','unchecked'].includes(s)) return false;
-      return '';
+    // ---------- Navigation & dialog ----------
+    goBack() {
+      this.$router.push({ name: "Dashboard", query: { openStudies: "true" } });
     },
-    // ---------- Navigation ----------
-    goBack() { this.$router.push({ name: "Dashboard", query: { openStudies: "true" } }); },
-    selectSubject(sid) {
-      this.sel.subjectId = sid;
-      const visits = this.treeVisitsForSubject(sid);
-      this.sel.visitName = visits[0] || "";
-      const secs = this.sel.visitName ? this.treeSectionsFor(sid, this.sel.visitName) : [];
-      this.sel.sectionName = secs[0] || "";
+    showDialogMessage(msg) {
+      this.dialogMessage = msg;
+      this.showDialog = true;
     },
-    selectVisit(vn) {
-      this.sel.visitName = vn;
-      const secs = this.sel.subjectId ? this.treeSectionsFor(this.sel.subjectId, vn) : [];
-      this.sel.sectionName = secs[0] || "";
+    closeDialog() {
+      this.showDialog = false;
+      this.dialogMessage = "";
     },
-    selectSection(sec) { this.sel.sectionName = sec; },
 
-    showDialogMessage(msg) { this.dialogMessage = msg; this.showDialog = true; },
-    closeDialog() { this.showDialog = false; this.dialogMessage = ""; },
-    triggerFile() { this.$refs.fileInput && this.$refs.fileInput.click(); },
-    toggleFullscreen() { this.isFullscreen = !this.isFullscreen; if (this.isFullscreen) this.$nextTick(() => this.$refs.comparePanel?.focus?.()); },
-    ensureExitFullscreen() { if (this.isFullscreen) this.isFullscreen = false; },
-
-    // ---------- Load ----------
+    // ---------- Load existing study ----------
     async loadStudy() {
       try {
         const { data } = await axios.get(`/forms/studies/${this.studyId}`, {
-          headers: { Authorization: `Bearer ${this.$store.state.token}` }
+          headers: { Authorization: `Bearer ${this.$store.state.token}` },
         });
         this.study = data;
         this.meta = data?.metadata || {};
         const sd = data?.content?.study_data || {};
         this.subjects = sd.subjects || [];
-        this.visits   = sd.visits || [];
-        this.groups   = sd.groups || [];
-        this.subjectToGroupIdx = (this.subjects || []).map(s => {
+        this.visits = sd.visits || [];
+        this.groups = sd.groups || [];
+        this.subjectToGroupIdx = (this.subjects || []).map((s) => {
           const gn = (s.group || "").toLowerCase().trim();
-          const gi = (this.groups || []).findIndex(g => (g.name || "").toLowerCase().trim() === gn);
+          const gi = (this.groups || []).findIndex(
+            (g) => (g.name || "").toLowerCase().trim() === gn
+          );
           return gi >= 0 ? gi : 0;
         });
-        console.log('[Merge] Study loaded', { subjects: this.subjects.length, visits: this.visits.length, groups: this.groups.length });
       } catch (e) {
-        console.error('[Merge] Failed to load study:', e);
+        console.error("[Merge] Failed to load study:", e);
         this.showDialogMessage("Failed to load study.");
       }
     },
     async loadEntries() {
       try {
         const { data } = await axios.get(`/forms/studies/${this.studyId}/data_entries`, {
-          headers: { Authorization: `Bearer ${this.$store.state.token}` }
+          headers: { Authorization: `Bearer ${this.$store.state.token}` },
         });
-        this.entries = Array.isArray(data) ? data : (data?.entries || []);
-        console.log('[Merge] Loaded entries', this.entries.length);
+        this.entries = Array.isArray(data) ? data : data?.entries || [];
       } catch (e) {
-        console.error('[Merge] Failed to load entries:', e);
+        console.error("[Merge] Failed to load entries:", e);
         this.entries = [];
       }
     },
@@ -470,12 +553,14 @@ export default {
       for (const e of this.entries) {
         const key = `${e.subject_index}|${e.visit_index}|${e.group_index}`;
         const cur = m.get(key);
-        if (!cur || Number(e.form_version) >= Number(cur?.form_version || 0)) m.set(key, e);
+        if (!cur || Number(e.form_version) >= Number(cur?.form_version || 0)) {
+          m.set(key, e);
+        }
       }
       this.entriesIndex = m;
     },
 
-    // ---------- Template index & section title mapping ----------
+    // ---------- Template index & helpers ----------
     buildSectionIndex() {
       this.sectionIndex = new Map();
       this.sectionTitleByCanon = new Map();
@@ -489,55 +574,48 @@ export default {
         const fieldNameByCanon = {};
         const fieldTypeByCanon = {};
 
-        // section title canonical map (for CSV section → template section)
         this.sectionTitleByCanon.set(this.canonKey(title), title);
 
         (sec.fields || []).forEach((f, idx) => {
           const label = f?.label || f?.title || f?.name || `Field ${idx + 1}`;
-          const name  = f?.name  || label; // key used by data-entry save path
-          const type  = (f?.type || '').toLowerCase();
+          const name = f?.name || label;
+          const type = (f?.type || "").toLowerCase();
 
-          // candidates that should map to this field (for matching CSV + existing)
-          const candidates = new Set([
-            name,
-            label,
-            f?.title || "",
-            this.humanizeCamel(name),
-            this.humanizeCamel(label),
-          ].filter(Boolean));
+          const candidates = new Set(
+            [
+              name,
+              label,
+              f?.title || "",
+              this.humanizeCamel(name),
+              this.humanizeCamel(label),
+            ].filter(Boolean)
+          );
 
           for (const c of candidates) {
             const canon = this.canonKey(c);
-            fieldNameByCanon[canon] = name;       // map many -> one name
-            fieldTypeByCanon[this.canonKey(name)] = type; // type keyed by name’s canon
+            fieldNameByCanon[canon] = name;
+            fieldTypeByCanon[this.canonKey(name)] = type;
           }
 
-          // UI display map: show label for the canon(name)
           displayByCanon[this.canonKey(name)] = label;
         });
 
-        // IMPORTANT: store fieldTypeByCanon too (used later for checkbox handling, etc.)
         this.sectionIndex.set(title, { displayByCanon, fieldNameByCanon, fieldTypeByCanon });
       });
-
-      console.log('[Merge] Section index built for', this.sectionIndex.size, 'sections');
     },
-
     mapSectionTitle(raw) {
       const mapped = this.sectionTitleByCanon.get(this.canonKey(raw));
       return mapped || raw;
     },
-
     displayFor(sectionTitle, canon) {
       const m = this.sectionIndex.get(sectionTitle);
       return (m?.displayByCanon?.[canon]) || this.prettyFromCanon(canon);
     },
 
-    // ---------- Normalization helpers ----------
     canonKey(s) {
       return String(s ?? "")
         .toLowerCase()
-        .replace(/[\W_]+/g, ''); // strip non-alphanumerics
+        .replace(/[\W_]+/g, "");
     },
     humanizeCamel(s) {
       if (!s) return "";
@@ -545,37 +623,45 @@ export default {
         .replace(/[_\-]+/g, " ")
         .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
         .toLowerCase();
-      return w.replace(/\b\w/g, c => c.toUpperCase());
+      return w.replace(/\b\w/g, (c) => c.toUpperCase());
     },
-    prettyFromCanon(canon) { return this.humanizeCamel(canon); },
-    hasValue(v) { return v !== null && v !== undefined && String(v).trim() !== ""; },
-    displayVal(v) { return this.hasValue(v) ? String(v) : ""; },
+    prettyFromCanon(canon) {
+      return this.humanizeCamel(canon);
+    },
+    hasValue(v) {
+      return v !== null && v !== undefined && String(v).trim() !== "";
+    },
+    displayVal(v) {
+      return this.hasValue(v) ? String(v) : "";
+    },
 
-    /**
-     * Normalize a section dict (incoming labels or existing names) to:
-     *   { canon(field.name) -> value }
-     * We ALWAYS key by canon(field.name) to avoid duplicates (label vs name).
-     */
+    normalizeCheckbox(val) {
+      if (val === true) return true;
+      if (val === false) return false;
+      if (val == null || String(val).trim() === "") return "";
+      const s = String(val).trim().toLowerCase();
+      if (["true", "yes", "1", "y", "on", "checked"].includes(s)) return true;
+      if (["false", "no", "0", "n", "off", "unchecked"].includes(s)) return false;
+      return "";
+    },
+
     normalizeSectionDict(sectionTitle, rawSectionDict) {
       const out = {};
-      if (!rawSectionDict || typeof rawSectionDict !== 'object') return out;
-
+      if (!rawSectionDict || typeof rawSectionDict !== "object") return out;
       const idx = this.sectionIndex.get(sectionTitle);
       if (!idx) return out;
 
       for (const rawKey of Object.keys(rawSectionDict)) {
         const cRaw = this.canonKey(rawKey);
-        const fieldName = idx.fieldNameByCanon?.[cRaw]; // resolve to template field.name
+        const fieldName = idx.fieldNameByCanon?.[cRaw];
         if (!fieldName) continue;
-
-        const canonName = this.canonKey(fieldName);     // <-- single source of truth
+        const canonName = this.canonKey(fieldName);
         const val = rawSectionDict[rawKey];
         if (!(canonName in out) || this.hasValue(val)) out[canonName] = val;
       }
       return out;
     },
 
-    // existing entry (server) -> { sectionTitle -> { canon(field.name) -> value } }
     entryToDictNormalized(entry) {
       const models = this.study?.content?.study_data?.selectedModels || [];
       const out = {};
@@ -588,14 +674,13 @@ export default {
         for (const sec of models) {
           const secTitle = sec.title;
           const secObj = entry.data?.[secTitle] || {};
-          // Build a dict by field.name, then normalize once more
           const byName = {};
           (sec.fields || []).forEach((f) => {
             const name = f?.name || "";
             const label = f?.label || f?.title || "";
             if (!name) return;
             let v = secObj[name];
-            if (v === undefined) v = secObj[label]; // tolerate legacy label-saved records
+            if (v === undefined) v = secObj[label];
             if (v !== undefined) byName[name] = v;
           });
           out[secTitle] = this.normalizeSectionDict(secTitle, byName);
@@ -603,7 +688,7 @@ export default {
         return out;
       }
 
-      // array-shape fallback (older entries)
+      // array-shape fallback
       const arr = Array.isArray(entry.data) ? entry.data : [];
       models.forEach((sec, sIdx) => {
         const secTitle = sec.title;
@@ -618,263 +703,11 @@ export default {
       return out;
     },
 
-    // incoming (parsed file) -> { subjectId -> visitName -> { sections: { sectionTitle -> { canon(field.name) -> value } }, groupName } }
-    incomingNormalized() {
-      const out = {};
-      for (const sid of Object.keys(this.incoming || {})) {
-        out[sid] = {};
-        for (const vn of Object.keys(this.incoming[sid] || {})) {
-          const row = this.incoming[sid][vn];
-          const secOut = {};
-          const secMap = row?.sections || {};
-          for (const rawSecName of Object.keys(secMap)) {
-            const secTitle = this.mapSectionTitle(rawSecName);
-            secOut[secTitle] = this.normalizeSectionDict(secTitle, secMap[rawSecName]);
-          }
-          out[sid][vn] = { sections: secOut, groupName: row.groupName || "" };
-        }
-      }
-      return out;
-    },
-
-    // ---------- CSV/XLSX parsing (2 header rows) ----------
-    onFile(ev) {
-      const f = ev.target.files && ev.target.files[0];
-      if (!f) return;
-      const name = f.name.toLowerCase();
-      if (name.endsWith(".csv")) this.readCSV(f);
-      else if (name.endsWith(".xlsx") || name.endsWith(".xls")) this.readXLSX(f);
-      else this.parseInfo = { ok: false, message: "Unsupported file type. Use CSV or Excel." };
-    },
-    readCSV(file) {
-      Papa.parse(file, {
-        skipEmptyLines: "greedy",
-        complete: (res) => this.consume2RowHeader(res.data || []),
-        error: () => this.parseInfo = { ok: false, message: "Failed to read CSV." }
-      });
-    },
-    readXLSX(file) {
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        const wb = XLSX.read(new Uint8Array(e.target.result), { type: "array" });
-        const sheet = wb.Sheets[wb.SheetNames[0]];
-        const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: false, defval: "" });
-        this.consume2RowHeader(rows);
-      };
-      reader.onerror = () => this.parseInfo = { ok: false, message: "Failed to read Excel file." };
-      reader.readAsArrayBuffer(file);
-    },
-    consume2RowHeader(rows) {
-      if (!rows || rows.length < 3) {
-        this.parseInfo = { ok: false, message: "Need 2 header rows + at least 1 data row." };
-        return;
-      }
-      const H0 = rows[0].map(x => String(x || "").trim()); // sections
-      const H1 = rows[1].map(x => String(x || "").trim()); // fields
-
-      const idxOf = (names) => {
-        const lc1 = H1.map(h => h.toLowerCase());
-        const lc0 = H0.map(h => h.toLowerCase());
-        for (let i = 0; i < H1.length; i++) {
-          for (const n of names) {
-            const nn = n.toLowerCase();
-            if (lc1[i] === nn || lc0[i] === nn) return i;
-          }
-        }
-        return -1;
-      };
-      const cSubject = idxOf(["subject id","subject","subject_id","participant id"]);
-      const cVisit   = idxOf(["visit","visit name","visit_name"]);
-      const cGroup   = idxOf(["group","arm","cohort"]);
-
-      if (cSubject < 0 || cVisit < 0) {
-        this.parseInfo = { ok: false, message: "Could not detect Subject and Visit columns." };
-        return;
-      }
-
-      // Map columns to (section, field label/name) with sticky section cells
-      const colMap = [];
-      let currentSection = "";
-      for (let col = 0; col < H1.length; col++) {
-        if ([cSubject,cVisit,cGroup].includes(col)) continue;
-        const secRaw = (H0[col] || "").trim();
-        if (secRaw) currentSection = secRaw;
-        const field = (H1[col] || "").trim();
-        if (!currentSection || !field) continue;
-
-        // Map the section title to the template's title now (tolerant)
-        const mappedSection = this.mapSectionTitle(currentSection);
-        colMap.push({ col, section: mappedSection, field }); // keep raw "field" (label or name); we normalize later
-      }
-      if (!colMap.length) {
-        this.parseInfo = { ok: false, message: "No (section, field) columns found." };
-        return;
-      }
-
-      const incoming = {};
-      let dataRows = 0;
-
-      for (let r = 2; r < rows.length; r++) {
-        const row = rows[r] || [];
-        const sid = String(row[cSubject] || "").trim();
-        const vn  = String(row[cVisit] || "").trim();
-        const gn  = (cGroup >= 0) ? String(row[cGroup] || "").trim() : "";
-        if (!sid || !vn) continue;
-
-        incoming[sid] ||= {};
-        incoming[sid][vn] ||= { sections: {}, groupName: gn };
-
-        for (const m of colMap) {
-          const v = row[m.col];
-          incoming[sid][vn].sections[m.section] ||= {};
-          // NOTE: we keep raw header here (label or name). normalizeSectionDict will map to canon(field.name).
-          incoming[sid][vn].sections[m.section][m.field] = this.normalizeCell(v);
-        }
-        dataRows++;
-      }
-
-      if (!dataRows) {
-        this.parseInfo = { ok: false, message: "No data rows found." };
-        this.incoming = {};
-        return;
-      }
-
-      this.incoming = incoming;
-      this.parseInfo = { ok: true, message: `Parsed ${dataRows} row(s).` };
-
-      // Default selection
-      const sid0 = Object.keys(incoming)[0];
-      const vn0  = sid0 ? Object.keys(incoming[sid0])[0] : "";
-      const sec0 = (sid0 && vn0) ? Object.keys(incoming[sid0][vn0].sections || {})[0] : "";
-      this.sel = { subjectId: sid0 || "", visitName: vn0 || "", sectionName: sec0 || "" };
-      this.decisions = {};
-      console.log('[Merge] Parsed file; initial selection', this.sel);
-    },
-
-    // ---------- Tree helpers ----------
-    treeVisitsForSubject(sid) {
-      const map = this.incoming[sid] || {};
-      let vns = Object.keys(map);
-      if (this.showConflictsOnly) vns = vns.filter(vn => this.countFor(sid, vn).conflict > 0);
-      return vns.sort();
-    },
-    treeSectionsFor(sid, vn) {
-      const secs = Object.keys(this.incoming[sid]?.[vn]?.sections || {});
-      return (this.showConflictsOnly
-        ? secs.filter(sec => this.countFor(sid, vn, sec).conflict > 0)
-        : secs
-      ).sort();
-    },
-
-    // ---------- Compare & counts ----------
-    resolveSVG(subjectId, visitName) {
-      const sIdx = this.subjects.findIndex(s => String(s.id).trim() === String(subjectId).trim());
-      const vIdx = this.visits.findIndex(v => (v.name || "").trim().toLowerCase() === String(visitName).trim().toLowerCase());
-      const gIdx = sIdx >= 0 ? (this.subjectToGroupIdx[sIdx] ?? 0) : 0;
-      return { sIdx, vIdx, gIdx };
-    },
-    countFor(sid, vn, secOpt) {
-      const { sIdx, vIdx, gIdx } = this.resolveSVG(sid, vn);
-      const exAll = (sIdx >= 0 && vIdx >= 0) ? this.entryToDictNormalized(this.entriesIndex.get(`${sIdx}|${vIdx}|${gIdx}`)) : {};
-      const inAll = this.incomingNormalized();
-
-      let conflict = 0, add = 0, same = 0;
-      const secs = secOpt ? [secOpt] : Object.keys(inAll[sid]?.[vn]?.sections || {});
-      for (const sec of secs) {
-        const exSec = (exAll?.[sec] || {});
-        const inSec = (inAll?.[sid]?.[vn]?.sections?.[sec] || {});
-        const canons = new Set([...Object.keys(exSec), ...Object.keys(inSec)]);
-        for (const c of canons) {
-          const ex = exSec[c], i = inSec[c];
-          if (!this.hasValue(ex) && !this.hasValue(i)) continue;
-          const st = this.decideState(ex, i);
-
-          if (st === "conflict" && this.decisions[`${sid}|${vn}|${sec}|${c}`]) { // resolved by decision
-            same++; continue;
-          }
-
-          if (st === "conflict") conflict++;
-          else if (st === "add") add++;
-          else same++;
-        }
-      }
-      return { conflict, add, same };
-    },
-
-    decideState(existing, incoming) {
-      const hv = (v) => v !== null && v !== undefined && String(v).trim() !== "";
-      if (!hv(existing) && !hv(incoming)) return "same";
-      if (hv(existing) && hv(incoming)) return this.valuesEqual(existing, incoming) ? "same" : "conflict";
-      return hv(incoming) ? "add" : "same";
-    },
-    valuesEqual(a, b) {
-      const hv = (v) => v !== null && v !== undefined && String(v).trim() !== "";
-      if (!hv(a) && !hv(b)) return true;
-      const aa = String(a ?? "").trim();
-      const bb = String(b ?? "").trim();
-      const na = Number(aa), nb = Number(bb);
-      if (!Number.isNaN(na) && !Number.isNaN(nb)) return na === nb;
-      return aa === bb;
-    },
-
-    rowClass(row) {
-      return {
-        conflict: row.state === "conflict",
-        add: row.state === "add",
-        same: row.state === "same",
-      };
-    },
-
-    // ---------- Decisions ----------
-    ensureAutoDecisions(rows = this.sectionRows) {
-      for (const r of rows) {
-        if (this.decisions[r.key]) continue;
-        const hasEx = this.hasValue(r.existing);
-        const hasIn = this.hasValue(r.incoming);
-        if (hasIn && !hasEx) this.setDecision(r.key, "incoming");
-        else if (hasEx && !hasIn) this.setDecision(r.key, "existing");
-      }
-    },
-    setDecision(key, choice) {
-      const next = { ...this.decisions, [key]: choice };
-      this.decisions = next;
-    },
-    clearDecision(key) {
-      const next = { ...this.decisions };
-      delete next[key];
-      this.decisions = next;
-    },
-    keepAllExisting() {
-      for (const r of this.sectionRows) {
-        this.setDecision(r.key, this.hasValue(r.existing) ? "existing" : "none");
-      }
-    },
-    acceptAllIncoming() {
-      for (const r of this.sectionRows) this.setDecision(r.key, "incoming");
-    },
-    acceptIncomingWhereEmpty() {
-      for (const r of this.sectionRows) {
-        if (!this.hasValue(r.existing) && this.hasValue(r.incoming)) this.setDecision(r.key, "incoming");
-      }
-    },
-    resetCurrentDecisions() {
-      const keys = this.sectionRows.map(r => r.key);
-      const next = { ...this.decisions };
-      for (const k of keys) delete next[k];
-      this.decisions = next;
-      this.$nextTick(() => this.ensureAutoDecisions());
-    },
-
-    // ---------- Commit ----------
-    normalizeCell(v) { return v == null ? "" : String(v).trim(); },
-
-    // Build skipped flags (m x n) from template
     makeSkipSkeleton() {
       const models = this.study?.content?.study_data?.selectedModels || [];
-      return models.map(sec => (sec.fields || []).map(() => false));
+      return models.map((sec) => (sec.fields || []).map(() => false));
     },
 
-    // Convert normalized dict (canon(field.name) -> value) back to server dict using template field.name keys
     denormalizeForSave(normBySection) {
       const out = {};
       for (const rawSecName of Object.keys(normBySection || {})) {
@@ -882,103 +715,470 @@ export default {
         const secDictCanon = normBySection[rawSecName] || {};
         const map = this.sectionIndex.get(secTitle);
         if (!map) continue;
-
         const row = {};
         for (const canon of Object.keys(secDictCanon)) {
-          const fieldKey = map.fieldNameByCanon?.[canon]; // template field.name
+          const fieldKey = map.fieldNameByCanon?.[canon];
           if (!fieldKey) continue;
-
           const fType = map.fieldTypeByCanon?.[canon];
-          let val = secDictCanon[canon];                 // <-- let (not const)
-          if (fType === 'checkbox') val = this.normalizeCheckbox(val);
+          let val = secDictCanon[canon];
+          if (fType === "checkbox") val = this.normalizeCheckbox(val);
           row[fieldKey] = val;
         }
         if (Object.keys(row).length > 0) {
-          out[secTitle] = row; // only include non-empty sections
+          out[secTitle] = row;
         }
       }
       return out;
     },
 
-    async commitCurrentSelection() {
-      const sid = this.sel.subjectId, vn = this.sel.visitName, sec = this.sel.sectionName;
-      if (!sid || !vn || !sec || !this.sectionRows.length) {
-        console.log('[Merge] Commit skipped: selection incomplete or no rows', { sid, vn, sec, rows: this.sectionRows.length });
-        return;
-      }
+    valuesEqual(a, b) {
+      const hv = (v) => v !== null && v !== undefined && String(v).trim() !== "";
+      if (!hv(a) && !hv(b)) return true;
+      const aa = String(a ?? "").trim();
+      const bb = String(b ?? "").trim();
+      const na = Number(aa);
+      const nb = Number(bb);
+      if (!Number.isNaN(na) && !Number.isNaN(nb)) return na === nb;
+      return aa === bb;
+    },
 
-      const { sIdx, vIdx, gIdx } = this.resolveSVG(sid, vn);
-      if (sIdx < 0 || vIdx < 0) {
-        this.showDialogMessage("Selected Subject/Visit not found in study.");
-        console.warn('[Merge] Subject/Visit not found', { sid, vn, sIdx, vIdx });
-        return;
-      }
+    // ---------- Scope helpers ----------
+    selectAllSubjects() {
+      this.selectedSubjectIds = [...this.bundleSubjectIds];
+      this.computeConflicts();
+    },
+    clearSelectedSubjects() {
+      this.selectedSubjectIds = [];
+      this.computeConflicts();
+    },
 
-      const existing = this.entriesIndex.get(`${sIdx}|${vIdx}|${gIdx}`);
-      const baseDict = this.entryToDictNormalized(existing);
-      baseDict[sec] ||= {};
-
-      // apply decisions
-      for (const r of this.sectionRows) {
-        const decision = this.decisions[r.key];
-        if (decision === "incoming") baseDict[sec][r.canon] = r.incoming;
-        else if (decision === "existing") baseDict[sec][r.canon] = this.hasValue(r.existing) ? r.existing : "";
-        else if (decision === "none") baseDict[sec][r.canon] = "";
-        else {
-          if (r.state === "add") baseDict[sec][r.canon] = r.incoming;
-          else if (r.state === "conflict") baseDict[sec][r.canon] = r.existing;
-        }
-      }
-
-      // to server shape (section title -> field.name -> value), skipping unknown/empty sections
-      const payload = {
-        study_id: this.studyId,
-        subject_index: sIdx,
-        visit_index: vIdx,
-        group_index: gIdx,
-        data: this.denormalizeForSave(baseDict),
-        skipped_required_flags: this.makeSkipSkeleton(),
-      };
-
-      console.log('[Merge] COMMIT payload', JSON.parse(JSON.stringify(payload)));
-
-      this.isCommitting = true;
+    // ---------- File handling / parsing ----------
+    triggerFile() {
+      this.$refs.fileInput && this.$refs.fileInput.click();
+    },
+    clearBundle() {
+      this.hasBundle = false;
+      this.bundleFileName = "";
+      this.bundleVersion = null;
+      this.bundleRowCount = 0;
+      this.bundleSubjectIds = [];
+      this.bundleVisitNames = [];
+      this.importedSchema = null;
+      this.incomingEntries = {};
+      this.conflicts = [];
+      this.decisions = {};
+      this.parseInfo = { ok: false, message: "" };
+      this.scopeMode = "all";
+      this.selectedSubjectIds = [];
+    },
+    async onBundleFile(ev) {
+      const f = ev.target.files && ev.target.files[0];
+      if (!f) return;
       try {
-        const headers = { headers: { Authorization: `Bearer ${this.$store.state.token}` } };
-        if (existing?.id) {
-          await axios.put(`/forms/studies/${this.studyId}/data_entries/${existing.id}`, payload, headers);
-          console.log('[Merge] PUT OK', existing.id);
-        } else {
-          const { data } = await axios.post(`/forms/studies/${this.studyId}/data`, payload, headers);
-          console.log('[Merge] POST OK', data?.id);
-        }
-
-        await this.loadEntries();
-        this.indexEntries();
-
-        // clear decisions for this section after success
-        for (const r of this.sectionRows) this.clearDecision(r.key);
-
-        this.showDialogMessage("Merged successfully.");
-        this.$nextTick(() => this.ensureAutoDecisions());
+        await this.parseBundle(f);
       } catch (e) {
-        console.error('[Merge] Commit failed:', e?.response?.data || e);
-        this.showDialogMessage("Merge failed. See console.");
-      } finally {
-        this.isCommitting = false;
+        console.error("[Merge] Failed to parse bundle:", e);
+        this.parseInfo = { ok: false, message: "Failed to read bundle. See console." };
+        this.hasBundle = false;
       }
     },
-  }
+    async parseBundle(file) {
+      this.clearBundle();
+      this.bundleFileName = file.name;
+
+      const zip = await JSZip.loadAsync(file);
+      let templateFile = null;
+      let dataFile = null;
+
+      zip.forEach((path, zf) => {
+        if (zf.dir) return;
+        const lower = path.toLowerCase();
+        if (!templateFile && lower.includes("template_v") && lower.endsWith(".json")) {
+          templateFile = zf;
+        } else if (!dataFile && lower.includes("data_v") && lower.endsWith(".csv")) {
+          dataFile = zf;
+        }
+      });
+
+      if (!templateFile || !dataFile) {
+        this.parseInfo = {
+          ok: false,
+          message: "Bundle must contain template_vX.json and data_vX.csv.",
+        };
+        return;
+      }
+
+      const templateText = await templateFile.async("string");
+      const csvText = await dataFile.async("string");
+
+      let schema = {};
+      try {
+        const parsed = JSON.parse(templateText);
+        schema = parsed?.schema || parsed || {};
+      } catch (e) {
+        console.error("[Merge] Failed to parse template JSON:", e);
+        this.parseInfo = { ok: false, message: "Failed to parse template JSON." };
+        return;
+      }
+
+      const csvRes = Papa.parse(csvText, {
+        skipEmptyLines: "greedy",
+      });
+      const rows = csvRes.data || [];
+      if (rows.length < 3) {
+        this.parseInfo = {
+          ok: false,
+          message: "CSV in bundle must have 2 header rows + data.",
+        };
+        return;
+      }
+
+      // Version from filename or schema
+      const tmplMatch = templateFile.name.match(/template_v(\d+)/i);
+      const dataMatch = dataFile.name.match(/data_v(\d+)/i);
+      const versionFromName =
+        (tmplMatch && Number(tmplMatch[1])) ||
+        (dataMatch && Number(dataMatch[1])) ||
+        Number(schema.version || 1);
+
+      this.bundleVersion = versionFromName || 1;
+      this.bundleRowCount = rows.length - 2;
+      this.importedSchema = schema;
+
+      // Build incoming entries from rows
+      const { incomingEntries, subjectIds, visitNames, warnings } =
+        this.buildIncomingEntriesFromRows(rows, schema, this.bundleVersion);
+
+      if (warnings.length) {
+        this.parseInfo = {
+          ok: false,
+          message: `Bundle contains unknown subjects/visits: ${warnings.join(
+            "; "
+          )}. Merge is disabled to avoid data loss.`,
+        };
+        return;
+      }
+
+      this.incomingEntries = incomingEntries;
+      this.bundleSubjectIds = subjectIds;
+      this.bundleVisitNames = visitNames;
+      this.selectedSubjectIds = [...subjectIds];
+
+      this.hasBundle = true;
+      this.parseInfo = {
+        ok: true,
+        message: `Bundle parsed. Rows: ${this.bundleRowCount}. Subjects: ${subjectIds.length}. Visits: ${visitNames.length}.`,
+      };
+
+      // Recompute conflicts based on full scope
+      this.computeConflicts();
+    },
+
+    buildIncomingEntriesFromRows(rows, schema, bundleVersion) {
+      const studyData = this.study?.content?.study_data || {};
+      const sections = Array.isArray(schema.selectedModels) ? schema.selectedModels : [];
+      const incomingEntries = {};
+      const subjectIdsSet = new Set();
+      const visitNamesSet = new Set();
+      const warnings = [];
+
+      // maps for current study
+      const subjMap = {};
+      this.subjects.forEach((s, idx) => {
+        subjMap[String(s.id)] = idx;
+      });
+      const visitMap = {};
+      this.visits.forEach((v, idx) => {
+        visitMap[String(v.name).trim().toLowerCase()] = idx;
+      });
+
+      for (let r = 2; r < rows.length; r++) {
+        const row = rows[r] || [];
+        const subjectId = String(row[0] || "").trim();
+        const visitName = String(row[1] || "").trim();
+        if (!subjectId || !visitName) continue;
+
+        subjectIdsSet.add(subjectId);
+        visitNamesSet.add(visitName);
+
+        const sIdx = subjMap[subjectId];
+        const vIdx = visitMap[visitName.trim().toLowerCase()];
+
+        if (sIdx == null || sIdx < 0) {
+          if (!warnings.includes("unknown subject(s)")) warnings.push("unknown subject(s)");
+          continue;
+        }
+        if (vIdx == null || vIdx < 0) {
+          if (!warnings.includes("unknown visit(s)")) warnings.push("unknown visit(s)");
+          continue;
+        }
+
+        const groupIdx = this.resolveGroup(studyData, sIdx);
+
+        const key = `${sIdx}|${vIdx}|${groupIdx}`;
+        if (!incomingEntries[key]) {
+          incomingEntries[key] = {
+            study_id: this.studyId,
+            subject_index: sIdx,
+            visit_index: vIdx,
+            group_index: groupIdx,
+            form_version: bundleVersion,
+            data: {},
+          };
+        }
+        const entry = incomingEntries[key];
+
+        let col = 2;
+        sections.forEach((section, sIndex) => {
+          const secTitle = section.title || section.name || `Section ${sIndex + 1}`;
+          const fields = section.fields || [];
+          if (!entry.data[secTitle]) entry.data[secTitle] = {};
+          fields.forEach((field, fIdx) => {
+            const val = row[col++] ?? "";
+            const name =
+              field.name ||
+              field.key ||
+              field.id ||
+              field.label ||
+              field.title ||
+              `f${fIdx}`;
+            const trimmed = String(val).trim();
+            if (trimmed !== "") {
+              entry.data[secTitle][name] = trimmed;
+            }
+          });
+        });
+      }
+
+      return {
+        incomingEntries,
+        subjectIds: Array.from(subjectIdsSet),
+        visitNames: Array.from(visitNamesSet),
+        warnings,
+      };
+    },
+
+    resolveGroup(studyData, subjIdx) {
+      const subjects = studyData.subjects || [];
+      const groups = studyData.groups || [];
+      const subjGroup = (subjects[subjIdx]?.group || "").trim().toLowerCase();
+      const idx = groups.findIndex(
+        (g) => (g.name || "").trim().toLowerCase() === subjGroup
+      );
+      return idx >= 0 ? idx : 0;
+    },
+
+    // ---------- Conflict detection ----------
+    computeConflicts() {
+      const conflicts = [];
+      const scopeAll = this.scopeMode === "all";
+      const scopeSet = new Set(this.selectedSubjectIds || []);
+      const conflictSeen = new Set();
+
+      for (const svgKey of Object.keys(this.incomingEntries || {})) {
+        const incoming = this.incomingEntries[svgKey];
+        const sIdx = incoming.subject_index;
+        const vIdx = incoming.visit_index;
+        const gIdx = incoming.group_index;
+
+        const subject = this.subjects[sIdx];
+        const visit = this.visits[vIdx];
+        const subjectId = subject?.id;
+        const visitName = visit?.name;
+
+        if (!subjectId || !visitName) continue;
+        if (!scopeAll && !scopeSet.has(String(subjectId))) continue;
+
+        const existing = this.entriesIndex.get(svgKey);
+        if (!existing) continue; // new entry, no conflicts
+
+        const exDict = this.entryToDictNormalized(existing);
+        const inDict = this.entryToDictNormalized(incoming);
+
+        const allSections = new Set([
+          ...Object.keys(exDict || {}),
+          ...Object.keys(inDict || {}),
+        ]);
+
+        for (const secTitle of allSections) {
+          const exSec = exDict[secTitle] || {};
+          const inSec = inDict[secTitle] || {};
+          const canons = new Set([
+            ...Object.keys(exSec),
+            ...Object.keys(inSec),
+          ]);
+
+          for (const canon of canons) {
+            const exVal = exSec[canon];
+            const inVal = inSec[canon];
+            if (!this.hasValue(exVal) && !this.hasValue(inVal)) continue;
+
+            if (
+              this.hasValue(exVal) &&
+              this.hasValue(inVal) &&
+              !this.valuesEqual(exVal, inVal)
+            ) {
+              const key = `${svgKey}|${secTitle}|${canon}`;
+              if (conflictSeen.has(key)) continue;
+              conflictSeen.add(key);
+
+              conflicts.push({
+                key,
+                svgKey,
+                subjectId,
+                visitName,
+                sectionTitle: secTitle,
+                fieldCanon: canon,
+                fieldLabel: this.displayFor(secTitle, canon),
+                existingValue: exVal,
+                incomingValue: inVal,
+                existingVersion: existing.form_version,
+                incomingVersion: incoming.form_version,
+              });
+            }
+          }
+        }
+      }
+
+      this.conflicts = conflicts;
+      this.decisions = {};
+      // Auto decisions based on version (higher version wins by default)
+      for (const c of conflicts) {
+        const eV = Number(c.existingVersion || 0);
+        const iV = Number(c.incomingVersion || 0);
+        this.decisions[c.key] = iV >= eV ? "incoming" : "existing";
+      }
+    },
+
+    setDecision(key, choice) {
+      this.decisions = { ...this.decisions, [key]: choice };
+    },
+    applyDecisionToAll(choice) {
+      const next = { ...this.decisions };
+      this.conflicts.forEach((c) => {
+        next[c.key] = choice;
+      });
+      this.decisions = next;
+    },
+
+    // ---------- Merge ----------
+    async performMerge() {
+      if (!this.canMerge) return;
+
+      const scopeAll = this.scopeMode === "all";
+      const scopeSet = new Set(this.selectedSubjectIds || []);
+      const conflictKeySet = new Set(this.conflicts.map((c) => c.key));
+
+      this.isMerging = true;
+      try {
+        const headers = {
+          headers: { Authorization: `Bearer ${this.$store.state.token}` },
+        };
+
+        for (const svgKey of Object.keys(this.incomingEntries || {})) {
+          const incoming = this.incomingEntries[svgKey];
+          const sIdx = incoming.subject_index;
+          const vIdx = incoming.visit_index;
+          const gIdx = incoming.group_index;
+
+          const subject = this.subjects[sIdx];
+          const subjectId = subject?.id;
+          if (!subjectId) continue;
+          if (!scopeAll && !scopeSet.has(String(subjectId))) continue;
+
+          const existing = this.entriesIndex.get(svgKey) || null;
+          const baseDict = this.entryToDictNormalized(existing);
+          const inDict = this.entryToDictNormalized(incoming);
+
+          const allSections = new Set([
+            ...Object.keys(baseDict || {}),
+            ...Object.keys(inDict || {}),
+          ]);
+
+          for (const secTitle of allSections) {
+            if (!baseDict[secTitle]) baseDict[secTitle] = {};
+            const exSec = baseDict[secTitle];
+            const inSec = inDict[secTitle] || {};
+            const canons = new Set([
+              ...Object.keys(exSec),
+              ...Object.keys(inSec),
+            ]);
+
+            for (const canon of canons) {
+              const exVal = exSec[canon];
+              const inVal = inSec[canon];
+              const hasEx = this.hasValue(exVal);
+              const hasIn = this.hasValue(inVal);
+              const cKey = `${svgKey}|${secTitle}|${canon}`;
+
+              if (
+                hasEx &&
+                hasIn &&
+                !this.valuesEqual(exVal, inVal) &&
+                conflictKeySet.has(cKey)
+              ) {
+                const choice = this.decisions[cKey] || "existing";
+                if (choice === "incoming") {
+                  exSec[canon] = inVal;
+                } else {
+                  exSec[canon] = hasEx ? exVal : inVal;
+                }
+              } else {
+                // Non-conflict: never drop non-empty data
+                if (hasIn && !hasEx) exSec[canon] = inVal;
+                else if (!hasIn && hasEx) exSec[canon] = exVal;
+                else if (hasIn && hasEx) exSec[canon] = inVal; // equal or compatible
+                else exSec[canon] = "";
+              }
+            }
+          }
+
+          const payload = {
+            study_id: this.studyId,
+            subject_index: sIdx,
+            visit_index: vIdx,
+            group_index: gIdx,
+            data: this.denormalizeForSave(baseDict),
+            skipped_required_flags: this.makeSkipSkeleton(),
+          };
+
+          if (existing?.id) {
+            await axios.put(
+              `/forms/studies/${this.studyId}/data_entries/${existing.id}`,
+              payload,
+              headers
+            );
+          } else {
+            await axios.post(
+              `/forms/studies/${this.studyId}/data`,
+              payload,
+              headers
+            );
+          }
+        }
+
+        // reload entries and indexes
+        await this.loadEntries();
+        this.indexEntries();
+        this.showDialogMessage("Merge completed successfully.");
+      } catch (e) {
+        console.error("[Merge] Merge failed:", e?.response?.data || e);
+        this.showDialogMessage("Merge failed. See console for details.");
+      } finally {
+        this.isMerging = false;
+      }
+    },
+  },
 };
 </script>
 
 <style scoped>
-/* Shared surface + buttons (consistent with eCRF) */
+/* Shared surface + buttons */
 .card-surface {
   border: 1px solid #e5e7eb;
   border-radius: 12px;
   background: #fff;
-  box-shadow: 0 10px 25px rgba(16,24,40,0.06);
+  box-shadow: 0 10px 25px rgba(16, 24, 40, 0.06);
 }
 .btn-primary {
   background: #2f6fed;
@@ -987,19 +1187,29 @@ export default {
   padding: 10px 16px;
   border-radius: 10px;
   cursor: pointer;
-  transition: background .15s ease, box-shadow .2s ease, transform .02s ease;
+  transition: background 0.15s ease, box-shadow 0.2s ease, transform 0.02s ease;
 }
-.btn-primary:hover { background: #285fce; box-shadow: 0 2px 10px rgba(47,111,237,.25); }
+.btn-primary:hover {
+  background: #285fce;
+  box-shadow: 0 2px 10px rgba(47, 111, 237, 0.25);
+}
 .btn-option {
   background: #fff;
   border: 1px solid #e0e0e0;
   color: #111827;
-  padding: 10px 16px;
+  padding: 8px 14px;
   border-radius: 10px;
   cursor: pointer;
-  transition: background .15s ease;
+  transition: background 0.15s ease;
+  font-size: 14px;
 }
-.btn-option:hover { background: #f8fafc; }
+.btn-option:hover {
+  background: #f8fafc;
+}
+.btn-option.sm {
+  padding: 6px 10px;
+  font-size: 13px;
+}
 .btn-minimal {
   background: none;
   border: 1px solid #e0e0e0;
@@ -1012,99 +1222,299 @@ export default {
   align-items: center;
   gap: 6px;
 }
-.btn-minimal:hover { background: #e8e8e8; color: #000; border-color: #d6d6d6; }
-.file-hidden { display: none; }
+.btn-minimal.sm {
+  padding: 4px 8px;
+  font-size: 12px;
+}
+.btn-minimal:hover {
+  background: #e8e8e8;
+  color: #000;
+  border-color: #d6d6d6;
+}
+.file-hidden {
+  display: none;
+}
 
 /* Page shell */
-.merge-page { max-width: 1160px; margin: 24px auto; padding: 0 16px 72px; }
-.back-header-row { position: relative; display: flex; align-items: center; justify-content: center; min-height: 42px; margin-bottom: 12px; }
-.back-button-container { position: absolute; left: 0; top: 50%; transform: translateY(-50%); }
-.existing-studies-title { margin: 0; font-size: 20px; color: #333; }
+.merge-page {
+  max-width: 1200px;
+  margin: 24px auto;
+  padding: 0 16px 72px;
+}
+.back-header-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 42px;
+  margin-bottom: 12px;
+}
+.back-button-container {
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+}
+.existing-studies-title {
+  margin: 0;
+  font-size: 20px;
+  color: #111827;
+}
 
 /* Top bar */
-.top-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 14px; margin-bottom: 12px; }
-.meta-title { font-size: 16px; color: #111827; }
-.meta-sub { color: #4b5563; margin-top: 4px; }
-.meta-stats { color: #6b7280; font-size: 13px; margin-top: 2px; }
-.actions { display: flex; align-items: center; gap: 10px; }
+.top-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  margin-bottom: 12px;
+}
+.meta-title {
+  font-size: 16px;
+  color: #111827;
+}
+.meta-sub {
+  color: #4b5563;
+  margin-top: 4px;
+}
+.meta-stats {
+  color: #6b7280;
+  font-size: 13px;
+  margin-top: 2px;
+}
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
 
-.parse-banner { margin: 10px 0; padding: 10px 12px; border-radius: 8px; font-size: 14px; }
-.parse-banner.ok   { background: #f0fdf4; color: #065f46; border: 1px solid #bbf7d0; }
-.parse-banner.warn { background: #fff7ed; color: #9a3412; border: 1px solid #fed7aa; }
-
-/* Layout */
-.main-layout { display: grid; grid-template-columns: 300px 1fr; gap: 12px; align-items: start; }
-
-/* Tree panel */
-.tree-panel { padding: 10px; }
-.tree-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
-.tree-title { font-weight: 700; color: #111827; }
-.chk { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; color: #374151; }
-
-.tree-scroll { max-height: 68vh; overflow: auto; }
-.tree { list-style: none; padding: 0; margin: 0; }
-.tree-row {
-  width: 100%;
-  text-align: left;
-  border: 1px solid #e5e7eb;
-  background: #fafafa;
+.parse-banner {
+  margin: 10px 0;
+  padding: 10px 12px;
   border-radius: 8px;
-  padding: 8px 10px;
-  margin: 4px 0;
-  cursor: pointer;
+  font-size: 14px;
+}
+.parse-banner.ok {
+  background: #f0fdf4;
+  color: #065f46;
+  border: 1px solid #bbf7d0;
+}
+.parse-banner.warn {
+  background: #fff7ed;
+  color: #9a3412;
+  border: 1px solid #fed7aa;
+}
+
+/* Empty state */
+.empty-state {
+  margin-top: 16px;
+  padding: 18px 20px;
+}
+.empty-title {
+  font-size: 17px;
+  font-weight: 600;
+  color: #111827;
+}
+.empty-text {
+  margin-top: 6px;
+  color: #4b5563;
+}
+.empty-list {
+  margin-top: 10px;
+  padding-left: 20px;
+  color: #4b5563;
+}
+.empty-list li {
+  margin-bottom: 4px;
+}
+
+/* Main layout */
+.main-layout {
+  margin-top: 16px;
+  display: grid;
+  grid-template-columns: minmax(0, 0.55fr) minmax(0, 0.45fr);
+  gap: 12px;
+  align-items: flex-start;
+}
+.left-column {
+  padding: 14px 14px 16px;
+}
+.right-column {
+  padding: 14px 14px 16px;
+}
+
+/* Sections */
+.section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+.section-header h3 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: #111827;
+}
+.section-actions {
   display: flex;
   gap: 8px;
+}
+.mt {
+  margin-top: 12px;
+}
+
+.summary-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+.summary-item {
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: #f9fafb;
+}
+.summary-item .label {
+  font-size: 12px;
+  color: #6b7280;
+}
+.summary-item .value {
+  margin-top: 2px;
+  font-size: 14px;
+  color: #111827;
+  word-break: break-word;
+}
+
+.template-compare {
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: #f9fafb;
+}
+.compare-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 13px;
+  margin-bottom: 4px;
+}
+.compare-row .label {
+  color: #6b7280;
+}
+.compare-row .value {
+  color: #111827;
+}
+.template-warning {
+  margin-top: 8px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  font-size: 13px;
+  background: #fef2f2;
+  color: #b91c1c;
+}
+
+/* Scope */
+.scope-card {
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: #f9fafb;
+}
+.radio-row {
+  display: flex;
   align-items: center;
+  font-size: 13px;
+  gap: 8px;
+  margin-bottom: 4px;
 }
-.tree-row:hover { background: #f5f5f5; }
-.tree-row.active { border-color: #2f6fed; box-shadow: 0 0 0 2px rgba(47,111,237,.15) inset; }
-.tree-row .label { color: #6b7280; font-size: 12px; min-width: 60px; }
-.tree-row .value { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.counts { display: inline-flex; gap: 6px; }
-.badge { padding: 1px 6px; border-radius: 999px; font-size: 11px; border: 1px solid #fecaca; background: #fef2f2; color: #991b1b; }
-
-/* Compare panel */
-.compare-panel { padding: 10px; position: relative; outline: none; }
-.compare-panel.fullscreen {
-  position: fixed;
-  inset: 10px;
-  z-index: 1200;
-  max-width: none;
-  width: auto;
-  height: auto;
-  background: #fff;
+.subject-select {
+  margin-top: 8px;
 }
-.compare-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
-.path { display: flex; gap: 6px; align-items: center; color: #374151; flex-wrap: wrap; }
-.sep { color: #9ca3af; }
-.compare-actions { display: flex; gap: 8px; align-items: center; }
-
-.empty-note.big { text-align: center; padding: 24px; color: #6b7280; }
-
-.split-view { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-.col { border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden; background: #fff; }
-.col-title { background: #f8fafc; padding: 8px 10px; border-bottom: 1px solid #e5e7eb; font-weight: 600; color: #111827; }
-.val-table { width: 100%; border-collapse: collapse; }
-.val-table th, .val-table td { border-bottom: 1px solid #e5e7eb; padding: 8px 10px; vertical-align: top; }
-.field-name { font-weight: 600; color: #111827; }
-.value-cell .value { white-space: pre-wrap; word-break: break-word; }
-.value-cell .hint { color: #6b7280; font-weight: 400; font-size: 12px; margin-left: 6px; }
-.resolve { margin-top: 6px; display: flex; gap: 12px; flex-wrap: wrap; }
-.radio { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; }
-.radio.muted { opacity: .7; }
-
-.val-table tr.conflict td { background: #fff7f7; }
-.val-table tr.add td      { background: #f6fffa; }
-.val-table tr.same td     { background: #f8fafc; }
-
-.resolved-pill {
-  margin-left: 8px;
-  padding: 2px 6px;
+.helper {
+  margin: 0 0 6px;
+  font-size: 13px;
+  color: #6b7280;
+}
+.subject-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+.subject-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
   border-radius: 999px;
-  background: #eef2ff;
-  color: #3730a3;
-  font-weight: 600;
+  border: 1px solid #e5e7eb;
+  background: #fff;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+/* Conflicts */
+.conflict-table-wrapper {
+  margin-top: 10px;
+  max-height: 60vh;
+  overflow: auto;
+}
+.conflict-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.conflict-table th,
+.conflict-table td {
+  border-bottom: 1px solid #e5e7eb;
+  padding: 6px 8px;
+  vertical-align: top;
+}
+.conflict-table th {
+  background: #f9fafb;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+.val-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.val-main {
+  word-break: break-word;
+}
+.val-meta {
   font-size: 11px;
+  color: #6b7280;
+}
+.choice-row {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.radio-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+}
+
+/* Merge summary badge */
+.badge-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+}
+.badge-pill.conflict {
+  background: #fef2f2;
+  color: #b91c1c;
+  border: 1px solid #fecaca;
+}
+.badge-pill.ok {
+  background: #ecfdf3;
+  color: #15803d;
+  border: 1px solid #bbf7d0;
 }
 
 /* Sticky footer */
@@ -1122,17 +1532,39 @@ export default {
   background: #ffffff;
   border: 1px solid #e5e7eb;
   border-radius: 12px;
-  box-shadow: 0 10px 25px rgba(16,24,40,0.08);
+  box-shadow: 0 10px 25px rgba(16, 24, 40, 0.08);
 }
-.sel-path { display: flex; gap: 6px; align-items: center; color: #374151; flex-wrap: wrap; }
-.sel-counts { color: #6b7280; }
-.sel-counts .dot { margin: 0 8px; color: #9ca3af; }
+.sel-summary {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  color: #374151;
+  flex-wrap: wrap;
+  font-size: 13px;
+}
+.sel-sub {
+  margin-top: 2px;
+  font-size: 12px;
+  color: #6b7280;
+}
+.dot {
+  margin: 0 4px;
+  color: #9ca3af;
+}
 
 /* Responsive */
 @media (max-width: 980px) {
-  .main-layout { grid-template-columns: 1fr; }
-  .tree-panel { order: 1; }
-  .compare-panel { order: 2; }
-  .split-view { grid-template-columns: 1fr; }
+  .main-layout {
+    grid-template-columns: 1fr;
+  }
+  .global-commit {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  .section-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 6px;
+  }
 }
 </style>

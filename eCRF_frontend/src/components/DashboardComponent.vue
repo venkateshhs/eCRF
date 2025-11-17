@@ -201,6 +201,9 @@
                       <button class="menu-item" role="menuitem" @click="handleExportStudy(study)">
                         Export Study Template
                       </button>
+                      <button class="menu-item" role="menuitem" @click="handleDownloadStudy(study)">
+                        Download Study (ZIP)
+                      </button>
                       <button class="menu-item" role="menuitem" @click="handleMergeStudy(study)">
                         Merge study
                       </button>
@@ -222,6 +225,7 @@
 <script>
 import axios from "axios";
 import icons from "@/assets/styles/icons";
+import { downloadStudyBundle } from "@/utils/studyDownload";
 
 export default {
   name: "DashboardComponent",
@@ -426,6 +430,21 @@ export default {
     handleMergeStudy(study) {
       this.openMenuId = null;
       this.$router.push(`/dashboard/merge-study/${study.id}`);
+    },
+    async handleDownloadStudy(study) {
+      this.openMenuId = null;
+      const token = this.$store.state.token;
+      if (!token) {
+        alert("Please log in again.");
+        this.$router.push("/login");
+        return;
+      }
+      try {
+        await downloadStudyBundle({ studyId: study.id, token });
+      } catch (e) {
+        console.error("Failed to download study bundle:", e);
+        alert("Failed to download study bundle.");
+      }
     },
   },
   mounted() {
