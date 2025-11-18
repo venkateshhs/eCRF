@@ -1,12 +1,14 @@
 # eCRF_backend/forms.py
 import os
+import platform
+import subprocess
 import shutil
 import tempfile
 from typing import List, Optional, Dict, Any
 from urllib.parse import urlparse
 
 from fastapi import Request
-from fastapi import APIRouter, HTTPException, Depends, Query, UploadFile, File, Form, Body
+from fastapi import APIRouter, HTTPException, Depends, Query, UploadFile, File, Form, Body, status
 from pathlib import Path
 import json
 import yaml
@@ -21,7 +23,7 @@ from .bids_exporter import (
     audit_change_both,  # unified audit (DB + BIDS)
     audit_access_change_both,  # unified access audit
     log_dataset_change_to_changes,  # optional BIDS CHANGES mirror
-    bump_bids_version, bulk_write_entries_to_bids,  # NEW: clone versioned BIDS tree safely on template bump
+    bump_bids_version, bulk_write_entries_to_bids, _dataset_path,
 )
 from .logger import logger
 from .models import User, StudyTemplateVersion
@@ -1595,4 +1597,90 @@ def bulk_insert_data(
 
     return {"inserted": inserted_count, "failed": 0, "errors": []}
 
+def _ensure_can_see_bids(current_user: models.User, study: models.StudyMetadata) -> None:
+    """
+    Only study owner or admins can see/open the BIDS dataset.
+    Adjust this to your own role logic if needed.
+    """
+    role = (getattr(getattr(current_user, "profile", None), "role", "") or "").strip().lower()
+    is_admin = role == "administrator"
+    is_owner = current_user.id == study.created_by
 
+    if not (is_admin or is_owner):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You do not have permission to view the BIDS dataset for this study.",
+        )
+
+
+@router.get("/studies/{study_id}/bids_path")
+def get_study_bids_path(
+    study_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    """
+    Return the absolute BIDS dataset path for this study.
+    Only visible to study owner and admins.
+    """
+    # was: study = crud.get_study_by_id(db, study_id)
+    study = (
+        db.query(models.StudyMetadata)
+        .filter(models.StudyMetadata.id == study_id)
+        .first()
+    )
+
+    if not study:
+        raise HTTPException(status_code=404, detail="Study not found")
+
+    _ensure_can_see_bids(current_user, study)
+
+    dataset_path = _dataset_path(study.id, study.study_name or "")
+    return {
+        "dataset_path": dataset_path,
+        "exists": os.path.isdir(dataset_path),
+    }
+@router.post("/studies/{study_id}/bids_open", status_code=204)
+def open_study_bids_folder(
+    study_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    """
+    Opens the BIDS dataset folder for this study in the OS file explorer.
+    Only allowed for study owner and admins.
+    """
+    # was: study = crud.get_study_by_id(db, study_id)
+    study = (
+        db.query(models.StudyMetadata)
+        .filter(models.StudyMetadata.id == study_id)
+        .first()
+    )
+
+    if not study:
+        raise HTTPException(status_code=404, detail="Study not found")
+
+    _ensure_can_see_bids(current_user, study)
+
+    dataset_path = _dataset_path(study.id, study.study_name or "")
+    if not os.path.isdir(dataset_path):
+        raise HTTPException(status_code=404, detail="BIDS dataset directory does not exist yet")
+
+    system = platform.system()
+    if system == "Darwin":
+        cmd = ["open", dataset_path]
+    elif system == "Windows":
+        cmd = ["explorer", dataset_path]
+    else:
+        cmd = ["xdg-open", dataset_path]
+
+    try:
+        subprocess.Popen(cmd)
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to open BIDS folder: {e}",
+        )
+
+    # 204 No Content
+    return
