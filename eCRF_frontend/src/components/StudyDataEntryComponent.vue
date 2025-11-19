@@ -132,6 +132,12 @@
                   </button>
                 </td>
               </tr>
+              <tr v-if="sd.subjects.length === 0">
+                <td colspan="999" class="no-subjects-placeholder">
+                  No subjects have been created for this study.<br />
+                  Please add subjects via <strong>Edit Study</strong>.
+                </td>
+              </tr>
             </tbody>
           </table>
         </div>
@@ -2550,5 +2556,12 @@ select:focus {
   background: #fff7ed;
   color: #9a3412;
   border: 1px solid #fed7aa;
+}
+.no-subjects-placeholder {
+  text-align: center;
+  padding: 20px;
+  color: #6b7280;
+  font-style: italic;
+  background: #fafafa;
 }
 </style>
