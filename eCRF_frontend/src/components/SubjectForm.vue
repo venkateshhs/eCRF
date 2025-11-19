@@ -1,22 +1,24 @@
 <template>
-  <BaseNumberField
-  :modelValue="subjectCount"
-  @update:modelValue="updateCount"
-  id="subject-count"
-  label="Number of Subjects"
-  placeholder="e.g. 20"
-  :required="true"
-/>
+  <div>
+    <BaseNumberField
+      :modelValue="subjectCount"
+      @update:modelValue="updateCount"
+      id="subject-count"
+      label="Number of Subjects"
+      placeholder="e.g. 20"
+      :required="true"
+    />
 
-<BaseSelectField
-  :modelValue="assignmentMethod"
-  @update:modelValue="updateMethod"
-  id="assignment-method"
-  label="Assignment Method"
-  :options="['Random', 'Manual', 'Skip']"
-  placeholder="Select assignment method"
-  :required="true"
-/>
+    <BaseSelectField
+      :modelValue="assignmentMethod"
+      @update:modelValue="updateMethod"
+      id="assignment-method"
+      label="Assignment Method"
+      :options="['Random', 'Manual', 'Skip']"
+      placeholder="Select assignment method"
+      :required="true"
+    />
+  </div>
 </template>
 
 <script>
@@ -33,13 +35,21 @@ export default {
   },
   emits: ["update:subjectCount", "update:assignmentMethod"],
   setup(props, { emit }) {
-    watch(() => props.subjectCount, (val) => {
-      if (val == null) emit("update:subjectCount", 1);
-    }, { immediate: true });
+    watch(
+      () => props.subjectCount,
+      (val) => {
+        if (val == null) emit("update:subjectCount", 1);
+      },
+      { immediate: true }
+    );
 
-    watch(() => props.assignmentMethod, (val) => {
-      if (!val) emit("update:assignmentMethod", "random");
-    }, { immediate: true });
+    watch(
+      () => props.assignmentMethod,
+      (val) => {
+        if (!val) emit("update:assignmentMethod", "random");
+      },
+      { immediate: true }
+    );
 
     const updateCount = (val) => emit("update:subjectCount", val);
     const updateMethod = (val) => emit("update:assignmentMethod", val);

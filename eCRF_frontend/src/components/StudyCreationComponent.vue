@@ -90,7 +90,20 @@
 
     <!-- STEP 3 -->
     <div v-if="step === 3" class="new-study-form">
-      <h2>Step 3: Subject Setup</h2>
+      <div class="step-header">
+        <h2>Step 3: Subject Setup</h2>
+        <label class="skip-toggle">
+          <span class="skip-label">Skip subject creation for now</span>
+          <button
+            type="button"
+            class="toggle-button"
+            :class="{ 'toggle-on': skipSubjectCreationNow }"
+            @click="skipSubjectCreationNow = !skipSubjectCreationNow"
+          >
+            <span class="toggle-knob" />
+          </button>
+        </label>
+      </div>
       <SubjectForm
         v-model:subjectCount="subjectCount"
         v-model:assignmentMethod="assignmentMethod"
@@ -102,7 +115,10 @@
     </div>
 
     <!-- STEP 4 -->
-    <div v-if="step === 4 && assignmentMethod !== 'Skip'" class="new-study-form">
+    <div
+      v-if="step === 4 && assignmentMethod !== 'Skip' && !skipSubjectCreationNow"
+      class="new-study-form"
+    >
       <SubjectAssignmentForm
         :subjects="subjectData"
         :groupData="groupData"
@@ -119,7 +135,7 @@
       <VisitForm :schema="visitSchema" v-model="visitData" />
       <div class="form-actions">
         <button
-          @click="step = (assignmentMethod === 'Skip' ? 3 : 4)"
+          @click="goBackFromVisits"
           class="btn-option"
         >
           Back
@@ -193,6 +209,9 @@ export default {
     const showDialog = ref(false);
     const dialogMessage = ref("");
 
+    //flag to skip subject creation (Step 3 + Step 4) for now
+    const skipSubjectCreationNow = ref(false);
+
     function fieldError(f, value) {
       return f.required && showStudyErrors.value && !value
         ? `${f.label} is required.`
@@ -249,7 +268,8 @@ export default {
         study: studyData.value,
         groups: [],
         visits: [],
-        assignments: assignments.value
+        assignments: assignments.value,
+        skipSubjectCreationNow: skipSubjectCreationNow.value
       };
 
       if (skips.includes("groups") && skips.includes("visits")) {
@@ -276,12 +296,20 @@ export default {
         study: studyData.value,
         groups: groupData.value,
         visits: [],
-        assignments: assignments.value
+        assignments: assignments.value,
+        skipSubjectCreationNow: skipSubjectCreationNow.value
       });
       step.value = 3;
     }
 
     function checkSubjectsSetup() {
+      // if user chose to skip subject creation now, just move to visits
+      if (skipSubjectCreationNow.value) {
+        // Do not touch existing subjectData (no data loss on edit)
+        step.value = 5;
+        return;
+      }
+
       if (!subjectCount.value || !assignmentMethod.value) {
         dialogMessage.value = "Please provide subject count and assignment method.";
         showDialog.value = true;
@@ -376,7 +404,8 @@ export default {
         assignmentMethod: assignmentMethod.value,
         subjects: subjectData.value,
         visits: visitData.value,
-        assignments: assignments.value
+        assignments: assignments.value,
+        skipSubjectCreationNow: skipSubjectCreationNow.value
       });
 
       router.push({ name: "CreateFormScratch", params: { assignments: assignments.value } });
@@ -388,6 +417,15 @@ export default {
 
     function handleAssignmentUpdated({ mIdx, vIdx, gIdx, checked }) {
       assignments.value[mIdx][vIdx][gIdx] = checked;
+    }
+
+    // Back navigation from visits should respect skipSubjectCreationNow
+    function goBackFromVisits() {
+      if (skipSubjectCreationNow.value) {
+        step.value = 3;
+      } else {
+        step.value = (assignmentMethod.value === "Skip" ? 3 : 4);
+      }
     }
 
     onMounted(async () => {
@@ -407,6 +445,7 @@ export default {
         assignmentMethod.value = details.assignmentMethod ?? assignmentMethod.value;
         subjectData.value = Array.isArray(details.subjects) ? [...details.subjects] : [];
         visitData.value = Array.isArray(details.visits) ? [...details.visits] : [];
+        skipSubjectCreationNow.value = !!details.skipSubjectCreationNow;
         assignments.value = Array.isArray(details.assignments)
           ? JSON.parse(JSON.stringify(details.assignments)) // Deep copy
           : initializeAssignments(details.selectedModels || [], details.visits || [], details.groups || []);
@@ -441,7 +480,9 @@ export default {
       checkSubjectsAssigned,
       checkVisits,
       goToStudyManagement,
-      handleAssignmentUpdated
+      handleAssignmentUpdated,
+      skipSubjectCreationNow,
+      goBackFromVisits
     };
   }
 };
@@ -475,6 +516,58 @@ export default {
   border-radius: 4px;
   cursor: pointer;
 }
+
+/* Step 3 header with toggle */
+.step-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 1rem;
+}
+.skip-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  color: #111827;
+}
+.skip-label {
+  white-space: nowrap;
+  color: #111827;
+  font-weight: 400;
+  font-size: 14px;
+}
+.toggle-button {
+  position: relative;
+  width: 42px;
+  height: 22px;
+  border-radius: 999px;
+  border: 1px solid #d1d5db;
+  background: #e5e7eb;
+  padding: 0;
+  cursor: pointer;
+  outline: none;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+.toggle-button .toggle-knob {
+  position: absolute;
+  top: 1px;
+  left: 1px;
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  background: #ffffff;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.15);
+  transition: transform 0.15s ease;
+}
+.toggle-button.toggle-on {
+  background: #3b82f6;
+  border-color: #2563eb;
+}
+.toggle-button.toggle-on .toggle-knob {
+  transform: translateX(20px);
+}
+
 .dialog-backdrop {
   position: fixed;
   top: 0; left: 0; width: 100%; height: 100%;
