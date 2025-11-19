@@ -8,7 +8,7 @@
           <span>Back</span>
         </button>
       </div>
-      <h2 class="existing-studies-title">Merge Study Bundle</h2>
+      <h2 class="existing-studies-title">Import Study Data</h2>
     </div>
 
     <!-- Study meta -->
@@ -34,7 +34,7 @@
           @change="onBundleFile"
         />
         <button class="btn-primary" @click="triggerFile">
-          Choose bundle (.zip)
+          Choose file (.zip)
         </button>
         <button
           class="btn-option"
@@ -55,32 +55,42 @@
       {{ parseInfo.message }}
     </div>
 
+    <!-- Extra info when parse was OK but templates mismatch -->
+    <div
+      v-if="hasBundle && parseInfo.ok && templateMismatch"
+      class="parse-banner warn"
+    >
+      Merge is currently disabled because the template in this file does not
+      match the study template. Please align template versions before merging.
+    </div>
+
     <!-- Nothing loaded yet -->
     <div v-if="!hasBundle" class="empty-state card-surface">
-      <p class="empty-title">Import a study bundle</p>
+      <p class="empty-title">Import study data</p>
       <p class="empty-text">
         Select the ZIP file created by <code>downloadStudyBundle</code>. It
         should contain <code>template_vX.json</code> and
         <code>data_vX.csv</code>.
       </p>
-      <ul class="empty-list">
-        <li>Default: merge data for all subjects.</li>
-        <li>Advanced: restrict import to specific subjects.</li>
-        <li>If there are conflicts, you’ll get a simple left/right resolution UI.</li>
-      </ul>
+      <p class="empty-text small">
+        After loading, you can merge data for all subjects or restrict to specific subjects, and resolve any differences.
+      </p>
     </div>
 
-    <!-- Main layout once bundle is parsed -->
-    <div v-else class="main-layout">
-      <!-- Left column: bundle + template info -->
-      <section class="card-surface left-column">
-        <!-- Bundle summary -->
+    <!-- Main layout once file is parsed -->
+    <div v-else class="main-layout" :class="{ 'single-column': !showImportDetails }">
+      <!-- Left column: import + template info (collapsible) -->
+      <section
+        v-if="showImportDetails"
+        class="card-surface left-column"
+      >
+        <!-- Import summary -->
         <div class="section-header">
-          <h3>Bundle summary</h3>
+          <h3>Import summary</h3>
         </div>
         <div class="summary-grid">
           <div class="summary-item">
-            <div class="label">Bundle file</div>
+            <div class="label">Import file</div>
             <div class="value">{{ bundleFileName }}</div>
           </div>
           <div class="summary-item">
@@ -96,13 +106,13 @@
             </div>
           </div>
           <div class="summary-item">
-            <div class="label">Subjects in bundle</div>
+            <div class="label">Subjects in file</div>
             <div class="value">
               {{ bundleSubjectIds.length }}
             </div>
           </div>
           <div class="summary-item">
-            <div class="label">Visits in bundle</div>
+            <div class="label">Visits in file</div>
             <div class="value">
               {{ bundleVisitNames.length }}
             </div>
@@ -130,18 +140,22 @@
             <div class="label">Imported template fields</div>
             <div class="value">{{ importedTemplateSummary.fields }}</div>
           </div>
-          <div
-            v-if="templateMismatch"
-            class="template-warning"
-          >
-            Template structure does not match. Merge is disabled to avoid data
-            loss. Please align template versions before importing this bundle.
+          <div v-if="templateMismatch" class="template-warning">
+            <div>
+              Template structure does not match. Merge is disabled to avoid data
+              loss. Please align template versions before importing this file.
+            </div>
+            <ul v-if="templateMismatchDetails.length" class="mismatch-list">
+              <li v-for="(msg, idx) in templateMismatchDetails" :key="idx">
+                {{ msg }}
+              </li>
+            </ul>
           </div>
         </div>
 
         <!-- Scope selection (whole study vs per subject) -->
         <div class="section-header mt">
-          <h3>Scope</h3>
+          <h3>Import scope</h3>
         </div>
         <div class="scope-card">
           <label class="radio-row">
@@ -149,16 +163,18 @@
               type="radio"
               value="all"
               v-model="scopeMode"
+              @change="computeConflicts"
             />
-            <span>Merge whole study (all subjects in bundle)</span>
+            <span>Merge data for all subjects in the file</span>
           </label>
           <label class="radio-row">
             <input
               type="radio"
               value="subset"
               v-model="scopeMode"
+              @change="computeConflicts"
             />
-            <span>Merge specific subjects</span>
+            <span>Merge data only for selected subjects</span>
           </label>
 
           <div
@@ -166,7 +182,7 @@
             class="subject-select"
           >
             <p class="helper">
-              Select subjects from the bundle to include in this merge.
+              Select subjects from the file to include in this merge.
             </p>
             <div class="subject-list">
               <label
@@ -178,6 +194,7 @@
                   type="checkbox"
                   :value="sid"
                   v-model="selectedSubjectIds"
+                  @change="computeConflicts"
                 />
                 <span>{{ sid }}</span>
               </label>
@@ -197,11 +214,18 @@
           </div>
         </div>
 
-        <!-- Merge summary -->
+        <!-- Merge summary (collapsible) -->
         <div class="section-header mt">
           <h3>Merge summary</h3>
+          <button
+            type="button"
+            class="link-toggle"
+            @click="showMergeSummary = !showMergeSummary"
+          >
+            {{ showMergeSummary ? 'Hide' : 'Show' }}
+          </button>
         </div>
-        <div class="summary-grid">
+        <div v-if="showMergeSummary" class="summary-grid">
           <div class="summary-item">
             <div class="label">Entries to import</div>
             <div class="value">{{ importEntryCount }}</div>
@@ -229,12 +253,20 @@
         </div>
       </section>
 
-      <!-- Right column: conflicts table (only if conflicts) -->
+      <!-- Right column: conflicts table (primary view) -->
       <section class="card-surface right-column" v-if="conflicts.length">
         <div class="section-header">
           <h3>Resolve conflicts</h3>
           <div class="section-actions">
-            <!-- NEW: Subject filter dropdown -->
+            <button
+              type="button"
+              class="btn-minimal sm"
+              @click="toggleImportDetails"
+            >
+              {{ showImportDetails ? 'Hide import details' : 'Show import details' }}
+            </button>
+
+            <!-- Subject filter dropdown -->
             <div class="subject-filter">
               <label for="conflict-subject-filter">Subject:</label>
               <select
@@ -256,22 +288,19 @@
               class="btn-option sm"
               @click="applyDecisionToAll('incoming')"
             >
-              Use incoming (right) for all
+              Use incoming for all
             </button>
             <button
               class="btn-option sm"
               @click="applyDecisionToAll('existing')"
             >
-              Keep existing (left) for all
+              Keep existing for all
             </button>
           </div>
         </div>
 
         <p class="helper">
-          These fields have different values in the current study and in the imported
-          bundle. Choose whether to keep the existing value (left) or use the incoming
-          value (right). Default decisions are based on the higher
-          <code>form_version</code>.
+          For each difference, choose whether to keep the current value or use the value from the file.
         </p>
 
         <div class="conflict-table-wrapper">
@@ -282,8 +311,8 @@
                 <th>Visit</th>
                 <th>Section</th>
                 <th>Field</th>
-                <th>Existing (left)</th>
-                <th>Incoming (right)</th>
+                <th>Existing</th>
+                <th>Incoming</th>
                 <th>Choice</th>
               </tr>
             </thead>
@@ -326,7 +355,7 @@
                         :checked="decisions[c.key] === 'existing'"
                         @change="setDecision(c.key, 'existing')"
                       />
-                      Left
+                      Existing
                     </label>
                     <label class="radio-inline">
                       <input
@@ -336,7 +365,7 @@
                         :checked="decisions[c.key] === 'incoming'"
                         @change="setDecision(c.key, 'incoming')"
                       />
-                      Right
+                      Incoming
                     </label>
                   </div>
                 </td>
@@ -346,18 +375,26 @@
         </div>
       </section>
 
-      <!-- No conflicts: small notice on right -->
+      <!-- No conflicts: simple notice -->
       <section
         v-else
         class="card-surface right-column"
       >
         <div class="section-header">
           <h3>No conflicts</h3>
+          <div class="section-actions">
+            <button
+              type="button"
+              class="btn-minimal sm"
+              @click="toggleImportDetails"
+            >
+              {{ showImportDetails ? 'Hide import details' : 'Show import details' }}
+            </button>
+          </div>
         </div>
         <p class="helper">
-          All incoming values are either identical to existing data or filling empty
-          fields. Clicking <strong>Merge</strong> will safely update or create
-          entries without overwriting conflicting data.
+          All incoming values either match existing data or fill empty fields.
+          You can go ahead and merge safely.
         </p>
       </section>
     </div>
@@ -433,7 +470,7 @@ export default {
       entries: [],
       entriesIndex: new Map(),       // svgKey -> latest entry
 
-      // imported bundle
+      // imported file
       hasBundle: false,
       bundleFileName: "",
       bundleVersion: null,
@@ -451,7 +488,7 @@ export default {
       conflicts: [],                 // [{ key, svgKey, subjectId, visitName, sectionTitle, fieldCanon, fieldLabel, existingValue, incomingValue, existingVersion, incomingVersion }]
       decisions: {},                 // conflictKey -> 'existing' | 'incoming'
 
-      // NEW: subject filter for conflicts table
+      // subject filter for conflicts table
       selectedConflictSubject: "ALL",
 
       parseInfo: { ok: false, message: "" },
@@ -459,6 +496,10 @@ export default {
 
       showDialog: false,
       dialogMessage: "",
+
+      // UI toggles
+      showImportDetails: false,      // show/hide left column
+      showMergeSummary: false,       // collapse/expand merge summary
     };
   },
   computed: {
@@ -512,12 +553,70 @@ export default {
         this.currentTemplateSummary.fields !== this.importedTemplateSummary.fields
       );
     },
-    // NEW: distinct subject IDs present in conflicts
+    // Explain what exactly is mismatching between templates
+    templateMismatchDetails() {
+      const details = [];
+      if (!this.importedSchema) return details;
+
+      const current = this.study?.content?.study_data?.selectedModels || [];
+      const imported = Array.isArray(this.importedSchema.selectedModels)
+        ? this.importedSchema.selectedModels
+        : [];
+
+      const currentNames = current
+        .map((s) => (s.title || s.name || "").trim())
+        .filter(Boolean);
+      const importedNames = imported
+        .map((s) => (s.title || s.name || "").trim())
+        .filter(Boolean);
+
+      if (currentNames.length !== importedNames.length) {
+        details.push(
+          `Section count differs (current ${currentNames.length}, import ${importedNames.length}).`
+        );
+      }
+
+      const impSet = new Set(importedNames.map((n) => n.toLowerCase()));
+      const curSet = new Set(currentNames.map((n) => n.toLowerCase()));
+
+      const missingInImport = currentNames.filter(
+        (n) => !impSet.has(n.toLowerCase())
+      );
+      const missingInCurrent = importedNames.filter(
+        (n) => !curSet.has(n.toLowerCase())
+      );
+
+      if (missingInImport.length) {
+        details.push(`Missing in import: ${missingInImport.join(", ")}`);
+      }
+      if (missingInCurrent.length) {
+        details.push(`Only in import: ${missingInCurrent.join(", ")}`);
+      }
+
+      current.forEach((sec) => {
+        const name = (sec.title || sec.name || "").trim();
+        if (!name) return;
+        const other = imported.find(
+          (s) => (s.title || s.name || "").trim() === name
+        );
+        if (!other) return;
+        const curCount = (sec.fields || []).length;
+        const impCount = (other.fields || []).length;
+        if (curCount !== impCount) {
+          details.push(
+            `Field count differs for "${name}" (current ${curCount}, import ${impCount}).`
+          );
+        }
+      });
+
+      return details;
+    },
+    // distinct subject IDs present in conflicts
     conflictSubjectOptions() {
       const set = new Set(this.conflicts.map((c) => String(c.subjectId)));
       return Array.from(set).sort();
     },
-    // NEW: conflicts filtered by selected subject for the table only
+    // conflicts filtered by selected subject for the table only
     visibleConflicts() {
       if (!this.selectedConflictSubject || this.selectedConflictSubject === "ALL") {
         return this.conflicts;
@@ -546,6 +645,9 @@ export default {
     closeDialog() {
       this.showDialog = false;
       this.dialogMessage = "";
+    },
+    toggleImportDetails() {
+      this.showImportDetails = !this.showImportDetails;
     },
 
     // ---------- Load existing study ----------
@@ -806,6 +908,8 @@ export default {
       this.scopeMode = "all";
       this.selectedSubjectIds = [];
       this.selectedConflictSubject = "ALL";
+      this.showImportDetails = false;
+      this.showMergeSummary = false;
     },
     async onBundleFile(ev) {
       const f = ev.target.files && ev.target.files[0];
@@ -813,8 +917,8 @@ export default {
       try {
         await this.parseBundle(f);
       } catch (e) {
-        console.error("[Merge] Failed to parse bundle:", e);
-        this.parseInfo = { ok: false, message: "Failed to read bundle. See console." };
+        console.error("[Merge] Failed to parse file:", e);
+        this.parseInfo = { ok: false, message: "Failed to read file. See console." };
         this.hasBundle = false;
       }
     },
@@ -839,7 +943,7 @@ export default {
       if (!templateFile || !dataFile) {
         this.parseInfo = {
           ok: false,
-          message: "Bundle must contain template_vX.json and data_vX.csv.",
+          message: "ZIP file must contain template_vX.json and data_vX.csv.",
         };
         return;
       }
@@ -864,7 +968,7 @@ export default {
       if (rows.length < 3) {
         this.parseInfo = {
           ok: false,
-          message: "CSV in bundle must have 2 header rows + data.",
+          message: "CSV file must have 2 header rows + data.",
         };
         return;
       }
@@ -888,7 +992,7 @@ export default {
       if (warnings.length) {
         this.parseInfo = {
           ok: false,
-          message: `Bundle contains unknown subjects/visits: ${warnings.join(
+          message: `File contains unknown subjects/visits: ${warnings.join(
             "; "
           )}. Merge is disabled to avoid data loss.`,
         };
@@ -903,8 +1007,12 @@ export default {
       this.hasBundle = true;
       this.parseInfo = {
         ok: true,
-        message: `Bundle parsed. Rows: ${this.bundleRowCount}. Subjects: ${subjectIds.length}. Visits: ${visitNames.length}.`,
+        message: `File parsed. Rows: ${this.bundleRowCount}. Subjects: ${subjectIds.length}. Visits: ${visitNames.length}.`,
       };
+
+      // By default, keep left panel hidden to avoid overload
+      this.showImportDetails = false;
+      this.showMergeSummary = false;
 
       // Recompute conflicts based on full scope
       this.computeConflicts();
@@ -1272,6 +1380,19 @@ export default {
   display: none;
 }
 
+/* link-like toggle */
+.link-toggle {
+  background: none;
+  border: none;
+  font-size: 12px;
+  color: #2563eb;
+  cursor: pointer;
+  padding: 2px 4px;
+}
+.link-toggle:hover {
+  text-decoration: underline;
+}
+
 /* Page shell */
 .merge-page {
   max-width: 1200px;
@@ -1357,13 +1478,8 @@ export default {
   margin-top: 6px;
   color: #4b5563;
 }
-.empty-list {
-  margin-top: 10px;
-  padding-left: 20px;
-  color: #4b5563;
-}
-.empty-list li {
-  margin-bottom: 4px;
+.empty-text.small {
+  font-size: 13px;
 }
 
 /* Main layout */
@@ -1374,11 +1490,17 @@ export default {
   gap: 12px;
   align-items: flex-start;
 }
+.main-layout.single-column {
+  grid-template-columns: minmax(0, 1fr);
+}
 .left-column {
   padding: 14px 14px 16px;
 }
 .right-column {
   padding: 14px 14px 16px;
+}
+.main-layout.single-column .right-column {
+  grid-column: 1 / -1;
 }
 
 /* Sections */
@@ -1449,6 +1571,11 @@ export default {
   background: #fef2f2;
   color: #b91c1c;
 }
+.mismatch-list {
+  margin: 6px 0 0;
+  padding-left: 18px;
+  font-size: 12px;
+}
 
 /* Scope */
 .scope-card {
@@ -1492,7 +1619,7 @@ export default {
 /* Conflicts */
 .conflict-table-wrapper {
   margin-top: 10px;
-  max-height: 60vh;
+  max-height: 70vh;
   overflow: auto;
 }
 .conflict-table {
