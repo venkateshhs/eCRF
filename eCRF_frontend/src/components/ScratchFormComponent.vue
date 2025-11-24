@@ -1700,7 +1700,7 @@ export default {
 .field-box .radio-group { display:flex; flex-direction:column; gap:8px; margin-bottom:10px; }
 
 input, textarea, select {
-  width: 100%;
+  width: 96%;
   padding: 10px;
   border: 1px solid $border-color;
   border-radius: 8px;
