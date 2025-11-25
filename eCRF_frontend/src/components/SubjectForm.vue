@@ -14,7 +14,7 @@
       @update:modelValue="updateMethod"
       id="assignment-method"
       label="Assignment Method"
-      :options="['Random', 'Manual', 'Skip']"
+      :options="assignmentOptions"
       placeholder="Select assignment method"
       :required="true"
     />
@@ -32,6 +32,12 @@ export default {
   props: {
     subjectCount: Number,
     assignmentMethod: String,
+    // NEW: allows callers to customize the list of methods
+    // default keeps existing behaviour (Random, Manual, Skip)
+    assignmentOptions: {
+      type: Array,
+      default: () => ["Random", "Manual", "Skip"],
+    },
   },
   emits: ["update:subjectCount", "update:assignmentMethod"],
   setup(props, { emit }) {
@@ -55,10 +61,9 @@ export default {
     const updateMethod = (val) => emit("update:assignmentMethod", val);
 
     return { updateCount, updateMethod };
-  }
+  },
 };
 </script>
-
 
 <style scoped>
 .form-actions {
