@@ -455,15 +455,23 @@
           <div
             v-for="(prop, i) in currentModel.fields"
             :key="prop.name"
-            class="prop-row"
+            class="prop-cell"
           >
             <div class="prop-info">
-              <strong>{{ prop.label || prettyModelTitle(prop.name) }}</strong>
-              <p v-if="prop.description" class="prop-desc">{{ prop.description }}</p>
+              <strong class="prop-label">
+                {{ prop.label || prettyModelTitle(prop.name) }}
+              </strong>
+              <p v-if="prop.description" class="prop-desc">
+                {{ prop.description }}
+              </p>
             </div>
-            <label class="prop-check">
-              <input type="checkbox" :id="'prop-check-' + i" v-model="selectedProps[i]" />
-            </label>
+
+            <input
+              type="checkbox"
+              :id="'prop-check-' + i"
+              v-model="selectedProps[i]"
+              class="prop-checkbox"
+            />
           </div>
         </div>
         <div class="modal-actions">
@@ -1754,4 +1762,70 @@ textarea { resize: vertical; }
 .preview-content { flex:1; background:white; padding:10px; overflow-y:auto; }
 .modal-actions { display:flex; justify-content:flex-end; gap:10px; margin-top:10px; }
 .input-dialog-field { width:100%; padding:8px; margin-top:5px; }
+.model-prop-list {
+  margin-top: 10px;
+  display: grid;
+  /* Responsive 2+ columns, never too narrow */
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 8px 12px;
+}
+
+.prop-cell {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  border: 1px solid #e5e7eb;
+  background: #f9fafb;
+  box-sizing: border-box;
+  cursor: pointer;
+}
+
+.prop-cell:hover {
+  background: #f3f4f6;
+}
+
+.prop-info {
+  flex: 1 1 auto;
+  min-width: 0;         /* allows natural wrapping, no per-letter layout */
+  text-align: left;     /* force left alignment even if a parent has text-align:right */
+}
+
+.prop-label {
+  display: block;
+  font-weight: 600;
+  color: #111827;
+  word-break: break-word;
+}
+
+.prop-desc {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: #6b7280;
+}
+
+.prop-checkbox {
+  flex: 0 0 auto;
+  margin-left: 6px;
+}
+/* Fix checkbox layout in "Select Properties" dialog */
+.model-prop-list .prop-checkbox {
+  width: auto;        /* undo global input width */
+  padding: 0;         /* no text-input padding */
+  margin-top: 0;      /* align vertically with label */
+  border: none;       /* remove text-input border */
+  border-radius: 0;
+}
+
+.model-prop-list .prop-cell {
+  align-items: center;
+}
+
+.model-prop-list .prop-info {
+  text-align: left;
+}
+
+
 </style>
