@@ -396,11 +396,11 @@
 
         <!-- BIDS DATASET TAB -->
         <div v-else-if="activeTab === 'bids'">
-          <h2 class="panel-title center">BIDS dataset</h2>
+          <h2 class="panel-title center">Dataset</h2>
 
           <!-- Only show button + path to owner/admin -->
           <div v-if="canSeeBidsButton" class="subsection bids-location">
-            <h3 class="sub-title">BIDS dataset location</h3>
+            <h3 class="sub-title">Dataset location</h3>
 
             <p class="muted">
               Dataset folder on disk for this study:
@@ -420,7 +420,7 @@
                 :disabled="openingBids || !bidsDatasetPath || !bidsPathExists"
                 @click="openBidsFolder"
               >
-                {{ openingBids ? 'Opening…' : 'Open BIDS Folder' }}
+                {{ openingBids ? 'Opening…' : 'Open Dataset Folder' }}
               </button>
             </div>
           </div>
@@ -473,7 +473,7 @@ export default {
         { key: "team", label: "Settings" },
         { key: "viewdata", label: "View Data" },
         { key: "audit", label: "Audit logs" },
-        { key: "bids", label: "BIDS dataset" },
+        { key: "bids", label: "Dataset" },
       ],
 
       // files
