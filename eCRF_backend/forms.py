@@ -32,7 +32,8 @@ from .users import get_current_user
 from sqlalchemy.orm import Session
 import secrets
 from sqlalchemy import or_, text
-
+from .utils import local_now
+from sqlalchemy.sql import func
 router = APIRouter(prefix="/forms", tags=["forms"])
 
 TEMPLATE_DIR = Path(os.environ.get("ECRF_TEMPLATES_DIR", "")) if os.environ.get("ECRF_TEMPLATES_DIR") \
@@ -1499,7 +1500,7 @@ def bulk_insert_data(
         raise HTTPException(status_code=400, detail=str(ve))
 
     # Prepare rows for one executemany insert
-    now = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+    now = local_now().strftime("%Y-%m-%d %H:%M:%S")
     rows = []
     for e in payload.entries:
         rows.append({

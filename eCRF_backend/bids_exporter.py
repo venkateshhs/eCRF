@@ -15,7 +15,7 @@ from filelock import FileLock
 from .versions import VersionManager  # <<— use versioned schemas
 
 from .crud import record_event as _db_record_event  # (db, user_id, study_id, subject_id, action, details)
-
+from .utils import local_now
 logger = logging.getLogger(__name__)
 
 # -------------------- Config --------------------
@@ -98,7 +98,7 @@ def _append_system_change_line(action: str, detail: Dict[str, Any]) -> None:
     """
     path = _system_changes_path()
     payload = {
-        "ts": datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "ts": local_now().strftime("%Y-%m-%dT%H:%M:%SZ"),
         "action": action,
         "study_name": "",  # system scope
         **detail,
@@ -418,7 +418,7 @@ def upsert_bids_dataset(
     if not os.path.exists(changes_txt_path):
         with open(changes_txt_path, "w", encoding="utf-8") as f:
             f.write(
-                f"1.0.0 {datetime.utcnow().strftime('%Y-%m-%d')}\n"
+                f"1.0.0 {local_now().strftime('%Y-%m-%d')}\n"
                 " - Initial BIDS dataset creation.\n"
             )
 
@@ -661,7 +661,7 @@ def _study_access_csv_path(study_id: int, study_name: Optional[str]) -> str:
 def _append_change_line(study_id: int, study_name: Optional[str], action: str, detail: Dict[str, Any]) -> None:
     path = _changes_file_path(study_id, study_name)
     payload = {
-        "ts": datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "ts": local_now().strftime("%Y-%m-%dT%H:%M:%SZ"),
         "action": action,
         "study_name": (study_name or ""),
         "study_id": study_id,
@@ -801,7 +801,7 @@ def audit_access_change_both(
             if write_header:
                 w.writeheader()
             w.writerow({
-                "timestamp": datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "timestamp": local_now().strftime("%Y-%m-%dT%H:%M:%SZ"),
                 "action": action,
                 "actor_id": actor_id,
                 "actor_name": actor_name or "",
@@ -900,7 +900,7 @@ def _rebuild_participants_tsv_for_schema(dataset_path: str, study_schema_for_ver
     headers = ["participant_id", "visits_planned", "visits_completed", "visits_partial", "visits_skipped", "last_updated"]
     rows: List[Dict[str, str]] = []
     visits_planned = str(len(visits)) if visits else "0"
-    now_iso = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+    now_iso = local_now().strftime("%Y-%m-%dT%H:%M:%SZ")
 
     for idx, subj in enumerate(subjects):
         raw_id = str(subj.get("id") or subj.get("subjectId") or subj.get("label") or "").strip() or str(idx+1)
@@ -1005,7 +1005,7 @@ def write_entry_to_bids(
         "group_name": group_name or "",
         "entry_id": str(entry.get("id")),
         "form_version": str(form_version),
-        "last_updated": datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "last_updated": local_now().strftime("%Y-%m-%dT%H:%M:%SZ"),
         "status": status,
     }
 
@@ -1231,7 +1231,7 @@ def bulk_write_entries_to_bids(
 
     # ---------- Process all entries in memory ----------
     subjects_touched = set()
-    now_iso = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+    now_iso = local_now().strftime("%Y-%m-%dT%H:%M:%SZ")
 
     for e in entries:
         try:

@@ -67,7 +67,7 @@
         <table class="audit-table" aria-label="Audit">
           <thead>
             <tr>
-              <th style="width: 180px">Timestamp (UTC)</th>
+              <th style="width: 180px">Timestamp</th>
               <th>Action</th>
               <th style="width: 220px">User</th>
               <th>Details</th>
