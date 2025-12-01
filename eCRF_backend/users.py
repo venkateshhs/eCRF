@@ -18,6 +18,7 @@ from .logger import logger
 
 # unified audit (DB + optional BIDS)
 from .bids_exporter import audit_change_both
+from .utils import local_now
 
 # --------------------------------------------------------------------
 # Security config
@@ -59,7 +60,7 @@ def get_current_user(
         exp = payload.get("exp")
         if not username or not exp:
             raise HTTPException(status_code=401, detail="Invalid token payload")
-        if datetime.utcnow().timestamp() > exp:
+        if local_now().timestamp() > exp:
             raise HTTPException(status_code=401, detail="Token expired")
 
         user = db.query(models.User).filter(models.User.username == username).first()

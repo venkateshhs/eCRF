@@ -1,12 +1,14 @@
 # eCRF_backend/forms.py
 import os
+import platform
+import subprocess
 import shutil
 import tempfile
 from typing import List, Optional, Dict, Any
 from urllib.parse import urlparse
 
 from fastapi import Request
-from fastapi import APIRouter, HTTPException, Depends, Query, UploadFile, File, Form, Body
+from fastapi import APIRouter, HTTPException, Depends, Query, UploadFile, File, Form, Body, status
 from pathlib import Path
 import json
 import yaml
@@ -18,9 +20,10 @@ from .bids_exporter import (
     upsert_bids_dataset,
     write_entry_to_bids,
     stage_file_for_modalities,
-    audit_change_both,          # unified audit (DB + BIDS)
-    audit_access_change_both,   # unified access audit
+    audit_change_both,  # unified audit (DB + BIDS)
+    audit_access_change_both,  # unified access audit
     log_dataset_change_to_changes,  # optional BIDS CHANGES mirror
+    bump_bids_version, bulk_write_entries_to_bids, _dataset_path,
 )
 from .logger import logger
 from .models import User, StudyTemplateVersion
@@ -29,7 +32,8 @@ from .users import get_current_user
 from sqlalchemy.orm import Session
 import secrets
 from sqlalchemy import or_, text
-
+from .utils import local_now
+from sqlalchemy.sql import func
 router = APIRouter(prefix="/forms", tags=["forms"])
 
 TEMPLATE_DIR = Path(os.environ.get("ECRF_TEMPLATES_DIR", "")) if os.environ.get("ECRF_TEMPLATES_DIR") \
@@ -380,6 +384,15 @@ def update_study(
     old_sd = _deepcopy_json(content.study_data or {})
     new_sd_incoming = _deepcopy_json(study_content.study_data or {})
 
+    # capture previous latest template version
+    prev_v_row = (
+        db.query(StudyTemplateVersion)
+          .filter(StudyTemplateVersion.study_id == study_id)
+          .order_by(StudyTemplateVersion.version.desc())
+          .first()
+    )
+    prev_latest_v = int(prev_v_row.version) if prev_v_row else 1
+
     try:
         result = crud.update_study(db, study_id, study_metadata, study_content)
     except Exception as e:
@@ -443,6 +456,20 @@ def update_study(
     except Exception as ve:
         logger.error("Versioning apply_on_update failed for study %s: %s", study_id, ve)
 
+    # Detect template version bump and copy BIDS tree non-destructively
+    new_v_row = (
+        db.query(StudyTemplateVersion)
+          .filter(StudyTemplateVersion.study_id == study_id)
+          .order_by(StudyTemplateVersion.version.desc())
+          .first()
+    )
+    new_latest_v = int(new_v_row.version) if new_v_row else prev_latest_v
+    if new_latest_v > prev_latest_v:
+        try:
+            bump_bids_version(metadata.id, metadata.study_name, prev_latest_v, new_latest_v)
+        except Exception as be:
+            logger.error("BIDS version bump copy failed for study %s: %s", study_id, be)
+
     return {"metadata": metadata, "content": content}
 
 
@@ -493,6 +520,9 @@ def upload_file(
         # Mirror into BIDS
         content = db.query(models.StudyContent).filter(models.StudyContent.study_id == study_id).first()
         study_data = content.study_data if content else {}
+
+        current_form_version = VersionManager.latest_writable_version(db, study_id)
+
         stage_file_for_modalities(
             study_id=study.id,
             study_name=study.study_name,
@@ -508,6 +538,7 @@ def upload_file(
             db=db,
             actor_id=user.id,
             actor_name=_display_name(user),
+            form_version=current_form_version,
         )
 
         # DB record
@@ -605,6 +636,9 @@ def create_url_file(
     try:
         content = db.query(models.StudyContent).filter(models.StudyContent.study_id == study_id).first()
         study_data = content.study_data if content else {}
+
+        current_form_version = VersionManager.latest_writable_version(db, study_id)
+
         stage_file_for_modalities(
             study_id=study.id,
             study_name=study.study_name,
@@ -620,6 +654,7 @@ def create_url_file(
             db=db,
             actor_id=user.id,
             actor_name=_display_name(user),
+            form_version=current_form_version,
         )
     except Exception as be:
         logger.error("BIDS mirror (URL) failed for study %s: %s", study_id, be)
@@ -1047,6 +1082,9 @@ def shared_upload_file(
 
         content = db.query(models.StudyContent).filter(models.StudyContent.study_id == study.id).first()
         study_data = content.study_data if content else {}
+
+        current_form_version = VersionManager.latest_writable_version(db, study.id)
+
         stage_file_for_modalities(
             study_id=study.id,
             study_name=study.study_name,
@@ -1062,6 +1100,7 @@ def shared_upload_file(
             db=db,
             actor_id=None,
             actor_name=None,
+            form_version=current_form_version,
         )
 
         file_data = schemas.FileCreate(
@@ -1164,6 +1203,9 @@ def shared_create_url_file(
     try:
         content = db.query(models.StudyContent).filter(models.StudyContent.study_id == study.id).first()
         study_data = content.study_data if content else {}
+
+        current_form_version = VersionManager.latest_writable_version(db, study.id)
+
         stage_file_for_modalities(
             study_id=study.id,
             study_name=study.study_name,
@@ -1179,6 +1221,7 @@ def shared_create_url_file(
             db=db,
             actor_id=None,
             actor_name=None,
+            form_version=current_form_version,
         )
     except Exception as be:
         logger.error("Shared BIDS mirror (URL) failed for study %s: %s", study.id, be)
@@ -1440,7 +1483,6 @@ def revoke_study_access(
     except Exception:
         pass
 
-
 @router.post("/studies/{study_id}/data/bulk")
 def bulk_insert_data(
     study_id: int,
@@ -1451,14 +1493,14 @@ def bulk_insert_data(
     if not payload.entries:
         return {"inserted": 0, "failed": 0, "errors": []}
 
-    now = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
-
     # Enforce latest-only
     try:
         form_version = VersionManager.assert_latest_is_used(db, study_id, version)
     except ValueError as ve:
         raise HTTPException(status_code=400, detail=str(ve))
 
+    # Prepare rows for one executemany insert
+    now = local_now().strftime("%Y-%m-%d %H:%M:%S")
     rows = []
     for e in payload.entries:
         rows.append({
@@ -1473,15 +1515,173 @@ def bulk_insert_data(
         })
 
     sql = text("""
-            INSERT INTO study_entry_data
-              (study_id, form_version, subject_index, visit_index, group_index, data, created_at, skipped_required_flags)
-            VALUES (:study_id, :form_version, :subject_index, :visit_index, :group_index, :data, :created_at, :skipped_required_flags)
-        """)
+        INSERT INTO study_entry_data
+          (study_id, form_version, subject_index, visit_index, group_index, data, created_at, skipped_required_flags)
+        VALUES (:study_id, :form_version, :subject_index, :visit_index, :group_index, :data, :created_at, :skipped_required_flags)
+    """)
 
     try:
-        db.execute(sql, rows)   # list of dicts → executemany
+        db.execute(sql, rows)   # executemany
         db.commit()
-        return {"inserted": len(rows), "failed": 0, "errors": []}
     except Exception as ex:
         db.rollback()
         raise HTTPException(status_code=400, detail=f"Bulk insert failed: {ex}")
+
+    inserted_count = len(rows)
+
+    # Load study context for BIDS
+    study = db.query(models.StudyMetadata).filter(models.StudyMetadata.id == study_id).first()
+    content = db.query(models.StudyContent).filter(models.StudyContent.study_id == study_id).first()
+    if not study or not content:
+        # unlikely, but keep safe
+        return {"inserted": inserted_count, "failed": 0, "errors": []}
+
+    # Re-select just-inserted rows for this request, then one batched BIDS write
+    just_inserted = (
+        db.query(models.StudyEntryData)
+          .filter(
+              models.StudyEntryData.study_id == study_id,
+              models.StudyEntryData.form_version == form_version,
+              models.StudyEntryData.created_at == now,
+          )
+          .order_by(models.StudyEntryData.id.asc())
+          .all()
+    )
+
+    def _json_or_passthrough(x):
+        if isinstance(x, (dict, list)):
+            return x
+        try:
+            return json.loads(x)
+        except Exception:
+            return x
+
+    entries_for_bids = []
+    for r in just_inserted:
+        entries_for_bids.append({
+            "id": r.id,
+            "subject_index": int(r.subject_index),
+            "visit_index": int(r.visit_index),
+            "group_index": int(r.group_index),
+            "form_version": int(r.form_version),
+            "data": _json_or_passthrough(r.data) or {},
+            "skipped_required_flags": _json_or_passthrough(r.skipped_required_flags) or [],
+        })
+
+    # Ensure dataset structure once (cheap if existing)
+    try:
+        upsert_bids_dataset(
+            study_id=study.id,
+            study_name=study.study_name,
+            study_description=study.study_description,
+            study_data=content.study_data or {},
+        )
+    except Exception:
+        # Non-fatal; bulk BIDS write will attempt again as needed
+        pass
+
+    # One fast BIDS write
+    try:
+        bulk_write_entries_to_bids(
+            study_id=study.id,
+            study_name=study.study_name,
+            study_description=study.study_description,
+            study_data=content.study_data or {},
+            entries=entries_for_bids,
+            form_version=form_version,
+            db=db,
+            actor="Bulk import",
+        )
+    except Exception as be:
+        # Do not roll back DB; report error but keep inserted count
+        return {"inserted": inserted_count, "failed": inserted_count, "errors": [f"BIDS mirror failed: {be}"]}
+
+    return {"inserted": inserted_count, "failed": 0, "errors": []}
+
+def _ensure_can_see_bids(current_user: models.User, study: models.StudyMetadata) -> None:
+    """
+    Only study owner or admins can see/open the BIDS dataset.
+    Adjust this to your own role logic if needed.
+    """
+    role = (getattr(getattr(current_user, "profile", None), "role", "") or "").strip().lower()
+    is_admin = role == "administrator"
+    is_owner = current_user.id == study.created_by
+
+    if not (is_admin or is_owner):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You do not have permission to view the BIDS dataset for this study.",
+        )
+
+
+@router.get("/studies/{study_id}/bids_path")
+def get_study_bids_path(
+    study_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    """
+    Return the absolute BIDS dataset path for this study.
+    Only visible to study owner and admins.
+    """
+    # was: study = crud.get_study_by_id(db, study_id)
+    study = (
+        db.query(models.StudyMetadata)
+        .filter(models.StudyMetadata.id == study_id)
+        .first()
+    )
+
+    if not study:
+        raise HTTPException(status_code=404, detail="Study not found")
+
+    _ensure_can_see_bids(current_user, study)
+
+    dataset_path = _dataset_path(study.id, study.study_name or "")
+    return {
+        "dataset_path": dataset_path,
+        "exists": os.path.isdir(dataset_path),
+    }
+@router.post("/studies/{study_id}/bids_open", status_code=204)
+def open_study_bids_folder(
+    study_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    """
+    Opens the BIDS dataset folder for this study in the OS file explorer.
+    Only allowed for study owner and admins.
+    """
+    # was: study = crud.get_study_by_id(db, study_id)
+    study = (
+        db.query(models.StudyMetadata)
+        .filter(models.StudyMetadata.id == study_id)
+        .first()
+    )
+
+    if not study:
+        raise HTTPException(status_code=404, detail="Study not found")
+
+    _ensure_can_see_bids(current_user, study)
+
+    dataset_path = _dataset_path(study.id, study.study_name or "")
+    if not os.path.isdir(dataset_path):
+        raise HTTPException(status_code=404, detail="BIDS dataset directory does not exist yet")
+
+    system = platform.system()
+    if system == "Darwin":
+        cmd = ["open", dataset_path]
+    elif system == "Windows":
+        cmd = ["explorer", dataset_path]
+    else:
+        cmd = ["xdg-open", dataset_path]
+
+    try:
+        subprocess.Popen(cmd)
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to open BIDS folder: {e}",
+        )
+
+    # 204 No Content
+    return

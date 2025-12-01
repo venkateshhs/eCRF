@@ -22,16 +22,52 @@
       <button @click="nextVisit" :disabled="currentVisitIndex === visitList.length - 1" class="nav-btn">&gt;</button>
     </div>
 
+    <!-- Bulk controls for current visit (only when many visits) -->
+    <div
+      v-if="visitList.length > 3 && groupList.length && selectedModels.length"
+      class="visit-bulk-bar"
+    >
+      <label class="bulk-toggle">
+        <input
+          type="checkbox"
+          :checked="isVisitFullySelected(currentVisitIndex)"
+          @change="onToggleVisitAll(currentVisitIndex, $event.target.checked)"
+        />
+        <span>Assign all forms to this visit</span>
+      </label>
+    </div>
+
     <!-- 2. Protocol Matrix -->
     <div class="table-container card-surface">
       <table class="protocol-table">
         <!-- Full matrix if ≤3 visits -->
         <thead v-if="visitList.length <= 3">
           <tr>
-            <th rowspan="2">Data Models</th>
-            <th v-for="(visit, vIdx) in visitList" :key="`vh-${vIdx}`" :colspan="groupList.length">
-              <span class="th-title">Visit:</span>
-              <span class="th-chip">{{ visit.name }}</span>
+            <th rowspan="2" class="model-header-col">
+              Data Models
+            </th>
+            <th
+              v-for="(visit, vIdx) in visitList"
+              :key="`vh-${vIdx}`"
+              :colspan="groupList.length"
+            >
+              <div class="visit-header-cell">
+                <div class="visit-header-main">
+                  <span class="th-title">Visit:</span>
+                  <span class="th-chip">{{ visit.name }}</span>
+                </div>
+                <label
+                  v-if="groupList.length && selectedModels.length"
+                  class="bulk-toggle small"
+                >
+                  <input
+                    type="checkbox"
+                    :checked="isVisitFullySelected(vIdx)"
+                    @change="onToggleVisitAll(vIdx, $event.target.checked)"
+                  />
+                  <span>All forms</span>
+                </label>
+              </div>
             </th>
           </tr>
           <tr>
@@ -46,7 +82,9 @@
         <!-- Single-visit view if >3 visits -->
         <thead v-else>
           <tr>
-            <th>Data Models</th>
+            <th class="model-header-col">
+              Data Models
+            </th>
             <th v-for="(group, gIdx) in groupList" :key="`g-${gIdx}`">
               <span class="group-name">{{ group.name }}</span>
             </th>
@@ -54,9 +92,27 @@
         </thead>
 
         <tbody>
-          <tr v-for="(model, mIdx) in selectedModels" :key="`m-${mIdx}`">
+          <!-- hide models with no fields -->
+          <tr
+              v-for="(model, mIdx) in selectedModels"
+              :key="`m-${mIdx}`"
+              v-show="model.fields && model.fields.length"
+            >
             <td class="model-cell">
-              <span class="model-title">{{ model.title }}</span>
+              <div class="model-header-row">
+                <span class="model-title">{{ model.title }}</span>
+                <label
+                  v-if="visitList.length && groupList.length"
+                  class="bulk-toggle small"
+                >
+                  <input
+                    type="checkbox"
+                    :checked="isModelFullySelected(mIdx)"
+                    @change="onToggleModelAll(mIdx, $event.target.checked)"
+                  />
+                  <span>All visits</span>
+                </label>
+              </div>
             </td>
 
             <!-- Full-matrix cells -->
@@ -92,6 +148,21 @@
           </tr>
         </tbody>
       </table>
+    </div>
+
+    <!-- Global bulk control: everything -->
+    <div
+      v-if="visitList.length && groupList.length && selectedModels.length"
+      class="global-bulk-bar"
+    >
+      <label class="bulk-toggle">
+        <input
+          type="checkbox"
+          :checked="isEverythingSelected"
+          @change="onToggleAll($event.target.checked)"
+        />
+        <span>Assign all models to all visits</span>
+      </label>
     </div>
 
     <!-- 3. Preview Modal -->
@@ -278,11 +349,81 @@ export default {
     const hasAnyData = ref(false);
 
     // Display lists
-    const visitList = computed(() => props.visits.length ? props.visits : [{ name: "All Visits" }]);
+     const visitList = computed(() => props.visits.length ? props.visits : [{ name: "All Visits" }]);
     const groupList = computed(() => props.groups.length ? props.groups : [{ name: "All Groups" }]);
+    const totalModels = computed(() => props.selectedModels.length);
+    const totalVisits = computed(() => props.visits.length);
+    const totalGroups = computed(() => props.groups.length);
 
     function onToggle(mIdx, vIdx, gIdx, checked) {
       emit("assignment-updated", { mIdx, vIdx, gIdx, checked });
+    }
+
+    // --------- BULK HELPERS ---------
+    function isModelFullySelected(mIdx) {
+      if (!totalVisits.value || !totalGroups.value) return false;
+      for (let vIdx = 0; vIdx < totalVisits.value; vIdx++) {
+        for (let gIdx = 0; gIdx < totalGroups.value; gIdx++) {
+          if (!props.assignments?.[mIdx]?.[vIdx]?.[gIdx]) return false;
+        }
+      }
+      return true;
+    }
+
+    function isVisitFullySelected(vIdx) {
+      if (!totalModels.value || !totalGroups.value) return false;
+      for (let mIdx = 0; mIdx < totalModels.value; mIdx++) {
+        for (let gIdx = 0; gIdx < totalGroups.value; gIdx++) {
+          if (!props.assignments?.[mIdx]?.[vIdx]?.[gIdx]) return false;
+        }
+      }
+      return true;
+    }
+
+    const isEverythingSelected = computed(() => {
+      if (!totalModels.value || !totalVisits.value || !totalGroups.value) return false;
+      for (let mIdx = 0; mIdx < totalModels.value; mIdx++) {
+        if (!isModelFullySelected(mIdx)) return false;
+      }
+      return true;
+    });
+
+    function onToggleModelAll(mIdx, checked) {
+      if (!totalVisits.value || !totalGroups.value) return;
+      for (let vIdx = 0; vIdx < totalVisits.value; vIdx++) {
+        for (let gIdx = 0; gIdx < totalGroups.value; gIdx++) {
+          const current = !!props.assignments?.[mIdx]?.[vIdx]?.[gIdx];
+          if (current !== checked) {
+            emit("assignment-updated", { mIdx, vIdx, gIdx, checked });
+          }
+        }
+      }
+    }
+
+    function onToggleVisitAll(vIdx, checked) {
+      if (!totalModels.value || !totalGroups.value) return;
+      for (let mIdx = 0; mIdx < totalModels.value; mIdx++) {
+        for (let gIdx = 0; gIdx < totalGroups.value; gIdx++) {
+          const current = !!props.assignments?.[mIdx]?.[vIdx]?.[gIdx];
+          if (current !== checked) {
+            emit("assignment-updated", { mIdx, vIdx, gIdx, checked });
+          }
+        }
+      }
+    }
+
+    function onToggleAll(checked) {
+      if (!totalModels.value || !totalVisits.value || !totalGroups.value) return;
+      for (let mIdx = 0; mIdx < totalModels.value; mIdx++) {
+        for (let vIdx = 0; vIdx < totalVisits.value; vIdx++) {
+          for (let gIdx = 0; gIdx < totalGroups.value; gIdx++) {
+            const current = !!props.assignments?.[mIdx]?.[vIdx]?.[gIdx];
+            if (current !== checked) {
+              emit("assignment-updated", { mIdx, vIdx, gIdx, checked });
+            }
+          }
+        }
+      }
     }
 
     // Matrix nav
@@ -325,7 +466,10 @@ export default {
       const visitName = visitList.value[previewVisitIndex.value].name;
       const groupName = groupList.value[previewGroupIndex.value].name;
       const sections = props.selectedModels
-        .filter((_, mIdx) => props.assignments[mIdx][previewVisitIndex.value]?.[previewGroupIndex.value])
+        .filter((m, mIdx) =>
+          m.fields && m.fields.length &&
+          props.assignments[mIdx][previewVisitIndex.value]?.[previewGroupIndex.value]
+        )
         .map(m => ({ title: m.title, fields: m.fields }));
       return { formName: `Preview: ${visitName} / ${groupName}`, sections };
     });
@@ -619,6 +763,14 @@ export default {
       onToggle,
       hasAssignment,
 
+      // bulk helpers
+      isModelFullySelected,
+      isVisitFullySelected,
+      isEverythingSelected,
+      onToggleModelAll,
+      onToggleVisitAll,
+      onToggleAll,
+
       // dialogs
       showInfo,
       showDialog,
@@ -726,9 +878,9 @@ export default {
 /* Confirm changes scroll handling */
 .confirm-scroll { max-width: 1100px; }
 .diff-scroll {
-  max-height: 60vh;         /* vertical scroll */
+  max-height: 60vh; /* vertical scroll */
   overflow-y: auto;
-  overflow-x: auto;          /* horizontal scroll */
+  overflow-x: auto; /* horizontal scroll */
   border: 1px solid $border-color;
   border-radius: 10px;
   padding: 12px;
@@ -753,4 +905,108 @@ export default {
 /* Small utility */
 .li-icon { margin-right: 6px; }
 .mr-6 { margin-right: 6px; }
+.bulk-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #111827;
+  cursor: pointer;
+}
+.bulk-toggle.small {
+  font-size: 11px;
+}
+.bulk-toggle-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 8px;
+  align-items: center;
+}
+
+.bulk-toggle-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: #111827;
+}
+
+.bulk-toggle-wrap {
+  --size: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--size);
+  height: var(--size);
+  position: relative;
+  cursor: pointer;
+}
+
+.bulk-toggle-wrap input {
+  opacity: 0;
+  width: var(--size);
+  height: var(--size);
+  position: absolute;
+  margin: 0;
+}
+
+.bulk-fa-chk {
+  font-size: 18px;
+  line-height: 1;
+  pointer-events: none;
+  color: #98a2b3;
+}
+
+.bulk-toggle-wrap input:checked + .bulk-fa-chk {
+  color: #2563eb;
+}
+.visit-bulk-bar,
+.global-bulk-bar {
+  display: flex;
+  justify-content: flex-end;
+  padding: 4px 0;
+  margin-top: 4px;
+}
+.model-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.bulk-toggle input {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+  border: 1px solid $border-color;
+  background: #ffffff;
+  display: inline-block;
+  position: relative;
+  margin: 0;
+  cursor: pointer;
+}
+
+.bulk-toggle input:checked {
+  background: $primary-color;
+  border-color: $primary-color;
+}
+
+.bulk-toggle input:checked::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 5px;
+  width: 4px;
+  height: 8px;
+  border: 2px solid #ffffff;
+  border-top: none;
+  border-left: none;
+  transform: rotate(45deg);
+}
+
+.bulk-toggle span {
+  line-height: 1.2;
+}
 </style>

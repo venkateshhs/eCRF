@@ -1,6 +1,14 @@
 # server.py — robust for PyInstaller (one-folder & one-file)
 from __future__ import annotations
-import os, sys, socket, threading, webbrowser, traceback
+import os
+import sys
+import socket
+import threading
+import webbrowser
+import traceback
+import json
+import platform
+import subprocess
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -10,15 +18,18 @@ from starlette.responses import FileResponse
 
 BACKEND_IMPORT = "eCRF_backend.main:app"
 
+
 def exe_dir() -> Path:
     # Folder containing the executable (or this file in dev)
     if getattr(sys, "frozen", False):
         return Path(sys.executable).resolve().parent
     return Path(__file__).resolve().parent
 
+
 def meipass_dir() -> Path | None:
     # PyInstaller temp extraction dir (one-file mode)
     return Path(getattr(sys, "_MEIPASS", "")) if getattr(sys, "frozen", False) else None
+
 
 EXE_DIR = exe_dir()
 MEIPASS = meipass_dir()
@@ -29,6 +40,7 @@ if MEIPASS:
     SEARCH_BASES.append(MEIPASS)
 # Our spec places the data trees under EXE_DIR/_internal
 SEARCH_BASES.append(EXE_DIR / "_internal")
+
 
 def find_frontend_dist() -> Path | None:
     candidates = [
@@ -44,6 +56,7 @@ def find_frontend_dist() -> Path | None:
             return p
     return None
 
+
 def find_backend_templates() -> Path | None:
     candidates = [
         EXE_DIR / "eCRF_backend" / "templates",
@@ -55,10 +68,150 @@ def find_backend_templates() -> Path | None:
             return p
     return None
 
+
+# =========================
+#   Data directory config
+# =========================
+
+# Config is stored next to the EXE / app folder, so it travels with the unzipped eCRF folder.
+CONFIG_FILENAME = "ecrf_config.json"
+
+
+def _config_path() -> Path:
+    return EXE_DIR / CONFIG_FILENAME
+
+
+def _default_data_dir() -> Path:
+    """
+    Fallback if user cancels or GUI is unavailable:
+    keep the original behaviour: ecrf_data next to the executable.
+    """
+    return EXE_DIR / "ecrf_data"
+
+
+def _ask_user_for_data_dir() -> Path | None:
+    """
+    Try to show a small native GUI folder picker:
+      - macOS: AppleScript via `osascript`
+      - Windows: PowerShell + FolderBrowserDialog
+    Returns a Path or None if user cancels or anything fails.
+    """
+    system = platform.system()
+
+    # --- macOS: osascript + choose folder ---
+    if system == "Darwin":
+        try:
+            result = subprocess.run(
+                [
+                    "osascript",
+                    "-e",
+                    'set theFolder to choose folder with prompt "Select folder where eCRF should store its data:"',
+                    "-e",
+                    "POSIX path of theFolder",
+                ],
+                capture_output=True,
+                text=True,
+            )
+            print(f"[eCRF] osascript rc={result.returncode}")
+            if result.stderr.strip():
+                print(f"[eCRF] osascript stderr: {result.stderr.strip()}")
+
+            if result.returncode == 0:
+                p = result.stdout.strip()
+                if p:
+                    print(f"[eCRF] osascript selected: {p}")
+                    return Path(p)
+        except Exception as e:
+            print(f"[eCRF] osascript failed: {e}")
+        return None
+
+    # --- Windows: PowerShell FolderBrowserDialog ---
+    if system == "Windows":
+        ps_script = r'''
+        Add-Type -AssemblyName System.Windows.Forms | Out-Null
+        $dlg = New-Object System.Windows.Forms.FolderBrowserDialog
+        $dlg.Description = "Select folder where eCRF should store its data"
+        $dlg.ShowNewFolderButton = $true
+        if ($dlg.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
+            Write-Output $dlg.SelectedPath
+        }
+        '''
+        try:
+            result = subprocess.run(
+                ["powershell", "-NoProfile", "-Command", ps_script],
+                capture_output=True,
+                text=True,
+            )
+            if result.returncode == 0:
+                p = result.stdout.strip()
+                if p:
+                    print(f"[eCRF] powershell selected: {p}")
+                    return Path(p)
+        except Exception as e:
+            print(f"[eCRF] powershell folder dialog failed: {e}")
+        return None
+
+    # Other OSes: no GUI, let caller fall back to default
+    return None
+
+
+def _load_or_init_data_dir() -> Path:
+    """
+    1. If EXE_DIR/ecrf_config.json exists, read data_dir from it.
+    2. Otherwise, show a GUI folder picker once.
+    3. If user cancels or GUI fails, use EXE_DIR / 'ecrf_data' (original behaviour).
+    """
+    cfg_path = _config_path()
+
+    # 1) Existing config?
+    if cfg_path.exists():
+        try:
+            with cfg_path.open("r", encoding="utf-8") as f:
+                cfg = json.load(f)
+            s = cfg.get("data_dir")
+            if s:
+                data_dir = Path(s)
+                data_dir.mkdir(parents=True, exist_ok=True)
+                print(f"[eCRF] Using existing data dir from config: {data_dir}")
+                return data_dir
+        except Exception as e:
+            print(f"[eCRF] Failed to read {cfg_path}, regenerating: {e}")
+
+    # 2) No valid config: ask user via GUI
+    data_dir = _ask_user_for_data_dir()
+
+    # 3) If user cancels or GUI fails, fall back to default
+    if data_dir is None:
+        data_dir = _default_data_dir()
+        print(f"[eCRF] No folder chosen; using default data dir: {data_dir}")
+
+    # Ensure directory exists
+    data_dir.mkdir(parents=True, exist_ok=True)
+
+    # Write config next to the EXE so we can reuse it next time
+    cfg = {
+        "data_dir": str(data_dir),
+        "exe_dir": str(EXE_DIR),
+    }
+    try:
+        with cfg_path.open("w", encoding="utf-8") as f:
+            json.dump(cfg, f, indent=2)
+        print(f"[eCRF] Wrote config at {cfg_path}")
+    except Exception as e:
+        print(f"[eCRF] Failed to write config at {cfg_path}: {e}")
+
+    return data_dir
+
+
 # === Writable data dir for the backend ===
-# Put persistent data next to the EXE (not inside MEIPASS)
-DEFAULT_DATA_DIR = EXE_DIR / "ecrf_data"
-os.environ.setdefault("ECRF_DATA_DIR", str(DEFAULT_DATA_DIR))
+# Use config-based selection; default remains EXE_DIR / "ecrf_data"
+DATA_DIR = _load_or_init_data_dir()
+os.environ["ECRF_DATA_DIR"] = str(DATA_DIR)
+
+
+# =========================
+#   Templates & frontend
+# =========================
 
 # Templates env var (read-only assets)
 tpl_dir = find_backend_templates()
@@ -74,6 +227,7 @@ if str(EXE_DIR) not in sys.path:
 if str(EXE_DIR / "_internal") not in sys.path:
     sys.path.insert(0, str(EXE_DIR / "_internal"))
 
+
 def import_backend_app() -> FastAPI:
     mod_name, _, attr = BACKEND_IMPORT.partition(":")
     attr = attr or "app"
@@ -84,6 +238,7 @@ def import_backend_app() -> FastAPI:
         print("Failed to import backend app from", BACKEND_IMPORT, file=sys.stderr)
         traceback.print_exc()
         return FastAPI(title="eCRF (SPA-only fallback)")
+
 
 def make_root_app() -> FastAPI:
     app = import_backend_app()
@@ -116,27 +271,29 @@ def make_root_app() -> FastAPI:
 
     return app
 
+
 def pick_port(default: int = 8000) -> int:
-    import socket as _s
     try:
-        with _s.socket() as s:
+        with socket.socket() as s:
             s.bind(("127.0.0.1", default))
         return default
     except OSError:
         for p in range(default + 1, default + 20):
             try:
-                with _s.socket() as s:
+                with socket.socket() as s:
                     s.bind(("127.0.0.1", p))
                 return p
             except OSError:
                 continue
         return default + 20
 
+
 def open_browser(url: str):
     try:
         threading.Timer(0.8, lambda: webbrowser.open_new_tab(url)).start()
     except Exception:
         pass
+
 
 def main():
     # Ensure data dir exists
@@ -153,6 +310,7 @@ def main():
 
     import uvicorn
     uvicorn.run(app, host="127.0.0.1", port=port, log_level="info")
+
 
 if __name__ == "__main__":
     main()

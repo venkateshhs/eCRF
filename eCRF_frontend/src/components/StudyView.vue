@@ -389,11 +389,49 @@
           <h2 class="panel-title center">View Data</h2>
           <p class="muted">Redirecting to the data dashboard…</p>
         </div>
-
         <!-- AUDIT LOGS -->
         <div v-else-if="activeTab === 'audit'">
           <StudyAuditLogs :study-id="studyId" />
         </div>
+
+        <!-- BIDS DATASET TAB -->
+        <div v-else-if="activeTab === 'bids'">
+          <h2 class="panel-title center">Dataset</h2>
+
+          <!-- Only show button + path to owner/admin -->
+          <div v-if="canSeeBidsButton" class="subsection bids-location">
+            <h3 class="sub-title">Dataset location</h3>
+
+            <p class="muted">
+              Dataset folder on disk for this study:
+              <span v-if="bidsDatasetPath">
+                <code class="file-path">{{ bidsDatasetPath }}</code>
+                <span v-if="!bidsPathExists" class="muted"> (folder does not exist yet)</span>
+              </span>
+              <span v-else>
+                Not available yet.
+              </span>
+            </p>
+
+            <div class="bids-actions">
+              <button
+                class="btn-primary"
+                type="button"
+                :disabled="openingBids || !bidsDatasetPath || !bidsPathExists"
+                @click="openBidsFolder"
+              >
+                {{ openingBids ? 'Opening…' : 'Open Dataset Folder' }}
+              </button>
+            </div>
+          </div>
+
+          <!-- Non-owner/non-admin see a message, no button -->
+          <p v-else class="muted">
+            Only the study owner or an administrator can view the BIDS dataset location.
+          </p>
+        </div>
+
+
       </section>
     </div>
   </div>
@@ -435,6 +473,7 @@ export default {
         { key: "team", label: "Settings" },
         { key: "viewdata", label: "View Data" },
         { key: "audit", label: "Audit logs" },
+        { key: "bids", label: "Dataset" },
       ],
 
       // files
@@ -457,6 +496,10 @@ export default {
       versionSchemas: {},   // { [v]: schema }
       versionDiffs: {},     // { [v]: diff }
       canShowVersionDetails: true,
+
+      bidsDatasetPath: "",
+      bidsPathExists: false,
+      openingBids: false,
     };
   },
   computed: {
@@ -497,6 +540,7 @@ export default {
     },
     canEditStudy() { return this.isAdmin || this.isOwner; },
     canManageAccess() { return this.isAdmin || this.isOwner; },
+    canSeeBidsButton() { return this.isAdmin || this.isOwner; },
 
     // per-subject table
     subjectAssignments() {
@@ -516,6 +560,9 @@ export default {
     activeTab(val) {
       if (val === "viewdata") this.goViewData();
       if (val === "team") this.ensureAccessData();
+      if (val === "bids" && this.canSeeBidsButton) {
+      this.fetchBidsPath();
+    }
     },
   },
   methods: {
@@ -900,12 +947,58 @@ export default {
       await this.revokeAccess(g);
       this.cancelRevoke();
     },
+        async fetchBidsPath() {
+      const token = this.token;
+      if (!token) return;
+
+      try {
+        const { data } = await axios.get(
+          `/forms/studies/${this.studyId}/bids_path`,
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+        this.bidsDatasetPath = data?.dataset_path || "";
+        this.bidsPathExists = !!data?.exists;
+      } catch (e) {
+        console.warn("Failed to fetch BIDS path:", e?.response?.data || e.message);
+        this.bidsDatasetPath = "";
+        this.bidsPathExists = false;
+      }
+    },
+
+    async openBidsFolder() {
+      if (!this.bidsDatasetPath || !this.bidsPathExists) return;
+
+      const token = this.token;
+      if (!token) {
+        this.$router.push("/login");
+        return;
+      }
+
+      this.openingBids = true;
+      try {
+        await axios.post(
+          `/forms/studies/${this.studyId}/bids_open`,
+          {},
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+        // Optionally: show a toast/notification that we requested the OS to open the folder.
+      } catch (e) {
+        console.error("Failed to open BIDS folder:", e?.response?.data || e.message);
+        // Optionally: show an error notification here.
+      } finally {
+        this.openingBids = false;
+      }
+    },
+
 
   },
   async mounted() {
     this.scrollToTop?.();
     await this.fetchMe();
     await this.fetchStudy();
+    if (this.canSeeBidsButton) {
+      await this.fetchBidsPath();
+    }
     await Promise.all([this.fetchStudyFiles(), this.fetchVersionsAndDiffs()]);
   },
   beforeRouteEnter(to, from, next) { next((vm) => vm.scrollToTop?.()); },
@@ -914,6 +1007,11 @@ export default {
     this.scrollToTop?.();
     Promise.resolve()
       .then(() => this.fetchStudy())
+      .then(() => {
+        if (this.canSeeBidsButton) {
+          return this.fetchBidsPath();
+        }
+      })
       .then(() => Promise.all([this.fetchStudyFiles(), this.fetchVersionsAndDiffs()]))
       .finally(() => next());
   },
@@ -1064,4 +1162,12 @@ export default {
 
 /* reuse diff-scroll for details block */
 .diff-scroll { overflow: auto; border: 1px solid #f1f1f1; border-radius: 10px; padding: 12px; background: #fff; }
+.bids-location .file-path {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  word-break: break-all;
+}
+
+.bids-actions {
+  margin-top: 8px;
+}
 </style>

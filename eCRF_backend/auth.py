@@ -3,6 +3,7 @@ import jwt
 from datetime import datetime, timedelta
 from fastapi import Request, HTTPException, status, Depends
 
+from .utils import local_now
 
 SECRET_KEY = "your-very-secure-secret-key"
 ALGORITHM = "HS256"
@@ -19,7 +20,7 @@ def verify_password(password: str, hashed_password: str) -> bool:
     return password == hashed_password
 
 def create_access_token(username: str) -> str:
-    expire = datetime.utcnow() + timedelta(minutes=30)
+    expire = local_now() + timedelta(minutes=30)
     payload = {"sub": username, "exp": expire}
     return jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
 

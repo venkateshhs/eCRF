@@ -45,6 +45,7 @@
         <div v-if="showExportMenu" class="export-menu" @click.stop>
           <button @click="exportCSV">Download CSV</button>
           <button @click="exportExcel">Download Excel</button>
+          <button @click="exportStudyZip">Download Study (ZIP)</button>
         </div>
       </div>
     </div>
@@ -143,6 +144,7 @@
 <script>
 import axios from 'axios';
 import icons from "@/assets/styles/icons"; // eslint-disable-line no-unused-vars
+import { downloadStudyBundle } from "@/utils/studyDownload";
 
 export default {
   name: 'StudyDataDashboard',
@@ -810,6 +812,19 @@ export default {
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
+    },
+
+    async exportStudyZip() {
+      try {
+        await downloadStudyBundle({
+          studyId: this.$route.params.id,
+          token: this.token,
+        });
+        this.showExportMenu = false;
+      } catch (e) {
+        console.error("Failed to download study bundle:", e);
+        alert("Failed to download study bundle.");
+      }
     },
   },
 };

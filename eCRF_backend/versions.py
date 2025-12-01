@@ -14,11 +14,14 @@
 #   - Options change for select/radio
 #   - Validation-affecting constraint changes (required, pattern, min/max…)
 #   - Assignments matrix changes (shape or values)
+#   - SUBJECTS: removing subjects or changing their group assignment
+#
 # Non-structural:
 #   - Study title/description text
 #   - Group/visit descriptions
 #   - Field label/description/placeholder
 #   - constraints.helpText
+#   - SUBJECTS: adding new subjects (id/group)
 #
 # Decisions:
 #   - If structural AND latest has data  => bump to v+1 (clone rows forward)
@@ -137,19 +140,80 @@ def _model_signature(m: Dict[str, Any]) -> Dict[str, Any]:
     field_sigs = [_field_signature(f) for f in fields if isinstance(f, dict)]
     return {"title": title, "fields": field_sigs}
 
-def _snapshot_structural(sd: Dict[str, Any]) -> Dict[str, Any]:
+
+#  structural core (no subjects) + subject-diff helpers --------
+
+def _snapshot_structural_core(sd: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Minimal structure used for equality checks & versioning decisions.
-    NEW: includes per-model field signatures.
+    Core structural snapshot: groups, visits, models, assignments.
+    NOTE: subjects are intentionally excluded here.
     """
     model_sigs = [_model_signature(m) for m in _selected_models_list(sd)]
     return {
         "groups": _names_from_objs(sd.get("groups") or []),
         "visits": _names_from_objs(sd.get("visits") or []),
         "models": model_sigs,
-        "subjects": sorted([(x.get("id",""), x.get("group","")) for x in _subjects_as_objs(sd)]),
         "assignments": sd.get("assignments") or [],
     }
+
+
+def _subjects_diff(old_sd: Dict[str, Any], new_sd: Dict[str, Any]) -> Dict[str, List[str]]:
+    """
+    Return added/removed/changed-group subject IDs between old and new study_data.
+    Used to:
+      - decide if subject changes are structural
+      - feed nicer audit logs (subjects_added)
+    """
+    old_subs = _subjects_as_objs(old_sd)
+    new_subs = _subjects_as_objs(new_sd)
+
+    old_by_id = {s.get("id", ""): s.get("group", "") for s in old_subs}
+    new_by_id = {s.get("id", ""): s.get("group", "") for s in new_subs}
+
+    old_ids = set(old_by_id.keys())
+    new_ids = set(new_by_id.keys())
+
+    added = sorted(new_ids - old_ids)
+    removed = sorted(old_ids - new_ids)
+    group_changed = sorted(
+        sid for sid in (old_ids & new_ids)
+        if old_by_id.get(sid, "") != new_by_id.get(sid, "")
+    )
+
+    return {
+        "added": added,
+        "removed": removed,
+        "group_changed": group_changed,
+    }
+
+
+def _subjects_change_is_structural(old_sd: Dict[str, Any], new_sd: Dict[str, Any]) -> bool:
+    """
+    Subject changes are considered structural IFF:
+      - any subject was removed, OR
+      - any existing subject changed group
+
+    Adding new subjects only is NON-structural.
+    """
+    diff = _subjects_diff(old_sd, new_sd)
+    if diff["removed"] or diff["group_changed"]:
+        return True
+    return False
+
+
+def _snapshot_structural(sd: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Backwards-compatible snapshot helper.
+    Now wraps the core snapshot and also lists subjects,
+    but VersionManager.preview_decision no longer relies
+    on this for structural equality.
+    """
+    base = _snapshot_structural_core(sd)
+    base["subjects"] = sorted(
+        [(x.get("id", ""), x.get("group", "")) for x in _subjects_as_objs(sd)]
+    )
+    return base
+
 
 def _schemas_equal(a: Dict[str, Any], b: Dict[str, Any]) -> bool:
     import json
@@ -210,10 +274,10 @@ def _index_map_by_name(old_names: List[str], new_names: List[str]) -> Dict[int, 
 def _index_map_subjects_by_id(old_sd: Dict[str, Any], new_sd: Dict[str, Any]) -> Dict[int, int]:
     old_subs = _subjects_as_objs(old_sd)
     new_subs = _subjects_as_objs(new_sd)
-    new_by_id = {s.get("id",""): idx for idx, s in enumerate(new_subs)}
+    new_by_id = {s.get("id", ""): idx for idx, s in enumerate(new_subs)}
     out: Dict[int, int] = {}
     for i, s in enumerate(old_subs):
-        sid = s.get("id","")
+        sid = s.get("id", "")
         if sid in new_by_id:
             out[i] = new_by_id[sid]
     return out
@@ -230,9 +294,9 @@ class VersionManager:
     def latest(db: Session, study_id: int) -> Optional[models.StudyTemplateVersion]:
         return (
             db.query(models.StudyTemplateVersion)
-              .filter(models.StudyTemplateVersion.study_id == study_id)
-              .order_by(models.StudyTemplateVersion.version.desc())
-              .first()
+            .filter(models.StudyTemplateVersion.study_id == study_id)
+            .order_by(models.StudyTemplateVersion.version.desc())
+            .first()
         )
 
     @staticmethod
@@ -258,14 +322,43 @@ class VersionManager:
         return v.version
 
     @staticmethod
-    def preview_decision(db: Session, study_id: int, old_sd: Dict[str, Any], new_sd: Dict[str, Any]) -> VersionDecision:
+    def preview_decision(
+        db: Session,
+        study_id: int,
+        old_sd: Dict[str, Any],
+        new_sd: Dict[str, Any],
+    ) -> VersionDecision:
+        """
+        Decide whether a change is structural and whether we will bump version.
+
+        Structural if:
+          - core snapshot (groups/visits/models/assignments) changed, OR
+          - subjects_change_is_structural (remove subject / change group)
+        """
         latest = VersionManager.latest(db, study_id)
         latest_version = latest.version if latest else 0
-        has_data = VersionManager.version_has_data(db, study_id, latest_version) if latest else False
-        structural_change = not _schemas_equal(_snapshot_structural(old_sd or {}), _snapshot_structural(new_sd or {}))
+        has_data = (
+            VersionManager.version_has_data(db, study_id, latest_version)
+            if latest
+            else False
+        )
+
+        # Core (no subjects)
+        core_old = _snapshot_structural_core(old_sd or {})
+        core_new = _snapshot_structural_core(new_sd or {})
+        base_structural_change = not _schemas_equal(core_old, core_new)
+
+        # Subjects
+        subject_structural_change = _subjects_change_is_structural(old_sd or {}, new_sd or {})
+
+        structural_change = base_structural_change or subject_structural_change
+
         if not structural_change:
+            # Non-structural: no bump, just refresh latest snapshot in place
             return VersionDecision(
                 structural_change=False,
+                base_structural_change=base_structural_change,
+                subject_structural_change=subject_structural_change,
                 latest_version=latest_version,
                 latest_version_has_data=has_data,
                 will_bump=False,
@@ -275,6 +368,8 @@ class VersionManager:
         decision_after = (latest_version + 1) if will_bump else (latest_version or 1)
         return VersionDecision(
             structural_change=True,
+            base_structural_change=base_structural_change,
+            subject_structural_change=subject_structural_change,
             latest_version=latest_version,
             latest_version_has_data=has_data,
             will_bump=will_bump,
@@ -300,15 +395,35 @@ class VersionManager:
         latest_version = latest.version if latest else 0
         rich_snap = _coerce_rich_snapshot(new_sd or {})
 
-        # Non-structural change -> refresh latest snapshot in place (NEW)
+        # Compute subject diff once for auditing
+        subj_diff = _subjects_diff(old_sd or {}, new_sd or {})
+        added_subject_ids = subj_diff["added"]
+
+        # Non-structural change -> refresh latest snapshot in place (NEW path still)
         if not decision["structural_change"]:
             if latest:
                 latest.schema = rich_snap
                 db.commit()
                 db.refresh(latest)
                 if audit_callback:
-                    audit_callback("version_snapshot_refreshed", {"version": latest.version})
-                logger.info("Refreshed template v%s in place for study_id=%s (non-structural)", latest.version, study_id)
+                    # Explicitly log subject additions even though it's non-structural
+                    if added_subject_ids:
+                        audit_callback(
+                            "subjects_added",
+                            {
+                                "version": latest.version,
+                                "count": len(added_subject_ids),
+                                "subject_ids": added_subject_ids,
+                            },
+                        )
+                    audit_callback(
+                        "version_snapshot_refreshed", {"version": latest.version}
+                    )
+                logger.info(
+                    "Refreshed template v%s in place for study_id=%s (non-structural)",
+                    latest.version,
+                    study_id,
+                )
                 decision["decision_version_after"] = latest.version
                 return decision
             # No latest → initialize v1
@@ -338,8 +453,26 @@ class VersionManager:
             VersionManager._clone_entries_forward(db, study_id, latest_version, new_v.version, old_sd, new_sd)
 
             if audit_callback:
-                audit_callback("template_version_bumped", {"from_version": latest_version, "to_version": new_v.version})
-            logger.info("Bumped study_id=%s template from v%s to v%s", study_id, latest_version, new_v.version)
+                audit_callback(
+                    "template_version_bumped",
+                    {"from_version": latest_version, "to_version": new_v.version},
+                )
+                # Also record any subject additions on the new version
+                if added_subject_ids:
+                    audit_callback(
+                        "subjects_added",
+                        {
+                            "version": new_v.version,
+                            "count": len(added_subject_ids),
+                            "subject_ids": added_subject_ids,
+                        },
+                    )
+            logger.info(
+                "Bumped study_id=%s template from v%s to v%s",
+                study_id,
+                latest_version,
+                new_v.version,
+            )
             decision["decision_version_after"] = new_v.version
             return decision
 
@@ -349,8 +482,24 @@ class VersionManager:
             db.commit()
             db.refresh(latest)
             if audit_callback:
-                audit_callback("template_overwritten_before_data", {"version": latest.version})
-            logger.info("Overwrote template v%s in place (no data yet) for study_id=%s", latest.version, study_id)
+                audit_callback(
+                    "template_overwritten_before_data", {"version": latest.version}
+                )
+                # subject additions are still interesting here
+                if added_subject_ids:
+                    audit_callback(
+                        "subjects_added",
+                        {
+                            "version": latest.version,
+                            "count": len(added_subject_ids),
+                            "subject_ids": added_subject_ids,
+                        },
+                    )
+            logger.info(
+                "Overwrote template v%s in place (no data yet) for study_id=%s",
+                latest.version,
+                study_id,
+            )
             decision["decision_version_after"] = latest.version
             return decision
 
@@ -361,7 +510,18 @@ class VersionManager:
         db.refresh(v1)
         if audit_callback:
             audit_callback("template_initialized", {"version": v1.version})
-        logger.info("Initialized template v1 on update for study_id=%s", study_id)
+            if added_subject_ids:
+                audit_callback(
+                    "subjects_added",
+                    {
+                        "version": v1.version,
+                        "count": len(added_subject_ids),
+                        "subject_ids": added_subject_ids,
+                    },
+                )
+        logger.info(
+            "Initialized template v1 on update for study_id=%s", study_id
+        )
         decision["decision_version_after"] = v1.version
         return decision
 
@@ -396,7 +556,7 @@ class VersionManager:
             db.query(models.StudyEntryData)
               .filter(and_(models.StudyEntryData.study_id == study_id,
                            models.StudyEntryData.form_version == from_version))
-              .all()
+            .all()
         )
         inserted = 0
         skipped = 0
@@ -406,8 +566,8 @@ class VersionManager:
             g_new = map_g.get(r.group_index, r.group_index)
 
             s_new = s_new if _safe_idx(s_new, new_subs_len) is not None else None
-            v_new = v_new if _safe_idx(v_new, new_vis_len)  is not None else None
-            g_new = g_new if _safe_idx(g_new, new_grp_len)  is not None else None
+            v_new = v_new if _safe_idx(v_new, new_vis_len) is not None else None
+            g_new = g_new if _safe_idx(g_new, new_grp_len) is not None else None
 
             if s_new is None or v_new is None or g_new is None:
                 skipped += 1

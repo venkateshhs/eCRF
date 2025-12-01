@@ -34,10 +34,10 @@ jobs:
         with:
           node-version: 20
           cache: 'npm'
-          cache-dependency-path: ecrf_frontend/package-lock.json
+          cache-dependency-path: eCRF_frontend/package-lock.json
 
       - name: Build frontend
-        working-directory: ecrf_frontend
+        working-directory: eCRF_frontend
         run: |
           npm ci
           npm run build
@@ -75,7 +75,7 @@ jobs:
         if: runner.os == 'Windows'
         uses: actions/upload-artifact@v4
         with:
-          name: ecrf-win
+          name: eCRF-win
           path: eCRF-win.zip
           retention-days: 7
           if-no-files-found: error
@@ -84,7 +84,7 @@ jobs:
         if: runner.os == 'macOS'
         uses: actions/upload-artifact@v4
         with:
-          name: ecrf-mac
+          name: eCRF-mac
           path: eCRF-mac.tar.gz
           retention-days: 7
           if-no-files-found: error
@@ -97,13 +97,13 @@ jobs:
       - name: Download mac artifact
         uses: actions/download-artifact@v4
         with:
-          name: ecrf-mac
+          name: eCRF-mac
           path: artifacts/macos
 
       - name: Download win artifact
         uses: actions/download-artifact@v4
         with:
-          name: ecrf-win
+          name: eCRF-win
           path: artifacts/windows
 
       - name: Checkout case-e
@@ -113,11 +113,10 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.CASEE_PUSH_TOKEN }}
 
-
       - name: Download mac artifact
         uses: actions/download-artifact@v4
         with:
-          name: ecrf-mac
+          name: eCRF-mac
           repository: venkateshhs/eCRF
           run-id: 19062103139
           path: artifacts/macos
@@ -125,7 +124,7 @@ jobs:
       - name: Download win artifact
         uses: actions/download-artifact@v4
         with:
-          name: ecrf-win
+          name: eCRF-win
           repository: venkateshhs/eCRF
           run-id: 19062103139
           path: artifacts/windows
@@ -216,3 +215,48 @@ jobs:
             builds/latest/windows/eCRF-win.zip
             builds/latest/windows/eCRF-win.zip.sha256
           artifactErrorsFailBuild: true
+
+      # Pointer releases in *this* repo (eCRF) that link to case-
+
+      - name: Create/Update pointer 'Latest' release in eCRF (links to case-e)
+        uses: ncipollo/release-action@v1
+        with:
+          token: ${{ github.token }}
+          tag: latest
+          commit: main
+          name: Latest (downloads hosted in case-e)
+          makeLatest: true
+          allowUpdates: true
+          draft: false
+          prerelease: false
+          body: |
+            ## Where are the downloads?
+            Assets are hosted in **[venkateshhs/case-e -> Releases -> Latest](https://github.com/venkateshhs/case-e/releases/latest)**.
+
+            **Direct download links:**
+            - **macOS:** https://github.com/venkateshhs/case-e/releases/latest/download/eCRF-mac.tar.gz
+            - **Windows:** https://github.com/venkateshhs/case-e/releases/latest/download/eCRF-win.zip
+
+            _This release is a pointer only. Binaries are published in the case-e repo._
+
+      - name: Mirror tagged release in eCRF (links to same tag in case-e)
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: ncipollo/release-action@v1
+        with:
+          token: ${{ github.token }}
+          tag: ${{ github.ref_name }}
+          commit: ${{ github.ref_name }}
+          name: ${{ github.ref_name }} (downloads hosted in case-e)
+          makeLatest: false
+          allowUpdates: true
+          draft: false
+          prerelease: false
+          body: |
+            ## Where are the downloads for ${{ github.ref_name }}?
+            Assets are hosted in **[venkateshhs/case-e -> Releases -> ${{ github.ref_name }}](https://github.com/venkateshhs/case-e/releases/tag/${{ github.ref_name }})**.
+
+            **Direct download links:**
+            - **macOS:** https://github.com/venkateshhs/case-e/releases/download/${{ github.ref_name }}/eCRF-mac.tar.gz
+            - **Windows:** https://github.com/venkateshhs/case-e/releases/download/${{ github.ref_name }}/eCRF-win.zip
+
+            _This release is a pointer only. Binaries are published in the case-e repo._
