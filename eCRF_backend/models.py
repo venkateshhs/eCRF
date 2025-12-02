@@ -13,7 +13,7 @@ class User(Base):
     username = Column(String(50), unique=True, nullable=False)
     email = Column(String(255), unique=True, nullable=False)
     password = Column(String(255), nullable=False)
-    created_at = Column(DateTime,default=local_now())
+    created_at = Column(DateTime,default=local_now)
 
     # Update relationship to reference StudyMetadata instead of Study
     studies = relationship("StudyMetadata", back_populates="user")
@@ -30,7 +30,7 @@ class UserProfile(Base):
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     first_name = Column(String(50), nullable=False)
     last_name = Column(String(50), nullable=False)
-    updated_at = Column(DateTime,default=local_now(), onupdate=local_now())
+    updated_at = Column(DateTime,default=local_now, onupdate=local_now)
     role = Column(String(20), nullable=False, server_default="Investigator")
 
     user = relationship("User", back_populates="profile")
@@ -44,8 +44,8 @@ class StudyMetadata(Base):
     created_by = Column(Integer, ForeignKey("users.id"), nullable=False)
     study_name = Column(String(255), nullable=False)
     study_description = Column(Text)
-    created_at = Column(DateTime(timezone=True), default=local_now())
-    updated_at = Column(DateTime(timezone=True), default=local_now(), onupdate=local_now())
+    created_at = Column(DateTime(timezone=True), default=local_now)
+    updated_at = Column(DateTime(timezone=True), default=local_now, onupdate=local_now)
 
     # Relationship back to User
     user = relationship("User", back_populates="studies")
@@ -70,7 +70,7 @@ class File(Base):
     file_path = Column(String(500), nullable=False)  # e.g. URL or file system path
     description = Column(Text)
     storage_option = Column(String(50))  # e.g., 'local' or 'db'
-    created_at = Column(DateTime(timezone=True), default=local_now())
+    created_at = Column(DateTime(timezone=True), default=local_now)
 
     subject_index = Column(Integer, nullable=True)
     visit_index = Column(Integer, nullable=True)
@@ -85,8 +85,8 @@ class UserSettings(Base):
     settings = Column(JSON, nullable=False)
     updated_at = Column(
         DateTime(timezone=True),
-        default=local_now(),
-        onupdate=local_now(),
+        default=local_now,
+        onupdate=local_now,
     )
 
 class SharedFormAccess(Base):
@@ -102,7 +102,7 @@ class SharedFormAccess(Base):
     max_uses = Column(Integer, default=1)
     used_count = Column(Integer, default=0)
     expires_at = Column(DateTime, nullable=False)
-    created_at = Column(DateTime, default=local_now())
+    created_at = Column(DateTime, default=local_now)
 
     study = relationship("StudyMetadata", back_populates="shared_links")
 
@@ -113,7 +113,7 @@ class StudyTemplateVersion(Base):
     study_id = Column(Integer, ForeignKey("study_metadata.id", ondelete="CASCADE"), nullable=False)
     version = Column(Integer, nullable=False)
     schema = Column(JSON, nullable=False)  # Full form structure with constraints
-    created_at = Column(DateTime, default=local_now())
+    created_at = Column(DateTime, default=local_now)
 
     study = relationship("StudyMetadata", back_populates="template_versions")
 
@@ -127,7 +127,7 @@ class StudyEntryData(Base):
     visit_index = Column(Integer, nullable=False)
     group_index = Column(Integer, nullable=False)
     data = Column(JSON, nullable=False)  # Actual field data per form instance
-    created_at = Column(DateTime, default=local_now())
+    created_at = Column(DateTime, default=local_now)
     skipped_required_flags = Column(JSON, nullable=True)
 
     study = relationship("StudyMetadata", back_populates="entry_data")
@@ -147,7 +147,7 @@ class StudyAccessGrant(Base):
     permissions = Column(JSON, nullable=False, default={"view": True, "add_data": True, "edit_study": False})
 
     created_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
-    created_at = Column(DateTime(timezone=True), default=local_now())
+    created_at = Column(DateTime(timezone=True), default=local_now)
 
     study = relationship("StudyMetadata", backref="access_grants")
     user = relationship("User", foreign_keys=[user_id])
@@ -156,7 +156,7 @@ class StudyAccessGrant(Base):
 class AuditEvent(Base):
     __tablename__ = "audit_events"
     id = Column(Integer, primary_key=True, index=True)
-    timestamp = Column(DateTime, nullable=False, default=local_now())
+    timestamp = Column(DateTime, nullable=False, default=local_now)
     # If an event is about a Study as a whole, subject_id stays NULL. If it's about a specific subject, both study_id and subject_id are set.
     study_id = Column(Integer, nullable=True, index=True)
     subject_id = Column(Integer, nullable=True, index=True)
