@@ -191,16 +191,19 @@ jobs:
           git commit -m "$MSG"
           git push
 
-      # Create/Update "Latest" release in venkateshhs/case-e and upload assets
-      - name: Publish/Update GitHub Release (Latest) on case-e
+      # Create a new release in venkateshhs/case-e for each run and make it the latest.
+      # Tag pushes use the tag name; main branch runs use a unique tag per run.
+
+      - name: Publish tagged GitHub Release on case-e
+        if: startsWith(github.ref, 'refs/tags/')
         uses: ncipollo/release-action@v1
         with:
           token: ${{ secrets.CASEE_PUSH_TOKEN }}   # fine-grained PAT with Contents: Read/Write on case-e
           owner: venkateshhs
           repo: case-e
-          tag: latest
-          name: Latest
-          commit: main                 # branch in case-e
+          tag: ${{ github.ref_name }}             # e.g. v1.2.3 or release-xyz
+          name: ${{ github.ref_name }}
+          commit: main                            # branch in case-e
           makeLatest: true
           allowUpdates: true
           replacesArtifacts: true
@@ -216,7 +219,32 @@ jobs:
             builds/latest/windows/eCRF-win.zip.sha256
           artifactErrorsFailBuild: true
 
-      # Pointer releases in *this* repo (eCRF) that link to case-
+      - name: Publish main branch build GitHub Release on case-e
+        if: github.ref == 'refs/heads/main'
+        uses: ncipollo/release-action@v1
+        with:
+          token: ${{ secrets.CASEE_PUSH_TOKEN }}   # fine-grained PAT with Contents: Read/Write on case-e
+          owner: venkateshhs
+          repo: case-e
+          tag: main-build-${{ github.run_id }}    # unique tag per run
+          name: main build ${{ github.run_id }}
+          commit: main                            # branch in case-e
+          makeLatest: true
+          allowUpdates: false
+          replacesArtifacts: true
+          removeArtifacts: true
+          draft: false
+          prerelease: false
+          body: |
+            Automated sync from eCRF @ ${{ github.sha }} (main branch build)
+          artifacts: |
+            builds/latest/macos/eCRF-mac.tar.gz
+            builds/latest/macos/eCRF-mac.tar.gz.sha256
+            builds/latest/windows/eCRF-win.zip
+            builds/latest/windows/eCRF-win.zip.sha256
+          artifactErrorsFailBuild: true
+
+      # Pointer releases in *this* repo (eCRF) that link to case-e
 
       - name: Create/Update pointer 'Latest' release in eCRF (links to case-e)
         uses: ncipollo/release-action@v1
