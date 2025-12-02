@@ -21,7 +21,7 @@ def verify_password(password: str, hashed_password: str) -> bool:
 
 def create_access_token(username: str) -> str:
     expire = local_now() + timedelta(minutes=30)
-    payload = {"sub": username, "exp": expire}
+    payload = {"sub": username, "exp": int(expire.timestamp())}
     return jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
 
 def extract_token(request: Request) -> str:

@@ -1500,7 +1500,7 @@ def bulk_insert_data(
         raise HTTPException(status_code=400, detail=str(ve))
 
     # Prepare rows for one executemany insert
-    now = local_now().strftime("%Y-%m-%d %H:%M:%S")
+    now = local_now()
     rows = []
     for e in payload.entries:
         rows.append({
