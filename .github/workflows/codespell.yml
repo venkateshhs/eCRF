@@ -25,5 +25,5 @@ jobs:
         uses: codespell-project/actions-codespell@v2
         with:
           # Skip the ontology file and spec file that intentionally contains nonstandard words
-          skip: "./eCRF_backend/templates/obi.obo.txt,./ecrf.spec"
+          skip: "./eCRF_backend/templates/obi.obo.txt,./ecrf.spec,./eCRF_frontend/package-lock.json"
 
