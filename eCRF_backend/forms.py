@@ -1542,7 +1542,6 @@ def bulk_insert_data(
           .filter(
               models.StudyEntryData.study_id == study_id,
               models.StudyEntryData.form_version == form_version,
-              models.StudyEntryData.created_at == now,
           )
           .order_by(models.StudyEntryData.id.asc())
           .all()

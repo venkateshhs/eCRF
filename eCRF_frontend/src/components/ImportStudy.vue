@@ -346,7 +346,7 @@
       </div>
 
       <div v-if="successStudyId && !saving" class="success">
-        ✅ Imported!&nbsp;
+        Imported!
         <button class="link" @click="$router.push({ name: 'StudyView', params: { id: successStudyId } })">
           Open Study
         </button>
