@@ -75,10 +75,10 @@ classes:
       publisher:
         range: string
         description: "Sponsoring or funding organization of the study."
-      start time:
+      start date:
         range: dateTime
         description: "Start date/time of the study."
-      End time:
+      End date:
         range: dateTime
         description: "End date/time of the study."
       Location:
