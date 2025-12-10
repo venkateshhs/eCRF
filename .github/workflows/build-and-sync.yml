@@ -63,20 +63,20 @@ jobs:
         shell: pwsh
         run: |
           # dist\eCRF contains the built app + dependencies
-          Compress-Archive -Path dist\eCRF\* -DestinationPath eCRF-win.zip
+          Compress-Archive -Path dist\eCRF\* -DestinationPath case-e.zip
 
       - name: Package (macOS)
         if: runner.os == 'macOS'
         run: |
           # Pack the 'eCRF' folder under dist into a tar.gz at repo root
-          tar -C dist -czf eCRF-mac.tar.gz eCRF
+          tar -C dist -czf case-e.tar.gz eCRF
 
       - name: Upload artifact (Windows)
         if: runner.os == 'Windows'
         uses: actions/upload-artifact@v4
         with:
-          name: eCRF-win
-          path: eCRF-win.zip
+          name: case-e-windows
+          path: case-e.zip
           retention-days: 7
           if-no-files-found: error
 
@@ -84,52 +84,52 @@ jobs:
         if: runner.os == 'macOS'
         uses: actions/upload-artifact@v4
         with:
-          name: eCRF-mac
-          path: eCRF-mac.tar.gz
+          name: case-e-macos
+          path: case-e.tar.gz
           retention-days: 7
           if-no-files-found: error
 
   sync:
-    name: Sync to case-e
+    name: Sync to both case-e repos
     needs: [ build ]
     runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - owner: venkateshhs
+            token_secret: CASEE_PUSH_TOKEN          # PAT (user repo)
+          - owner: Biomarker-Development-at-INM7
+            token_secret: CASEE_PUSH_TOKEN_ORG      # PAT (org repo)
+
     steps:
-      - name: Download mac artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: eCRF-mac
-          path: artifacts/macos
-
-      - name: Download win artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: eCRF-win
-          path: artifacts/windows
-
       - name: Checkout case-e
         uses: actions/checkout@v4
         with:
-          repository: venkateshhs/case-e
+          repository: ${{ matrix.owner }}/case-e
           fetch-depth: 0
-          token: ${{ secrets.CASEE_PUSH_TOKEN }}
+          token: ${{ secrets[matrix.token_secret] }}
+          path: case-e
 
       - name: Download mac artifact
         uses: actions/download-artifact@v4
         with:
-          name: eCRF-mac
+          name: case-e-macos
+          path: case-e/artifacts/macos
           repository: venkateshhs/eCRF
-          run-id: 19062103139
-          path: artifacts/macos
+          run-id: ${{ github.run_id }}
 
       - name: Download win artifact
         uses: actions/download-artifact@v4
         with:
-          name: eCRF-win
+          name: case-e-windows
+          path: case-e/artifacts/windows
           repository: venkateshhs/eCRF
-          run-id: 19062103139
-          path: artifacts/windows
+          run-id: ${{ github.run_id }}
 
       - name: Stage into builds/
+        working-directory: case-e
         env:
           SHORT_SHA: ${{ github.sha }}
           REF_TYPE: ${{ github.ref_type }}
@@ -137,12 +137,12 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p builds/latest/{macos,windows}
-          cp -f artifacts/macos/eCRF-mac.tar.gz   builds/latest/macos/
-          cp -f artifacts/windows/eCRF-win.zip    builds/latest/windows/
+          cp -f artifacts/macos/case-e.tar.gz   builds/latest/macos/
+          cp -f artifacts/windows/case-e.zip    builds/latest/windows/
 
           # checksums
-          (cd builds/latest/macos   && sha256sum eCRF-mac.tar.gz  > eCRF-mac.tar.gz.sha256)
-          (cd builds/latest/windows && sha256sum eCRF-win.zip     > eCRF-win.zip.sha256)
+          (cd builds/latest/macos   && sha256sum case-e.tar.gz  > case-e.tar.gz.sha256)
+          (cd builds/latest/windows && sha256sum case-e.zip     > case-e.zip.sha256)
         
           # manifest.json 
           NOW="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
@@ -154,12 +154,12 @@ jobs:
             "ref_name": "${REF_NAME}",
             "artifacts": {
               "macos": {
-                "file": "eCRF-mac.tar.gz",
-                "sha256_file": "eCRF-mac.tar.gz.sha256"
+                "file": "case-e.tar.gz",
+                "sha256_file": "case-e.tar.gz.sha256"
               },
               "windows": {
-                "file": "eCRF-win.zip",
-                "sha256_file": "eCRF-win.zip.sha256"
+                "file": "case-e.zip",
+                "sha256_file": "case-e.zip.sha256"
               }
             }
           }
@@ -169,12 +169,13 @@ jobs:
           if [[ "${REF_TYPE}" == "tag" ]]; then
             TAG="${REF_NAME}"
             mkdir -p "builds/${TAG}/macos" "builds/${TAG}/windows"
-            cp -f builds/latest/macos/eCRF-mac.tar.gz* "builds/${TAG}/macos/"
-            cp -f builds/latest/windows/eCRF-win.zip* "builds/${TAG}/windows/"
+            cp -f builds/latest/macos/case-e.tar.gz* "builds/${TAG}/macos/"
+            cp -f builds/latest/windows/case-e.zip* "builds/${TAG}/windows/"
             cp -f builds/latest/manifest.json "builds/${TAG}/"
           fi
 
       - name: Commit & push to case-e
+        working-directory: case-e
         env:
           GIT_AUTHOR_NAME: github-actions[bot]
           GIT_AUTHOR_EMAIL: github-actions[bot]@users.noreply.github.com
@@ -191,15 +192,14 @@ jobs:
           git commit -m "$MSG"
           git push
 
-      # Create a new release in venkateshhs/case-e for each run and make it the latest.
-      # Tag pushes use the tag name; main branch runs use a unique tag per run.
+      # --- Releases in each case-e repo ---
 
       - name: Publish tagged GitHub Release on case-e
         if: startsWith(github.ref, 'refs/tags/')
         uses: ncipollo/release-action@v1
         with:
-          token: ${{ secrets.CASEE_PUSH_TOKEN }}   # fine-grained PAT with Contents: Read/Write on case-e
-          owner: venkateshhs
+          token: ${{ secrets[matrix.token_secret] }}
+          owner: ${{ matrix.owner }}
           repo: case-e
           tag: ${{ github.ref_name }}             # e.g. v1.2.3 or release-xyz
           name: ${{ github.ref_name }}
@@ -213,18 +213,18 @@ jobs:
           body: |
             Automated sync from eCRF @ ${{ github.sha }}
           artifacts: |
-            builds/latest/macos/eCRF-mac.tar.gz
-            builds/latest/macos/eCRF-mac.tar.gz.sha256
-            builds/latest/windows/eCRF-win.zip
-            builds/latest/windows/eCRF-win.zip.sha256
+            builds/latest/macos/case-e.tar.gz
+            builds/latest/macos/case-e.tar.gz.sha256
+            builds/latest/windows/case-e.zip
+            builds/latest/windows/case-e.zip.sha256
           artifactErrorsFailBuild: true
 
       - name: Publish main branch build GitHub Release on case-e
         if: github.ref == 'refs/heads/main'
         uses: ncipollo/release-action@v1
         with:
-          token: ${{ secrets.CASEE_PUSH_TOKEN }}   # fine-grained PAT with Contents: Read/Write on case-e
-          owner: venkateshhs
+          token: ${{ secrets[matrix.token_secret] }}
+          owner: ${{ matrix.owner }}
           repo: case-e
           tag: main-build-${{ github.run_id }}    # unique tag per run
           name: main build ${{ github.run_id }}
@@ -238,15 +238,16 @@ jobs:
           body: |
             Automated sync from eCRF @ ${{ github.sha }} (main branch build)
           artifacts: |
-            builds/latest/macos/eCRF-mac.tar.gz
-            builds/latest/macos/eCRF-mac.tar.gz.sha256
-            builds/latest/windows/eCRF-win.zip
-            builds/latest/windows/eCRF-win.zip.sha256
+            builds/latest/macos/case-e.tar.gz
+            builds/latest/macos/case-e.tar.gz.sha256
+            builds/latest/windows/case-e.zip
+            builds/latest/windows/case-e.zip.sha256
           artifactErrorsFailBuild: true
 
       # Pointer releases in *this* repo (eCRF) that link to case-e
-
+      # Run these only once (for one matrix entry).
       - name: Create/Update pointer 'Latest' release in eCRF (links to case-e)
+        if: matrix.owner == 'venkateshhs'
         uses: ncipollo/release-action@v1
         with:
           token: ${{ github.token }}
@@ -262,13 +263,13 @@ jobs:
             Assets are hosted in **[venkateshhs/case-e -> Releases -> Latest](https://github.com/venkateshhs/case-e/releases/latest)**.
 
             **Direct download links:**
-            - **macOS:** https://github.com/venkateshhs/case-e/releases/latest/download/eCRF-mac.tar.gz
-            - **Windows:** https://github.com/venkateshhs/case-e/releases/latest/download/eCRF-win.zip
+            - **macOS:** https://github.com/venkateshhs/case-e/releases/latest/download/case-e.tar.gz
+            - **Windows:** https://github.com/venkateshhs/case-e/releases/latest/download/case-e.zip
 
             _This release is a pointer only. Binaries are published in the case-e repo._
 
       - name: Mirror tagged release in eCRF (links to same tag in case-e)
-        if: startsWith(github.ref, 'refs/tags/')
+        if: matrix.owner == 'venkateshhs' && startsWith(github.ref, 'refs/tags/')
         uses: ncipollo/release-action@v1
         with:
           token: ${{ github.token }}
@@ -284,7 +285,7 @@ jobs:
             Assets are hosted in **[venkateshhs/case-e -> Releases -> ${{ github.ref_name }}](https://github.com/venkateshhs/case-e/releases/tag/${{ github.ref_name }})**.
 
             **Direct download links:**
-            - **macOS:** https://github.com/venkateshhs/case-e/releases/download/${{ github.ref_name }}/eCRF-mac.tar.gz
-            - **Windows:** https://github.com/venkateshhs/case-e/releases/download/${{ github.ref_name }}/eCRF-win.zip
+            - **macOS:** https://github.com/venkateshhs/case-e/releases/download/${{ github.ref_name }}/case-e.tar.gz
+            - **Windows:** https://github.com/venkateshhs/case-e/releases/download/${{ github.ref_name }}/case-e.zip
 
             _This release is a pointer only. Binaries are published in the case-e repo._
