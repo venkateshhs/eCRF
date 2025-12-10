@@ -196,7 +196,6 @@ jobs:
 
       - name: Publish tagged GitHub Release on case-e
         if: startsWith(github.ref, 'refs/tags/')
-        working-directory: case-e
         uses: ncipollo/release-action@v1
         with:
           token: ${{ secrets[matrix.token_secret] }}
@@ -214,15 +213,14 @@ jobs:
           body: |
             Automated sync from eCRF @ ${{ github.sha }}
           artifacts: |
-            builds/latest/macos/case-e.tar.gz
-            builds/latest/macos/case-e.tar.gz.sha256
-            builds/latest/windows/case-e.zip
-            builds/latest/windows/case-e.zip.sha256
+            case-e/builds/latest/macos/case-e.tar.gz
+            case-e/builds/latest/macos/case-e.tar.gz.sha256
+            case-e/builds/latest/windows/case-e.zip
+            case-e/builds/latest/windows/case-e.zip.sha256
           artifactErrorsFailBuild: true
 
       - name: Publish main branch build GitHub Release on case-e
         if: github.ref == 'refs/heads/main'
-        working-directory: case-e
         uses: ncipollo/release-action@v1
         with:
           token: ${{ secrets[matrix.token_secret] }}
@@ -240,10 +238,10 @@ jobs:
           body: |
             Automated sync from eCRF @ ${{ github.sha }} (main branch build)
           artifacts: |
-            builds/latest/macos/case-e.tar.gz
-            builds/latest/macos/case-e.tar.gz.sha256
-            builds/latest/windows/case-e.zip
-            builds/latest/windows/case-e.zip.sha256
+            case-e/builds/latest/macos/case-e.tar.gz
+            case-e/builds/latest/macos/case-e.tar.gz.sha256
+            case-e/builds/latest/windows/case-e.zip
+            case-e/builds/latest/windows/case-e.zip.sha256
           artifactErrorsFailBuild: true
 
       # Pointer releases in *this* repo (eCRF) that link to case-e
