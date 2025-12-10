@@ -196,6 +196,7 @@ jobs:
 
       - name: Publish tagged GitHub Release on case-e
         if: startsWith(github.ref, 'refs/tags/')
+        working-directory: case-e
         uses: ncipollo/release-action@v1
         with:
           token: ${{ secrets[matrix.token_secret] }}
@@ -221,6 +222,7 @@ jobs:
 
       - name: Publish main branch build GitHub Release on case-e
         if: github.ref == 'refs/heads/main'
+        working-directory: case-e
         uses: ncipollo/release-action@v1
         with:
           token: ${{ secrets[matrix.token_secret] }}
