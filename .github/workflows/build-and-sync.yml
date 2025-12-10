@@ -97,7 +97,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        owner: [ venkateshhs, Biomarker-Development-at-INM7 ]
+        include:
+          - owner: venkateshhs
+            token_secret: CASEE_PUSH_TOKEN          # PAT (user repo)
+          - owner: Biomarker-Development-at-INM7
+            token_secret: CASEE_PUSH_TOKEN_ORG      # PAT (org repo)
 
     steps:
       - name: Checkout case-e
@@ -105,7 +109,7 @@ jobs:
         with:
           repository: ${{ matrix.owner }}/case-e
           fetch-depth: 0
-          token: ${{ secrets.CASEE_PUSH_TOKEN_ORG }}
+          token: ${{ secrets[matrix.token_secret] }}
           path: case-e
 
       - name: Download mac artifact
@@ -113,12 +117,16 @@ jobs:
         with:
           name: case-e-macos
           path: case-e/artifacts/macos
+          repository: venkateshhs/eCRF
+          run-id: ${{ github.run_id }}
 
       - name: Download win artifact
         uses: actions/download-artifact@v4
         with:
           name: case-e-windows
           path: case-e/artifacts/windows
+          repository: venkateshhs/eCRF
+          run-id: ${{ github.run_id }}
 
       - name: Stage into builds/
         working-directory: case-e
@@ -184,13 +192,13 @@ jobs:
           git commit -m "$MSG"
           git push
 
-      # Create a new release in each case-e repo for each run and make it the latest.
+      # --- Releases in each case-e repo ---
 
       - name: Publish tagged GitHub Release on case-e
         if: startsWith(github.ref, 'refs/tags/')
         uses: ncipollo/release-action@v1
         with:
-          token: ${{ secrets.CASEE_PUSH_TOKEN_ORG }}   # PAT with Contents: Read/Write on both case-e repos
+          token: ${{ secrets[matrix.token_secret] }}
           owner: ${{ matrix.owner }}
           repo: case-e
           tag: ${{ github.ref_name }}             # e.g. v1.2.3 or release-xyz
@@ -215,7 +223,7 @@ jobs:
         if: github.ref == 'refs/heads/main'
         uses: ncipollo/release-action@v1
         with:
-          token: ${{ secrets.CASEE_PUSH_TOKEN_ORG }}   # PAT with Contents: Read/Write on both case-e repos
+          token: ${{ secrets[matrix.token_secret] }}
           owner: ${{ matrix.owner }}
           repo: case-e
           tag: main-build-${{ github.run_id }}    # unique tag per run
