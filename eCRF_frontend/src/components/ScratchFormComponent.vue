@@ -426,7 +426,7 @@
             + Add Section
           </button>
           <button @click.prevent="confirmClearForm" class="btn-option">
-            Clear
+            Clear All
           </button>
           <button @click.prevent="saveForm" class="btn-primary">
             Save Template
@@ -441,7 +441,7 @@
             @click.prevent="handleProtocolClick"
             class="btn-option protocol-btn"
           >
-            Schedule of Assessment
+            Create Visit Schedule
           </button>
         </div>
       </div>
