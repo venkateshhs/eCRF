@@ -470,10 +470,10 @@ export default {
       tabs: [
         { key: "meta", label: "Meta-data" },
         { key: "docs", label: "Documents" },
-        { key: "team", label: "Settings" },
+        { key: "team", label: "Study Access" },
         { key: "viewdata", label: "View Data" },
         { key: "audit", label: "Audit logs" },
-        { key: "bids", label: "Dataset" },
+        { key: "bids", label: "Export Options" },
       ],
 
       // files
