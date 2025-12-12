@@ -285,9 +285,9 @@
 
     <!-- 5. Footer Actions -->
     <div class="matrix-actions card-surface">
-      <button @click="$emit('edit-template')" class="btn-option">Edit Template</button>
-      <button @click="saveStudy" class="btn-primary">Save</button>
+      <button @click="$emit('edit-template')" class="btn-option">Back to Edit Template</button>
       <button @click="openPreview" :disabled="!hasAssignment(currentVisitIndex)" class="btn-option">Preview</button>
+      <button @click="saveStudy" class="btn-primary">Save</button>
       <button @click="goToSaved" class="btn-option">View Saved Study</button>
     </div>
   </div>
