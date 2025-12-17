@@ -477,21 +477,39 @@
           <button @click.prevent="confirmClearForm" class="btn-option">
             Clear All
           </button>
-          <button @click.prevent="saveForm" class="btn-primary">
-            Save Template
-          </button>
-          <button @click.prevent="downloadFormData" class="btn-option">
-            Download Template
-          </button>
-          <button @click.prevent="openUploadDialog" class="btn-option">
-            Upload Template
-          </button>
+
           <button
             @click.prevent="handleProtocolClick"
             class="btn-option protocol-btn"
           >
             Create Visit Schedule
           </button>
+          <!-- Additional options (Download/Upload) -->
+          <div class="additional-options" @click.stop>
+            <button
+              ref="additionalOptionsBtn"
+              class="btn-ellipsis"
+              title="Additional options"
+              @click.prevent="toggleAdditionalOptions"
+            >
+              <i :class="icons.ellipsisV || 'fas fa-ellipsis-v'"></i>
+            </button>
+
+            <div
+              v-if="showAdditionalOptions"
+              ref="additionalOptionsMenu"
+              class="options-menu"
+              role="menu"
+              aria-label="Additional options"
+            >
+              <button class="options-item" role="menuitem" @click.prevent="onDownloadTemplate">
+                Download Template
+              </button>
+              <button class="options-item" role="menuitem" @click.prevent="onUploadTemplate">
+                Upload Template
+              </button>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -745,7 +763,9 @@ export default {
 
       uidCounter: 1,
       sectionUidMap: new WeakMap(),
-      fieldUidMap: new WeakMap()
+      fieldUidMap: new WeakMap(),
+
+      showAdditionalOptions: false,
     };
   },
   computed: {
@@ -803,6 +823,7 @@ export default {
     }
   },
   async mounted() {
+    document.addEventListener("click", this.onGlobalClick);
     if (this.studyDetails.study_metadata?.id) {
       const stored = localStorage.getItem("scratchForms");
       if (stored) {
@@ -840,6 +861,9 @@ export default {
 
     await this.loadDataModels();
   },
+   beforeUnmount() {
+      document.removeEventListener("click", this.onGlobalClick);
+    },
   methods: {
     /* ---------- Stable keys (no mutation) ---------- */
     getSectionUid(sectionObj) {
@@ -1741,8 +1765,6 @@ export default {
 
     cancelConstraintsDialog() { this.showConstraintsDialog = false; },
 
-    saveForm() { this.openGenericDialog("Saved!"); },
-
     downloadFormData() {
       const payload = {
         sections: this.currentForm.sections.map(sec => ({
@@ -1822,7 +1844,36 @@ export default {
       if (['integer','decimal','number'].includes(range)) return 'number'
       if (ui.widget === 'file' || dt === 'file' || range === 'file') return 'file'
       return 'text'
-    }
+    },
+    toggleAdditionalOptions() {
+      this.showAdditionalOptions = !this.showAdditionalOptions;
+    },
+    closeAdditionalOptions() {
+      this.showAdditionalOptions = false;
+    },
+    onGlobalClick(e) {
+      if (!this.showAdditionalOptions) return;
+
+      const btn = this.$refs.additionalOptionsBtn;
+      const menu = this.$refs.additionalOptionsMenu;
+
+      const btnEl = Array.isArray(btn) ? btn[0] : btn;
+      const menuEl = Array.isArray(menu) ? menu[0] : menu;
+
+      if (btnEl && btnEl.contains(e.target)) return;
+      if (menuEl && menuEl.contains(e.target)) return;
+
+      this.showAdditionalOptions = false;
+    },
+
+    onDownloadTemplate() {
+      this.closeAdditionalOptions();
+      this.downloadFormData();
+    },
+    onUploadTemplate() {
+      this.closeAdditionalOptions();
+      this.openUploadDialog();
+    },
   }
 };
 </script>
@@ -2196,7 +2247,53 @@ input, textarea, select {
   gap: 15px;
   z-index: 10;
 }
+.additional-options {
+  position: relative;
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+}
 
+.btn-ellipsis {
+  background: $secondary-color;
+  border: 1px solid $border-color;
+  border-radius: $button-border-radius;
+  cursor: pointer;
+  padding: $button-padding;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+}
+
+.options-menu {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 8px);
+  min-width: 200px;
+  background: white;
+  border: 1px solid $border-color;
+  border-radius: 10px;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.12);
+  padding: 6px;
+  z-index: 50;
+}
+
+.options-item {
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: none;
+  border-radius: 8px;
+  padding: 10px 12px;
+  cursor: pointer;
+  font-size: 14px;
+  color: $text-color;
+}
+
+.options-item:hover {
+  background: rgba(0, 0, 0, 0.06);
+}
 .btn-option {
   background: $secondary-color;
   padding: $button-padding;
