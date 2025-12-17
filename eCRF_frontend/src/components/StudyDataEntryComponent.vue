@@ -355,9 +355,20 @@
           <button @click="createShareLink">Generate</button>
           <button @click="showShareDialog = false">Cancel</button>
         </div>
-        <p v-if="generatedLink">
-          <a :href="generatedLink" target="_blank">{{ generatedLink }}</a>
-        </p>
+
+        <!-- Copy link UI (only after successful generation) -->
+        <div v-if="generatedLink" class="share-result">
+          <span class="share-result-text">Link generated.</span>
+          <button type="button" class="btn-copy-link" @click="copyGeneratedLink">
+            Copy link
+          </button>
+        </div>
+        <div v-if="generatedLink" class="generated-link-preview" :title="generatedLink">
+          {{ generatedLink }}
+        </div>
+        <div v-if="copyStatus" class="copy-status">
+          {{ copyStatus }}
+        </div>
       </div>
     </div>
 
@@ -542,6 +553,7 @@ export default {
       shareParams: { subjectIndex: null, visitIndex: null, groupIndex: null },
       shareConfig: { permission: "view", maxUses: 1, expiresInDays: 7 },
       generatedLink: "",
+      copyStatus: "",
       permissionError: false,
 
       showDialog: false,
@@ -1604,6 +1616,46 @@ export default {
         return gi >= 0 ? gi : 0;
       });
     },
+
+    // Cross-platform copy helper (Clipboard API + fallback)
+    async copyGeneratedLink() {
+      const text = String(this.generatedLink || "");
+      if (!text) return;
+
+      try {
+        // Modern browsers (secure context)
+        if (navigator.clipboard && window.isSecureContext) {
+          await navigator.clipboard.writeText(text);
+        } else {
+          // Fallback for older browsers / non-secure contexts
+          const ta = document.createElement("textarea");
+          ta.value = text;
+          ta.setAttribute("readonly", "");
+          ta.style.position = "fixed";
+          ta.style.top = "-9999px";
+          ta.style.left = "-9999px";
+          document.body.appendChild(ta);
+          ta.focus();
+          ta.select();
+          ta.setSelectionRange(0, ta.value.length);
+          const ok = document.execCommand("copy");
+          document.body.removeChild(ta);
+          if (!ok) throw new Error("execCommand(copy) failed");
+        }
+
+        this.copyStatus = "Copied!";
+        setTimeout(() => {
+          this.copyStatus = "";
+        }, 1800);
+      } catch (e) {
+        console.error("Copy failed:", e);
+        this.copyStatus = "Copy failed.";
+        setTimeout(() => {
+          this.copyStatus = "";
+        }, 2200);
+      }
+    },
+
     buildStatusCache() {
       this.statusMap = new Map();
       const nS = this.numberOfSubjects;
@@ -2611,6 +2663,7 @@ export default {
         groupIndex: gIdx,
       };
       this.generatedLink = "";
+      this.copyStatus = "";
       this.showShareDialog = true;
     },
     async createShareLink() {
@@ -2634,7 +2687,10 @@ export default {
           }
         );
         this.generatedLink = resp.data.link;
+        this.copyStatus = "";
       } catch (err) {
+        this.generatedLink = "";
+        this.copyStatus = "";
         if (err.response?.status === 403)
           this.permissionError = true;
       }
@@ -3283,6 +3339,48 @@ select:focus {
 .dialog-actions button:last-child {
   background: #e5e7eb;
   color: #1f2937;
+}
+
+/* Share result + copy button layout */
+.share-result {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 12px;
+}
+.share-result-text {
+  font-size: 13px;
+  color: #374151;
+}
+.btn-copy-link {
+  background: #2563eb;
+  color: #ffffff;
+  border: none;
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 0.2s;
+  white-space: nowrap;
+}
+.btn-copy-link:hover {
+  background: #1d4ed8;
+}
+.generated-link-preview {
+  margin-top: 8px;
+  font-size: 12px;
+  color: #6b7280;
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  padding: 8px;
+  word-break: break-all; /* prevents overflow */
+}
+.copy-status {
+  margin-top: 6px;
+  font-size: 12px;
+  color: #374151;
 }
 
 /* Mini dialog (constraints / legends) */
