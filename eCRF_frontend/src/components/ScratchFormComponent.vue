@@ -44,7 +44,7 @@
           </div>
 
           <p class="template-instruction">
-            Click a model to pick properties
+            Select a section and properties to add
           </p>
           <div class="tab-results">
             <div
