@@ -70,7 +70,7 @@
               </ul>
             </div>
 
-          <!-- Empty state when no matches -->
+            <!-- Empty state when no matches -->
             <div v-if="searchQuery && filteredDataModels.length === 0" class="no-matches">
               No matches found for "<strong>{{ searchQuery }}</strong>".
             </div>
@@ -310,6 +310,8 @@
                             title="Settings"
                             @click.stop.prevent="setActiveSection(si); openConstraintsDialog(si, fi)"
                           ><i :class="icons.cog"></i></button>
+
+                          <!-- MOVE: extreme right of each field (right of settings) -->
                           <span
                             class="drag-handle drag-handle-right"
                             draggable="true"
@@ -324,7 +326,7 @@
                       </div>
 
                       <div class="field-box">
-                    <!-- TEXT -->
+                        <!-- TEXT -->
                         <input
                           v-if="field.type === 'text'"
                           type="text"
@@ -332,7 +334,7 @@
                           :placeholder="field.constraints?.placeholder || field.placeholder"
                         />
 
-                    <!-- TEXTAREA -->
+                        <!-- TEXTAREA -->
                         <textarea
                           v-else-if="field.type === 'textarea'"
                           v-model="field.value"
@@ -340,7 +342,7 @@
                           :placeholder="field.constraints?.placeholder || field.placeholder"
                         ></textarea>
 
-                    <!-- NUMBER -->
+                        <!-- NUMBER -->
                         <input
                           v-else-if="field.type === 'number'"
                           type="number"
@@ -352,7 +354,7 @@
                           @blur="enforceNumberDigitLimits(si, fi, $event, true)"
                         />
 
-                    <!-- DATE -->
+                        <!-- DATE -->
                         <DateFormatPicker
                           v-else-if="field.type === 'date'"
                           v-model="field.value"
@@ -362,7 +364,7 @@
                           :max-date="field.constraints?.maxDate || null"
                         />
 
-                    <!-- TIME -->
+                        <!-- TIME -->
                         <FieldTime
                           v-else-if="field.type === 'time'"
                           v-model="field.value"
@@ -371,7 +373,7 @@
                           :placeholder="field.placeholder || (field.constraints?.hourCycle === '12' ? 'hh:mm a' : 'HH:mm')"
                         />
 
-                    <!-- SELECT -->
+                        <!-- SELECT -->
                         <select
                           v-else-if="field.type === 'select'"
                           v-model="field.value"
@@ -380,7 +382,7 @@
                           <option v-for="opt in field.options" :key="opt">{{ opt }}</option>
                         </select>
 
-                    <!-- RADIO -->
+                        <!-- RADIO -->
                         <FieldRadioGroup
                           v-else-if="field.type === 'radio'"
                           :name="field.name"
@@ -388,7 +390,7 @@
                           v-model="field.value"
                         />
 
-                    <!-- SLIDER / LINEAR -->
+                        <!-- SLIDER / LINEAR -->
                         <FieldSlider
                           v-else-if="field.type === 'slider' && (field.constraints?.mode || 'slider') === 'slider'"
                           v-model="field.value"
@@ -409,7 +411,7 @@
                           :readonly="!!field.constraints?.readonly"
                         />
 
-                    <!-- FILE -->
+                        <!-- FILE -->
                         <FieldFileUpload
                           v-else-if="field.type === 'file'"
                           v-model="field.value"
@@ -419,13 +421,13 @@
                           stage="builder"
                         />
 
-                    <!-- BUTTON -->
+                        <!-- BUTTON -->
                         <button
                           v-else-if="field.type === 'button'"
                           class="form-button"
                         >{{ field.label }}</button>
 
-                    <!-- FALLBACK -->
+                        <!-- FALLBACK -->
                         <input
                           v-else
                           type="text"
@@ -518,9 +520,51 @@
               :id="'prop-check-' + i"
               v-model="selectedProps[i]"
               class="prop-checkbox"
+              :disabled="modelAddToExisting && isPropAlreadyInTargetSection(prop)"
+              :title="(modelAddToExisting && isPropAlreadyInTargetSection(prop)) ? 'Already added in selected section' : ''"
             />
           </div>
         </div>
+
+        <!-- selection (dropdown/hint) ABOVE checkbox, and block sits ABOVE takeover buttons -->
+        <div class="model-target">
+          <div class="model-target-selection">
+            <div
+              v-if="modelAddToExisting && currentForm.sections.length"
+              class="model-target-select"
+            >
+              <div class="model-target-label">Add selected fields to:</div>
+              <select v-model.number="modelTargetSectionIndex">
+                <option
+                  v-for="(s, idx) in currentForm.sections"
+                  :key="getSectionUid(s)"
+                  :value="idx"
+                >
+                  {{ idx === activeSection ? `[Current] ${s.title}` : s.title }}
+                </option>
+              </select>
+            </div>
+
+            <div v-else class="model-target-hint">
+              <span v-if="currentForm.sections.length">
+                Add as a new section (below: <strong>{{ currentForm.sections[activeSection]?.title }}</strong>)
+              </span>
+              <span v-else>
+                Add as a new section
+              </span>
+            </div>
+          </div>
+
+          <label class="model-target-check">
+            <input
+              type="checkbox"
+              v-model="modelAddToExisting"
+              :disabled="!currentForm.sections.length"
+            />
+            Add to existing section
+          </label>
+        </div>
+
         <div class="modal-actions">
           <button @click="takeoverModel" class="btn-primary">Takeover</button>
           <button @click="showModelDialog=false" class="btn-option">
@@ -686,6 +730,10 @@ export default {
       requestedLimit: 50,
       limitStep: 50,
 
+      // Template takeover target controls
+      modelAddToExisting: false,
+      modelTargetSectionIndex: 0,
+
       dragState: {
         kind: null,          // "section" | "field" | null
         fromSection: null,
@@ -744,6 +792,14 @@ export default {
       if (newVal !== 'obi') {
         this.resetObiState();
       }
+    },
+
+    // when adding to existing section, pre-check/disable already-added props
+    modelAddToExisting() {
+      this.$nextTick(() => this.syncSelectedPropsForExistingSection());
+    },
+    modelTargetSectionIndex() {
+      this.$nextTick(() => this.syncSelectedPropsForExistingSection());
     }
   },
   async mounted() {
@@ -799,6 +855,46 @@ export default {
         this.fieldUidMap.set(fieldObj, `fld_${this.uidCounter++}`);
       }
       return this.fieldUidMap.get(fieldObj);
+    },
+
+    /* ---------- Model dialog helpers (prevent duplicates) ---------- */
+    clampSectionIndex(i) {
+      const n = this.currentForm.sections.length;
+      if (!n) return 0;
+      const x = Number.isInteger(i) ? i : 0;
+      return Math.max(0, Math.min(x, n - 1));
+    },
+    getTargetSectionForModelDialog() {
+      const sections = this.currentForm.sections || [];
+      if (!sections.length) return null;
+      const idx = this.clampSectionIndex(this.modelTargetSectionIndex);
+      return sections[idx] || null;
+    },
+    isPropAlreadyInTargetSection(prop) {
+      if (!this.modelAddToExisting) return false;
+      const sec = this.getTargetSectionForModelDialog();
+      if (!sec) return false;
+      const name = String(prop?.name || "");
+      if (!name) return false;
+      return Array.isArray(sec.fields) && sec.fields.some(f => String(f?.name || "") === name);
+    },
+    syncSelectedPropsForExistingSection() {
+      // Only apply pre-checking when user is adding to an existing section.
+      if (!this.showModelDialog) return;
+      if (!this.modelAddToExisting) return;
+      if (!this.currentModel || !Array.isArray(this.currentModel.fields)) return;
+
+      const sec = this.getTargetSectionForModelDialog();
+      if (!sec || !Array.isArray(sec.fields)) return;
+
+      const existing = new Set(sec.fields.map(f => String(f?.name || "")));
+      this.currentModel.fields.forEach((p, i) => {
+        const nm = String(p?.name || "");
+        if (nm && existing.has(nm)) {
+          // Check it (informational) and disable via template condition.
+          this.$set(this.selectedProps, i, true);
+        }
+      });
     },
 
     /* ---------- Drag helpers ---------- */
@@ -1228,12 +1324,60 @@ export default {
       const full = this.dataModels.find(d => d.title === model.title) || model;
       this.currentModel = full;
       this.selectedProps = full.fields.map(() => false);
+
+      // Default: add as new section (below current active section)
+      this.modelAddToExisting = false;
+      this.modelTargetSectionIndex = this.clampSectionIndex(this.activeSection);
+
       this.showModelDialog = true;
+
+      // If user later toggles to existing, watcher will pre-check already-added props.
     },
+
     takeoverModel() {
       const chosen = this.currentModel.fields
         .filter((_, i) => this.selectedProps[i])
         .map(f => ({ ...f, description: f.description || "", constraints: f.constraints || {} }));
+
+      // Add to existing section: NO DUPLICATES (skip already-present field.name)
+      if (this.modelAddToExisting && this.currentForm.sections.length) {
+        const sections = this.forms[this.currentFormIndex].sections;
+        const idx = this.clampSectionIndex(this.modelTargetSectionIndex);
+        const targetSec = sections[idx];
+        if (!targetSec) {
+          this.showModelDialog = false;
+          return;
+        }
+
+        if (targetSec.collapsed) targetSec.collapsed = false;
+
+        const existingNames = new Set((targetSec.fields || []).map(ff => String(ff?.name || "")));
+
+        let added = 0;
+        chosen.forEach(f => {
+          const nm = String(f?.name || "");
+          // Skip duplicates instead of renaming (prevents “selected twice” duplicates)
+          if (nm && existingNames.has(nm)) return;
+
+          existingNames.add(nm);
+          targetSec.fields.push({ ...f });
+          added += 1;
+        });
+
+        // Requirement: destination section becomes active
+        this.activeSection = idx;
+        this.$nextTick(() => this.focusSection(idx));
+
+        // If nothing new was added, still close; optional info dialog:
+        if (added === 0) {
+          this.openGenericDialog(`All selected field(s) already exist in "${targetSec.title}".`);
+        }
+
+        this.showModelDialog = false;
+        return;
+      }
+
+      // Add as a NEW section (existing behavior)
       const insertAt = Math.min(this.activeSection + 1, this.currentForm.sections.length);
       const sec = { title: this.currentModel.title, fields: chosen, collapsed: false, source: "template" };
       this.forms[this.currentFormIndex].sections.splice(insertAt, 0, sec);
@@ -1333,7 +1477,7 @@ export default {
         base.value = null;
         base.icon = base.icon || icons.paperclip;
         const provided = base.constraints || {};
-          // default modality from label (or fallback to name)
+        // default modality from label (or fallback to name)
         const fallbackMod = (String(base.label || '').trim()) || base.name;
 
         base.constraints = {
@@ -1347,11 +1491,11 @@ export default {
             ? Number(provided.maxSizeMB)
             : undefined,
           storagePreference: (provided.storagePreference === "url") ? "url" : "local",
-            //  Default to label/name when user hasn’t picked any modality
+          //  Default to label/name when user hasn’t picked any modality
           modalities: (Array.isArray(provided.modalities) && provided.modalities.length)
             ? provided.modalities
             : [fallbackMod],
-            // default true when not specified
+          // default true when not specified
           allowMultipleFiles: (provided.allowMultipleFiles === undefined) ? true : !!provided.allowMultipleFiles
         };
       }
@@ -1538,7 +1682,7 @@ export default {
           });
           f.constraints = { ...norm, ...extra };
         } else {
-        f.constraints = { ...norm };
+          f.constraints = { ...norm };
         }
 
         if (
@@ -2138,14 +2282,59 @@ input, textarea, select {
   border: none;       /* remove text-input border */
   border-radius: 0;
 }
+.model-prop-list .prop-cell { align-items: center; }
+.model-prop-list .prop-info { text-align: left; }
 
-.model-prop-list .prop-cell {
+/* --- Model dialog target block: tighten spacing + fix checkbox sizing --- */
+.model-target {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid #eef0f3;
+
+  display: flex;
+  flex-direction: column;
+  gap: 6px;            /* was too large → made checkbox look "floating" */
+}
+
+.model-target-selection {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.model-target-hint {
+  margin: 0;
+  padding: 0;
+}
+
+/* Keep the checkbox directly below the hint/dropdown and on one line */
+.model-target-check {
+  display: flex;
   align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+
+  margin: 0;          /* remove any inherited spacing */
+  padding: 0;
+
+  white-space: nowrap;        /* "Add to existing section" single line */
+  overflow: hidden;
+  text-overflow: ellipsis;    /* prevent wrap in narrow modal */
+  line-height: 1.1;
 }
 
-.model-prop-list .prop-info {
-  text-align: left;
-}
+/* Override global input styling that makes checkboxes huge/fuzzy */
+.model-target-check input[type="checkbox"] {
+  width: auto !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  border: none !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
 
+  /* optional: nicer alignment */
+  transform: translateY(1px);
+}
 
 </style>
