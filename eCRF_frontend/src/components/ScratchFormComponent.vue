@@ -189,222 +189,269 @@
         <div class="sections-container">
           <!-- Sections View -->
           <div v-if="!showMatrix">
-            <div
-              v-for="(section, si) in currentForm.sections"
-              :key="si"
-              class="form-section"
-              :class="{ active: activeSection === si }"
-              @click="onSectionClick(si)"
-              :ref="'section-' + si"
-            >
-              <div class="section-header">
-                <h3>{{ section.title }}</h3>
-                <div class="field-actions">
-                  <button
-                    class="icon-button"
-                    title="Edit Section Title"
-                    @click.stop.prevent="setActiveSection(si); openInputDialog(
-                      'Enter new section title:',
-                      section.title,
-                      val => editSection(si, val)
-                    )"
-                  ><i :class="icons.edit"></i></button>
+            <transition-group name="reorder" tag="div" class="sections-list">
+              <div
+                v-for="(section, si) in currentForm.sections"
+                :key="getSectionUid(section)"
+                class="form-section"
+                :class="[
+                  { active: activeSection === si },
+                  getSectionDropClass(si)
+                ]"
+                @click="onSectionClick(si)"
+                :ref="'section-' + si"
+                @dragover.prevent="onSectionDragOver(si, $event)"
+                @drop.prevent="onSectionDrop(si)"
+              >
+                <div class="section-header">
+                  <h3>{{ section.title }}</h3>
+                  <div class="field-actions">
+                    <button
+                      class="icon-button"
+                      title="Edit Section Title"
+                      @click.stop.prevent="setActiveSection(si); openInputDialog(
+                        'Enter new section title:',
+                        section.title,
+                        val => editSection(si, val)
+                      )"
+                    ><i :class="icons.edit"></i></button>
 
-                  <button
-                    class="icon-button"
-                    title="Add Section Below"
-                    @click.stop.prevent="setActiveSection(si); addNewSectionBelow(si)"
-                  ><i :class="icons.add"></i></button>
+                    <button
+                      class="icon-button"
+                      title="Add Section Below"
+                      @click.stop.prevent="setActiveSection(si); addNewSectionBelow(si)"
+                    ><i :class="icons.add"></i></button>
 
-                  <button
-                    class="icon-button"
-                    title="Delete Section"
-                    @click.stop.prevent="setActiveSection(si); confirmDeleteSection(si)"
-                  ><i :class="icons.delete"></i></button>
-
-                  <button
-                    class="icon-button"
-                    :title="section.collapsed ? 'Expand' : 'Collapse'"
-                    @click.stop.prevent="setActiveSection(si); toggleSection(si)"
-                  >
-                    <i :class="section.collapsed ? icons.toggleDown : icons.toggleUp"></i>
-                  </button>
-                </div>
-              </div>
-
-              <div v-if="!section.collapsed" class="section-content">
-                <div
-                  v-for="(field, fi) in section.fields"
-                  :key="fi"
-                  class="form-group"
-                >
-                  <div class="field-header">
-                    <label
-                      v-if="field.type !== 'button' && field.type !== 'checkbox'"
-                      :for="field.name"
+                    <button
+                      class="icon-button"
+                      title="Delete Section"
+                      @click.stop.prevent="setActiveSection(si); confirmDeleteSection(si)"
+                    ><i :class="icons.delete"></i></button>
+                    <span
+                      class="drag-handle drag-handle-right"
+                      draggable="true"
+                      title="Move section"
+                      @click.stop
+                      @dragstart.stop="onSectionDragStart(si, $event)"
+                      @dragend="onDragEnd"
                     >
-                      {{ field.label }}
-                    </label>
-                    <label
-                      v-else-if="field.type === 'checkbox'"
-                      class="checkbox-label"
-                      :for="field.name"
+                      <i :class="icons.move || 'fas fa-grip-vertical'"></i>
+                    </span>
+
+                    <button
+                      class="icon-button"
+                      :title="section.collapsed ? 'Expand' : 'Collapse'"
+                      @click.stop.prevent="setActiveSection(si); toggleSection(si)"
                     >
-                      {{ field.label }}
-                      <FieldCheckbox
-                        :id="field.name"
-                        v-model="field.value"
-                      />
-                    </label>
-
-                    <div class="field-actions">
-                      <button
-                        class="icon-button"
-                        title="Edit Field Label"
-                        @click.stop.prevent="setActiveSection(si); openInputDialog(
-                          'Enter new field label:',
-                          field.label,
-                          val => editField(si, fi, val)
-                        )"
-                      ><i :class="icons.edit"></i></button>
-
-                      <button
-                        class="icon-button"
-                        title="Add Similar Field"
-                        @click.stop.prevent="setActiveSection(si); addSimilarField(si, fi)"
-                      ><i :class="icons.add"></i></button>
-
-                      <button
-                        class="icon-button"
-                        title="Delete Field"
-                        @click.stop.prevent="setActiveSection(si, fi); removeField(si, fi)"
-                      ><i :class="icons.delete"></i></button>
-
-                      <button
-                        class="icon-button"
-                        title="Settings"
-                        @click.stop.prevent="setActiveSection(si); openConstraintsDialog(si, fi)"
-                      ><i :class="icons.cog"></i></button>
-                    </div>
+                      <i :class="section.collapsed ? icons.toggleDown : icons.toggleUp"></i>
+                    </button>
                   </div>
+                </div>
 
-                  <div class="field-box">
+                <div
+                  v-if="!section.collapsed"
+                  class="section-content-wrapper"
+                  @dragover.prevent="onFieldContainerOver(si, $event)"
+                  @drop.prevent="onFieldContainerDrop(si)"
+                >
+                  <transition-group name="reorder" tag="div" class="section-content">
+                    <div
+                      v-for="(field, fi) in section.fields"
+                      :key="getFieldUid(field)"
+                      class="form-group"
+                      :class="getFieldDropClass(si, fi)"
+                      @dragover.stop.prevent="onFieldDragOver(si, fi, $event)"
+                      @drop.stop.prevent="onFieldDrop(si, fi)"
+                    >
+                      <div class="field-header">
+                        <label
+                          v-if="field.type !== 'button' && field.type !== 'checkbox'"
+                          :for="field.name"
+                        >
+                          {{ field.label }}
+                        </label>
+                        <label
+                          v-else-if="field.type === 'checkbox'"
+                          class="checkbox-label"
+                          :for="field.name"
+                        >
+                          {{ field.label }}
+                          <FieldCheckbox
+                            :id="field.name"
+                            v-model="field.value"
+                          />
+                        </label>
+
+                        <div class="field-actions">
+                          <button
+                            class="icon-button"
+                            title="Edit Field Label"
+                            @click.stop.prevent="setActiveSection(si); openInputDialog(
+                              'Enter new field label:',
+                              field.label,
+                              val => editField(si, fi, val)
+                            )"
+                          ><i :class="icons.edit"></i></button>
+
+                          <button
+                            class="icon-button"
+                            title="Add Similar Field"
+                            @click.stop.prevent="setActiveSection(si); addSimilarField(si, fi)"
+                          ><i :class="icons.add"></i></button>
+
+                          <button
+                            class="icon-button"
+                            title="Delete Field"
+                            @click.stop.prevent="setActiveSection(si, fi); removeField(si, fi)"
+                          ><i :class="icons.delete"></i></button>
+
+                          <button
+                            class="icon-button"
+                            title="Settings"
+                            @click.stop.prevent="setActiveSection(si); openConstraintsDialog(si, fi)"
+                          ><i :class="icons.cog"></i></button>
+                          <span
+                            class="drag-handle drag-handle-right"
+                            draggable="true"
+                            title="Move field"
+                            @click.stop
+                            @dragstart.stop="onFieldDragStart(si, fi, $event)"
+                            @dragend="onDragEnd"
+                          >
+                            <i :class="icons.move || 'fas fa-grip-vertical'"></i>
+                          </span>
+                        </div>
+                      </div>
+
+                      <div class="field-box">
                     <!-- TEXT -->
-                    <input
-                      v-if="field.type === 'text'"
-                      type="text"
-                      v-model="field.value"
-                      :placeholder="field.constraints?.placeholder || field.placeholder"
-                    />
+                        <input
+                          v-if="field.type === 'text'"
+                          type="text"
+                          v-model="field.value"
+                          :placeholder="field.constraints?.placeholder || field.placeholder"
+                        />
 
                     <!-- TEXTAREA -->
-                    <textarea
-                      v-else-if="field.type === 'textarea'"
-                      v-model="field.value"
-                      :rows="field.rows || 4"
-                      :placeholder="field.constraints?.placeholder || field.placeholder"
-                    ></textarea>
+                        <textarea
+                          v-else-if="field.type === 'textarea'"
+                          v-model="field.value"
+                          :rows="field.rows || 4"
+                          :placeholder="field.constraints?.placeholder || field.placeholder"
+                        ></textarea>
 
                     <!-- NUMBER -->
-                    <input
-                      v-else-if="field.type === 'number'"
-                      type="number"
-                      v-model.number="field.value"
-                      :min="field.constraints?.min"
-                      :max="field.constraints?.max"
-                      :step="field.constraints?.step"
-                      @input="enforceNumberDigitLimits(si, fi, $event)"
-                      @blur="enforceNumberDigitLimits(si, fi, $event, true)"
-                    />
+                        <input
+                          v-else-if="field.type === 'number'"
+                          type="number"
+                          v-model.number="field.value"
+                          :min="field.constraints?.min"
+                          :max="field.constraints?.max"
+                          :step="field.constraints?.step"
+                          @input="enforceNumberDigitLimits(si, fi, $event)"
+                          @blur="enforceNumberDigitLimits(si, fi, $event, true)"
+                        />
 
                     <!-- DATE -->
-                    <DateFormatPicker
-                      v-else-if="field.type === 'date'"
-                      v-model="field.value"
-                      :format="field.constraints?.dateFormat || 'dd.MM.yyyy'"
-                      :placeholder="field.placeholder || (field.constraints?.dateFormat || 'dd.MM.yyyy')"
-                      :min-date="field.constraints?.minDate || null"
-                      :max-date="field.constraints?.maxDate || null"
-                    />
+                        <DateFormatPicker
+                          v-else-if="field.type === 'date'"
+                          v-model="field.value"
+                          :format="field.constraints?.dateFormat || 'dd.MM.yyyy'"
+                          :placeholder="field.placeholder || (field.constraints?.dateFormat || 'dd.MM.yyyy')"
+                          :min-date="field.constraints?.minDate || null"
+                          :max-date="field.constraints?.maxDate || null"
+                        />
 
                     <!-- TIME -->
-                    <FieldTime
-                      v-else-if="field.type === 'time'"
-                      v-model="field.value"
-                      v-bind="field.constraints"
-                      :hourCycle="field.constraints?.hourCycle || '24'"
-                      :placeholder="field.placeholder || (field.constraints?.hourCycle === '12' ? 'hh:mm a' : 'HH:mm')"
-                    />
+                        <FieldTime
+                          v-else-if="field.type === 'time'"
+                          v-model="field.value"
+                          v-bind="field.constraints"
+                          :hourCycle="field.constraints?.hourCycle || '24'"
+                          :placeholder="field.placeholder || (field.constraints?.hourCycle === '12' ? 'hh:mm a' : 'HH:mm')"
+                        />
 
                     <!-- SELECT -->
-                    <select
-                      v-else-if="field.type === 'select'"
-                      v-model="field.value"
-                    >
-                      <option value="" disabled>Select…</option>
-                      <option v-for="opt in field.options" :key="opt">{{ opt }}</option>
-                    </select>
+                        <select
+                          v-else-if="field.type === 'select'"
+                          v-model="field.value"
+                        >
+                          <option value="" disabled>Select…</option>
+                          <option v-for="opt in field.options" :key="opt">{{ opt }}</option>
+                        </select>
 
                     <!-- RADIO -->
-                    <FieldRadioGroup
-                      v-else-if="field.type === 'radio'"
-                      :name="field.name"
-                      :options="field.options"
-                      v-model="field.value"
-                    />
+                        <FieldRadioGroup
+                          v-else-if="field.type === 'radio'"
+                          :name="field.name"
+                          :options="field.options"
+                          v-model="field.value"
+                        />
 
                     <!-- SLIDER / LINEAR -->
-                    <FieldSlider
-                      v-else-if="field.type === 'slider' && (field.constraints?.mode || 'slider') === 'slider'"
-                      v-model="field.value"
-                      :min="field.constraints?.min ?? 1"
-                      :max="field.constraints?.max ?? 5"
-                      :step="field.constraints?.step ?? 1"
-                      :readonly="!!field.constraints?.readonly"
-                      :percent="!!field.constraints?.percent"
-                      :marks="field.constraints?.marks || []"
-                    />
-                    <FieldLinearScale
-                      v-else-if="field.type === 'slider' && field.constraints?.mode === 'linear'"
-                      v-model="field.value"
-                      :min="field.constraints?.min ?? 1"
-                      :max="field.constraints?.max ?? 5"
-                      :left-label="field.constraints?.leftLabel || ''"
-                      :right-label="field.constraints?.rightLabel || ''"
-                      :readonly="!!field.constraints?.readonly"
-                    />
+                        <FieldSlider
+                          v-else-if="field.type === 'slider' && (field.constraints?.mode || 'slider') === 'slider'"
+                          v-model="field.value"
+                          :min="field.constraints?.min ?? 1"
+                          :max="field.constraints?.max ?? 5"
+                          :step="field.constraints?.step ?? 1"
+                          :readonly="!!field.constraints?.readonly"
+                          :percent="!!field.constraints?.percent"
+                          :marks="field.constraints?.marks || []"
+                        />
+                        <FieldLinearScale
+                          v-else-if="field.type === 'slider' && field.constraints?.mode === 'linear'"
+                          v-model="field.value"
+                          :min="field.constraints?.min ?? 1"
+                          :max="field.constraints?.max ?? 5"
+                          :left-label="field.constraints?.leftLabel || ''"
+                          :right-label="field.constraints?.rightLabel || ''"
+                          :readonly="!!field.constraints?.readonly"
+                        />
 
                     <!-- FILE -->
-                    <FieldFileUpload
-                      v-else-if="field.type === 'file'"
-                      v-model="field.value"
-                      :constraints="field.constraints || {}"
-                      :readonly="!!field.constraints?.readonly"
-                      :required="!!field.constraints?.required"
-                      stage="builder"
-                    />
+                        <FieldFileUpload
+                          v-else-if="field.type === 'file'"
+                          v-model="field.value"
+                          :constraints="field.constraints || {}"
+                          :readonly="!!field.constraints?.readonly"
+                          :required="!!field.constraints?.required"
+                          stage="builder"
+                        />
 
                     <!-- BUTTON -->
-                    <button
-                      v-else-if="field.type === 'button'"
-                      class="form-button"
-                    >{{ field.label }}</button>
+                        <button
+                          v-else-if="field.type === 'button'"
+                          class="form-button"
+                        >{{ field.label }}</button>
 
                     <!-- FALLBACK -->
-                    <input
-                      v-else
-                      type="text"
-                      v-model="field.value"
-                      :placeholder="field.constraints?.placeholder || field.placeholder"
-                    />
+                        <input
+                          v-else
+                          type="text"
+                          v-model="field.value"
+                          :placeholder="field.constraints?.placeholder || field.placeholder"
+                        />
 
-                    <small v-if="field.constraints?.helpText" class="help-text">
-                      {{ field.constraints.helpText }}
-                    </small>
+                        <small v-if="field.constraints?.helpText" class="help-text">
+                          {{ field.constraints.helpText }}
+                        </small>
+                      </div>
+                    </div>
+                  </transition-group>
+
+                  <div
+                    v-if="dragState.kind === 'field'"
+                    class="field-drop-end"
+                    :class="{ 'drop-active': dragState.overSection === si && dragState.overField == null }"
+                    @dragover.prevent="onFieldDropEndOver(si, $event)"
+                    @drop.prevent="onFieldDropEnd(si)"
+                  >
+                    Drop field here (end of section)
                   </div>
                 </div>
               </div>
-            </div>
+            </transition-group>
           </div>
 
           <!-- Protocol Matrix View -->
@@ -637,7 +684,20 @@ export default {
 
       // Limit controls
       requestedLimit: 50,
-      limitStep: 50
+      limitStep: 50,
+
+      dragState: {
+        kind: null,          // "section" | "field" | null
+        fromSection: null,
+        fromField: null,
+        overSection: null,
+        overField: null,
+        position: null       // "before" | "after" | "end" | null
+      },
+
+      uidCounter: 1,
+      sectionUidMap: new WeakMap(),
+      fieldUidMap: new WeakMap()
     };
   },
   computed: {
@@ -725,6 +785,214 @@ export default {
     await this.loadDataModels();
   },
   methods: {
+    /* ---------- Stable keys (no mutation) ---------- */
+    getSectionUid(sectionObj) {
+      if (!sectionObj || typeof sectionObj !== "object") return String(Math.random());
+      if (!this.sectionUidMap.has(sectionObj)) {
+        this.sectionUidMap.set(sectionObj, `sec_${this.uidCounter++}`);
+      }
+      return this.sectionUidMap.get(sectionObj);
+    },
+    getFieldUid(fieldObj) {
+      if (!fieldObj || typeof fieldObj !== "object") return String(Math.random());
+      if (!this.fieldUidMap.has(fieldObj)) {
+        this.fieldUidMap.set(fieldObj, `fld_${this.uidCounter++}`);
+      }
+      return this.fieldUidMap.get(fieldObj);
+    },
+
+    /* ---------- Drag helpers ---------- */
+    onDragEnd() {
+      this.dragState = {
+        kind: null,
+        fromSection: null,
+        fromField: null,
+        overSection: null,
+        overField: null,
+        position: null
+      };
+    },
+
+    getSectionDropClass(si) {
+      if (this.dragState.kind !== "section") return "";
+      if (this.dragState.overSection !== si) return "";
+      return this.dragState.position === "after" ? "drop-after" : "drop-before";
+    },
+    getFieldDropClass(si, fi) {
+      if (this.dragState.kind !== "field") return "";
+      if (this.dragState.overSection !== si) return "";
+      if (this.dragState.overField !== fi) return "";
+      return this.dragState.position === "after" ? "drop-after" : "drop-before";
+    },
+
+    /* ---------- Section drag/drop ---------- */
+    onSectionDragStart(si, evt) {
+      if (this.showMatrix) return;
+      this.dragState.kind = "section";
+      this.dragState.fromSection = si;
+      this.dragState.fromField = null;
+
+      try {
+        evt.dataTransfer.effectAllowed = "move";
+        evt.dataTransfer.setData("text/plain", "section");
+      } catch { /* ignore */ }
+    },
+    onSectionDragOver(targetIndex, evt) {
+      if (this.dragState.kind !== "section") return;
+      const el = evt.currentTarget;
+      if (!el) return;
+      const rect = el.getBoundingClientRect();
+      const after = (evt.clientY - rect.top) > rect.height / 2;
+      this.dragState.overSection = targetIndex;
+      this.dragState.overField = null;
+      this.dragState.position = after ? "after" : "before";
+    },
+    onSectionDrop(targetIndex) {
+      if (this.dragState.kind !== "section") return;
+
+      const sections = this.forms[this.currentFormIndex].sections || [];
+      const from = this.dragState.fromSection;
+      if (!Number.isInteger(from) || from < 0 || from >= sections.length) {
+        return this.onDragEnd();
+      }
+
+      const movingObj = sections[from];
+
+      let to = targetIndex + (this.dragState.position === "after" ? 1 : 0);
+      if (from < to) to -= 1;
+      to = Math.max(0, Math.min(to, sections.length - 1));
+
+      // Even if dropped back on itself, requirement says moved section should be active
+      // so we'll still set active to its current index.
+      if (to !== from) {
+        sections.splice(from, 1);
+        sections.splice(to, 0, movingObj);
+
+        // Move matching assignments slice (critical: no regression)
+        if (Array.isArray(this.assignments) && this.assignments.length) {
+          const a = this.assignments;
+          if (from >= 0 && from < a.length) {
+            const movedA = a.splice(from, 1)[0];
+            a.splice(to, 0, movedA);
+            this.assignments = a;
+            this.$store.commit("setStudyDetails", { ...this.studyDetails, assignments: this.assignments });
+          }
+        }
+      }
+
+      // Requirement: moved section becomes active
+      const newIdx = sections.indexOf(movingObj);
+      this.activeSection = newIdx >= 0 ? newIdx : 0;
+
+      this.$nextTick(() => this.focusSection(this.activeSection));
+      this.onDragEnd();
+    },
+
+    /* ---------- Field drag/drop ---------- */
+    onFieldDragStart(si, fi, evt) {
+      if (this.showMatrix) return;
+      this.dragState.kind = "field";
+      this.dragState.fromSection = si;
+      this.dragState.fromField = fi;
+
+      try {
+        evt.dataTransfer.effectAllowed = "move";
+        evt.dataTransfer.setData("text/plain", "field");
+      } catch { /* ignore */ }
+    },
+    onFieldDragOver(si, fi, evt) {
+      if (this.dragState.kind !== "field") return;
+      const el = evt.currentTarget;
+      if (!el) return;
+      const rect = el.getBoundingClientRect();
+      const after = (evt.clientY - rect.top) > rect.height / 2;
+
+      this.dragState.overSection = si;
+      this.dragState.overField = fi;
+      this.dragState.position = after ? "after" : "before";
+    },
+    onFieldDrop(si, fi) {
+      if (this.dragState.kind !== "field") return;
+
+      const fromS = this.dragState.fromSection;
+      const fromF = this.dragState.fromField;
+      const toS = si;
+
+      const sections = this.forms[this.currentFormIndex].sections || [];
+      const fromSec = sections[fromS];
+      const toSec = sections[toS];
+      if (!fromSec || !toSec) return this.onDragEnd();
+
+      const fromFields = fromSec.fields || [];
+      const toFields = toSec.fields || [];
+
+      if (!Number.isInteger(fromF) || fromF < 0 || fromF >= fromFields.length) {
+        return this.onDragEnd();
+      }
+
+      let insertAt = fi + (this.dragState.position === "after" ? 1 : 0);
+
+      const moved = fromFields.splice(fromF, 1)[0];
+      if (fromS === toS && insertAt > fromF) insertAt -= 1;
+
+      insertAt = Math.max(0, Math.min(insertAt, toFields.length));
+      toFields.splice(insertAt, 0, moved);
+
+      // Requirement: destination section becomes active
+      this.activeSection = toS;
+      this.$nextTick(() => this.focusSection(this.activeSection));
+      this.onDragEnd();
+    },
+
+    onFieldDropEndOver(si) {
+      if (this.dragState.kind !== "field") return;
+      this.dragState.overSection = si;
+      this.dragState.overField = null;
+      this.dragState.position = "end";
+    },
+    onFieldDropEnd(si) {
+      if (this.dragState.kind !== "field") return;
+
+      const fromS = this.dragState.fromSection;
+      const fromF = this.dragState.fromField;
+      const toS = si;
+
+      const sections = this.forms[this.currentFormIndex].sections || [];
+      const fromSec = sections[fromS];
+      const toSec = sections[toS];
+      if (!fromSec || !toSec) return this.onDragEnd();
+
+      const fromFields = fromSec.fields || [];
+      const toFields = toSec.fields || [];
+
+      if (!Number.isInteger(fromF) || fromF < 0 || fromF >= fromFields.length) {
+        return this.onDragEnd();
+      }
+
+      const moved = fromFields.splice(fromF, 1)[0];
+      let insertAt = toFields.length;
+      if (fromS === toS && insertAt > fromF) insertAt -= 1;
+
+      insertAt = Math.max(0, Math.min(insertAt, toFields.length));
+      toFields.splice(insertAt, 0, moved);
+
+      // Requirement: destination section becomes active
+      this.activeSection = toS;
+      this.$nextTick(() => this.focusSection(this.activeSection));
+      this.onDragEnd();
+    },
+
+    onFieldContainerOver(si) {
+      if (this.dragState.kind !== "field") return;
+      this.dragState.overSection = si;
+      this.dragState.overField = null;
+      this.dragState.position = "end";
+    },
+    onFieldContainerDrop(si) {
+      if (this.dragState.kind !== "field") return;
+      this.onFieldDropEnd(si);
+    },
+
     /* ---------- OBI search ---------- */
     resetObiState() {
       this.obiQuery = "";
@@ -1660,6 +1928,10 @@ export default {
   position: relative;
 }
 
+.sections-list { display: block; }
+
+.reorder-move { transition: transform 180ms ease; }
+
 .form-section {
   padding: 15px;
   border-bottom: 1px solid $border-color;
@@ -1680,7 +1952,42 @@ export default {
   margin-bottom: 12px;
 }
 
-/* Vertical stack for fields */
+.field-actions {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+/* Drag handles (right-aligned) */
+.drag-handle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  cursor: grab;
+  user-select: none;
+  color: #374151;
+  background: rgba(0,0,0,0.04);
+}
+.drag-handle:hover { background: rgba(0,0,0,0.08); }
+.drag-handle:active { cursor: grabbing; }
+
+/* Keep it visually aligned with icon buttons */
+.drag-handle-right {
+  margin-left: 2px;
+}
+
+.drop-before { box-shadow: 0 -3px 0 0 rgba($primary-color, 0.55) inset; }
+.drop-after  { box-shadow: 0  3px 0 0 rgba($primary-color, 0.55) inset; }
+
+.section-content-wrapper {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
 .section-content { display:flex; flex-direction:column; gap:14px; }
 .form-group {
   background: #ffffff;
@@ -1690,22 +1997,22 @@ export default {
   box-shadow: 0 1px 2px rgba(0,0,0,0.04);
   transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.05s ease;
 }
-.form-group:hover { border-color: rgba(0,0,0,0.12); box-shadow:0 6px 12px rgba(0,0,0,0.06); }
-.form-group:focus-within { border-color: rgba($primary-color, 0.6); box-shadow: 0 0 0 3px rgba($primary-color, 0.12); }
 
 .field-header { display:flex; justify-content:space-between; align-items:flex-start; gap:8px; margin-bottom:8px; }
 .field-header > label { font-weight: 600; color: #111827; line-height: 1.25; }
 
-.icon-button { border:none; background:transparent; padding:6px; border-radius:8px; cursor:pointer; line-height:0; transition: background 0.15s ease, transform 0.02s ease; }
+.icon-button {
+  border:none;
+  background:transparent;
+  padding:6px;
+  border-radius:8px;
+  cursor:pointer;
+  line-height:0;
+  transition: background 0.15s ease, transform 0.02s ease;
+}
 .icon-button:hover { background: rgba(0,0,0,0.06); }
 .icon-button:active { transform: scale(0.98); }
 .icon-button i { font-size:14px; color:#374151; }
-
-.field-actions { display:flex; gap:6px; }
-.field-box { margin-top:6px; }
-
-.field-header .checkbox-label { display:flex; align-items:center; gap:10px; }
-.field-box .radio-group { display:flex; flex-direction:column; gap:8px; margin-bottom:10px; }
 
 input, textarea, select {
   width: 96%;
@@ -1716,9 +2023,22 @@ input, textarea, select {
   background: #fff;
 }
 
-textarea { resize: vertical; }
-
 .help-text { display:inline-block; margin-top:6px; color:#6b7280; }
+
+.field-drop-end {
+  border: 1px dashed rgba($primary-color, 0.35);
+  border-radius: 10px;
+  padding: 10px;
+  font-size: 12px;
+  color: #6b7280;
+  text-align: center;
+  background: rgba($primary-color, 0.04);
+}
+.field-drop-end.drop-active {
+  border-color: rgba($primary-color, 0.7);
+  background: rgba($primary-color, 0.08);
+  color: #374151;
+}
 
 /* actions footer */
 .form-actions {
