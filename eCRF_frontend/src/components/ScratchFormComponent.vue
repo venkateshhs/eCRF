@@ -1034,12 +1034,12 @@ export default {
     onFieldDrop(si, fi) {
       if (this.dragState.kind !== "field") return;
 
-      const fromS = this.dragState.fromSection;
+      const form_s = this.dragState.fromSection;
       const fromF = this.dragState.fromField;
       const toS = si;
 
       const sections = this.forms[this.currentFormIndex].sections || [];
-      const fromSec = sections[fromS];
+      const fromSec = sections[form_s];
       const toSec = sections[toS];
       if (!fromSec || !toSec) return this.onDragEnd();
 
@@ -1053,7 +1053,7 @@ export default {
       let insertAt = fi + (this.dragState.position === "after" ? 1 : 0);
 
       const moved = fromFields.splice(fromF, 1)[0];
-      if (fromS === toS && insertAt > fromF) insertAt -= 1;
+      if (form_s === toS && insertAt > fromF) insertAt -= 1;
 
       insertAt = Math.max(0, Math.min(insertAt, toFields.length));
       toFields.splice(insertAt, 0, moved);
@@ -1073,12 +1073,12 @@ export default {
     onFieldDropEnd(si) {
       if (this.dragState.kind !== "field") return;
 
-      const fromS = this.dragState.fromSection;
+      const form_s = this.dragState.fromSection;
       const fromF = this.dragState.fromField;
       const toS = si;
 
       const sections = this.forms[this.currentFormIndex].sections || [];
-      const fromSec = sections[fromS];
+      const fromSec = sections[form_s];
       const toSec = sections[toS];
       if (!fromSec || !toSec) return this.onDragEnd();
 
@@ -1091,7 +1091,7 @@ export default {
 
       const moved = fromFields.splice(fromF, 1)[0];
       let insertAt = toFields.length;
-      if (fromS === toS && insertAt > fromF) insertAt -= 1;
+      if (form_s === toS && insertAt > fromF) insertAt -= 1;
 
       insertAt = Math.max(0, Math.min(insertAt, toFields.length));
       toFields.splice(insertAt, 0, moved);
