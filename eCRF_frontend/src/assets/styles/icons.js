@@ -50,6 +50,7 @@ export default {
   check:          "fas fa-check",
   times:          "fas fa-times",
   ellipsis : "fas fa-ellipsis-v",
+  move: "fas fa-grip-vertical"
 
 
 };

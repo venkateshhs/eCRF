@@ -44,7 +44,7 @@
           </div>
 
           <p class="template-instruction">
-            Click a model to pick properties
+            Select a section and properties to add
           </p>
           <div class="tab-results">
             <div
@@ -70,7 +70,7 @@
               </ul>
             </div>
 
-          <!-- Empty state when no matches -->
+            <!-- Empty state when no matches -->
             <div v-if="searchQuery && filteredDataModels.length === 0" class="no-matches">
               No matches found for "<strong>{{ searchQuery }}</strong>".
             </div>
@@ -189,222 +189,271 @@
         <div class="sections-container">
           <!-- Sections View -->
           <div v-if="!showMatrix">
-            <div
-              v-for="(section, si) in currentForm.sections"
-              :key="si"
-              class="form-section"
-              :class="{ active: activeSection === si }"
-              @click="onSectionClick(si)"
-              :ref="'section-' + si"
-            >
-              <div class="section-header">
-                <h3>{{ section.title }}</h3>
-                <div class="field-actions">
-                  <button
-                    class="icon-button"
-                    title="Edit Section Title"
-                    @click.stop.prevent="setActiveSection(si); openInputDialog(
-                      'Enter new section title:',
-                      section.title,
-                      val => editSection(si, val)
-                    )"
-                  ><i :class="icons.edit"></i></button>
-
-                  <button
-                    class="icon-button"
-                    title="Add Section Below"
-                    @click.stop.prevent="setActiveSection(si); addNewSectionBelow(si)"
-                  ><i :class="icons.add"></i></button>
-
-                  <button
-                    class="icon-button"
-                    title="Delete Section"
-                    @click.stop.prevent="setActiveSection(si); confirmDeleteSection(si)"
-                  ><i :class="icons.delete"></i></button>
-
-                  <button
-                    class="icon-button"
-                    :title="section.collapsed ? 'Expand' : 'Collapse'"
-                    @click.stop.prevent="setActiveSection(si); toggleSection(si)"
-                  >
-                    <i :class="section.collapsed ? icons.toggleDown : icons.toggleUp"></i>
-                  </button>
-                </div>
-              </div>
-
-              <div v-if="!section.collapsed" class="section-content">
-                <div
-                  v-for="(field, fi) in section.fields"
-                  :key="fi"
-                  class="form-group"
-                >
-                  <div class="field-header">
-                    <label
-                      v-if="field.type !== 'button' && field.type !== 'checkbox'"
-                      :for="field.name"
-                    >
-                      {{ field.label }}
-                    </label>
-                    <label
-                      v-else-if="field.type === 'checkbox'"
-                      class="checkbox-label"
-                      :for="field.name"
-                    >
-                      {{ field.label }}
-                      <FieldCheckbox
-                        :id="field.name"
-                        v-model="field.value"
-                      />
-                    </label>
-
-                    <div class="field-actions">
-                      <button
-                        class="icon-button"
-                        title="Edit Field Label"
-                        @click.stop.prevent="setActiveSection(si); openInputDialog(
-                          'Enter new field label:',
-                          field.label,
-                          val => editField(si, fi, val)
-                        )"
-                      ><i :class="icons.edit"></i></button>
-
-                      <button
-                        class="icon-button"
-                        title="Add Similar Field"
-                        @click.stop.prevent="setActiveSection(si); addSimilarField(si, fi)"
-                      ><i :class="icons.add"></i></button>
-
-                      <button
-                        class="icon-button"
-                        title="Delete Field"
-                        @click.stop.prevent="setActiveSection(si, fi); removeField(si, fi)"
-                      ><i :class="icons.delete"></i></button>
-
-                      <button
-                        class="icon-button"
-                        title="Settings"
-                        @click.stop.prevent="setActiveSection(si); openConstraintsDialog(si, fi)"
-                      ><i :class="icons.cog"></i></button>
-                    </div>
-                  </div>
-
-                  <div class="field-box">
-                    <!-- TEXT -->
-                    <input
-                      v-if="field.type === 'text'"
-                      type="text"
-                      v-model="field.value"
-                      :placeholder="field.constraints?.placeholder || field.placeholder"
-                    />
-
-                    <!-- TEXTAREA -->
-                    <textarea
-                      v-else-if="field.type === 'textarea'"
-                      v-model="field.value"
-                      :rows="field.rows || 4"
-                      :placeholder="field.constraints?.placeholder || field.placeholder"
-                    ></textarea>
-
-                    <!-- NUMBER -->
-                    <input
-                      v-else-if="field.type === 'number'"
-                      type="number"
-                      v-model.number="field.value"
-                      :min="field.constraints?.min"
-                      :max="field.constraints?.max"
-                      :step="field.constraints?.step"
-                      @input="enforceNumberDigitLimits(si, fi, $event)"
-                      @blur="enforceNumberDigitLimits(si, fi, $event, true)"
-                    />
-
-                    <!-- DATE -->
-                    <DateFormatPicker
-                      v-else-if="field.type === 'date'"
-                      v-model="field.value"
-                      :format="field.constraints?.dateFormat || 'dd.MM.yyyy'"
-                      :placeholder="field.placeholder || (field.constraints?.dateFormat || 'dd.MM.yyyy')"
-                      :min-date="field.constraints?.minDate || null"
-                      :max-date="field.constraints?.maxDate || null"
-                    />
-
-                    <!-- TIME -->
-                    <FieldTime
-                      v-else-if="field.type === 'time'"
-                      v-model="field.value"
-                      v-bind="field.constraints"
-                      :hourCycle="field.constraints?.hourCycle || '24'"
-                      :placeholder="field.placeholder || (field.constraints?.hourCycle === '12' ? 'hh:mm a' : 'HH:mm')"
-                    />
-
-                    <!-- SELECT -->
-                    <select
-                      v-else-if="field.type === 'select'"
-                      v-model="field.value"
-                    >
-                      <option value="" disabled>Select…</option>
-                      <option v-for="opt in field.options" :key="opt">{{ opt }}</option>
-                    </select>
-
-                    <!-- RADIO -->
-                    <FieldRadioGroup
-                      v-else-if="field.type === 'radio'"
-                      :name="field.name"
-                      :options="field.options"
-                      v-model="field.value"
-                    />
-
-                    <!-- SLIDER / LINEAR -->
-                    <FieldSlider
-                      v-else-if="field.type === 'slider' && (field.constraints?.mode || 'slider') === 'slider'"
-                      v-model="field.value"
-                      :min="field.constraints?.min ?? 1"
-                      :max="field.constraints?.max ?? 5"
-                      :step="field.constraints?.step ?? 1"
-                      :readonly="!!field.constraints?.readonly"
-                      :percent="!!field.constraints?.percent"
-                      :marks="field.constraints?.marks || []"
-                    />
-                    <FieldLinearScale
-                      v-else-if="field.type === 'slider' && field.constraints?.mode === 'linear'"
-                      v-model="field.value"
-                      :min="field.constraints?.min ?? 1"
-                      :max="field.constraints?.max ?? 5"
-                      :left-label="field.constraints?.leftLabel || ''"
-                      :right-label="field.constraints?.rightLabel || ''"
-                      :readonly="!!field.constraints?.readonly"
-                    />
-
-                    <!-- FILE -->
-                    <FieldFileUpload
-                      v-else-if="field.type === 'file'"
-                      v-model="field.value"
-                      :constraints="field.constraints || {}"
-                      :readonly="!!field.constraints?.readonly"
-                      :required="!!field.constraints?.required"
-                      stage="builder"
-                    />
-
-                    <!-- BUTTON -->
+            <transition-group name="reorder" tag="div" class="sections-list">
+              <div
+                v-for="(section, si) in currentForm.sections"
+                :key="getSectionUid(section)"
+                class="form-section"
+                :class="[
+                  { active: activeSection === si },
+                  getSectionDropClass(si)
+                ]"
+                @click="onSectionClick(si)"
+                :ref="'section-' + si"
+                @dragover.prevent="onSectionDragOver(si, $event)"
+                @drop.prevent="onSectionDrop(si)"
+              >
+                <div class="section-header">
+                  <h3>{{ section.title }}</h3>
+                  <div class="field-actions">
                     <button
-                      v-else-if="field.type === 'button'"
-                      class="form-button"
-                    >{{ field.label }}</button>
+                      class="icon-button"
+                      title="Edit Section Title"
+                      @click.stop.prevent="setActiveSection(si); openInputDialog(
+                        'Enter new section title:',
+                        section.title,
+                        val => editSection(si, val)
+                      )"
+                    ><i :class="icons.edit"></i></button>
 
-                    <!-- FALLBACK -->
-                    <input
-                      v-else
-                      type="text"
-                      v-model="field.value"
-                      :placeholder="field.constraints?.placeholder || field.placeholder"
-                    />
+                    <button
+                      class="icon-button"
+                      title="Add Section Below"
+                      @click.stop.prevent="setActiveSection(si); addNewSectionBelow(si)"
+                    ><i :class="icons.add"></i></button>
 
-                    <small v-if="field.constraints?.helpText" class="help-text">
-                      {{ field.constraints.helpText }}
-                    </small>
+                    <button
+                      class="icon-button"
+                      title="Delete Section"
+                      @click.stop.prevent="setActiveSection(si); confirmDeleteSection(si)"
+                    ><i :class="icons.delete"></i></button>
+                    <span
+                      class="drag-handle drag-handle-right"
+                      draggable="true"
+                      title="Move section"
+                      @click.stop
+                      @dragstart.stop="onSectionDragStart(si, $event)"
+                      @dragend="onDragEnd"
+                    >
+                      <i :class="icons.move || 'fas fa-grip-vertical'"></i>
+                    </span>
+
+                    <button
+                      class="icon-button"
+                      :title="section.collapsed ? 'Expand' : 'Collapse'"
+                      @click.stop.prevent="setActiveSection(si); toggleSection(si)"
+                    >
+                      <i :class="section.collapsed ? icons.toggleDown : icons.toggleUp"></i>
+                    </button>
+                  </div>
+                </div>
+
+                <div
+                  v-if="!section.collapsed"
+                  class="section-content-wrapper"
+                  @dragover.prevent="onFieldContainerOver(si, $event)"
+                  @drop.prevent="onFieldContainerDrop(si)"
+                >
+                  <transition-group name="reorder" tag="div" class="section-content">
+                    <div
+                      v-for="(field, fi) in section.fields"
+                      :key="getFieldUid(field)"
+                      class="form-group"
+                      :class="getFieldDropClass(si, fi)"
+                      @dragover.stop.prevent="onFieldDragOver(si, fi, $event)"
+                      @drop.stop.prevent="onFieldDrop(si, fi)"
+                    >
+                      <div class="field-header">
+                        <label
+                          v-if="field.type !== 'button' && field.type !== 'checkbox'"
+                          :for="field.name"
+                        >
+                          {{ field.label }}
+                        </label>
+                        <label
+                          v-else-if="field.type === 'checkbox'"
+                          class="checkbox-label"
+                          :for="field.name"
+                        >
+                          {{ field.label }}
+                          <FieldCheckbox
+                            :id="field.name"
+                            v-model="field.value"
+                          />
+                        </label>
+
+                        <div class="field-actions">
+                          <button
+                            class="icon-button"
+                            title="Edit Field Label"
+                            @click.stop.prevent="setActiveSection(si); openInputDialog(
+                              'Enter new field label:',
+                              field.label,
+                              val => editField(si, fi, val)
+                            )"
+                          ><i :class="icons.edit"></i></button>
+
+                          <button
+                            class="icon-button"
+                            title="Add Similar Field"
+                            @click.stop.prevent="setActiveSection(si); addSimilarField(si, fi)"
+                          ><i :class="icons.add"></i></button>
+
+                          <button
+                            class="icon-button"
+                            title="Delete Field"
+                            @click.stop.prevent="setActiveSection(si, fi); removeField(si, fi)"
+                          ><i :class="icons.delete"></i></button>
+
+                          <button
+                            class="icon-button"
+                            title="Settings"
+                            @click.stop.prevent="setActiveSection(si); openConstraintsDialog(si, fi)"
+                          ><i :class="icons.cog"></i></button>
+
+                          <!-- MOVE: extreme right of each field (right of settings) -->
+                          <span
+                            class="drag-handle drag-handle-right"
+                            draggable="true"
+                            title="Move field"
+                            @click.stop
+                            @dragstart.stop="onFieldDragStart(si, fi, $event)"
+                            @dragend="onDragEnd"
+                          >
+                            <i :class="icons.move || 'fas fa-grip-vertical'"></i>
+                          </span>
+                        </div>
+                      </div>
+
+                      <div class="field-box">
+                        <!-- TEXT -->
+                        <input
+                          v-if="field.type === 'text'"
+                          type="text"
+                          v-model="field.value"
+                          :placeholder="field.constraints?.placeholder || field.placeholder"
+                        />
+
+                        <!-- TEXTAREA -->
+                        <textarea
+                          v-else-if="field.type === 'textarea'"
+                          v-model="field.value"
+                          :rows="field.rows || 4"
+                          :placeholder="field.constraints?.placeholder || field.placeholder"
+                        ></textarea>
+
+                        <!-- NUMBER -->
+                        <input
+                          v-else-if="field.type === 'number'"
+                          type="number"
+                          v-model.number="field.value"
+                          :min="field.constraints?.min"
+                          :max="field.constraints?.max"
+                          :step="field.constraints?.step"
+                          @input="enforceNumberDigitLimits(si, fi, $event)"
+                          @blur="enforceNumberDigitLimits(si, fi, $event, true)"
+                        />
+
+                        <!-- DATE -->
+                        <DateFormatPicker
+                          v-else-if="field.type === 'date'"
+                          v-model="field.value"
+                          :format="field.constraints?.dateFormat || 'dd.MM.yyyy'"
+                          :placeholder="field.placeholder || (field.constraints?.dateFormat || 'dd.MM.yyyy')"
+                          :min-date="field.constraints?.minDate || null"
+                          :max-date="field.constraints?.maxDate || null"
+                        />
+
+                        <!-- TIME -->
+                        <FieldTime
+                          v-else-if="field.type === 'time'"
+                          v-model="field.value"
+                          v-bind="field.constraints"
+                          :hourCycle="field.constraints?.hourCycle || '24'"
+                          :placeholder="field.placeholder || (field.constraints?.hourCycle === '12' ? 'hh:mm a' : 'HH:mm')"
+                        />
+
+                        <!-- SELECT -->
+                        <select
+                          v-else-if="field.type === 'select'"
+                          v-model="field.value"
+                        >
+                          <option value="" disabled>Select…</option>
+                          <option v-for="opt in field.options" :key="opt">{{ opt }}</option>
+                        </select>
+
+                        <!-- RADIO -->
+                        <FieldRadioGroup
+                          v-else-if="field.type === 'radio'"
+                          :name="field.name"
+                          :options="field.options"
+                          v-model="field.value"
+                        />
+
+                        <!-- SLIDER / LINEAR -->
+                        <FieldSlider
+                          v-else-if="field.type === 'slider' && (field.constraints?.mode || 'slider') === 'slider'"
+                          v-model="field.value"
+                          :min="field.constraints?.min ?? 1"
+                          :max="field.constraints?.max ?? 5"
+                          :step="field.constraints?.step ?? 1"
+                          :readonly="!!field.constraints?.readonly"
+                          :percent="!!field.constraints?.percent"
+                          :marks="field.constraints?.marks || []"
+                        />
+                        <FieldLinearScale
+                          v-else-if="field.type === 'slider' && field.constraints?.mode === 'linear'"
+                          v-model="field.value"
+                          :min="field.constraints?.min ?? 1"
+                          :max="field.constraints?.max ?? 5"
+                          :left-label="field.constraints?.leftLabel || ''"
+                          :right-label="field.constraints?.rightLabel || ''"
+                          :readonly="!!field.constraints?.readonly"
+                        />
+
+                        <!-- FILE -->
+                        <FieldFileUpload
+                          v-else-if="field.type === 'file'"
+                          v-model="field.value"
+                          :constraints="field.constraints || {}"
+                          :readonly="!!field.constraints?.readonly"
+                          :required="!!field.constraints?.required"
+                          stage="builder"
+                        />
+
+                        <!-- BUTTON -->
+                        <button
+                          v-else-if="field.type === 'button'"
+                          class="form-button"
+                        >{{ field.label }}</button>
+
+                        <!-- FALLBACK -->
+                        <input
+                          v-else
+                          type="text"
+                          v-model="field.value"
+                          :placeholder="field.constraints?.placeholder || field.placeholder"
+                        />
+
+                        <small v-if="field.constraints?.helpText" class="help-text">
+                          {{ field.constraints.helpText }}
+                        </small>
+                      </div>
+                    </div>
+                  </transition-group>
+
+                  <div
+                    v-if="dragState.kind === 'field'"
+                    class="field-drop-end"
+                    :class="{ 'drop-active': dragState.overSection === si && dragState.overField == null }"
+                    @dragover.prevent="onFieldDropEndOver(si, $event)"
+                    @drop.prevent="onFieldDropEnd(si)"
+                  >
+                    Drop field here (end of section)
                   </div>
                 </div>
               </div>
-            </div>
+            </transition-group>
           </div>
 
           <!-- Protocol Matrix View -->
@@ -428,21 +477,39 @@
           <button @click.prevent="confirmClearForm" class="btn-option">
             Clear All
           </button>
-          <button @click.prevent="saveForm" class="btn-primary">
-            Save Template
-          </button>
-          <button @click.prevent="downloadFormData" class="btn-option">
-            Download Template
-          </button>
-          <button @click.prevent="openUploadDialog" class="btn-option">
-            Upload Template
-          </button>
+
           <button
             @click.prevent="handleProtocolClick"
             class="btn-option protocol-btn"
           >
             Create Visit Schedule
           </button>
+          <!-- Additional options (Download/Upload) -->
+          <div class="additional-options" @click.stop>
+            <button
+              ref="additionalOptionsBtn"
+              class="btn-ellipsis"
+              title="Additional options"
+              @click.prevent="toggleAdditionalOptions"
+            >
+              <i :class="icons.ellipsisV || 'fas fa-ellipsis-v'"></i>
+            </button>
+
+            <div
+              v-if="showAdditionalOptions"
+              ref="additionalOptionsMenu"
+              class="options-menu"
+              role="menu"
+              aria-label="Additional options"
+            >
+              <button class="options-item" role="menuitem" @click.prevent="onDownloadTemplate">
+                Download Template
+              </button>
+              <button class="options-item" role="menuitem" @click.prevent="onUploadTemplate">
+                Upload Template
+              </button>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -471,9 +538,51 @@
               :id="'prop-check-' + i"
               v-model="selectedProps[i]"
               class="prop-checkbox"
+              :disabled="modelAddToExisting && isPropAlreadyInTargetSection(prop)"
+              :title="(modelAddToExisting && isPropAlreadyInTargetSection(prop)) ? 'Already added in selected section' : ''"
             />
           </div>
         </div>
+
+        <!-- selection (dropdown/hint) ABOVE checkbox, and block sits ABOVE takeover buttons -->
+        <div class="model-target">
+          <div class="model-target-selection">
+            <div
+              v-if="modelAddToExisting && currentForm.sections.length"
+              class="model-target-select"
+            >
+              <div class="model-target-label">Add selected fields to:</div>
+              <select v-model.number="modelTargetSectionIndex">
+                <option
+                  v-for="(s, idx) in currentForm.sections"
+                  :key="getSectionUid(s)"
+                  :value="idx"
+                >
+                  {{ idx === activeSection ? `[Current] ${s.title}` : s.title }}
+                </option>
+              </select>
+            </div>
+
+            <div v-else class="model-target-hint">
+              <span v-if="currentForm.sections.length">
+                Add as a new section (below: <strong>{{ currentForm.sections[activeSection]?.title }}</strong>)
+              </span>
+              <span v-else>
+                Add as a new section
+              </span>
+            </div>
+          </div>
+
+          <label class="model-target-check">
+            <input
+              type="checkbox"
+              v-model="modelAddToExisting"
+              :disabled="!currentForm.sections.length"
+            />
+            Add to existing section
+          </label>
+        </div>
+
         <div class="modal-actions">
           <button @click="takeoverModel" class="btn-primary">Takeover</button>
           <button @click="showModelDialog=false" class="btn-option">
@@ -637,7 +746,26 @@ export default {
 
       // Limit controls
       requestedLimit: 50,
-      limitStep: 50
+      limitStep: 50,
+
+      // Template takeover target controls
+      modelAddToExisting: false,
+      modelTargetSectionIndex: 0,
+
+      dragState: {
+        kind: null,          // "section" | "field" | null
+        fromSection: null,
+        fromField: null,
+        overSection: null,
+        overField: null,
+        position: null       // "before" | "after" | "end" | null
+      },
+
+      uidCounter: 1,
+      sectionUidMap: new WeakMap(),
+      fieldUidMap: new WeakMap(),
+
+      showAdditionalOptions: false,
     };
   },
   computed: {
@@ -684,9 +812,18 @@ export default {
       if (newVal !== 'obi') {
         this.resetObiState();
       }
+    },
+
+    // when adding to existing section, pre-check/disable already-added props
+    modelAddToExisting() {
+      this.$nextTick(() => this.syncSelectedPropsForExistingSection());
+    },
+    modelTargetSectionIndex() {
+      this.$nextTick(() => this.syncSelectedPropsForExistingSection());
     }
   },
   async mounted() {
+    document.addEventListener("click", this.onGlobalClick);
     if (this.studyDetails.study_metadata?.id) {
       const stored = localStorage.getItem("scratchForms");
       if (stored) {
@@ -724,7 +861,258 @@ export default {
 
     await this.loadDataModels();
   },
+   beforeUnmount() {
+      document.removeEventListener("click", this.onGlobalClick);
+    },
   methods: {
+    /* ---------- Stable keys (no mutation) ---------- */
+    getSectionUid(sectionObj) {
+      if (!sectionObj || typeof sectionObj !== "object") return String(Math.random());
+      if (!this.sectionUidMap.has(sectionObj)) {
+        this.sectionUidMap.set(sectionObj, `sec_${this.uidCounter++}`);
+      }
+      return this.sectionUidMap.get(sectionObj);
+    },
+    getFieldUid(fieldObj) {
+      if (!fieldObj || typeof fieldObj !== "object") return String(Math.random());
+      if (!this.fieldUidMap.has(fieldObj)) {
+        this.fieldUidMap.set(fieldObj, `fld_${this.uidCounter++}`);
+      }
+      return this.fieldUidMap.get(fieldObj);
+    },
+
+    /* ---------- Model dialog helpers (prevent duplicates) ---------- */
+    clampSectionIndex(i) {
+      const n = this.currentForm.sections.length;
+      if (!n) return 0;
+      const x = Number.isInteger(i) ? i : 0;
+      return Math.max(0, Math.min(x, n - 1));
+    },
+    getTargetSectionForModelDialog() {
+      const sections = this.currentForm.sections || [];
+      if (!sections.length) return null;
+      const idx = this.clampSectionIndex(this.modelTargetSectionIndex);
+      return sections[idx] || null;
+    },
+    isPropAlreadyInTargetSection(prop) {
+      if (!this.modelAddToExisting) return false;
+      const sec = this.getTargetSectionForModelDialog();
+      if (!sec) return false;
+      const name = String(prop?.name || "");
+      if (!name) return false;
+      return Array.isArray(sec.fields) && sec.fields.some(f => String(f?.name || "") === name);
+    },
+    syncSelectedPropsForExistingSection() {
+      // Only apply pre-checking when user is adding to an existing section.
+      if (!this.showModelDialog) return;
+      if (!this.modelAddToExisting) return;
+      if (!this.currentModel || !Array.isArray(this.currentModel.fields)) return;
+
+      const sec = this.getTargetSectionForModelDialog();
+      if (!sec || !Array.isArray(sec.fields)) return;
+
+      const existing = new Set(sec.fields.map(f => String(f?.name || "")));
+      this.currentModel.fields.forEach((p, i) => {
+        const nm = String(p?.name || "");
+        if (nm && existing.has(nm)) {
+          // Check it (informational) and disable via template condition.
+          this.$set(this.selectedProps, i, true);
+        }
+      });
+    },
+
+    /* ---------- Drag helpers ---------- */
+    onDragEnd() {
+      this.dragState = {
+        kind: null,
+        fromSection: null,
+        fromField: null,
+        overSection: null,
+        overField: null,
+        position: null
+      };
+    },
+
+    getSectionDropClass(si) {
+      if (this.dragState.kind !== "section") return "";
+      if (this.dragState.overSection !== si) return "";
+      return this.dragState.position === "after" ? "drop-after" : "drop-before";
+    },
+    getFieldDropClass(si, fi) {
+      if (this.dragState.kind !== "field") return "";
+      if (this.dragState.overSection !== si) return "";
+      if (this.dragState.overField !== fi) return "";
+      return this.dragState.position === "after" ? "drop-after" : "drop-before";
+    },
+
+    /* ---------- Section drag/drop ---------- */
+    onSectionDragStart(si, evt) {
+      if (this.showMatrix) return;
+      this.dragState.kind = "section";
+      this.dragState.fromSection = si;
+      this.dragState.fromField = null;
+
+      try {
+        evt.dataTransfer.effectAllowed = "move";
+        evt.dataTransfer.setData("text/plain", "section");
+      } catch { /* ignore */ }
+    },
+    onSectionDragOver(targetIndex, evt) {
+      if (this.dragState.kind !== "section") return;
+      const el = evt.currentTarget;
+      if (!el) return;
+      const rect = el.getBoundingClientRect();
+      const after = (evt.clientY - rect.top) > rect.height / 2;
+      this.dragState.overSection = targetIndex;
+      this.dragState.overField = null;
+      this.dragState.position = after ? "after" : "before";
+    },
+    onSectionDrop(targetIndex) {
+      if (this.dragState.kind !== "section") return;
+
+      const sections = this.forms[this.currentFormIndex].sections || [];
+      const from = this.dragState.fromSection;
+      if (!Number.isInteger(from) || from < 0 || from >= sections.length) {
+        return this.onDragEnd();
+      }
+
+      const movingObj = sections[from];
+
+      let to = targetIndex + (this.dragState.position === "after" ? 1 : 0);
+      if (from < to) to -= 1;
+      to = Math.max(0, Math.min(to, sections.length - 1));
+
+      // Even if dropped back on itself, requirement says moved section should be active
+      // so we'll still set active to its current index.
+      if (to !== from) {
+        sections.splice(from, 1);
+        sections.splice(to, 0, movingObj);
+
+        // Move matching assignments slice (critical: no regression)
+        if (Array.isArray(this.assignments) && this.assignments.length) {
+          const a = this.assignments;
+          if (from >= 0 && from < a.length) {
+            const movedA = a.splice(from, 1)[0];
+            a.splice(to, 0, movedA);
+            this.assignments = a;
+            this.$store.commit("setStudyDetails", { ...this.studyDetails, assignments: this.assignments });
+          }
+        }
+      }
+
+      // Requirement: moved section becomes active
+      const newIdx = sections.indexOf(movingObj);
+      this.activeSection = newIdx >= 0 ? newIdx : 0;
+
+      this.$nextTick(() => this.focusSection(this.activeSection));
+      this.onDragEnd();
+    },
+
+    /* ---------- Field drag/drop ---------- */
+    onFieldDragStart(si, fi, evt) {
+      if (this.showMatrix) return;
+      this.dragState.kind = "field";
+      this.dragState.fromSection = si;
+      this.dragState.fromField = fi;
+
+      try {
+        evt.dataTransfer.effectAllowed = "move";
+        evt.dataTransfer.setData("text/plain", "field");
+      } catch { /* ignore */ }
+    },
+    onFieldDragOver(si, fi, evt) {
+      if (this.dragState.kind !== "field") return;
+      const el = evt.currentTarget;
+      if (!el) return;
+      const rect = el.getBoundingClientRect();
+      const after = (evt.clientY - rect.top) > rect.height / 2;
+
+      this.dragState.overSection = si;
+      this.dragState.overField = fi;
+      this.dragState.position = after ? "after" : "before";
+    },
+    onFieldDrop(si, fi) {
+      if (this.dragState.kind !== "field") return;
+
+      const form_s = this.dragState.fromSection;
+      const fromF = this.dragState.fromField;
+      const toS = si;
+
+      const sections = this.forms[this.currentFormIndex].sections || [];
+      const fromSec = sections[form_s];
+      const toSec = sections[toS];
+      if (!fromSec || !toSec) return this.onDragEnd();
+
+      const fromFields = fromSec.fields || [];
+      const toFields = toSec.fields || [];
+
+      if (!Number.isInteger(fromF) || fromF < 0 || fromF >= fromFields.length) {
+        return this.onDragEnd();
+      }
+
+      let insertAt = fi + (this.dragState.position === "after" ? 1 : 0);
+
+      const moved = fromFields.splice(fromF, 1)[0];
+      if (form_s === toS && insertAt > fromF) insertAt -= 1;
+
+      insertAt = Math.max(0, Math.min(insertAt, toFields.length));
+      toFields.splice(insertAt, 0, moved);
+
+      // Requirement: destination section becomes active
+      this.activeSection = toS;
+      this.$nextTick(() => this.focusSection(this.activeSection));
+      this.onDragEnd();
+    },
+
+    onFieldDropEndOver(si) {
+      if (this.dragState.kind !== "field") return;
+      this.dragState.overSection = si;
+      this.dragState.overField = null;
+      this.dragState.position = "end";
+    },
+    onFieldDropEnd(si) {
+      if (this.dragState.kind !== "field") return;
+
+      const form_s = this.dragState.fromSection;
+      const fromF = this.dragState.fromField;
+      const toS = si;
+
+      const sections = this.forms[this.currentFormIndex].sections || [];
+      const fromSec = sections[form_s];
+      const toSec = sections[toS];
+      if (!fromSec || !toSec) return this.onDragEnd();
+
+      const fromFields = fromSec.fields || [];
+      const toFields = toSec.fields || [];
+
+      if (!Number.isInteger(fromF) || fromF < 0 || fromF >= fromFields.length) {
+        return this.onDragEnd();
+      }
+
+      const moved = fromFields.splice(fromF, 1)[0];
+      let insertAt = toFields.length;
+      if (form_s === toS && insertAt > fromF) insertAt -= 1;
+
+      insertAt = Math.max(0, Math.min(insertAt, toFields.length));
+      toFields.splice(insertAt, 0, moved);
+
+      // Requirement: destination section becomes active
+      this.activeSection = toS;
+      this.$nextTick(() => this.focusSection(this.activeSection));
+      this.onDragEnd();
+    },
+
+    onFieldContainerOver(si) {
+      if (this.dragState.kind !== "field") return;
+      this.dragState.overSection = si;
+      this.dragState.overField = null;
+      this.dragState.position = "end";
+    },
+    onFieldContainerDrop(si) {
+      if (this.dragState.kind !== "field") return;
+      this.onFieldDropEnd(si);
+    },
+
     /* ---------- OBI search ---------- */
     resetObiState() {
       this.obiQuery = "";
@@ -960,12 +1348,60 @@ export default {
       const full = this.dataModels.find(d => d.title === model.title) || model;
       this.currentModel = full;
       this.selectedProps = full.fields.map(() => false);
+
+      // Default: add as new section (below current active section)
+      this.modelAddToExisting = false;
+      this.modelTargetSectionIndex = this.clampSectionIndex(this.activeSection);
+
       this.showModelDialog = true;
+
+      // If user later toggles to existing, watcher will pre-check already-added props.
     },
+
     takeoverModel() {
       const chosen = this.currentModel.fields
         .filter((_, i) => this.selectedProps[i])
         .map(f => ({ ...f, description: f.description || "", constraints: f.constraints || {} }));
+
+      // Add to existing section: NO DUPLICATES (skip already-present field.name)
+      if (this.modelAddToExisting && this.currentForm.sections.length) {
+        const sections = this.forms[this.currentFormIndex].sections;
+        const idx = this.clampSectionIndex(this.modelTargetSectionIndex);
+        const targetSec = sections[idx];
+        if (!targetSec) {
+          this.showModelDialog = false;
+          return;
+        }
+
+        if (targetSec.collapsed) targetSec.collapsed = false;
+
+        const existingNames = new Set((targetSec.fields || []).map(ff => String(ff?.name || "")));
+
+        let added = 0;
+        chosen.forEach(f => {
+          const nm = String(f?.name || "");
+          // Skip duplicates instead of renaming (prevents “selected twice” duplicates)
+          if (nm && existingNames.has(nm)) return;
+
+          existingNames.add(nm);
+          targetSec.fields.push({ ...f });
+          added += 1;
+        });
+
+        // Requirement: destination section becomes active
+        this.activeSection = idx;
+        this.$nextTick(() => this.focusSection(idx));
+
+        // If nothing new was added, still close; optional info dialog:
+        if (added === 0) {
+          this.openGenericDialog(`All selected field(s) already exist in "${targetSec.title}".`);
+        }
+
+        this.showModelDialog = false;
+        return;
+      }
+
+      // Add as a NEW section (existing behavior)
       const insertAt = Math.min(this.activeSection + 1, this.currentForm.sections.length);
       const sec = { title: this.currentModel.title, fields: chosen, collapsed: false, source: "template" };
       this.forms[this.currentFormIndex].sections.splice(insertAt, 0, sec);
@@ -1065,7 +1501,7 @@ export default {
         base.value = null;
         base.icon = base.icon || icons.paperclip;
         const provided = base.constraints || {};
-          // default modality from label (or fallback to name)
+        // default modality from label (or fallback to name)
         const fallbackMod = (String(base.label || '').trim()) || base.name;
 
         base.constraints = {
@@ -1079,11 +1515,11 @@ export default {
             ? Number(provided.maxSizeMB)
             : undefined,
           storagePreference: (provided.storagePreference === "url") ? "url" : "local",
-            //  Default to label/name when user hasn’t picked any modality
+          //  Default to label/name when user hasn’t picked any modality
           modalities: (Array.isArray(provided.modalities) && provided.modalities.length)
             ? provided.modalities
             : [fallbackMod],
-            // default true when not specified
+          // default true when not specified
           allowMultipleFiles: (provided.allowMultipleFiles === undefined) ? true : !!provided.allowMultipleFiles
         };
       }
@@ -1270,7 +1706,7 @@ export default {
           });
           f.constraints = { ...norm, ...extra };
         } else {
-        f.constraints = { ...norm };
+          f.constraints = { ...norm };
         }
 
         if (
@@ -1328,8 +1764,6 @@ export default {
     },
 
     cancelConstraintsDialog() { this.showConstraintsDialog = false; },
-
-    saveForm() { this.openGenericDialog("Saved!"); },
 
     downloadFormData() {
       const payload = {
@@ -1410,7 +1844,36 @@ export default {
       if (['integer','decimal','number'].includes(range)) return 'number'
       if (ui.widget === 'file' || dt === 'file' || range === 'file') return 'file'
       return 'text'
-    }
+    },
+    toggleAdditionalOptions() {
+      this.showAdditionalOptions = !this.showAdditionalOptions;
+    },
+    closeAdditionalOptions() {
+      this.showAdditionalOptions = false;
+    },
+    onGlobalClick(e) {
+      if (!this.showAdditionalOptions) return;
+
+      const btn = this.$refs.additionalOptionsBtn;
+      const menu = this.$refs.additionalOptionsMenu;
+
+      const btnEl = Array.isArray(btn) ? btn[0] : btn;
+      const menuEl = Array.isArray(menu) ? menu[0] : menu;
+
+      if (btnEl && btnEl.contains(e.target)) return;
+      if (menuEl && menuEl.contains(e.target)) return;
+
+      this.showAdditionalOptions = false;
+    },
+
+    onDownloadTemplate() {
+      this.closeAdditionalOptions();
+      this.downloadFormData();
+    },
+    onUploadTemplate() {
+      this.closeAdditionalOptions();
+      this.openUploadDialog();
+    },
   }
 };
 </script>
@@ -1660,6 +2123,10 @@ export default {
   position: relative;
 }
 
+.sections-list { display: block; }
+
+.reorder-move { transition: transform 180ms ease; }
+
 .form-section {
   padding: 15px;
   border-bottom: 1px solid $border-color;
@@ -1680,7 +2147,42 @@ export default {
   margin-bottom: 12px;
 }
 
-/* Vertical stack for fields */
+.field-actions {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+/* Drag handles (right-aligned) */
+.drag-handle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  cursor: grab;
+  user-select: none;
+  color: #374151;
+  background: rgba(0,0,0,0.04);
+}
+.drag-handle:hover { background: rgba(0,0,0,0.08); }
+.drag-handle:active { cursor: grabbing; }
+
+/* Keep it visually aligned with icon buttons */
+.drag-handle-right {
+  margin-left: 2px;
+}
+
+.drop-before { box-shadow: 0 -3px 0 0 rgba($primary-color, 0.55) inset; }
+.drop-after  { box-shadow: 0  3px 0 0 rgba($primary-color, 0.55) inset; }
+
+.section-content-wrapper {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
 .section-content { display:flex; flex-direction:column; gap:14px; }
 .form-group {
   background: #ffffff;
@@ -1690,22 +2192,22 @@ export default {
   box-shadow: 0 1px 2px rgba(0,0,0,0.04);
   transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.05s ease;
 }
-.form-group:hover { border-color: rgba(0,0,0,0.12); box-shadow:0 6px 12px rgba(0,0,0,0.06); }
-.form-group:focus-within { border-color: rgba($primary-color, 0.6); box-shadow: 0 0 0 3px rgba($primary-color, 0.12); }
 
 .field-header { display:flex; justify-content:space-between; align-items:flex-start; gap:8px; margin-bottom:8px; }
 .field-header > label { font-weight: 600; color: #111827; line-height: 1.25; }
 
-.icon-button { border:none; background:transparent; padding:6px; border-radius:8px; cursor:pointer; line-height:0; transition: background 0.15s ease, transform 0.02s ease; }
+.icon-button {
+  border:none;
+  background:transparent;
+  padding:6px;
+  border-radius:8px;
+  cursor:pointer;
+  line-height:0;
+  transition: background 0.15s ease, transform 0.02s ease;
+}
 .icon-button:hover { background: rgba(0,0,0,0.06); }
 .icon-button:active { transform: scale(0.98); }
 .icon-button i { font-size:14px; color:#374151; }
-
-.field-actions { display:flex; gap:6px; }
-.field-box { margin-top:6px; }
-
-.field-header .checkbox-label { display:flex; align-items:center; gap:10px; }
-.field-box .radio-group { display:flex; flex-direction:column; gap:8px; margin-bottom:10px; }
 
 input, textarea, select {
   width: 96%;
@@ -1716,9 +2218,22 @@ input, textarea, select {
   background: #fff;
 }
 
-textarea { resize: vertical; }
-
 .help-text { display:inline-block; margin-top:6px; color:#6b7280; }
+
+.field-drop-end {
+  border: 1px dashed rgba($primary-color, 0.35);
+  border-radius: 10px;
+  padding: 10px;
+  font-size: 12px;
+  color: #6b7280;
+  text-align: center;
+  background: rgba($primary-color, 0.04);
+}
+.field-drop-end.drop-active {
+  border-color: rgba($primary-color, 0.7);
+  background: rgba($primary-color, 0.08);
+  color: #374151;
+}
 
 /* actions footer */
 .form-actions {
@@ -1732,7 +2247,53 @@ textarea { resize: vertical; }
   gap: 15px;
   z-index: 10;
 }
+.additional-options {
+  position: relative;
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+}
 
+.btn-ellipsis {
+  background: $secondary-color;
+  border: 1px solid $border-color;
+  border-radius: $button-border-radius;
+  cursor: pointer;
+  padding: $button-padding;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+}
+
+.options-menu {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 8px);
+  min-width: 200px;
+  background: white;
+  border: 1px solid $border-color;
+  border-radius: 10px;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.12);
+  padding: 6px;
+  z-index: 50;
+}
+
+.options-item {
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: none;
+  border-radius: 8px;
+  padding: 10px 12px;
+  cursor: pointer;
+  font-size: 14px;
+  color: $text-color;
+}
+
+.options-item:hover {
+  background: rgba(0, 0, 0, 0.06);
+}
 .btn-option {
   background: $secondary-color;
   padding: $button-padding;
@@ -1818,14 +2379,59 @@ textarea { resize: vertical; }
   border: none;       /* remove text-input border */
   border-radius: 0;
 }
+.model-prop-list .prop-cell { align-items: center; }
+.model-prop-list .prop-info { text-align: left; }
 
-.model-prop-list .prop-cell {
+/* --- Model dialog target block: tighten spacing + fix checkbox sizing --- */
+.model-target {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid #eef0f3;
+
+  display: flex;
+  flex-direction: column;
+  gap: 6px;            /* was too large → made checkbox look "floating" */
+}
+
+.model-target-selection {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.model-target-hint {
+  margin: 0;
+  padding: 0;
+}
+
+/* Keep the checkbox directly below the hint/dropdown and on one line */
+.model-target-check {
+  display: flex;
   align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+
+  margin: 0;          /* remove any inherited spacing */
+  padding: 0;
+
+  white-space: nowrap;        /* "Add to existing section" single line */
+  overflow: hidden;
+  text-overflow: ellipsis;    /* prevent wrap in narrow modal */
+  line-height: 1.1;
 }
 
-.model-prop-list .prop-info {
-  text-align: left;
-}
+/* Override global input styling that makes checkboxes huge/fuzzy */
+.model-target-check input[type="checkbox"] {
+  width: auto !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  border: none !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
 
+  /* optional: nicer alignment */
+  transform: translateY(1px);
+}
 
 </style>
