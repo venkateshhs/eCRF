@@ -87,15 +87,6 @@
               <span class="action-card-desc">Ingest participant data from CSV/Excel</span>
             </button>
 
-            <!-- NEW: Import Study Template (template only, no data) -->
-            <button
-              v-if="isAdmin || isPI"
-              class="action-card"
-              @click="navigate('/dashboard/import-study-template')"
-            >
-              <span class="action-card-title">Import Study Template</span>
-              <span class="action-card-desc">Template only (no data). Use JSON exported from another device.</span>
-            </button>
           </div>
 
           <!-- STYLE 2: Wide Buttons -->
