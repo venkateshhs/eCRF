@@ -1,6 +1,6 @@
 <template>
   <div>
-    <h2>Step 5: Define Visits</h2>
+
 
     <!-- Number of Visits -->
     <BaseNumberField

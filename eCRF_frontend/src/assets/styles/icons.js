@@ -50,7 +50,11 @@ export default {
   check:          "fas fa-check",
   times:          "fas fa-times",
   ellipsis : "fas fa-ellipsis-v",
-  move: "fas fa-grip-vertical"
+  move: "fas fa-grip-vertical",
+  chevronLeft: "fas fa-angle-double-left",
+  chevronRight: "fas fa-angle-double-right",
+  expand: "fas fa-expand",
+  compress: "fas fa-compress"
 
 
 };
