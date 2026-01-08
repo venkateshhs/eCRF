@@ -396,7 +396,7 @@ export default {
     },
     addData(study) { this.$router.push({ name: "StudyDetail", params: { id: study.id } }); },
     viewStudy(study) { this.$router.push({ name: "StudyView", params: { id: study.id } }); },
-    navigate(to) { this.activeSection = ""; this.$router.push(to); },
+    navigate(to) { this.$router.push(to); },
     logout() {
       this.$store.commit("setUser", null);
       this.$store.commit("setToken", null);
@@ -519,7 +519,7 @@ export default {
 /* Primary Actions — Style 1: Cards */
 .primary-actions-cards {
   display: grid;
-  grid-template-columns: repeat(2, minmax(260px, 360px));
+  grid-template-columns: minmax(260px, 360px);
   justify-content: center; /* center the grid */
   gap: 18px;
   margin-top: 20px;
