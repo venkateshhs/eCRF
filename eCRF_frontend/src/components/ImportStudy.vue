@@ -1,10 +1,5 @@
 <template>
   <div class="import-study">
-    <h1>Import Study</h1>
-    <p class="sub">
-      Upload a CSV or Excel file and map columns to create a study and import entries (template first, then data).
-    </p>
-
     <!-- STEP 1: Upload -->
     <section class="card">
       <h2>1) Upload file</h2>

@@ -67,12 +67,6 @@ const routes = [
   component: () => import("@/components/StudyDataDashboard.vue"),
   meta: { requiresAuth: true }
 },
-{
-  path: '/dashboard/import-study',
-  name: 'ImportStudy',
-  component: () => import('@/components/ImportStudy.vue'),
-  meta: { requiresAuth: true }
-},
 { path: '/dashboard/export-study/:id', name: 'ExportStudy', component: () => import('@/components/ExportStudy.vue') },
 {
   path: '/dashboard/merge-study/:id',
