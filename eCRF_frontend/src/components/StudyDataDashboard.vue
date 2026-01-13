@@ -1,51 +1,61 @@
 /* eslint-disable */
 <template>
-  <div class="study-dashboard-container" v-if="study">
-    <!-- header controls -->
+  <div class="study-dashboard-container" :class="{ embedded, fullscreen }" v-if="study">
+    <!-- header controls (NO back button, NO study name header) -->
     <div class="dashboard-header-controls">
-      <button class="btn-minimal" @click="goBack">
-        Back
-      </button>
-      <h2 class="dashboard-title">{{ study.metadata.study_name }}</h2>
-
-      <div class="version-dropdown">
-        <label for="version-select">Version:</label>
-        <select id="version-select" v-model.number="selectedVersion">
-          <option v-for="v in studyVersions" :key="'ver-'+v.version" :value="v.version">
-            {{ v.version }}
-          </option>
-        </select>
-      </div>
-
-      <div class="legend-dropdown">
-        <button class="btn-minimal icon-only" @click="showLegend = !showLegend" title="Table Legend">
-          <i :class="icons.info"></i>
-        </button>
-        <div v-if="showLegend" class="legend-content" @click.stop>
-          <p>
-            <span class="legend-swatch swatch-gray"></span>
-            <strong>Gray cell:</strong> No section assigned for this subject’s group at this visit.
-          </p>
-          <p>
-            <span class="legend-swatch swatch-none"></span>
-            <strong>No color:</strong> Section assigned but no data has been entered.
-          </p>
-          <p>
-            <span class="legend-swatch swatch-red"></span>
-            <strong>Red cell:</strong> Required field was <em>skipped</em> when saving.
-          </p>
-          <p>Data is displayed for each subject under the visit and section assigned to their group.</p>
+      <div class="left-controls">
+        <div class="version-dropdown">
+          <label for="version-select">Version:</label>
+          <select id="version-select" v-model.number="selectedVersion">
+            <option v-for="v in studyVersions" :key="'ver-'+v.version" :value="v.version">
+              {{ v.version }}
+            </option>
+          </select>
         </div>
       </div>
 
-      <div class="export-dropdown">
-        <button class="btn-minimal" @click.stop="toggleExportMenu">
-          Export <i :class="icons.export"></i>
+      <div class="right-controls">
+        <!-- Fit-to-screen -->
+        <button
+          class="btn-minimal icon-only"
+          type="button"
+          @click="$emit('toggle-fullscreen')"
+          :title="fullscreen ? 'Exit fit to screen' : 'Fit to screen'"
+          aria-label="Fit to screen"
+        >
+          <i :class="fullscreen ? icons.compress : icons.expand"></i>
         </button>
-        <div v-if="showExportMenu" class="export-menu" @click.stop>
-          <button @click="exportCSV">Download CSV</button>
-          <button @click="exportExcel">Download Excel</button>
-          <button @click="exportStudyZip">Download Study (ZIP)</button>
+
+        <div class="legend-dropdown">
+          <button class="btn-minimal icon-only" @click="showLegend = !showLegend" title="Table Legend">
+            <i :class="icons.info"></i>
+          </button>
+          <div v-if="showLegend" class="legend-content" @click.stop>
+            <p>
+              <span class="legend-swatch swatch-gray"></span>
+              <strong>Gray cell:</strong> No section assigned for this subject’s group at this visit.
+            </p>
+            <p>
+              <span class="legend-swatch swatch-none"></span>
+              <strong>No color:</strong> Section assigned but no data has been entered.
+            </p>
+            <p>
+              <span class="legend-swatch swatch-red"></span>
+              <strong>Red cell:</strong> Required field was <em>skipped</em> when saving.
+            </p>
+            <p>Data is displayed for each subject under the visit and section assigned to their group.</p>
+          </div>
+        </div>
+
+        <div class="export-dropdown">
+          <button class="btn-minimal" @click.stop="toggleExportMenu">
+            Export <i :class="icons.export"></i>
+          </button>
+          <div v-if="showExportMenu" class="export-menu" @click.stop>
+            <button @click="exportCSV">Download CSV</button>
+            <button @click="exportExcel">Download Excel</button>
+            <button @click="exportStudyZip">Download Study (ZIP)</button>
+          </div>
         </div>
       </div>
     </div>
@@ -100,11 +110,17 @@
             <th><input v-model="filters.visit" placeholder="Filter Visit"></th>
             <template v-for="(section, sIdx) in sections" :key="'filter-sec-'+sIdx">
               <template v-for="(field, fIdx) in section.fields" :key="'filter-fld-'+sIdx+'-'+fIdx">
-                <th><input v-model="filters[`s${sIdx}_f${fIdx}`]" :placeholder="`Filter ${field.label || field.name || field.title || (fIdx+1)}`"></th>
+                <th>
+                  <input
+                    v-model="filters[`s${sIdx}_f${fIdx}`]"
+                    :placeholder="`Filter ${field.label || field.name || field.title || (fIdx+1)}`"
+                  >
+                </th>
               </template>
             </template>
           </tr>
         </thead>
+
         <tbody>
           <template v-for="(row, rowIdx) in paginatedData" :key="'row-'+rowIdx">
             <tr>
@@ -143,18 +159,21 @@
 
 <script>
 import axios from 'axios';
-import icons from "@/assets/styles/icons"; // eslint-disable-line no-unused-vars
+import icons from "@/assets/styles/icons";
 import { downloadStudyBundle } from "@/utils/studyDownload";
 
 export default {
   name: 'StudyDataDashboard',
+  props: {
+    studyId: { type: [String, Number], default: null },
+    embedded: { type: Boolean, default: false },
+    fullscreen: { type: Boolean, default: false },
+  },
   data() {
     return {
       study: null,
-
-      // entries for the current page (or all if viewAll)
       entries: [],
-      totalEntries: 0, // informational
+      totalEntries: 0,
 
       showExportMenu: false,
       showLegend: false,
@@ -164,42 +183,25 @@ export default {
       sortConfig: { key: 'subjectId', direction: 'asc' },
       filters: { subjectId: '', visit: '' },
 
-      // paging
       currentPage: 1,
       pageSize: 50,
       VIEW_ALL_MAX_ROWS: 1000,
       viewAll: false,
       isLoadingEntries: false,
 
-      // versioning
       studyVersions: [],
       selectedVersion: null,
       templateCache: new Map(),
-
-      // debug (no leading underscores to satisfy vue/no-reserved-keys)
-      debugOnce: { study:false, fetch:false, entryShape:false },
     };
   },
   computed: {
-    visits() {
-      return this.study?.content?.study_data?.visits || [];
-    },
-    sections() {
-      return this.study?.content?.study_data?.selectedModels || [];
-    },
-    subjects() {
-      return this.study?.content?.study_data?.subjects || [];
-    },
-    fieldsPerSection() {
-      return this.sections.map(sec => sec.fields?.length || 0);
-    },
+    visits() { return this.study?.content?.study_data?.visits || []; },
+    sections() { return this.study?.content?.study_data?.selectedModels || []; },
+    subjects() { return this.study?.content?.study_data?.subjects || []; },
+    fieldsPerSection() { return this.sections.map(sec => sec.fields?.length || 0); },
 
-    totalGridRows() {
-      return (this.subjects?.length || 0) * (this.visits?.length || 0);
-    },
-    canViewAll() {
-      return this.totalGridRows > 0 && this.totalGridRows <= this.VIEW_ALL_MAX_ROWS;
-    },
+    totalGridRows() { return (this.subjects?.length || 0) * (this.visits?.length || 0); },
+    canViewAll() { return this.totalGridRows > 0 && this.totalGridRows <= this.VIEW_ALL_MAX_ROWS; },
 
     filteredData() {
       let data = [];
@@ -220,15 +222,9 @@ export default {
               if (assigned) {
                 const raw = this.getValue(subjIdx, vIdx, sIdx, fIdx);
                 const type = (field.type || '').toLowerCase();
-                if (type === 'checkbox') {
-                  value = (raw === true) ? 'Yes'
-                        : (raw === false) ? 'No'
-                        : '';
-                } else if (type === 'file') {
-                  value = this.formatFileCell(raw);
-                } else {
-                  value = (raw == null || raw === '') ? '' : raw;
-                }
+                if (type === 'checkbox') value = (raw === true) ? 'Yes' : (raw === false) ? 'No' : '';
+                else if (type === 'file') value = this.formatFileCell(raw);
+                else value = (raw == null || raw === '') ? '' : raw;
               }
               row[`s${sIdx}_f${fIdx}`] = value;
             });
@@ -237,7 +233,6 @@ export default {
         });
       });
 
-      // Column filters
       data = data.filter(row => {
         if (this.filters.subjectId && !String(row.subjectId).toLowerCase().includes(this.filters.subjectId.toLowerCase())) return false;
         if (this.filters.visit && !String(row.visit).toLowerCase().includes(this.filters.visit.toLowerCase())) return false;
@@ -245,14 +240,11 @@ export default {
         for (const key in this.filters) {
           if (key === 'subjectId' || key === 'visit') continue;
           const filterVal = this.filters[key];
-          if (filterVal && !String(row[key] ?? '').toLowerCase().includes(String(filterVal).toLowerCase())) {
-            return false;
-          }
+          if (filterVal && !String(row[key] ?? '').toLowerCase().includes(String(filterVal).toLowerCase())) return false;
         }
         return true;
       });
 
-      // Sorting
       if (this.sortConfig.key) {
         const key = this.sortConfig.key;
         const dir = this.sortConfig.direction === 'asc' ? 1 : -1;
@@ -314,21 +306,15 @@ export default {
     await this.bootstrap();
   },
   methods: {
-    // ---- debug helpers ----
-    dbg(...args){ console.log('[Dashboard]', ...args); },
-    groupDbg(label, obj){ console.groupCollapsed('[Dashboard]', label); console.log(obj); console.groupEnd(); },
-    normalizeKey(k){ return String(k || '').trim().toLowerCase(); },
-    listKeys(obj){ return Object.keys(obj || {}); },
-
-    // ---- dict helpers (section/field keys consistent with save) ----
-    sectionDictKey(sectionObj) {
-      return sectionObj?.title ?? '';
+    getStudyId() {
+      return this.studyId != null ? String(this.studyId) : String(this.$route.params.id);
     },
+
+    normalizeKey(k){ return String(k || '').trim().toLowerCase(); },
+    sectionDictKey(sectionObj) { return sectionObj?.title ?? ''; },
     fieldDictKey(fieldObj, fallbackIndex) {
-      // include 'id' fallback
       return fieldObj?.name ?? fieldObj?.key ?? fieldObj?.id ?? fieldObj?.label ?? fieldObj?.title ?? `f${fallbackIndex}`;
     },
-    // tolerant getter: exact match, else case/trim-insensitive fallback (logs on miss)
     dictRead(dataDict, sIdx, fIdx) {
       if (!dataDict || typeof dataDict !== 'object' || Array.isArray(dataDict)) return undefined;
 
@@ -339,39 +325,24 @@ export default {
       const fKey = this.fieldDictKey(fld, fIdx);
 
       let secObj = dataDict[sKey];
-      // fallback section key (case/trim-insensitive)
       if (!secObj) {
         const wanted = this.normalizeKey(sKey);
         const hitKey = Object.keys(dataDict).find(k => this.normalizeKey(k) === wanted);
-        if (hitKey) {
-          secObj = dataDict[hitKey];
-          this.dbg('Section key fallback used:', { expected: sKey, matched: hitKey });
-        }
+        if (hitKey) secObj = dataDict[hitKey];
       }
-      if (!secObj || typeof secObj !== 'object') {
-        this.dbg('dictRead: section not found', { sIdx, sKey, available: this.listKeys(dataDict) });
-        return undefined;
-      }
+      if (!secObj || typeof secObj !== 'object') return undefined;
 
       if (Object.prototype.hasOwnProperty.call(secObj, fKey)) return secObj[fKey];
 
-      // fallback field key (case/trim-insensitive)
       const wantedField = this.normalizeKey(fKey);
       const hitField = Object.keys(secObj).find(k => this.normalizeKey(k) === wantedField);
-      if (hitField) {
-        this.dbg('Field key fallback used:', { sKey, expectedField: fKey, matchedField: hitField });
-        return secObj[hitField];
-      }
+      if (hitField) return secObj[hitField];
 
-      this.dbg('dictRead: field not found', {
-        sIdx, fIdx, sKey, fKey,
-        availableFields: this.listKeys(secObj)
-      });
       return undefined;
     },
 
     async bootstrap() {
-      const studyId = this.$route.params.id;
+      const studyId = this.getStudyId();
       try {
         const studyResp = await axios.get(`/forms/studies/${studyId}`, {
           headers: { Authorization: `Bearer ${this.token}` },
@@ -383,24 +354,6 @@ export default {
           this.selectedVersion = this.studyVersions[this.studyVersions.length - 1].version;
         }
         await this.loadTemplateForSelectedVersion();
-
-        if (!this.debugOnce.study) {
-          this.debugOnce.study = true;
-          this.groupDbg('Study loaded', {
-            studyId,
-            subjects: this.subjects.length,
-            visits: this.visits.length,
-            sections: this.sections.map((s, i) => ({
-              i, title: s.title,
-              fieldKeys: (s.fields || []).map((f, j) => this.fieldDictKey(f, j))
-            })),
-            assignmentsShape: {
-              m: this.sections.length,
-              v: this.visits.length,
-              g: (this.study?.content?.study_data?.groups || []).length
-            }
-          });
-        }
 
         this.initDynamicFilters();
 
@@ -441,7 +394,7 @@ export default {
     },
 
     async loadTemplateForSelectedVersion() {
-      const studyId = this.$route.params.id;
+      const studyId = this.getStudyId();
       if (!studyId || !this.selectedVersion) return;
 
       if (this.templateCache.has(this.selectedVersion)) {
@@ -458,7 +411,7 @@ export default {
         this.templateCache.set(this.selectedVersion, schema);
         this.applyTemplateSchema(schema);
       } catch (e) {
-        // keep existing template if fetch fails
+        // eslint: ignore template fetch failures; keep current schema
       }
     },
 
@@ -512,7 +465,7 @@ export default {
 
     async fetchPageEntries() {
       if (!this.study) return;
-      const studyId = this.$route.params.id;
+      const studyId = this.getStudyId();
 
       const { subjectIdxPageSet, visitIdxPageSet } = this.currentWindowIndexSets();
 
@@ -533,32 +486,10 @@ export default {
 
       try {
         this.isLoadingEntries = true;
-        if (!this.debugOnce.fetch) {
-          this.debugOnce.fetch = true;
-          this.dbg('Fetching entries…', { url, viewAll: this.viewAll, subject_indexes, visit_indexes, version: this.selectedVersion });
-        }
         const resp = await axios.get(url, { headers: { Authorization: `Bearer ${this.token}` } });
         const payload = Array.isArray(resp.data) ? { entries: resp.data, total: resp.data.length } : (resp.data || {});
         this.entries = payload.entries || [];
         this.totalEntries = payload.total ?? this.entries.length;
-
-        if (!this.debugOnce.entryShape) {
-          this.debugOnce.entryShape = true;
-          const sample = (this.entries || []).slice(0, 3).map(e => ({
-            id: e.id,
-            s: e.subject_index, v: e.visit_index, g: e.group_index,
-            dataType: Array.isArray(e.data) ? 'array' : (e.data && typeof e.data === 'object') ? 'dict' : typeof e.data,
-            topKeys: e.data && typeof e.data === 'object' && !Array.isArray(e.data) ? Object.keys(e.data) : null
-          }));
-          this.groupDbg('Entries fetched', {
-            count: this.entries.length,
-            sample
-          });
-          if (sample[0]?.topKeys) {
-            this.dbg('First entry dict section keys:', sample[0].topKeys);
-          }
-        }
-
       } catch (err) {
         console.error('Failed to load entries:', err);
         this.entries = [];
@@ -567,32 +498,16 @@ export default {
       }
     },
 
-    goBack() {
-      const id = this.$route.params.id;
-      this.$router.push({ name: "StudyView", params: { id } });
-    },
-    toggleExportMenu() {
-      this.showExportMenu = !this.showExportMenu;
-    },
+    toggleExportMenu() { this.showExportMenu = !this.showExportMenu; },
 
-    // --- helpers to resolve & read data ---
     resolveGroup(subjIdx) {
       const subjGroup = (this.subjects[subjIdx]?.group || '').trim().toLowerCase();
       const grpList = this.study?.content?.study_data?.groups || [];
       const idx = grpList.findIndex(g => (g.name || '').trim().toLowerCase() === subjGroup);
-      if (idx < 0) {
-        this.dbg('resolveGroup: subject group not found, defaulting to 0', {
-          subjectIndex: subjIdx, subjectGroup: subjGroup, availableGroups: grpList.map(g => g.name)
-        });
-      }
       return idx >= 0 ? idx : 0;
     },
     isAssigned(sectionIdx, visitIdx, groupIdx) {
-      const ok = !!(this.study?.content?.study_data?.assignments?.[sectionIdx]?.[visitIdx]?.[groupIdx]);
-      if (!ok && (sectionIdx === 0) && (visitIdx === 0) && (groupIdx === 0)) {
-        this.dbg('isAssigned=false example', { sectionIdx, visitIdx, groupIdx });
-      }
-      return ok;
+      return !!(this.study?.content?.study_data?.assignments?.[sectionIdx]?.[visitIdx]?.[groupIdx]);
     },
     findBestEntry(subjIdx, visitIdx, groupIdx) {
       const all = (this.entries || []).filter(e =>
@@ -603,17 +518,14 @@ export default {
       if (!all.length) return null;
 
       const target = Number(this.selectedVersion);
-      // Prefer exact match
       const exact = all.find(e => Number(e.form_version) === target);
       if (exact) return exact;
 
-      // Else highest version <= target
       const le = all
         .filter(e => Number(e.form_version) <= target)
         .sort((a, b) => Number(b.form_version) - Number(a.form_version))[0];
       if (le) return le;
 
-      // Fallback: highest version available
       return all.sort((a, b) => Number(b.form_version) - Number(a.form_version))[0];
     },
 
@@ -641,19 +553,13 @@ export default {
     cellClass(subjIdx, visitIdx, sectionIdx, fieldIdx) {
       const groupIdx = this.resolveGroup(subjIdx);
       const assigned = this.isAssigned(sectionIdx, visitIdx, groupIdx);
-      const raw = assigned ? this.getValue(subjIdx, visitIdx, sectionIdx, fieldIdx) : '';
-      const field = this.sections?.[sectionIdx]?.fields?.[fieldIdx] || {};
-      const isCheckbox = (field.type || '').toLowerCase() === 'checkbox';
-      const hasData = isCheckbox ? (raw === true || raw === false) : !(raw == null || raw === '');
-
       return {
         'cell-skipped': this.isCellSkipped(subjIdx, visitIdx, sectionIdx, fieldIdx),
         'cell-unassigned': !assigned,
-        'cell-empty-assigned': false && assigned && !hasData
+        'cell-empty-assigned': false
       };
     },
 
-    // Sorting
     sortTable(key) {
       if (this.sortConfig.key === key) {
         this.sortConfig.direction = this.sortConfig.direction === 'asc' ? 'desc' : 'asc';
@@ -667,7 +573,6 @@ export default {
         : this.icons.toggleUp;
     },
 
-    // file cell formatter
     formatFileCell(val) {
       const baseName = (p) => {
         if (!p) return '';
@@ -684,26 +589,16 @@ export default {
         }).filter(Boolean);
         return names.join(', ');
       }
-      if (val && typeof val === 'object') {
-        return fromObj(val);
-      }
-      if (typeof val === 'string') {
-        return baseName(val);
-      }
+      if (val && typeof val === 'object') return fromObj(val);
+      if (typeof val === 'string') return baseName(val);
       return '';
     },
 
-    // Paging helpers
-    goFirst() { this.currentPage = 1; }
-    ,
-    goPrev()  { if (this.currentPage > 1) this.currentPage--; }
-    ,
-    goNext()  { if (this.currentPage < this.totalPages) this.currentPage++; }
-    ,
-    goLast()  { this.currentPage = this.totalPages; }
-    ,
+    goFirst() { this.currentPage = 1; },
+    goPrev()  { if (this.currentPage > 1) this.currentPage--; },
+    goNext()  { if (this.currentPage < this.totalPages) this.currentPage++; },
+    goLast()  { this.currentPage = this.totalPages; },
 
-    // Exports
     async exportCSV() {
       const allRows = await this.ensureAllEntriesForExport();
       this.downloadDelimited(allRows, 'csv');
@@ -715,7 +610,7 @@ export default {
       this.showExportMenu = false;
     },
     async ensureAllEntriesForExport() {
-      const studyId = this.$route.params.id;
+      const studyId = this.getStudyId();
 
       let entriesForExport = this.entries;
 
@@ -747,15 +642,9 @@ export default {
               if (assigned) {
                 const raw = this.getValue(subjIdx, vIdx, sIdx, fIdx);
                 const type = (field.type || '').toLowerCase();
-                if (type === 'checkbox') {
-                  value = (raw === true) ? 'Yes'
-                        : (raw === false) ? 'No'
-                        : '';
-                } else if (type === 'file') {
-                  value = this.formatFileCell(raw);
-                } else {
-                  value = (raw == null || raw === '') ? '' : raw;
-                }
+                if (type === 'checkbox') value = (raw === true) ? 'Yes' : (raw === false) ? 'No' : '';
+                else if (type === 'file') value = this.formatFileCell(raw);
+                else value = (raw == null || raw === '') ? '' : raw;
               }
               row[`s${sIdx}_f${fIdx}`] = value;
             });
@@ -776,7 +665,6 @@ export default {
       lines.push(hdr1.map(quote).join(','));
       lines.push(hdr2.map(quote).join(','));
 
-      // Apply current filters to exported rows as well
       const filteredRows = rows.filter(row => {
         if (this.filters.subjectId && !String(row.subjectId).toLowerCase().includes(this.filters.subjectId.toLowerCase())) return false;
         if (this.filters.visit && !String(row.visit).toLowerCase().includes(this.filters.visit.toLowerCase())) return false;
@@ -817,7 +705,7 @@ export default {
     async exportStudyZip() {
       try {
         await downloadStudyBundle({
-          studyId: this.$route.params.id,
+          studyId: this.getStudyId(),
           token: this.token,
         });
         this.showExportMenu = false;
@@ -831,28 +719,22 @@ export default {
 </script>
 
 <style scoped>
-/* (unchanged styles from your file) */
 .dashboard-header-controls {
-  display: grid;
-  grid-template-columns: auto 1fr auto auto auto;
+  display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 12px;
   margin-bottom: 12px;
+  flex-wrap: wrap;
 }
-.dashboard-header-controls .btn-minimal { justify-self: start; }
-.dashboard-header-controls .export-dropdown,
-.dashboard-header-controls .legend-dropdown,
-.dashboard-header-controls .version-dropdown {
-  justify-self: end;
-  position: relative;
+
+.left-controls, .right-controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
 }
-.dashboard-title {
-  justify-self: center;
-  margin: 0;
-  font-size: 1.5rem;
-  font-weight: 600;
-  color: #333;
-}
+
 .btn-minimal {
   background: transparent;
   border: 1px solid #d1d5db;
@@ -867,7 +749,7 @@ export default {
   gap: 6px;
 }
 .btn-minimal:hover { background: #f3f4f6; border-color: #9ca3af; color: #1f2937; }
-.icon-only { padding: 6px; font-size: 1rem; }
+.icon-only { padding: 6px 10px; font-size: 1rem; }
 
 .version-dropdown label {
   margin-right: 6px;
@@ -881,6 +763,12 @@ export default {
   background: #fff;
   font-size: 0.9rem;
   color: #374151;
+}
+
+.export-dropdown,
+.legend-dropdown {
+  justify-self: end;
+  position: relative;
 }
 
 .export-menu,
@@ -911,26 +799,42 @@ export default {
   vertical-align: -2px;
   background: #ffffff;
 }
-
-/* legend variants */
 .swatch-none { background: #ffffff; border-color: #d1d5db; }
 .swatch-gray { background: #e5e7eb; border-color: #9ca3af; }
 .swatch-red  { background: #fee2e2; border-color: #ef4444; }
 
-/* table */
+/* table controls */
 .table-controls {
   display: flex; justify-content: space-between; align-items: center; margin: 8px 0;
-  color: #4b5563; font-size: 0.9rem;
+  color: #4b5563; font-size: 0.9rem; gap: 10px; flex-wrap: wrap;
 }
 .table-controls .view-all { margin-left: 12px; }
 
-.table-wrapper { overflow-x: auto; width: 100%; max-width: 100%; }
-
-.dashboard-table { width: 100%; border-collapse: collapse; margin-top: 8px; }
-.dashboard-table th, .dashboard-table td {
-  border: 1px solid #e5e7eb; padding: 8px 12px; font-size: 0.9rem; text-align: center;
+/* wrapper */
+.study-dashboard-container {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  box-sizing: border-box;
+  padding: 12px;
 }
-.dashboard-table th { cursor: pointer; white-space: nowrap; }
+
+.table-wrapper {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  width: 100%;
+  max-width: 100%;
+}
+
+/* table */
+.dashboard-table { width: max-content; min-width: 100%; border-collapse: collapse; margin-top: 8px; }
+.dashboard-table th, .dashboard-table td {
+  border: 1px solid #e5e7eb; padding: 8px 12px; font-size: 0.9rem; text-align: center; white-space: nowrap;
+}
+.dashboard-table th { cursor: pointer; }
 .dashboard-table th i { font-size: 0.8rem; color: #1f2937; margin-left: 4px; }
 .dashboard-table thead tr:nth-child(1) th { background: #e5e7eb; font-weight: 600; color: #1f2937; }
 .dashboard-table thead tr:nth-child(2) th { background: #f3f4f6; font-weight: 600; color: #374151; }
@@ -942,27 +846,8 @@ export default {
 .dashboard-table tbody td:not(:first-child):not(:nth-child(2)) { background: #ffffff; color: #4b5563; }
 .dashboard-table tbody tr:hover td { background: #f1f5f9; }
 
-/* Assigned but empty: now no special color (kept for compatibility, not applied) */
-.cell-empty-assigned {
-  background: #e5e7eb !important;
-  color: #374151;
-  border-color: #d1d5db !important;
-}
-
-/* Unassigned cell (gray) */
-.cell-unassigned {
-  background: #e5e7eb !important;
-  color: #374151;
-  border-color: #d1d5db !important;
-}
-
-/* Skipped cell (red) */
-.cell-skipped {
-  background: #fee2e2 !important;
-  color: #991b1b;
-  border-color: #ef4444 !important;
-  font-weight: 600;
-}
+.cell-unassigned { background: #e5e7eb !important; color: #374151; border-color: #d1d5db !important; }
+.cell-skipped { background: #fee2e2 !important; color: #991b1b; border-color: #ef4444 !important; font-weight: 600; }
 
 .loading { text-align: center; padding: 24px; color: #6b7280; }
 .no-data { text-align: center; padding: 16px; color: #6b7280; font-style: italic; }
@@ -973,7 +858,7 @@ export default {
 }
 
 .pagination-controls {
-  display: flex; justify-content: center; gap: 8px; margin: 12px 0 0;
+  display: flex; justify-content: center; gap: 8px; margin: 12px 0 0; flex-wrap: wrap;
 }
 .pagination-controls button {
   background: #f3f4f6; border: 1px solid #d1d5db; padding: 6px 12px; cursor: pointer; border-radius: 4px;

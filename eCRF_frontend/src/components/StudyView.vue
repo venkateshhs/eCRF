@@ -1,6 +1,9 @@
 <template>
-  <div class="study-view-layout">
-    <header class="sv-header">
+  <div
+    class="study-view-layout"
+    :class="{ 'sv-dashboard-fullscreen': activeTab === 'viewdata' && dashboardFullscreen }"
+  >
+    <header class="sv-header" v-if="!(activeTab === 'viewdata' && dashboardFullscreen)">
       <button class="btn-minimal back-btn" @click="goBackToDashboard" aria-label="Back to Dashboard">Back</button>
       <div class="title-wrap">
         <h1 class="sv-title">{{ studyMeta.study_name || 'Study' }}</h1>
@@ -9,23 +12,50 @@
       <div class="header-spacer" aria-hidden="true"></div>
     </header>
 
-    <div class="sv-content card">
+    <div
+      class="sv-content card"
+      :class="{
+        'sv-viewdata': activeTab === 'viewdata',
+        'sv-sidebar-collapsed': activeTab === 'viewdata' && dataSidebarCollapsed,
+        'sv-dashboard-fullscreen': activeTab === 'viewdata' && dashboardFullscreen
+      }"
+    >
       <!-- Vertical Tabs -->
-      <aside class="v-tabs" role="tablist" aria-orientation="vertical">
+      <aside
+        v-if="!(activeTab === 'viewdata' && dashboardFullscreen)"
+        class="v-tabs"
+        :class="{ collapsed: activeTab === 'viewdata' && dataSidebarCollapsed }"
+        role="tablist"
+        aria-orientation="vertical"
+      >
+        <!--  Collapse/Expand icon only for View Data tab -->
+        <div class="v-tabs-tools" v-if="activeTab === 'viewdata'">
+          <button
+            class="btn-minimal icon-only"
+            type="button"
+            @click="toggleDataSidebar"
+            :title="dataSidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'"
+            :aria-label="dataSidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'"
+          >
+            <i :class="dataSidebarCollapsed ? icons.chevronRight : icons.chevronLeft"></i>
+          </button>
+        </div>
+
         <button
-          v-for="t in tabs"
+          v-for="t in visibleTabs"
           :key="t.key"
           :class="['v-tab', { active: activeTab === t.key }]"
           @click="activeTab = t.key"
           role="tab"
           :aria-selected="activeTab === t.key"
+          :title="t.label"
         >
-          {{ t.label }}
+          {{ (activeTab === 'viewdata' && dataSidebarCollapsed) ? tabAbbrev(t.label) : t.label }}
         </button>
       </aside>
 
       <!-- Panels -->
-      <section class="v-panel">
+      <section class="v-panel" :class="{ 'v-panel-tight': activeTab === 'viewdata' }">
         <!-- META-DATA -->
         <div v-if="activeTab === 'meta'">
           <h2 class="panel-title center">Meta-data</h2>
@@ -191,9 +221,35 @@
             </div>
           </div>
 
-          <!-- Edit Study (PI owner or Admin only) -->
+          <!-- Edit Study (kept as-is for backward compatibility) -->
           <div class="edit-row" v-if="canEditStudy">
             <button class="btn-primary" @click="editStudy">Edit Study</button>
+          </div>
+        </div>
+
+        <!--  EDIT STUDY TAB -->
+        <div v-else-if="activeTab === 'edit'">
+          <h2 class="panel-title center">Edit Study</h2>
+
+          <p class="muted center" style="margin-top:-6px;">
+            Choose exactly what you want to edit. Each step can be saved independently.
+          </p>
+
+          <div class="edit-steps-grid">
+            <button
+              v-for="s in editSteps"
+              :key="s.step"
+              class="edit-step-card"
+              @click="openEditStep(s.step)"
+              :disabled="!canEditStudy"
+            >
+              <div class="esc-title">{{ s.label }}</div>
+              <div class="esc-desc">{{ s.desc }}</div>
+            </button>
+          </div>
+
+          <div class="edit-hint muted">
+            Tip: This will open the individual steps in edit mode with a dedicated Save button.
           </div>
         </div>
 
@@ -384,11 +440,16 @@
           </div>
         </div>
 
-        <!-- VIEW DATA: Auto-redirect -->
-        <div v-else-if="activeTab === 'viewdata'">
-          <h2 class="panel-title center">View Data</h2>
-          <p class="muted">Redirecting to the data dashboard…</p>
+        <!--  VIEW DATA: embedded (NO routing) -->
+        <div v-else-if="activeTab === 'viewdata'" class="viewdata-host">
+          <StudyDataDashboard
+            :study-id="studyId"
+            :embedded="true"
+            :fullscreen="dashboardFullscreen"
+            @toggle-fullscreen="toggleDashboardFullscreen"
+          />
         </div>
+
         <!-- AUDIT LOGS -->
         <div v-else-if="activeTab === 'audit'">
           <StudyAuditLogs :study-id="studyId" />
@@ -398,7 +459,6 @@
         <div v-else-if="activeTab === 'bids'">
           <h2 class="panel-title center">Dataset</h2>
 
-          <!-- Only show button + path to owner/admin -->
           <div v-if="canSeeBidsButton" class="subsection bids-location">
             <h3 class="sub-title">Dataset location</h3>
 
@@ -425,13 +485,10 @@
             </div>
           </div>
 
-          <!-- Non-owner/non-admin see a message, no button -->
           <p v-else class="muted">
             Only the study owner or an administrator can view the BIDS dataset location.
           </p>
         </div>
-
-
       </section>
     </div>
   </div>
@@ -442,10 +499,12 @@ import axios from "axios";
 import FieldFileUpload from "@/components/fields/FieldFileUpload.vue";
 import StudyAuditLogs from "@/components/StudyAuditLogs.vue";
 import TemplateDiffView, { computeTemplateDiff, buildVersionSummary } from "@/components/TemplateDiffView.vue";
+import StudyDataDashboard from "@/components/StudyDataDashboard.vue";
+import icons from "@/assets/styles/icons";
 
 export default {
   name: "StudyView",
-  components: { FieldFileUpload, StudyAuditLogs, TemplateDiffView },
+  components: { FieldFileUpload, StudyAuditLogs, TemplateDiffView, StudyDataDashboard },
   data() {
     return {
       studyId: this.$route.params.id,
@@ -465,15 +524,33 @@ export default {
       me: null,
       confirm: { visible: false, target: null },
 
+      icons,
+
+      //  View Data embedding state
+      dataSidebarCollapsed: false,
+      dashboardFullscreen: false,
+
       // tabs
       activeTab: "meta",
       tabs: [
         { key: "meta", label: "Meta-data" },
+        { key: "edit", label: "Edit Study", requiresEdit: true }, //  NEW
         { key: "docs", label: "Documents" },
         { key: "team", label: "Study Access" },
         { key: "viewdata", label: "View Data" },
         { key: "audit", label: "Audit logs" },
         { key: "bids", label: "Export Options" },
+      ],
+
+      //  7-step edit launcher (kept)
+      editSteps: [
+        { step: 1, label: "1) Study details", desc: "Title, description, basics" },
+        { step: 2, label: "2) Arms / Groups", desc: "Treatment arms, groups, labels" },
+        { step: 3, label: "3) Visits", desc: "Visit definitions, windows, order" },
+        { step: 4, label: "4) eCRF / Forms", desc: "Forms, sections, fields (templates)" },
+        { step: 5, label: "5) Subject assignment", desc: "Randomization / assignment settings" },
+        { step: 6, label: "6) Subjects / Enrollment", desc: "Planned subject count, identifiers (if used)" },
+        { step: 7, label: "7) Schedule of assessments", desc: "SoA matrix: which forms in which visits/groups" },
       ],
 
       // files
@@ -493,8 +570,8 @@ export default {
       // versions
       versionsLoading: false,
       versions: [],
-      versionSchemas: {},   // { [v]: schema }
-      versionDiffs: {},     // { [v]: diff }
+      versionSchemas: {},
+      versionDiffs: {},
       canShowVersionDetails: true,
 
       bidsDatasetPath: "",
@@ -503,6 +580,10 @@ export default {
     };
   },
   computed: {
+    visibleTabs() {
+      return (this.tabs || []).filter(t => !t.requiresEdit || this.canEditStudy);
+    },
+
     groups() { return Array.isArray(this.studyData.groups) ? this.studyData.groups : []; },
     visits() { return Array.isArray(this.studyData.visits) ? this.studyData.visits : []; },
     subjects() { return Array.isArray(this.studyData.subjects) ? this.studyData.subjects : []; },
@@ -558,14 +639,39 @@ export default {
   },
   watch: {
     activeTab(val) {
-      if (val === "viewdata") this.goViewData();
+      //  View Data embedded behavior: collapse sidebar + allow fullscreen
+      if (val === "viewdata") {
+        this.dataSidebarCollapsed = true;
+      } else {
+        this.dataSidebarCollapsed = false;
+        this.dashboardFullscreen = false;
+      }
+
       if (val === "team") this.ensureAccessData();
-      if (val === "bids" && this.canSeeBidsButton) {
-      this.fetchBidsPath();
-    }
+      if (val === "bids" && this.canSeeBidsButton) this.fetchBidsPath();
+
+      // keep tab in URL (eslint no-empty fix: no empty block)
+      this.$router
+        .replace({ query: { ...this.$route.query, tab: val } })
+        .catch(() => null);
     },
   },
   methods: {
+    tabAbbrev(label) {
+      const s = String(label || "").trim();
+      if (!s) return "•";
+      const words = s.split(/\s+/).filter(Boolean);
+      if (words.length === 1) return words[0].slice(0, 2).toUpperCase();
+      return (words[0][0] + words[1][0]).toUpperCase();
+    },
+    toggleDataSidebar() {
+      this.dataSidebarCollapsed = !this.dataSidebarCollapsed;
+    },
+    toggleDashboardFullscreen() {
+      if (this.activeTab !== "viewdata") return;
+      this.dashboardFullscreen = !this.dashboardFullscreen;
+    },
+
     // tiny helpers
     userDisplay(u) {
       const firstLast = [u.first_name || u.profile?.first_name, u.last_name || u.profile?.last_name].filter(Boolean).join(" ").trim();
@@ -668,7 +774,9 @@ export default {
         const u = data || {};
         const firstLast = [u?.profile?.first_name, u?.profile?.last_name].filter(Boolean).join(" ").trim();
         return u.name || u.full_name || firstLast || u.username || u.email || null;
-      } catch { return null; }
+      } catch (e) {
+        return null;
+      }
     },
     async fetchStudy() {
       const token = this.token;
@@ -720,14 +828,12 @@ export default {
       this.versionsLoading = true;
       this.canShowVersionDetails = true;
       try {
-        // list
         const { data } = await axios.get(`/forms/studies/${this.studyId}/versions`, { headers: { Authorization: `Bearer ${token}` } });
         const list = Array.isArray(data) ? data : [];
         this.versions = [...list].sort((a, b) => Number(a.version) - Number(b.version));
 
         if (!this.versions.length) { this.versionSchemas = {}; this.versionDiffs = {}; return; }
 
-        // schemas
         const schemas = {};
         for (const v of this.versions) {
           try {
@@ -744,7 +850,6 @@ export default {
 
         if (!this.canShowVersionDetails) { this.versionDiffs = {}; return; }
 
-        // diffs & summaries
         const diffs = {};
         for (const v of this.versions) {
           const ver = Number(v.version);
@@ -753,7 +858,7 @@ export default {
           const next = this.versionSchemas[ver];
           if (prev && next) {
             const d = computeTemplateDiff(prev, next);
-            d.summary = buildVersionSummary(d); // ensure latest summary text
+            d.summary = buildVersionSummary(d);
             diffs[ver] = d;
           }
         }
@@ -824,20 +929,19 @@ export default {
       finally { const next = { ...this.revokeBusy }; delete next[g.user_id]; this.revokeBusy = next; }
     },
 
-    // nav
-    goViewData() {
-      this.$router.push({ name: "StudyDataDashboard", params: { id: this.studyId } });
-    },
-    async editStudy() {
+    //  shared loader (kept)
+    async loadStudyIntoStoreForEdit() {
       localStorage.removeItem("setStudyDetails");
       localStorage.removeItem("scratchForms");
+
       const token = this.token;
-      if (!token) { this.$router.push("/login"); return; }
+      if (!token) { this.$router.push("/login"); return false; }
+
       try {
         const resp = await axios.get(`/forms/studies/${this.studyId}`, { headers: { Authorization: `Bearer ${token}` } });
         const sd = resp.data.content?.study_data;
         const meta = resp.data.metadata || {};
-        if (!sd) return;
+        if (!sd) { alert("Study content is empty."); return false; }
 
         let assignments = Array.isArray(sd.assignments) ? sd.assignments : [];
         if (!assignments.length && sd.selectedModels?.length) {
@@ -850,10 +954,16 @@ export default {
             )
           );
         }
+
         const studyInfo = {
-          id: meta.id, name: meta.study_name, description: meta.study_description,
-          created_at: meta.created_at, updated_at: meta.updated_at, created_by: meta.created_by
+          id: meta.id,
+          name: meta.study_name,
+          description: meta.study_description,
+          created_at: meta.created_at,
+          updated_at: meta.updated_at,
+          created_by: meta.created_by
         };
+
         this.$store.commit("setStudyDetails", {
           study_metadata: studyInfo,
           study: { id: meta.id, ...sd.study },
@@ -864,22 +974,63 @@ export default {
           subjects: sd.subjects || [],
           assignments: assignments,
           forms: sd.selectedModels ? [{
-            sections: sd.selectedModels.map(model => ({ title: model.title, fields: model.fields, source: "template" }))
+            sections: sd.selectedModels.map(model => ({
+              title: model.title,
+              fields: model.fields,
+              source: "template"
+            }))
           }] : []
         });
+
         if (sd.selectedModels) {
           const scratchForms = [{
-            sections: sd.selectedModels.map(model => ({ title: model.title, fields: model.fields, source: "template" }))
+            sections: sd.selectedModels.map(model => ({
+              title: model.title,
+              fields: model.fields,
+              source: "template"
+            }))
           }];
           localStorage.setItem("scratchForms", JSON.stringify(scratchForms));
         }
-        this.$router.push({ name: "CreateStudy", params: { id: this.studyId } });
+
+        return true;
       } catch (e) {
-        console.error("Failed to load study details for edit:", e);
+        console.error("Failed to load study details:", e);
+        alert("Failed to load study details.");
+        return false;
       }
     },
 
-    // ---------- attach handlers ----------
+    // Existing editStudy (kept)
+    async editStudy() {
+      const ok = await this.loadStudyIntoStoreForEdit();
+      if (!ok) return;
+      this.$router.push({ name: "CreateStudy", params: { id: this.studyId } });
+    },
+
+    // open single step edit
+    async openEditStep(stepNumber) {
+      if (!this.canEditStudy) return;
+
+      const ok = await this.loadStudyIntoStoreForEdit();
+      if (!ok) return;
+
+      const step = Number(stepNumber);
+      this.$router.push({
+        name: "CreateStudy",
+        params: { id: this.studyId },
+        query: {
+          mode: "edit",
+          single: "true",
+          step: String(step),
+          returnTo: "StudyView",
+          returnId: String(this.studyId),
+          returnTab: "edit",
+        },
+      });
+    },
+
+    // attach handlers
     onAttachTempChange(val) {
       this.attachTempValue = Array.isArray(val) ? val : [];
     },
@@ -900,10 +1051,7 @@ export default {
     async saveStudyAttachments() {
       if (!this.pendingFiles.length) return;
       const token = this.token;
-      if (!token) {
-        this.$router.push("/login");
-        return;
-      }
+      if (!token) { this.$router.push("/login"); return; }
       this.uploading = true;
       try {
         for (const item of this.pendingFiles) {
@@ -911,7 +1059,7 @@ export default {
           fd.append("uploaded_file", item.file);
           fd.append("description", item.description || "");
           fd.append("storage_option", "local");
-          fd.append("modalities_json", "[]"); // study-level
+          fd.append("modalities_json", "[]");
           await axios.post(
             `/forms/studies/${this.studyId}/files`,
             fd,
@@ -927,6 +1075,7 @@ export default {
         this.uploading = false;
       }
     },
+
     openRevokeDialog(g) {
       this.confirm = { visible: true, target: g };
       this.$nextTick(() => {
@@ -938,16 +1087,15 @@ export default {
         }
       });
     },
-    cancelRevoke() {
-      this.confirm = { visible: false, target: null };
-    },
+    cancelRevoke() { this.confirm = { visible: false, target: null }; },
     async confirmRevoke() {
       const g = this.confirm.target;
       if (!g) return;
       await this.revokeAccess(g);
       this.cancelRevoke();
     },
-        async fetchBidsPath() {
+
+    async fetchBidsPath() {
       const token = this.token;
       if (!token) return;
 
@@ -969,10 +1117,7 @@ export default {
       if (!this.bidsDatasetPath || !this.bidsPathExists) return;
 
       const token = this.token;
-      if (!token) {
-        this.$router.push("/login");
-        return;
-      }
+      if (!token) { this.$router.push("/login"); return; }
 
       this.openingBids = true;
       try {
@@ -981,36 +1126,37 @@ export default {
           {},
           { headers: { Authorization: `Bearer ${token}` } }
         );
-        // Optionally: show a toast/notification that we requested the OS to open the folder.
       } catch (e) {
         console.error("Failed to open BIDS folder:", e?.response?.data || e.message);
-        // Optionally: show an error notification here.
       } finally {
         this.openingBids = false;
       }
     },
-
-
   },
   async mounted() {
     this.scrollToTop?.();
+
+    // allow deep-linking to a tab (ex: ?tab=edit)
+    const qTab = this.$route.query?.tab;
+    if (qTab && this.tabs.some(t => t.key === qTab)) this.activeTab = qTab;
+
     await this.fetchMe();
     await this.fetchStudy();
-    if (this.canSeeBidsButton) {
-      await this.fetchBidsPath();
-    }
+    if (this.canSeeBidsButton) await this.fetchBidsPath();
     await Promise.all([this.fetchStudyFiles(), this.fetchVersionsAndDiffs()]);
   },
   beforeRouteEnter(to, from, next) { next((vm) => vm.scrollToTop?.()); },
   beforeRouteUpdate(to, from, next) {
     this.studyId = to.params.id;
+
+    const qTab = to.query?.tab;
+    if (qTab && this.tabs.some(t => t.key === qTab)) this.activeTab = qTab;
+
     this.scrollToTop?.();
     Promise.resolve()
       .then(() => this.fetchStudy())
       .then(() => {
-        if (this.canSeeBidsButton) {
-          return this.fetchBidsPath();
-        }
+        if (this.canSeeBidsButton) return this.fetchBidsPath();
       })
       .then(() => Promise.all([this.fetchStudyFiles(), this.fetchVersionsAndDiffs()]))
       .finally(() => next());
@@ -1024,6 +1170,16 @@ export default {
 
 .study-view-layout { display: flex; flex-direction: column; gap: 16px; padding: 24px; background: #f9fafb; min-height: 100%; }
 
+/*  Fullscreen overlay for View Data */
+.study-view-layout.sv-dashboard-fullscreen {
+  position: fixed;
+  inset: 0;
+  padding: 0;
+  gap: 0;
+  background: #fff;
+  z-index: 3000;
+}
+
 /* Header */
 .sv-header { position: relative; display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 16px; }
 .back-btn { position: absolute; left: 0; top: 50%; transform: translateY(-50%); }
@@ -1035,14 +1191,32 @@ export default {
 /* Card layout */
 .card { display: grid; grid-template-columns: 240px 1fr; background: #fff; border: 1px solid #ececec; border-radius: 14px; box-shadow: 0 6px 18px rgba(0,0,0,0.04); overflow: hidden; }
 
+/*  When viewdata and sidebar collapsed */
+.card.sv-sidebar-collapsed { grid-template-columns: 52px 1fr; }
+
+/*  When fullscreen, no sidebar column */
+.card.sv-dashboard-fullscreen { grid-template-columns: 1fr; border-radius: 0; border: none; box-shadow: none; height: 100vh; }
+
 /* Vertical tabs */
 .v-tabs { background: #fcfcff; border-right: 1px solid #f0f0f6; padding: 10px; display: flex; flex-direction: column; gap: 8px; min-height: 360px; }
+.v-tabs.collapsed { padding: 8px 6px; gap: 8px; }
+
+.v-tabs-tools { display: flex; justify-content: center; padding-bottom: 6px; }
+
+/* Tabs */
 .v-tab { text-align: left; background: #fff; border: 1px solid #ececec; border-radius: 10px; padding: 10px 12px; font-size: 14px; color: #374151; cursor: pointer; transition: background .2s, color .2s, box-shadow .2s, border .2s; }
+.v-tabs.collapsed .v-tab { text-align: center; padding: 10px 8px; font-size: 12px; }
 .v-tab:hover { background: #f8fafc; }
 .v-tab.active { background: #eef2ff; color: #3538cd; border-color: #e0e7ff; box-shadow: 0 3px 10px rgba(53,56,205,0.08); }
 
 /* Panel */
 .v-panel { padding: 18px 20px; }
+.v-panel-tight { padding: 0; overflow: hidden; min-height: 0; }
+
+/* Viewdata host fills */
+.viewdata-host { height: 100%; min-height: 0; }
+
+/* Panel titles */
 .panel-title { margin: 4px 0 12px; font-size: 16px; font-weight: 700; }
 .panel-title.center { text-align: center; }
 
@@ -1063,7 +1237,7 @@ export default {
 .kv-key { color: #6b7280; font-size: 13px; }
 .kv-val { color: #111827; font-size: 14px; white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; }
 
-/* Lists for groups/visits */
+/* Lists */
 .list-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); gap: 10px; }
 .list-card { border: 1px solid #f1f1f1; border-radius: 12px; padding: 10px; background: #fff; }
 .list-card .kv-row { display: grid; grid-template-columns: minmax(120px, 220px) 1fr; gap: 8px; align-items: start; }
@@ -1107,6 +1281,7 @@ export default {
 .btn-primary:hover:not([disabled]) { transform: translateY(-1px); box-shadow: 0 6px 18px rgba(0,0,0,.1); }
 .btn-minimal { background: none; border: 1px solid #e0e0e0; border-radius: 8px; padding: 8px 12px; font-size: 14px; color: #555; cursor: pointer; transition: background 0.3s ease, color 0.3s ease, border-color 0.3s ease; }
 .btn-minimal:hover { background: #e8e8e8; color: #000; border-color: #d6d6d6; }
+.btn-minimal.icon-only { padding: 8px 10px; }
 .edit-row { margin-top: 16px; }
 
 /* Empty + util */
@@ -1141,7 +1316,7 @@ export default {
 .help { font-size: 12px; color: #6b7280; }
 .actions { display: flex; gap: 8px; align-self: end; }
 
-/* Modal (revoke) */
+/* Modal */
 .modal-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,.35); display: flex; align-items: center; justify-content: center; z-index: 1000; }
 .modal { background: #fff; border-radius: 12px; padding: 16px; width: 100%; max-width: 420px; box-shadow: 0 10px 30px rgba(0,0,0,.15); outline: none; }
 .modal-title { margin: 0 0 8px; font-size: 16px; font-weight: 700; color: #111827; }
@@ -1159,15 +1334,35 @@ export default {
 .vc-date { color: #6b7280; font-size: 12px; }
 .vc-summary { color: #374151; font-size: 13px; margin-top: 2px; }
 .vc-summary-line { display: block; margin-top: 2px; }
-
-/* reuse diff-scroll for details block */
 .diff-scroll { overflow: auto; border: 1px solid #f1f1f1; border-radius: 10px; padding: 12px; background: #fff; }
-.bids-location .file-path {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
-  word-break: break-all;
-}
 
-.bids-actions {
-  margin-top: 8px;
+.bids-location .file-path { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; word-break: break-all; }
+.bids-actions { margin-top: 8px; }
+
+/* edit steps grid */
+.edit-steps-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(260px, 1fr));
+  gap: 12px;
+  margin-top: 12px;
+}
+.edit-step-card {
+  text-align: left;
+  background: #fff;
+  border: 1px solid #ececec;
+  border-radius: 12px;
+  padding: 12px 14px;
+  cursor: pointer;
+  transition: background .2s, border .2s, box-shadow .2s, transform .05s;
+}
+.edit-step-card:hover:not([disabled]) { background: #f8fafc; border-color: #e5e7eb; box-shadow: 0 8px 18px rgba(0,0,0,0.06); transform: translateY(-1px); }
+.edit-step-card[disabled] { opacity: 0.6; cursor: not-allowed; }
+.esc-title { font-weight: 800; color: #111827; margin-bottom: 4px; }
+.esc-desc { color: #6b7280; font-size: 13px; }
+.edit-hint { margin-top: 10px; text-align: center; }
+
+/* Responsive */
+@media (max-width: 900px) {
+  .edit-steps-grid { grid-template-columns: 1fr; }
 }
 </style>
