@@ -1,6 +1,6 @@
 <template>
   <div class="new-study-form">
-    <h2>Step 4: Assign Subjects</h2>
+
 
     <table class="assignment-table">
       <thead>

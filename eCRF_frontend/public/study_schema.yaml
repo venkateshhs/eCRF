@@ -48,14 +48,8 @@ classes:
         range: string
         description: "Type or category of the study."
         enum:
-          - "Case Report"
           - "Cross Sectional Study"
           - "Longitudinal Study"
-          - "Meta Analysis"
-          - "Phase Clinical Trials"
-          - "Pragmatic Clinical Trial"
-          - "Registry Study"
-          - "Systematic Review"
           - "Custom"
         skip:
           "Meta Analysis": [ "groups", "visits" ]

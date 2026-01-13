@@ -1,10 +1,5 @@
 <template>
   <div class="import-study">
-    <h1>Import Study</h1>
-    <p class="sub">
-      Upload a CSV or Excel file and map columns to create a study and import entries (template first, then data).
-    </p>
-
     <!-- STEP 1: Upload -->
     <section class="card">
       <h2>1) Upload file</h2>
@@ -993,7 +988,6 @@ export default {
         };
 
         const CHUNK_SIZE = 1000;
-        let usedBulk = true;
 
         for (let i = 0; i < entries.length; i += CHUNK_SIZE) {
           const chunk = entries.slice(i, i + CHUNK_SIZE);
@@ -1002,7 +996,6 @@ export default {
             this.progress.done += chunk.length;
           } catch (err) {
             if (err?.response?.status === 404 || err?.response?.status === 405) {
-              usedBulk = false;
               const CONC = 6;
               let idx = 0;
               const workers = Array.from({ length: CONC }, () => (async () => {
@@ -1083,25 +1076,67 @@ export default {
 </script>
 
 <style scoped>
-.import-study { max-width: 1100px; margin: 0 auto; }
+/* keep layout from ever widening its parent */
+.import-study {
+  width: 100%;
+  min-width: 0;
+  max-width: 1100px;
+  margin: 0 auto;
+}
+
 .sub { color:#666; margin-bottom: 12px; }
 
-.card { border:1px solid #e7e7e7; border-radius:12px; padding:16px 18px; margin:14px 0; background:#fafafa; }
-.grid { display:grid; grid-template-columns: repeat(2, minmax(220px, 1fr)); gap:14px; }
-.form-row { display:flex; flex-direction:column; gap:6px; }
+.card {
+  border:1px solid #e7e7e7;
+  border-radius:12px;
+  padding:16px 18px;
+  margin:14px 0;
+  background:#fafafa;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.grid { display:grid; grid-template-columns: repeat(2, minmax(220px, 1fr)); gap:14px; min-width:0; }
+.form-row { display:flex; flex-direction:column; gap:6px; min-width:0; }
 .form-row.full { grid-column: 1 / -1; }
 label { font-size: 13px; color:#444; }
 input, select { padding:10px; border:1px solid #ddd; border-radius:8px; }
 .muted { color:#777; font-size: 12px; }
 .smalltop { margin-top: 6px; }
-.table-scroll { overflow:auto; max-height: 280px; margin-top:10px; border:1px solid #eee; border-radius:8px; }
 
+/* this is where horizontal scrolling must happen */
+.table-scroll {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  overflow: auto;
+  max-height: 280px;
+  margin-top:10px;
+  border:1px solid #eee;
+  border-radius:8px;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Keep default tables normal everywhere else */
 .preview { border-collapse: collapse; width: 100%; }
-.preview th, .preview td { border-bottom:1px solid #eee; padding:6px 8px; text-align:left; font-size:12px; }
+
+/* only the preview table inside the scroll box should be allowed to be wider */
+.table-scroll .preview {
+  width: max-content;   /* force wide table -> horizontal scroll in .table-scroll */
+  min-width: 100%;
+}
+
+.preview th, .preview td {
+  border-bottom:1px solid #eee;
+  padding:6px 8px;
+  text-align:left;
+  font-size:12px;
+  white-space: nowrap;
+}
 
 .structure .chips { display:flex; gap:10px; margin-top:10px; flex-wrap:wrap; }
 .chip { background:#fff; border:1px solid #e1e1e1; border-radius:999px; padding:6px 10px; font-size:12px; }
-.cols { display:grid; grid-template-columns: repeat(3, 1fr); gap:16px; margin-top:10px; }
+.cols { display:grid; grid-template-columns: repeat(3, 1fr); gap:16px; margin-top:10px; min-width:0; }
 
 .btn { border:1px solid #ddd; padding:10px 14px; border-radius:8px; cursor:pointer; background:#fff; }
 .btn.primary { background:#2f6fed; color:#fff; border-color:#245fe0; }
@@ -1117,16 +1152,16 @@ input, select { padding:10px; border:1px solid #ddd; border-radius:8px; }
 .hint { color:#555; margin-top:6px; }
 
 /* schema mapping grid */
-.schema-grid { display: grid; grid-template-columns: 1fr; gap: 10px; margin-top: 8px; }
-.schema-map-row { display: grid; grid-template-columns: 220px 1fr; gap: 12px; align-items: center; background:#fff; border:1px solid #eee; border-radius:10px; padding:10px; }
-.schema-map-label { display:flex; align-items:center; gap:6px; }
+.schema-grid { display: grid; grid-template-columns: 1fr; gap: 10px; margin-top: 8px; min-width:0; }
+.schema-map-row { display: grid; grid-template-columns: 220px 1fr; gap: 12px; align-items: center; background:#fff; border:1px solid #eee; border-radius:10px; padding:10px; min-width:0; }
+.schema-map-label { display:flex; align-items:center; gap:6px; min-width:0; }
 .schema-map-label .lbl { font-weight:600; color:#333; font-size: 13px; }
 .schema-map-label .req { color:#b00020; font-size: 12px; }
-.schema-map-ctrls { display: grid; grid-template-columns: repeat(2, minmax(180px, 1fr)); gap: 10px; }
-.schema-map-ctrl { display:flex; flex-direction:column; gap:6px; }
+.schema-map-ctrls { display: grid; grid-template-columns: repeat(2, minmax(180px, 1fr)); gap: 10px; min-width:0; }
+.schema-map-ctrl { display:flex; flex-direction:column; gap:6px; min-width:0; }
 .schema-map-ctrl .small { font-size: 11px; color:#777; }
 
-.pillbox { display:flex; flex-wrap:wrap; gap:8px; margin-top: 6px; }
+.pillbox { display:flex; flex-wrap:wrap; gap:8px; margin-top: 6px; min-width:0; }
 .pill { border:1px solid #ddd; padding:6px 8px; border-radius:999px; background:#fff; font-size:12px; }
 .select-all { display:flex; gap:8px; align-items:center; margin-top:8px; }
 </style>
