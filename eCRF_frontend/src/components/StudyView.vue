@@ -88,143 +88,213 @@
             </div>
           </div>
 
-          <!-- Study Data -->
-          <div class="subsection">
-            <h3 class="sub-title">Study Data</h3>
-            <div v-if="studyKVEntries.length" class="kv-grid">
-              <div class="kv-row" v-for="entry in studyKVEntries" :key="entry[0]">
-                <div class="kv-key">{{ prettyLabel(entry[0]) }}</div>
-                <div class="kv-val">{{ formatAny(entry[1]) }}</div>
+          <!-- Collapsible meta sections (collapsed by default) -->
+          <div class="meta-sections">
+            <!-- Study Data -->
+            <div class="meta-section">
+              <div class="meta-section-head">
+                <h3 class="sub-title">Study Data</h3>
+                <button
+                  class="btn-minimal icon-only meta-toggle"
+                  type="button"
+                  @click="toggleMetaSection('studyData')"
+                  :title="metaCollapsed.studyData ? 'Expand' : 'Collapse'"
+                  :aria-label="metaCollapsed.studyData ? 'Expand Study Data' : 'Collapse Study Data'"
+                  :aria-expanded="(!metaCollapsed.studyData).toString()"
+                >
+                  <i :class="metaCollapsed.studyData ? icons.toggleDown : icons.toggleUp"></i>
+                </button>
               </div>
-            </div>
-            <div v-else class="empty-state">No additional study data.</div>
-          </div>
-
-          <!-- Groups -->
-          <div class="subsection">
-            <h3 class="sub-title">Groups</h3>
-            <div v-if="groups && groups.length" class="list-grid">
-              <div class="list-card" v-for="(g, gi) in groups" :key="gi">
-                <div class="kv-row" v-for="entry in objectEntriesFiltered(g)" :key="entry[0]">
-                  <div class="kv-key">{{ prettyLabel(entry[0]) }}</div>
-                  <div class="kv-val">{{ formatAny(entry[1]) }}</div>
+              <div class="meta-section-body" v-show="!metaCollapsed.studyData">
+                <div v-if="studyKVEntries.length" class="kv-grid">
+                  <div class="kv-row" v-for="entry in studyKVEntries" :key="entry[0]">
+                    <div class="kv-key">{{ prettyLabel(entry[0]) }}</div>
+                    <div class="kv-val">{{ formatAny(entry[1]) }}</div>
+                  </div>
                 </div>
-              </div>
-            </div>
-            <div v-else class="empty-state">No groups defined.</div>
-          </div>
-
-          <!-- Visits -->
-          <div class="subsection">
-            <h3 class="sub-title">Visits</h3>
-            <div v-if="visits && visits.length" class="list-grid">
-              <div class="list-card" v-for="(v, vi) in visits" :key="vi">
-                <div class="kv-row" v-for="entry in objectEntriesFiltered(v)" :key="entry[0]">
-                  <div class="kv-key">{{ prettyLabel(entry[0]) }}</div>
-                  <div class="kv-val">{{ formatAny(entry[1]) }}</div>
-                </div>
-              </div>
-            </div>
-            <div v-else class="empty-state">No visits defined.</div>
-          </div>
-
-          <!-- Subject Assignment -->
-          <div class="subsection">
-            <h3 class="sub-title">Subject Assignment</h3>
-            <div class="kv-grid">
-              <div class="kv-row" v-if="hasValue(studyData.assignmentMethod)">
-                <div class="kv-key">Assignment Method</div>
-                <div class="kv-val">{{ studyData.assignmentMethod }}</div>
-              </div>
-              <div class="kv-row" v-if="hasValue(studyData.subjectCount)">
-                <div class="kv-key">Subjects Planned</div>
-                <div class="kv-val">{{ studyData.subjectCount }}</div>
-              </div>
-              <div class="kv-row" v-if="Array.isArray(subjects)">
-                <div class="kv-key">Subjects Enrolled</div>
-                <div class="kv-val">{{ subjects.length }}</div>
-              </div>
-              <div class="kv-row" v-if="assignmentSize">
-                <div class="kv-key">Assignment Matrix</div>
-                <div class="kv-val">
-                  {{ assignmentSize.m }} × {{ assignmentSize.v }} × {{ assignmentSize.g }}
-                  <span class="muted">(models × visits × groups)</span>
-                </div>
+                <div v-else class="empty-state">No additional study data.</div>
               </div>
             </div>
 
-            <!-- Per-Subject Group mapping (PI/Admin only) -->
-            <div v-if="isPIOrAdmin" class="per-subject-block">
-              <h4 class="per-subject-title">Per-Subject Group Assignment</h4>
-              <div v-if="subjectAssignments.length" class="ps-table-wrap">
-                <table class="ps-table" aria-label="Per-subject group assignment">
-                  <thead>
-                    <tr>
-                      <th scope="col">Subject ID</th>
-                      <th scope="col">Assigned Group</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <tr v-for="row in subjectAssignments" :key="row.subjectId">
-                      <td class="monospace">{{ row.subjectId }}</td>
-                      <td>{{ row.groupName || '—' }}</td>
-                    </tr>
-                  </tbody>
-                </table>
+            <!-- Groups -->
+            <div class="meta-section">
+              <div class="meta-section-head">
+                <h3 class="sub-title">Groups</h3>
+                <button
+                  class="btn-minimal icon-only meta-toggle"
+                  type="button"
+                  @click="toggleMetaSection('groups')"
+                  :title="metaCollapsed.groups ? 'Expand' : 'Collapse'"
+                  :aria-label="metaCollapsed.groups ? 'Expand Groups' : 'Collapse Groups'"
+                  :aria-expanded="(!metaCollapsed.groups).toString()"
+                >
+                  <i :class="metaCollapsed.groups ? icons.toggleDown : icons.toggleUp"></i>
+                </button>
               </div>
-              <div v-else class="empty-state">No subjects enrolled yet.</div>
-            </div>
-          </div>
-
-          <!-- Template Versions -->
-          <div class="subsection">
-            <h3 class="sub-title">Template Versions</h3>
-            <div class="versions-wrap">
-              <div v-if="versionsLoading" class="muted">Loading versions…</div>
-              <div v-else-if="!versions.length" class="empty-state">No template versions yet.</div>
-
-              <div v-else class="version-list">
-                <div class="version-card" v-for="(v, idx) in versions" :key="`ver-${v.version}`">
-                  <div class="vc-head">
-                    <div class="vc-title">
-                      <span class="tag">v{{ v.version }}</span>
-                      <span class="vc-date">{{ formatDateTime(v.created_at) }}</span>
-                      <span v-if="idx === versions.length - 1" class="pill ok">Latest</span>
-                    </div>
-
-                    <div class="vc-summary" v-if="v.version > 1">
-                      <template v-if="canShowVersionDetails && versionDiffs[v.version]">
-                        <span class="muted">Changes from v{{ v.version - 1 }}:</span>
-                        <span class="vc-summary-line">{{ versionDiffs[v.version].summary }}</span>
-                      </template>
-                      <template v-else>
-                        <span class="muted">Changes from previous version are hidden (insufficient permission).</span>
-                      </template>
+              <div class="meta-section-body" v-show="!metaCollapsed.groups">
+                <div v-if="groups && groups.length" class="list-grid">
+                  <div class="list-card" v-for="(g, gi) in groups" :key="gi">
+                    <div class="kv-row" v-for="entry in objectEntriesFiltered(g)" :key="entry[0]">
+                      <div class="kv-key">{{ prettyLabel(entry[0]) }}</div>
+                      <div class="kv-val">{{ formatAny(entry[1]) }}</div>
                     </div>
                   </div>
+                </div>
+                <div v-else class="empty-state">No groups defined.</div>
+              </div>
+            </div>
 
-                  <!-- Details -->
-                  <details v-if="v.version > 1 && canShowVersionDetails && versionDiffs[v.version]">
-                    <summary>Show details</summary>
-                    <div class="vc-details diff-scroll">
-                      <TemplateDiffView
-                        :from="versionSchemas[v.version - 1]"
-                        :to="versionSchemas[v.version]"
-                        compact
-                      />
+            <!-- Visits -->
+            <div class="meta-section">
+              <div class="meta-section-head">
+                <h3 class="sub-title">Visits</h3>
+                <button
+                  class="btn-minimal icon-only meta-toggle"
+                  type="button"
+                  @click="toggleMetaSection('visits')"
+                  :title="metaCollapsed.visits ? 'Expand' : 'Collapse'"
+                  :aria-label="metaCollapsed.visits ? 'Expand Visits' : 'Collapse Visits'"
+                  :aria-expanded="(!metaCollapsed.visits).toString()"
+                >
+                  <i :class="metaCollapsed.visits ? icons.toggleDown : icons.toggleUp"></i>
+                </button>
+              </div>
+              <div class="meta-section-body" v-show="!metaCollapsed.visits">
+                <div v-if="visits && visits.length" class="list-grid">
+                  <div class="list-card" v-for="(v, vi) in visits" :key="vi">
+                    <div class="kv-row" v-for="entry in objectEntriesFiltered(v)" :key="entry[0]">
+                      <div class="kv-key">{{ prettyLabel(entry[0]) }}</div>
+                      <div class="kv-val">{{ formatAny(entry[1]) }}</div>
                     </div>
-                  </details>
+                  </div>
+                </div>
+                <div v-else class="empty-state">No visits defined.</div>
+              </div>
+            </div>
 
-                  <div v-else-if="v.version === 1" class="muted">Initial version.</div>
+            <!-- Subject Assignment -->
+            <div class="meta-section">
+              <div class="meta-section-head">
+                <h3 class="sub-title">Subject Assignment</h3>
+                <button
+                  class="btn-minimal icon-only meta-toggle"
+                  type="button"
+                  @click="toggleMetaSection('assignment')"
+                  :title="metaCollapsed.assignment ? 'Expand' : 'Collapse'"
+                  :aria-label="metaCollapsed.assignment ? 'Expand Subject Assignment' : 'Collapse Subject Assignment'"
+                  :aria-expanded="(!metaCollapsed.assignment).toString()"
+                >
+                  <i :class="metaCollapsed.assignment ? icons.toggleDown : icons.toggleUp"></i>
+                </button>
+              </div>
+              <div class="meta-section-body" v-show="!metaCollapsed.assignment">
+                <div class="kv-grid">
+                  <div class="kv-row" v-if="hasValue(studyData.assignmentMethod)">
+                    <div class="kv-key">Assignment Method</div>
+                    <div class="kv-val">{{ studyData.assignmentMethod }}</div>
+                  </div>
+                  <div class="kv-row" v-if="hasValue(studyData.subjectCount)">
+                    <div class="kv-key">Subjects Planned</div>
+                    <div class="kv-val">{{ studyData.subjectCount }}</div>
+                  </div>
+                  <div class="kv-row" v-if="Array.isArray(subjects)">
+                    <div class="kv-key">Subjects Enrolled</div>
+                    <div class="kv-val">{{ subjects.length }}</div>
+                  </div>
+                  <div class="kv-row" v-if="assignmentSize">
+                    <div class="kv-key">Assignment Matrix</div>
+                    <div class="kv-val">
+                      {{ assignmentSize.m }} × {{ assignmentSize.v }} × {{ assignmentSize.g }}
+                      <span class="muted">(models × visits × groups)</span>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Per-Subject Group mapping (PI/Admin only) -->
+                <div v-if="isPIOrAdmin" class="per-subject-block">
+                  <h4 class="per-subject-title">Per-Subject Group Assignment</h4>
+                  <div v-if="subjectAssignments.length" class="ps-table-wrap">
+                    <table class="ps-table" aria-label="Per-subject group assignment">
+                      <thead>
+                        <tr>
+                          <th scope="col">Subject ID</th>
+                          <th scope="col">Assigned Group</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr v-for="row in subjectAssignments" :key="row.subjectId">
+                          <td class="monospace">{{ row.subjectId }}</td>
+                          <td>{{ row.groupName || '—' }}</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                  <div v-else class="empty-state">No subjects enrolled yet.</div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Template Versions -->
+            <div class="meta-section">
+              <div class="meta-section-head">
+                <h3 class="sub-title">Template Versions</h3>
+                <button
+                  class="btn-minimal icon-only meta-toggle"
+                  type="button"
+                  @click="toggleMetaSection('versions')"
+                  :title="metaCollapsed.versions ? 'Expand' : 'Collapse'"
+                  :aria-label="metaCollapsed.versions ? 'Expand Template Versions' : 'Collapse Template Versions'"
+                  :aria-expanded="(!metaCollapsed.versions).toString()"
+                >
+                  <i :class="metaCollapsed.versions ? icons.toggleDown : icons.toggleUp"></i>
+                </button>
+              </div>
+
+              <div class="meta-section-body" v-show="!metaCollapsed.versions">
+                <div class="versions-wrap">
+                  <div v-if="versionsLoading" class="muted">Loading versions…</div>
+                  <div v-else-if="!versions.length" class="empty-state">No template versions yet.</div>
+
+                  <div v-else class="version-list">
+                    <div class="version-card" v-for="(v, idx) in versions" :key="`ver-${v.version}`">
+                      <div class="vc-head">
+                        <div class="vc-title">
+                          <span class="tag">v{{ v.version }}</span>
+                          <span class="vc-date">{{ formatDateTime(v.created_at) }}</span>
+                          <span v-if="idx === versions.length - 1" class="pill ok">Latest</span>
+                        </div>
+
+                        <div class="vc-summary" v-if="v.version > 1">
+                          <template v-if="canShowVersionDetails && versionDiffs[v.version]">
+                            <span class="muted">Changes from v{{ v.version - 1 }}:</span>
+                            <span class="vc-summary-line">{{ versionDiffs[v.version].summary }}</span>
+                          </template>
+                          <template v-else>
+                            <span class="muted">Changes from previous version are hidden (insufficient permission).</span>
+                          </template>
+                        </div>
+                      </div>
+
+                      <!-- Details -->
+                      <details v-if="v.version > 1 && canShowVersionDetails && versionDiffs[v.version]">
+                        <summary>Show details</summary>
+                        <div class="vc-details diff-scroll">
+                          <TemplateDiffView
+                            :from="versionSchemas[v.version - 1]"
+                            :to="versionSchemas[v.version]"
+                            compact
+                          />
+                        </div>
+                      </details>
+
+                      <div v-else-if="v.version === 1" class="muted">Initial version.</div>
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
           </div>
-
-          <!-- Edit Study (kept as-is for backward compatibility) -->
-          <div class="edit-row" v-if="canEditStudy">
-            <button class="btn-primary" @click="editStudy">Edit Study</button>
-          </div>
+          <!-- (Edit Study button removed from meta tab; Edit Study tab is the entry point now) -->
         </div>
 
         <!--  EDIT STUDY TAB -->
@@ -526,6 +596,15 @@ export default {
 
       icons,
 
+      // Meta tab collapsibles (collapsed by default)
+      metaCollapsed: {
+        studyData: true,
+        groups: true,
+        visits: true,
+        assignment: true,
+        versions: true,
+      },
+
       //  View Data embedding state
       dataSidebarCollapsed: false,
       dashboardFullscreen: false,
@@ -534,7 +613,7 @@ export default {
       activeTab: "meta",
       tabs: [
         { key: "meta", label: "Meta-data" },
-        { key: "edit", label: "Edit Study", requiresEdit: true }, //  NEW
+        { key: "edit", label: "Edit Study", requiresEdit: true },
         { key: "docs", label: "Documents" },
         { key: "team", label: "Study Access" },
         { key: "viewdata", label: "View Data" },
@@ -650,7 +729,7 @@ export default {
       if (val === "team") this.ensureAccessData();
       if (val === "bids" && this.canSeeBidsButton) this.fetchBidsPath();
 
-      // keep tab in URL (eslint no-empty fix: no empty block)
+      // keep tab in URL
       this.$router
         .replace({ query: { ...this.$route.query, tab: val } })
         .catch(() => null);
@@ -670,6 +749,11 @@ export default {
     toggleDashboardFullscreen() {
       if (this.activeTab !== "viewdata") return;
       this.dashboardFullscreen = !this.dashboardFullscreen;
+    },
+
+    toggleMetaSection(key) {
+      if (!key || !Object.prototype.hasOwnProperty.call(this.metaCollapsed, key)) return;
+      this.metaCollapsed[key] = !this.metaCollapsed[key];
     },
 
     // tiny helpers
@@ -929,7 +1013,7 @@ export default {
       finally { const next = { ...this.revokeBusy }; delete next[g.user_id]; this.revokeBusy = next; }
     },
 
-    //  shared loader (kept)
+    // shared loader (kept)
     async loadStudyIntoStoreForEdit() {
       localStorage.removeItem("setStudyDetails");
       localStorage.removeItem("scratchForms");
@@ -999,13 +1083,6 @@ export default {
         alert("Failed to load study details.");
         return false;
       }
-    },
-
-    // Existing editStudy (kept)
-    async editStudy() {
-      const ok = await this.loadStudyIntoStoreForEdit();
-      if (!ok) return;
-      this.$router.push({ name: "CreateStudy", params: { id: this.studyId } });
     },
 
     // open single step edit
@@ -1165,8 +1242,12 @@ export default {
 </script>
 
 <style scoped>
-/* Typography base */
-:host, * { font-family: "Inter", system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial, sans-serif; letter-spacing: 0.1px; }
+/* IMPORTANT: do NOT apply font-family to * (breaks FontAwesome icons).
+   Keep typography scoped to the page container only. */
+.study-view-layout {
+  font-family: "Inter", system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial, sans-serif;
+  letter-spacing: 0.1px;
+}
 
 .study-view-layout { display: flex; flex-direction: column; gap: 16px; padding: 24px; background: #f9fafb; min-height: 100%; }
 
@@ -1222,7 +1303,7 @@ export default {
 
 /* Subsections */
 .subsection { margin-top: 18px; }
-.sub-title { margin: 0 0 8px; font-size: 14px; font-weight: 700; color: #111827; }
+.sub-title { margin: 0; font-size: 14px; font-weight: 700; color: #111827; }
 
 /* Meta grid */
 .meta-grid { display: grid; grid-template-columns: repeat(2, minmax(220px, 1fr)); gap: 12px; }
@@ -1231,9 +1312,35 @@ export default {
 .meta-value { font-size: 14px; color: #111827; word-break: break-word; }
 .monospace { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; }
 
+/* Collapsible meta sections: consistent containers */
+.meta-sections { margin-top: 14px; display: flex; flex-direction: column; gap: 12px; }
+
+.meta-section {
+  background: #f3f4f6;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  padding: 12px;
+}
+
+.meta-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.meta-section-body { margin-top: 10px; }
+
+.meta-toggle {
+  padding: 6px 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
 /* Key-value grids */
 .kv-grid { display: grid; grid-template-columns: 1fr; gap: 8px; }
-.kv-row { display: grid; grid-template-columns: 200px 1fr; gap: 8px; padding: 8px 10px; border: 1px solid #f5f5f5; border-radius: 8px; }
+.kv-row { display: grid; grid-template-columns: 200px 1fr; gap: 8px; padding: 8px 10px; border: 1px solid #f5f5f5; border-radius: 8px; background: #fff; }
 .kv-key { color: #6b7280; font-size: 13px; }
 .kv-val { color: #111827; font-size: 14px; white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; }
 
@@ -1245,7 +1352,7 @@ export default {
 /* per-subject table */
 .per-subject-block { margin-top: 14px; }
 .per-subject-title { margin: 8px 0; font-size: 13px; font-weight: 700; color: #111827; }
-.ps-table-wrap { overflow: auto; border: 1px solid #f1f1f1; border-radius: 10px; }
+.ps-table-wrap { overflow: auto; border: 1px solid #f1f1f1; border-radius: 10px; background: #fff; }
 .ps-table { width: 100%; border-collapse: collapse; font-size: 13px; background: #fff; }
 .ps-table th, .ps-table td { border-bottom: 1px solid #f5f5f5; padding: 8px 10px; text-align: left; }
 .ps-table th { background: #fafafe; color: #374151; font-weight: 600; }
@@ -1282,7 +1389,6 @@ export default {
 .btn-minimal { background: none; border: 1px solid #e0e0e0; border-radius: 8px; padding: 8px 12px; font-size: 14px; color: #555; cursor: pointer; transition: background 0.3s ease, color 0.3s ease, border-color 0.3s ease; }
 .btn-minimal:hover { background: #e8e8e8; color: #000; border-color: #d6d6d6; }
 .btn-minimal.icon-only { padding: 8px 10px; }
-.edit-row { margin-top: 16px; }
 
 /* Empty + util */
 .empty-state { color: #6b7280; }
@@ -1306,7 +1412,7 @@ export default {
 
 /* Grant form */
 .grant-grid {
-  display: grid; grid-template-columns: repeat(3, minmax(180px, 1fr)); gap: 12px; align-items: center;
+  display: grid; grid-template-columns: repeat(3, minmax(180px, 1fr)); gap: 12px;
   background: #fff; border: 1px solid #f1f1f1; border-radius: 12px; padding: 12px; align-items: start;
 }
 .field { display: flex; flex-direction: column; gap: 6px; }
