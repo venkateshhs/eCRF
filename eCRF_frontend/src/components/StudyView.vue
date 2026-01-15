@@ -294,7 +294,6 @@
               </div>
             </div>
           </div>
-          <!-- (Edit Study button removed from meta tab; Edit Study tab is the entry point now) -->
         </div>
 
         <!--  EDIT STUDY TAB -->
@@ -465,7 +464,7 @@
                   {{ revokeBusy[confirm.target?.user_id] ? 'Revoking…' : 'Revoke' }}
                 </button>
               </div>
-            </div>
+        </div>
           </div>
 
           <!-- GRANT FORM -->
@@ -525,10 +524,34 @@
           <StudyAuditLogs :study-id="studyId" />
         </div>
 
-        <!-- BIDS DATASET TAB -->
+        <!-- EXPORT OPTIONS TAB -->
         <div v-else-if="activeTab === 'bids'">
-          <h2 class="panel-title center">Dataset</h2>
+          <h2 class="panel-title center">Export Options</h2>
 
+          <!-- moved from Dashboard 3-dot menu -->
+          <div class="subsection">
+            <h3 class="sub-title">Study exports</h3>
+            <p class="muted">
+              Export the study template or download a ZIP bundle of the study.
+            </p>
+
+            <div class="bids-actions export-actions">
+              <button class="btn-primary" type="button" @click="exportStudyTemplate">
+                Export Study Template
+              </button>
+
+              <button
+                class="btn-primary"
+                type="button"
+                :disabled="downloadingZip"
+                @click="downloadStudyZip"
+              >
+                {{ downloadingZip ? "Downloading…" : "Download Study (ZIP)" }}
+              </button>
+            </div>
+          </div>
+
+          <!-- Existing dataset (kept as-is) -->
           <div v-if="canSeeBidsButton" class="subsection bids-location">
             <h3 class="sub-title">Dataset location</h3>
 
@@ -571,6 +594,7 @@ import StudyAuditLogs from "@/components/StudyAuditLogs.vue";
 import TemplateDiffView, { computeTemplateDiff, buildVersionSummary } from "@/components/TemplateDiffView.vue";
 import StudyDataDashboard from "@/components/StudyDataDashboard.vue";
 import icons from "@/assets/styles/icons";
+import { downloadStudyBundle } from "@/utils/studyDownload";
 
 export default {
   name: "StudyView",
@@ -656,6 +680,9 @@ export default {
       bidsDatasetPath: "",
       bidsPathExists: false,
       openingBids: false,
+
+
+      downloadingZip: false,
     };
   },
   computed: {
@@ -718,7 +745,6 @@ export default {
   },
   watch: {
     activeTab(val) {
-      //  View Data embedded behavior: collapse sidebar + allow fullscreen
       if (val === "viewdata") {
         this.dataSidebarCollapsed = true;
       } else {
@@ -729,7 +755,6 @@ export default {
       if (val === "team") this.ensureAccessData();
       if (val === "bids" && this.canSeeBidsButton) this.fetchBidsPath();
 
-      // keep tab in URL
       this.$router
         .replace({ query: { ...this.$route.query, tab: val } })
         .catch(() => null);
@@ -754,6 +779,29 @@ export default {
     toggleMetaSection(key) {
       if (!key || !Object.prototype.hasOwnProperty.call(this.metaCollapsed, key)) return;
       this.metaCollapsed[key] = !this.metaCollapsed[key];
+    },
+
+    //  moved actions
+    exportStudyTemplate() {
+      // same behavior as Dashboard: route to export-study page
+      this.$router.push(`/dashboard/export-study/${this.studyId}`);
+    },
+    async downloadStudyZip() {
+      const token = this.token;
+      if (!token) {
+        alert("Please log in again.");
+        this.$router.push("/login");
+        return;
+      }
+      this.downloadingZip = true;
+      try {
+        await downloadStudyBundle({ studyId: this.studyId, token });
+      } catch (e) {
+        console.error("Failed to download study bundle:", e);
+        alert("Failed to download study bundle.");
+      } finally {
+        this.downloadingZip = false;
+      }
     },
 
     // tiny helpers
@@ -786,7 +834,6 @@ export default {
       return `Location on disk (relative to backend working directory): ${this.docRelativePath(file)}`;
     },
 
-    // helpers
     scrollToTop() {
       try {
         window.scrollTo({ top: 0, left: 0, behavior: "auto" });
@@ -839,7 +886,6 @@ export default {
       return Object.entries(obj || {}).filter(([, v]) => this.hasValue(v));
     },
 
-    // data fetch
     async fetchMe() {
       const token = this.token;
       if (!token) return;
@@ -905,7 +951,6 @@ export default {
       } catch (e) { console.warn("Failed to fetch study files:", e?.response?.data || e.message); }
     },
 
-    // versions
     async fetchVersionsAndDiffs() {
       const token = this.token;
       if (!token) return;
@@ -953,7 +998,6 @@ export default {
       } finally { this.versionsLoading = false; }
     },
 
-    // access
     async ensureAccessData() { await Promise.all([this.fetchAccessList(), this.fetchAllUsers()]); },
     async fetchAccessList() {
       const token = this.token; if (!token) return;
@@ -1209,11 +1253,12 @@ export default {
         this.openingBids = false;
       }
     },
+
+    // NOTE: other methods you pasted (docs, grant/revoke, save attachments, etc.) remain unchanged in your file
   },
   async mounted() {
     this.scrollToTop?.();
 
-    // allow deep-linking to a tab (ex: ?tab=edit)
     const qTab = this.$route.query?.tab;
     if (qTab && this.tabs.some(t => t.key === qTab)) this.activeTab = qTab;
 
@@ -1470,5 +1515,15 @@ export default {
 /* Responsive */
 @media (max-width: 900px) {
   .edit-steps-grid { grid-template-columns: 1fr; }
+}
+.bids-actions.export-actions {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.bids-actions.export-actions .btn-primary {
+  margin: 0;
 }
 </style>
