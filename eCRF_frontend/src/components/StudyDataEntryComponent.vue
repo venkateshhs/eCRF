@@ -1,14 +1,22 @@
 <template>
   <div class="study-data-container" v-if="study">
-    <!-- Back Buttons (hidden for shared links) -->
-    <div class="back-buttons-container" v-if="!isShared">
-      <button v-if="showSelection" @click="goToDashboard" class="btn-back">
-        <i :class="icons.back"></i> Back to Dashboard
-      </button>
-      <button v-if="!showSelection" @click="backToSelection" class="btn-back">
-        <i :class="icons.back"></i> Back to Selection
-      </button>
-    </div>
+    <!-- Back Buttons (hidden for shared links AND while Merge panel is open) -->
+     <div class="back-buttons-container" v-if="!isShared">
+       <!-- Merge mode back button (same styling/position) -->
+       <button v-if="isMergeMode" @click="closeMergeStudy" class="btn-back">
+         <i :class="icons.back"></i> Back to Selection
+       </button>
+
+       <!-- Normal behavior -->
+       <template v-else>
+         <button v-if="showSelection" @click="goToDashboard" class="btn-back">
+           <i :class="icons.back"></i> Back to Dashboard
+         </button>
+         <button v-else @click="backToSelection" class="btn-back">
+           <i :class="icons.back"></i> Back to Selection
+         </button>
+       </template>
+     </div>
 
     <!-- Header -->
     <div class="study-header-container">
@@ -25,9 +33,20 @@
 
       <div class="details-panel">
         <div class="details-controls">
-          <button @click="toggleDetails" class="details-toggle-btn">
+          <!-- Hide details toggle while Merge panel is open (keeps UI clean) -->
+          <button v-if="!isMergeMode" @click="toggleDetails" class="details-toggle-btn">
             <i :class="showDetails ? icons.toggleUp : icons.toggleDown"></i>
             {{ showDetails ? 'Hide Details' : 'Show Details' }}
+          </button>
+
+          <!-- Merge Study button placed in the same row (simple, no teleport/mount hacks) -->
+          <button
+            v-if="showSelection && !isShared && !isMergeMode"
+            type="button"
+            class="btn-merge-study"
+            @click="openMergeStudy"
+          >
+            Merge Study
           </button>
 
           <!-- Share icon hidden for shared mode -->
@@ -64,25 +83,34 @@
     </div>
 
     <!-- Selection (hidden in shared mode; shared preselects) -->
-    <SelectionMatrixView
-      v-if="showSelection && !isShared"
-      :matrixReady="matrixReady"
-      :visitList="visitList"
-      :selectedVisitIndex="selectedVisitIndex"
-      :displayedVisitIndices="displayedVisitIndices"
-      :subjects="sd.subjects"
-      :visitLoading="visitLoading"
-      :isFluidMatrix="isFluidMatrix"
-      :subjectColStyle="subjectColStyle"
-      :visitColStyle="visitColStyle"
-      :statusClass="statusClassFast"
-      :selectedVersion="selectedVersion"
-      :infoIcon="icons.info"
-      @update:selectedVisitIndex="selectedVisitIndex = $event"
-      @add-subjects="openSubjectDialog"
-      @select-cell="selectCell"
-      @open-status-legend="openStatusLegend"
-    />
+    <template v-if="showSelection && !isShared">
+      <!-- Matrix view (hidden when Merge is open) -->
+      <SelectionMatrixView
+        v-if="!isMergeMode"
+        :matrixReady="matrixReady"
+        :visitList="visitList"
+        :selectedVisitIndex="selectedVisitIndex"
+        :displayedVisitIndices="displayedVisitIndices"
+        :subjects="sd.subjects"
+        :visitLoading="visitLoading"
+        :isFluidMatrix="isFluidMatrix"
+        :subjectColStyle="subjectColStyle"
+        :visitColStyle="visitColStyle"
+        :statusClass="statusClassFast"
+        :selectedVersion="selectedVersion"
+        :infoIcon="icons.info"
+        @update:selectedVisitIndex="selectedVisitIndex = $event"
+        @add-subjects="openSubjectDialog"
+        @select-cell="selectCell"
+        @open-status-legend="openStatusLegend"
+      />
+
+      <!-- Merge Study panel (replaces matrix within the same container) -->
+      <section v-else class="merge-panel">
+        <!-- MergeStudy already has its own back button; no extra title/back here -->
+        <MergeStudy :studyId="studyId" :returnTo="`/studies/${studyId}`" />
+      </section>
+    </template>
 
     <!-- Entry Form -->
     <div v-else class="entry-form-wrapper">
@@ -505,6 +533,8 @@ import SelectionMatrixView from "@/components/SelectionMatrixView.vue";
 import AddSubjectsDialog from "@/components/AddSubjectsDialog.vue";
 import { createAjv, validateFieldValue } from "@/utils/jsonschemaValidation";
 
+import MergeStudy from "@/components/MergeStudy.vue";
+
 export default {
   name: "StudyDataEntryComponent",
   components: {
@@ -519,6 +549,7 @@ export default {
     FieldFileUpload,
     SelectionMatrixView,
     AddSubjectsDialog,
+    MergeStudy,
   },
   data() {
     return {
@@ -593,10 +624,18 @@ export default {
       subjectDrafts: [],
       subjectDialogError: "",
       savingSubjects: false,
+
+      // Merge mode (selection panel toggles to merge UI in same container)
+      isMergeMode: false,
     };
   },
 
   computed: {
+    studyId() {
+      const id = Number(this.$route.params.id);
+      return Number.isFinite(id) ? id : null;
+    },
+
     sd() {
       const sd =
         this.study && this.study.content && this.study.content.study_data;
@@ -743,6 +782,17 @@ export default {
   },
 
   watch: {
+    // Merge mode is controlled by query param: ?merge=1
+    "$route.query.merge": {
+      immediate: true,
+      handler(val) {
+        const next =
+          val === "1" || val === 1 || val === true || val === "true";
+        this.isMergeMode = next;
+        if (next) this.showDetails = false; // keep header compact in merge view
+      },
+    },
+
     existingEntries: {
       handler() {
         if (this.selectedVisitIndex === -999) return;
@@ -771,6 +821,23 @@ export default {
   },
 
   methods: {
+    // --- Merge Study controls ---
+
+    openMergeStudy() {
+      if (this.isShared) return;
+      const id = this.studyId || this.$route.params.id;
+      this.$router.push({
+        path: `/studies/${id}`,
+        query: { ...this.$route.query, merge: "1" },
+      });
+    },
+     closeMergeStudy() {
+    const id = this.studyId || this.$route.params.id;
+    const q = { ...this.$route.query };
+    delete q.merge;
+    this.$router.push({ path: `/studies/${id}`, query: q });
+  },
+
     safeVersionParams(v) {
       const n = Number(v);
       return Number.isFinite(n) && n >= 1 ? { version: n } : undefined;
@@ -1617,17 +1684,14 @@ export default {
       });
     },
 
-    // Cross-platform copy helper (Clipboard API + fallback)
     async copyGeneratedLink() {
       const text = String(this.generatedLink || "");
       if (!text) return;
 
       try {
-        // Modern browsers (secure context)
         if (navigator.clipboard && window.isSecureContext) {
           await navigator.clipboard.writeText(text);
         } else {
-          // Fallback for older browsers / non-secure contexts
           const ta = document.createElement("textarea");
           ta.value = text;
           ta.setAttribute("readonly", "");
@@ -3061,6 +3125,7 @@ hr {
 .details-controls {
   display: flex;
   align-items: center;
+  justify-content: flex-end; /* keep on the right, as you asked */
   gap: 12px;
   margin-bottom: 8px;
 }
@@ -3112,6 +3177,21 @@ hr {
 .details-block li {
   font-size: 14px;
   color: #374151;
+}
+
+/* Merge Study button (now sits in the header controls row) */
+.btn-merge-study {
+  background: #2563eb;
+  color: #ffffff;
+  border: none;
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-size: 14px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+.btn-merge-study:hover {
+  background: #1d4ed8;
 }
 
 /* Breadcrumb */
@@ -3332,10 +3412,7 @@ select:focus {
   cursor: pointer;
   font-size: 0.9rem;
 }
-.dialog-actions button:first-child {
-  background: #e5e7eb;
-  color: #1f2937;
-}
+.dialog-actions button:first-child,
 .dialog-actions button:last-child {
   background: #e5e7eb;
   color: #1f2937;
@@ -3375,7 +3452,7 @@ select:focus {
   border: 1px solid #e5e7eb;
   border-radius: 6px;
   padding: 8px;
-  word-break: break-all; /* prevents overflow */
+  word-break: break-all;
 }
 .copy-status {
   margin-top: 6px;
@@ -3537,5 +3614,13 @@ select:focus {
   background: #fff7ed;
   color: #9a3412;
   border: 1px solid #fed7aa;
+}
+
+/* Merge panel shown instead of matrix, within same container */
+.merge-panel {
+  padding: 14px;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  background: #ffffff;
 }
 </style>

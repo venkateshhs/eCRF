@@ -1,30 +1,29 @@
 <template>
-  <div class="merge-page">
+  <div
+    class="merge-page"
+    :class="{
+      embedded: isEmbedded,
+      expanded: isExpanded
+    }"
+  >
     <!-- Header -->
-    <div class="back-header-row">
-      <div class="back-button-container">
-        <button class="btn-minimal" @click="goBack">
-          <i :class="icons.back" aria-hidden="true"></i>
-          <span>Back</span>
+    <div class="header-row">
+      <h2 class="existing-studies-title">Import Study Data</h2>
+
+      <div class="header-actions">
+        <button
+          type="button"
+          class="btn-minimal icon-btn"
+          @click="toggleExpand"
+          :title="isExpanded ? 'Shrink' : 'Expand'"
+        >
+          <i :class="isExpanded ? icons.compress : icons.expand" aria-hidden="true"></i>
         </button>
       </div>
-      <h2 class="existing-studies-title">Import Study Data</h2>
     </div>
 
-    <!-- Study meta -->
+    <!-- File actions (study meta removed as requested) -->
     <div class="top-bar card-surface">
-      <div class="meta">
-        <div class="meta-title">
-          Study: <strong>{{ meta.study_name || '—' }}</strong>
-        </div>
-        <div class="meta-sub" v-if="meta.study_description">
-          {{ meta.study_description }}
-        </div>
-        <div class="meta-stats">
-          Subjects: {{ subjects.length }} · Visits: {{ visits.length }} · Groups: {{ groups.length }}
-        </div>
-      </div>
-
       <div class="actions">
         <input
           ref="fileInput"
@@ -317,32 +316,21 @@
               </tr>
             </thead>
             <tbody>
-              <tr
-                v-for="c in visibleConflicts"
-                :key="c.key"
-              >
+              <tr v-for="c in visibleConflicts" :key="c.key">
                 <td>{{ c.subjectId }}</td>
                 <td>{{ c.visitName }}</td>
                 <td>{{ c.sectionTitle }}</td>
                 <td>{{ c.fieldLabel }}</td>
                 <td>
                   <div class="val-cell">
-                    <div class="val-main">
-                      {{ displayVal(c.existingValue) }}
-                    </div>
-                    <div class="val-meta">
-                      v{{ c.existingVersion || '—' }}
-                    </div>
+                    <div class="val-main">{{ displayVal(c.existingValue) }}</div>
+                    <div class="val-meta">v{{ c.existingVersion || '—' }}</div>
                   </div>
                 </td>
                 <td>
                   <div class="val-cell">
-                    <div class="val-main">
-                      {{ displayVal(c.incomingValue) }}
-                    </div>
-                    <div class="val-meta">
-                      v{{ c.incomingVersion || '—' }}
-                    </div>
+                    <div class="val-main">{{ displayVal(c.incomingValue) }}</div>
+                    <div class="val-meta">v{{ c.incomingVersion || '—' }}</div>
                   </div>
                 </td>
                 <td>
@@ -376,10 +364,7 @@
       </section>
 
       <!-- No conflicts: simple notice -->
-      <section
-        v-else
-        class="card-surface right-column"
-      >
+      <section v-else class="card-surface right-column">
         <div class="section-header">
           <h3>No conflicts</h3>
           <div class="section-actions">
@@ -399,8 +384,12 @@
       </section>
     </div>
 
-    <!-- Sticky footer -->
-    <div class="global-commit" v-if="hasBundle">
+    <!-- Footer (fixed on full page, sticky when embedded) -->
+    <div
+      class="global-commit"
+      v-if="hasBundle"
+      :class="{ embedded: isEmbedded && !isExpanded }"
+    >
       <div class="gc-left">
         <div class="sel-summary">
           <span>Subjects in scope:</span>
@@ -422,11 +411,7 @@
         </div>
       </div>
       <div class="gc-right">
-        <button
-          class="btn-primary"
-          :disabled="!canMerge"
-          @click="performMerge"
-        >
+        <button class="btn-primary" :disabled="!canMerge" @click="performMerge">
           {{ isMerging ? 'Merging…' : (autoMergePossible ? 'Merge' : 'Merge with decisions') }}
         </button>
       </div>
@@ -451,10 +436,22 @@ import icons from "@/assets/styles/icons";
 export default {
   name: "MergeStudyBundle",
   components: { CustomDialog },
+  props: {
+    // Optional when embedded. If not provided, falls back to route param.
+    studyId: {
+      type: [String, Number],
+      default: null,
+    },
+  },
   data() {
     return {
       icons,
-      studyId: null,
+
+      // layout state
+      isEmbedded: false,
+      isExpanded: false,
+      _prevBodyOverflow: "",
+
       study: null,
       meta: {},
       subjects: [],
@@ -503,6 +500,14 @@ export default {
     };
   },
   computed: {
+    resolvedStudyId() {
+      const fromProp = this.studyId;
+      const fromRoute = this.$route?.params?.id;
+      const raw = fromProp != null ? fromProp : fromRoute;
+      const n = Number(raw);
+      return Number.isFinite(n) ? n : null;
+    },
+
     importEntryCount() {
       return Object.keys(this.incomingEntries || {}).length;
     },
@@ -516,9 +521,7 @@ export default {
       if (!this.hasBundle) return false;
       if (this.templateMismatch) return false;
       if (this.scopeMode === "subset" && this.selectedSubjectIds.length === 0) return false;
-      if (!this.autoMergePossible && this.decidedConflictCount < this.conflicts.length) {
-        return false;
-      }
+      if (!this.autoMergePossible && this.decidedConflictCount < this.conflicts.length) return false;
       return !this.isMerging;
     },
     // simple summaries for template comparison
@@ -529,10 +532,7 @@ export default {
       sections.forEach((sec) => {
         fieldCount += (sec.fields || []).length;
       });
-      return {
-        sections: sections.length,
-        fields: fieldCount,
-      };
+      return { sections: sections.length, fields: fieldCount };
     },
     importedTemplateSummary() {
       const schema = this.importedSchema || {};
@@ -541,10 +541,7 @@ export default {
       sections.forEach((sec) => {
         fieldCount += (sec.fields || []).length;
       });
-      return {
-        sections: sections.length,
-        fields: fieldCount,
-      };
+      return { sections: sections.length, fields: fieldCount };
     },
     templateMismatch() {
       // very conservative: require same number of sections and fields
@@ -571,41 +568,27 @@ export default {
         .filter(Boolean);
 
       if (currentNames.length !== importedNames.length) {
-        details.push(
-          `Section count differs (current ${currentNames.length}, import ${importedNames.length}).`
-        );
+        details.push(`Section count differs (current ${currentNames.length}, import ${importedNames.length}).`);
       }
 
       const impSet = new Set(importedNames.map((n) => n.toLowerCase()));
       const curSet = new Set(currentNames.map((n) => n.toLowerCase()));
 
-      const missingInImport = currentNames.filter(
-        (n) => !impSet.has(n.toLowerCase())
-      );
-      const missingInCurrent = importedNames.filter(
-        (n) => !curSet.has(n.toLowerCase())
-      );
+      const missingInImport = currentNames.filter((n) => !impSet.has(n.toLowerCase()));
+      const missingInCurrent = importedNames.filter((n) => !curSet.has(n.toLowerCase()));
 
-      if (missingInImport.length) {
-        details.push(`Missing in import: ${missingInImport.join(", ")}`);
-      }
-      if (missingInCurrent.length) {
-        details.push(`Only in import: ${missingInCurrent.join(", ")}`);
-      }
+      if (missingInImport.length) details.push(`Missing in import: ${missingInImport.join(", ")}`);
+      if (missingInCurrent.length) details.push(`Only in import: ${missingInCurrent.join(", ")}`);
 
       current.forEach((sec) => {
         const name = (sec.title || sec.name || "").trim();
         if (!name) return;
-        const other = imported.find(
-          (s) => (s.title || s.name || "").trim() === name
-        );
+        const other = imported.find((s) => (s.title || s.name || "").trim() === name);
         if (!other) return;
         const curCount = (sec.fields || []).length;
         const impCount = (other.fields || []).length;
         if (curCount !== impCount) {
-          details.push(
-            `Field count differs for "${name}" (current ${curCount}, import ${impCount}).`
-          );
+          details.push(`Field count differs for "${name}" (current ${curCount}, import ${impCount}).`);
         }
       });
 
@@ -621,23 +604,55 @@ export default {
       if (!this.selectedConflictSubject || this.selectedConflictSubject === "ALL") {
         return this.conflicts;
       }
-      return this.conflicts.filter(
-        (c) => String(c.subjectId) === String(this.selectedConflictSubject)
-      );
+      return this.conflicts.filter((c) => String(c.subjectId) === String(this.selectedConflictSubject));
     },
   },
+
   async created() {
-    this.studyId = this.$route.params.id;
+    if (!this.resolvedStudyId) {
+      this.showDialogMessage("Invalid study id.");
+      return;
+    }
     await this.loadStudy();
     await this.loadEntries();
     this.indexEntries();
     this.buildSectionIndex();
   },
+
+  mounted() {
+    // Detect embedding inside StudyDataEntry "merge-panel" (or the main study container)
+    try {
+      const el = this.$el;
+      this.isEmbedded = !!(el && (el.closest(".merge-panel") || el.closest(".study-data-container")));
+    } catch (e) {
+      this.isEmbedded = false;
+    }
+  },
+
+  beforeDestroy() {
+    this.restoreBodyOverflow();
+  },
+
   methods: {
-    // ---------- Navigation & dialog ----------
-    goBack() {
-      this.$router.push({ name: "Dashboard", query: { openStudies: "true" } });
+    // ---------- Expand/Shrink ----------
+    toggleExpand() {
+      this.isExpanded = !this.isExpanded;
+      if (this.isExpanded) this.lockBodyScroll();
+      else this.restoreBodyOverflow();
     },
+    lockBodyScroll() {
+      try {
+        this._prevBodyOverflow = document.body.style.overflow || "";
+        document.body.style.overflow = "hidden";
+      } catch (e) {}
+    },
+    restoreBodyOverflow() {
+      try {
+        document.body.style.overflow = this._prevBodyOverflow || "";
+      } catch (e) {}
+    },
+
+    // ---------- Dialog ----------
     showDialogMessage(msg) {
       this.dialogMessage = msg;
       this.showDialog = true;
@@ -653,7 +668,7 @@ export default {
     // ---------- Load existing study ----------
     async loadStudy() {
       try {
-        const { data } = await axios.get(`/forms/studies/${this.studyId}`, {
+        const { data } = await axios.get(`/forms/studies/${this.resolvedStudyId}`, {
           headers: { Authorization: `Bearer ${this.$store.state.token}` },
         });
         this.study = data;
@@ -676,7 +691,7 @@ export default {
     },
     async loadEntries() {
       try {
-        const { data } = await axios.get(`/forms/studies/${this.studyId}/data_entries`, {
+        const { data } = await axios.get(`/forms/studies/${this.resolvedStudyId}/data_entries`, {
           headers: { Authorization: `Bearer ${this.$store.state.token}` },
         });
         this.entries = Array.isArray(data) ? data : data?.entries || [];
@@ -861,9 +876,7 @@ export default {
           if (fType === "checkbox") val = this.normalizeCheckbox(val);
           row[fieldKey] = val;
         }
-        if (Object.keys(row).length > 0) {
-          out[secTitle] = row;
-        }
+        if (Object.keys(row).length > 0) out[secTitle] = row;
       }
       return out;
     },
@@ -910,6 +923,7 @@ export default {
       this.selectedConflictSubject = "ALL";
       this.showImportDetails = false;
       this.showMergeSummary = false;
+      // keep expand state untouched
     },
     async onBundleFile(ev) {
       const f = ev.target.files && ev.target.files[0];
@@ -941,10 +955,7 @@ export default {
       });
 
       if (!templateFile || !dataFile) {
-        this.parseInfo = {
-          ok: false,
-          message: "ZIP file must contain template_vX.json and data_vX.csv.",
-        };
+        this.parseInfo = { ok: false, message: "ZIP file must contain template_vX.json and data_vX.csv." };
         return;
       }
 
@@ -961,15 +972,10 @@ export default {
         return;
       }
 
-      const csvRes = Papa.parse(csvText, {
-        skipEmptyLines: "greedy",
-      });
+      const csvRes = Papa.parse(csvText, { skipEmptyLines: "greedy" });
       const rows = csvRes.data || [];
       if (rows.length < 3) {
-        this.parseInfo = {
-          ok: false,
-          message: "CSV file must have 2 header rows + data.",
-        };
+        this.parseInfo = { ok: false, message: "CSV file must have 2 header rows + data." };
         return;
       }
 
@@ -992,9 +998,7 @@ export default {
       if (warnings.length) {
         this.parseInfo = {
           ok: false,
-          message: `File contains unknown subjects/visits: ${warnings.join(
-            "; "
-          )}. Merge is disabled to avoid data loss.`,
+          message: `File contains unknown subjects/visits: ${warnings.join("; ")}. Merge is disabled to avoid data loss.`,
         };
         return;
       }
@@ -1010,11 +1014,10 @@ export default {
         message: `File parsed. Rows: ${this.bundleRowCount}. Subjects: ${subjectIds.length}. Visits: ${visitNames.length}.`,
       };
 
-      // By default, keep left panel hidden to avoid overload
+      // By default, keep left panel hidden
       this.showImportDetails = false;
       this.showMergeSummary = false;
 
-      // Recompute conflicts based on full scope
       this.computeConflicts();
     },
 
@@ -1062,7 +1065,7 @@ export default {
         const key = `${sIdx}|${vIdx}|${groupIdx}`;
         if (!incomingEntries[key]) {
           incomingEntries[key] = {
-            study_id: this.studyId,
+            study_id: this.resolvedStudyId,
             subject_index: sIdx,
             visit_index: vIdx,
             group_index: groupIdx,
@@ -1087,9 +1090,7 @@ export default {
               field.title ||
               `f${fIdx}`;
             const trimmed = String(val).trim();
-            if (trimmed !== "") {
-              entry.data[secTitle][name] = trimmed;
-            }
+            if (trimmed !== "") entry.data[secTitle][name] = trimmed;
           });
         });
       }
@@ -1123,7 +1124,6 @@ export default {
         const incoming = this.incomingEntries[svgKey];
         const sIdx = incoming.subject_index;
         const vIdx = incoming.visit_index;
-        const gIdx = incoming.group_index;
 
         const subject = this.subjects[sIdx];
         const visit = this.visits[vIdx];
@@ -1147,21 +1147,14 @@ export default {
         for (const secTitle of allSections) {
           const exSec = exDict[secTitle] || {};
           const inSec = inDict[secTitle] || {};
-          const canons = new Set([
-            ...Object.keys(exSec),
-            ...Object.keys(inSec),
-          ]);
+          const canons = new Set([...Object.keys(exSec), ...Object.keys(inSec)]);
 
           for (const canon of canons) {
             const exVal = exSec[canon];
             const inVal = inSec[canon];
             if (!this.hasValue(exVal) && !this.hasValue(inVal)) continue;
 
-            if (
-              this.hasValue(exVal) &&
-              this.hasValue(inVal) &&
-              !this.valuesEqual(exVal, inVal)
-            ) {
+            if (this.hasValue(exVal) && this.hasValue(inVal) && !this.valuesEqual(exVal, inVal)) {
               const key = `${svgKey}|${secTitle}|${canon}`;
               if (conflictSeen.has(key)) continue;
               conflictSeen.add(key);
@@ -1187,6 +1180,7 @@ export default {
       this.conflicts = conflicts;
       this.decisions = {};
       this.selectedConflictSubject = "ALL";
+
       // Auto decisions based on version (higher version wins by default)
       for (const c of conflicts) {
         const eV = Number(c.existingVersion || 0);
@@ -1244,10 +1238,7 @@ export default {
             if (!baseDict[secTitle]) baseDict[secTitle] = {};
             const exSec = baseDict[secTitle];
             const inSec = inDict[secTitle] || {};
-            const canons = new Set([
-              ...Object.keys(exSec),
-              ...Object.keys(inSec),
-            ]);
+            const canons = new Set([...Object.keys(exSec), ...Object.keys(inSec)]);
 
             for (const canon of canons) {
               const exVal = exSec[canon];
@@ -1256,18 +1247,10 @@ export default {
               const hasIn = this.hasValue(inVal);
               const cKey = `${svgKey}|${secTitle}|${canon}`;
 
-              if (
-                hasEx &&
-                hasIn &&
-                !this.valuesEqual(exVal, inVal) &&
-                conflictKeySet.has(cKey)
-              ) {
+              if (hasEx && hasIn && !this.valuesEqual(exVal, inVal) && conflictKeySet.has(cKey)) {
                 const choice = this.decisions[cKey] || "existing";
-                if (choice === "incoming") {
-                  exSec[canon] = inVal;
-                } else {
-                  exSec[canon] = hasEx ? exVal : inVal;
-                }
+                if (choice === "incoming") exSec[canon] = inVal;
+                else exSec[canon] = hasEx ? exVal : inVal;
               } else {
                 // Non-conflict: never drop non-empty data
                 if (hasIn && !hasEx) exSec[canon] = inVal;
@@ -1279,7 +1262,7 @@ export default {
           }
 
           const payload = {
-            study_id: this.studyId,
+            study_id: this.resolvedStudyId,
             subject_index: sIdx,
             visit_index: vIdx,
             group_index: gIdx,
@@ -1289,20 +1272,19 @@ export default {
 
           if (existing?.id) {
             await axios.put(
-              `/forms/studies/${this.studyId}/data_entries/${existing.id}`,
+              `/forms/studies/${this.resolvedStudyId}/data_entries/${existing.id}`,
               payload,
               headers
             );
           } else {
             await axios.post(
-              `/forms/studies/${this.studyId}/data`,
+              `/forms/studies/${this.resolvedStudyId}/data`,
               payload,
               headers
             );
           }
         }
 
-        // reload entries and indexes
         await this.loadEntries();
         this.indexEntries();
         this.showDialogMessage("Merge completed successfully.");
@@ -1376,6 +1358,10 @@ export default {
   color: #000;
   border-color: #d6d6d6;
 }
+.icon-btn {
+  padding: 8px 10px;
+  line-height: 1;
+}
 .file-hidden {
   display: none;
 }
@@ -1393,13 +1379,36 @@ export default {
   text-decoration: underline;
 }
 
-/* Page shell */
-.merge-page {
+/* Page shell: default (standalone route) */
+.merge-page:not(.embedded):not(.expanded) {
   max-width: 1200px;
   margin: 24px auto;
   padding: 0 16px 72px;
 }
-.back-header-row {
+
+/* Embedded inside StudyDataEntry: fill parent and avoid outer page margins/padding */
+.merge-page.embedded:not(.expanded) {
+  width: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+/* Expanded: full-screen overlay */
+.merge-page.expanded {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  background: #ffffff;
+  width: 100%;
+  height: 100vh;
+  margin: 0;
+  padding: 12px 12px 72px;
+  overflow: auto;
+  box-sizing: border-box;
+}
+
+/* Header row */
+.header-row {
   position: relative;
   display: flex;
   align-items: center;
@@ -1407,9 +1416,9 @@ export default {
   min-height: 42px;
   margin-bottom: 12px;
 }
-.back-button-container {
+.header-actions {
   position: absolute;
-  left: 0;
+  right: 0;
   top: 50%;
   transform: translateY(-50%);
 }
@@ -1423,28 +1432,16 @@ export default {
 .top-bar {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-start;
   gap: 12px;
   padding: 12px 14px;
   margin-bottom: 12px;
-}
-.meta-title {
-  font-size: 16px;
-  color: #111827;
-}
-.meta-sub {
-  color: #4b5563;
-  margin-top: 4px;
-}
-.meta-stats {
-  color: #6b7280;
-  font-size: 13px;
-  margin-top: 2px;
 }
 .actions {
   display: flex;
   align-items: center;
   gap: 10px;
+  flex-wrap: wrap;
 }
 
 .parse-banner {
@@ -1503,6 +1500,11 @@ export default {
   grid-column: 1 / -1;
 }
 
+/* Embedded: prefer more space for main content */
+.merge-page.embedded .main-layout {
+  margin-top: 12px;
+}
+
 /* Sections */
 .section-header {
   display: flex;
@@ -1520,6 +1522,7 @@ export default {
   display: flex;
   gap: 8px;
   align-items: center;
+  flex-wrap: wrap;
 }
 .mt {
   margin-top: 12px;
@@ -1621,11 +1624,19 @@ export default {
   margin-top: 10px;
   max-height: 70vh;
   overflow: auto;
+  border-radius: 8px;
+}
+.merge-page.embedded .conflict-table-wrapper {
+  max-height: 52vh; /* better fit when embedded */
+}
+.merge-page.expanded .conflict-table-wrapper {
+  max-height: calc(100vh - 240px);
 }
 .conflict-table {
   width: 100%;
   border-collapse: collapse;
   font-size: 13px;
+  min-width: 860px; /* ensures horizontal scroll instead of crushing columns */
 }
 .conflict-table th,
 .conflict-table td {
@@ -1697,7 +1708,7 @@ export default {
   border: 1px solid #bbf7d0;
 }
 
-/* Sticky footer */
+/* Footer */
 .global-commit {
   position: fixed;
   left: 12px;
@@ -1713,6 +1724,14 @@ export default {
   border: 1px solid #e5e7eb;
   border-radius: 12px;
   box-shadow: 0 10px 25px rgba(16, 24, 40, 0.08);
+}
+.global-commit.embedded {
+  position: sticky; /* crucial for embedded view so content isn't "lost" */
+  left: auto;
+  right: auto;
+  bottom: 0;
+  margin-top: 12px;
+  z-index: 5;
 }
 .sel-summary {
   display: flex;
@@ -1745,6 +1764,12 @@ export default {
     flex-direction: column;
     align-items: flex-start;
     gap: 6px;
+  }
+  .header-actions {
+    right: 0;
+  }
+  .conflict-table {
+    min-width: 760px;
   }
 }
 </style>
