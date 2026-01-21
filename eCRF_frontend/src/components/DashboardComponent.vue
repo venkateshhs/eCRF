@@ -1,5 +1,14 @@
 <template>
-  <div :class="['dashboard-layout', { collapsed: sidebarCollapsed, 'import-open': showImportData }]">
+  <div
+    :class="[
+      'dashboard-layout',
+      {
+        collapsed: sidebarCollapsed && !hideSidebar,
+        'import-open': showImportData,
+        'sidebar-hidden': hideSidebar
+      }
+    ]"
+  >
     <!-- Header -->
     <header class="dashboard-header">
       <div class="logo-container">
@@ -15,8 +24,8 @@
       </div>
     </header>
 
-    <!-- Sidebar -->
-    <aside :class="['dashboard-sidebar', { collapsed: sidebarCollapsed }]">
+    <!-- Sidebar (HIDDEN for View Study + Add Data) -->
+    <aside v-if="!hideSidebar" :class="['dashboard-sidebar', { collapsed: sidebarCollapsed }]">
       <button type="button" class="hamburger-menu" @click="toggleSidebar" aria-label="Toggle sidebar">
         <span></span>
         <span></span>
@@ -53,7 +62,7 @@
     </aside>
 
     <!-- Main Content -->
-    <main :class="['dashboard-main', { expanded: sidebarCollapsed }]">
+    <main :class="['dashboard-main', { expanded: sidebarCollapsed && !hideSidebar }]">
       <!-- IMPORT STUDY (DATA) embedded in Dashboard -->
       <div v-if="$route.name === 'Dashboard' && showImportData">
         <div :class="['import-overlay', { maximized: importMaximized }]">
@@ -220,7 +229,7 @@
         </div>
       </div>
 
-      <router-view/>
+      <router-view />
     </main>
   </div>
 </template>
@@ -267,9 +276,14 @@ export default {
     },
     showImportData(val) {
       this.setPageNoXScroll(!!val);
-    }
+    },
   },
   computed: {
+    //  Hide sidebar ONLY on View Study + Add Data inside dashboard
+    hideSidebar() {
+      return this.$route.name === "StudyView" || this.$route.name === "DashboardAddData";
+    },
+
     currentUser() {
       return this.$store.getters.getUser || {};
     },
@@ -403,9 +417,12 @@ export default {
       });
     },
 
+    //  Add Data inside dashboard layout
     addData(study) {
-      this.$router.push({ name: "StudyDetail", params: { id: study.id } });
+      this.$router.push({ name: "DashboardAddData", params: { id: study.id } });
     },
+
+    // View Study inside dashboard layout (already)
     viewStudy(study) {
       this.$router.push({ name: "StudyView", params: { id: study.id } });
     },
@@ -454,6 +471,14 @@ export default {
   height: 100vh;
   font-family: "Inter", sans-serif;
   transition: grid-template-columns 0.3s ease;
+}
+
+/*  When sidebar should be hidden entirely (View Study / Add Data) */
+.dashboard-layout.sidebar-hidden {
+  grid-template-areas:
+    "header header"
+    "main main";
+  grid-template-columns: 0 1fr;
 }
 
 .dashboard-header {
@@ -553,13 +578,18 @@ export default {
 /* Main Content */
 .dashboard-main {
   grid-area: main;
-  padding: 30px;
+  padding: 20px;
   background: #fff;
   transition: margin-left 0.3s ease;
   min-width: 0;
 }
 .dashboard-main.expanded {
   margin-left: -150px;
+}
+
+/*  If sidebar hidden, ensure no funky shift */
+.dashboard-layout.sidebar-hidden .dashboard-main {
+  margin-left: 0 !important;
 }
 
 /* Study Management Heading + Subtitle (centered) */
@@ -865,6 +895,14 @@ export default {
   }
   .import-overlay {
     height: calc(100vh - 70px - 40px);
+  }
+
+  /*  Keep sidebar hidden behavior on mobile too */
+  .dashboard-layout.sidebar-hidden {
+    grid-template-columns: 0 1fr;
+    grid-template-areas:
+      "header header"
+      "main main";
   }
 }
 </style>

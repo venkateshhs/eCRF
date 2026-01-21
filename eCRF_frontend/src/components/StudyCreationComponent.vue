@@ -1213,7 +1213,7 @@ export default {
 
 <style scoped>
 .study-creation-container {
-  max-width: 800px;
+  max-width: none;
   margin: 0 auto;
   font-family: Arial, sans-serif;
 }

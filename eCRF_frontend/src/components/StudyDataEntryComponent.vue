@@ -3049,9 +3049,9 @@ export default {
 
 <style scoped>
 .study-data-container {
-  max-width: 960px;
+  max-width: none;
   margin: 24px auto;
-  padding: 24px;
+  padding: 10px;
   background: #ffffff;
   border-radius: 8px;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
