@@ -1,5 +1,14 @@
 <template>
-  <div :class="['dashboard-layout', { collapsed: sidebarCollapsed, 'import-open': showImportData }]">
+  <div
+    :class="[
+      'dashboard-layout',
+      {
+        collapsed: sidebarCollapsed && !hideSidebar,
+        'import-open': showImportData,
+        'sidebar-hidden': hideSidebar
+      }
+    ]"
+  >
     <!-- Header -->
     <header class="dashboard-header">
       <div class="logo-container">
@@ -11,13 +20,13 @@
           <div class="user-name" :title="userName">{{ userName }}</div>
           <div class="user-role" :title="role || '—'">{{ role || '—' }}</div>
         </div>
-        <button @click="logout" class="btn-minimal">Logout</button>
+        <button type="button" @click="logout" class="btn-minimal">Logout</button>
       </div>
     </header>
 
-    <!-- Sidebar -->
-    <aside :class="['dashboard-sidebar', { collapsed: sidebarCollapsed }]">
-      <button class="hamburger-menu" @click="toggleSidebar">
+    <!-- Sidebar (HIDDEN for View Study + Add Data) -->
+    <aside v-if="!hideSidebar" :class="['dashboard-sidebar', { collapsed: sidebarCollapsed }]">
+      <button type="button" class="hamburger-menu" @click="toggleSidebar" aria-label="Toggle sidebar">
         <span></span>
         <span></span>
         <span></span>
@@ -29,16 +38,23 @@
             v-if="isAdmin || isPI || isInvestigator"
             @click="setActiveSection('study-management')"
             class="nav-item"
+            tabindex="0"
+            @keydown.enter="setActiveSection('study-management')"
+            @keydown.space.prevent="setActiveSection('study-management')"
           >
-            <i :class="icons.book" v-if="sidebarCollapsed"></i>
+            <i :class="icons.book || 'fas fa-book'" v-if="sidebarCollapsed"></i>
             <span v-if="!sidebarCollapsed">Study Management</span>
           </li>
+
           <!-- User Management: visible to all roles -->
           <li
             @click="() => { setActiveSection(''); navigate('/dashboard/user-info') }"
             class="nav-item"
+            tabindex="0"
+            @keydown.enter="() => { setActiveSection(''); navigate('/dashboard/user-info') }"
+            @keydown.space.prevent="() => { setActiveSection(''); navigate('/dashboard/user-info') }"
           >
-            <i :class="icons.user" v-if="sidebarCollapsed"></i>
+            <i :class="icons.user || 'fas fa-user'" v-if="sidebarCollapsed"></i>
             <span v-if="!sidebarCollapsed">User Management</span>
           </li>
         </ul>
@@ -46,15 +62,15 @@
     </aside>
 
     <!-- Main Content -->
-    <main :class="['dashboard-main', { expanded: sidebarCollapsed }]">
+    <main :class="['dashboard-main', { expanded: sidebarCollapsed && !hideSidebar }]">
       <!-- IMPORT STUDY (DATA) embedded in Dashboard -->
       <div v-if="$route.name === 'Dashboard' && showImportData">
         <div :class="['import-overlay', { maximized: importMaximized }]">
           <div class="import-overlay-header">
             <div class="import-overlay-left">
-              <button class="btn-minimal" @click="closeImportData">
-              <span>Back</span>
-            </button>
+              <button type="button" class="btn-minimal" @click="closeImportData">
+                <span>Back</span>
+              </button>
             </div>
 
             <div class="import-overlay-center">
@@ -66,13 +82,14 @@
 
             <div class="import-overlay-right">
               <button
+                type="button"
                 class="btn-minimal icon-only"
                 @click="toggleImportMaximize"
                 :title="importMaximized ? 'Exit full screen' : 'Full screen'"
                 aria-label="Toggle full screen"
               >
                 <i
-                  :class="importMaximized ? icons.compress : icons.expand"
+                  :class="importMaximized ? (icons.compress || 'fas fa-compress') : (icons.expand || 'fas fa-expand')"
                   aria-hidden="true"
                 ></i>
               </button>
@@ -100,6 +117,7 @@
           <div v-if="actionStyle === 'cards'" class="primary-actions-cards">
             <button
               v-if="isAdmin || isPI"
+              type="button"
               class="action-card"
               @click="navigate('/dashboard/create-study')"
             >
@@ -109,6 +127,7 @@
 
             <button
               v-if="isAdmin || isPI || isInvestigator"
+              type="button"
               class="action-card"
               @click="toggleStudyOptions"
             >
@@ -118,6 +137,7 @@
 
             <button
               v-if="isAdmin || isPI || isInvestigator"
+              type="button"
               class="action-card"
               @click="openImportData"
             >
@@ -130,6 +150,7 @@
           <div v-else class="button-container">
             <button
               v-if="isAdmin || isPI"
+              type="button"
               @click="navigate('/dashboard/create-study')"
               class="btn-primary"
             >
@@ -138,6 +159,7 @@
 
             <button
               v-if="isAdmin || isPI || isInvestigator"
+              type="button"
               @click="toggleStudyOptions"
               class="btn-primary"
             >
@@ -146,6 +168,7 @@
 
             <button
               v-if="isAdmin || isPI || isInvestigator"
+              type="button"
               @click="openImportData"
               class="btn-primary"
             >
@@ -158,7 +181,7 @@
         <div v-if="showStudyOptions" class="study-dashboard">
           <div class="back-header-row">
             <div class="back-button-container">
-              <button @click="toggleStudyOptions" class="btn-minimal">Back</button>
+              <button type="button" @click="toggleStudyOptions" class="btn-minimal">Back</button>
             </div>
             <h2 class="existing-studies-title">Existing Studies</h2>
           </div>
@@ -171,7 +194,6 @@
                 <th>Created At</th>
                 <th>Updated At</th>
                 <th>Actions</th>
-                <th class="menu-col"></th>
               </tr>
             </thead>
             <tbody>
@@ -185,6 +207,7 @@
                   <div class="action-buttons">
                     <button
                       v-if="isAdmin || isPI || isInvestigator"
+                      type="button"
                       @click="addData(study)"
                       class="btn-minimal btn-equal"
                     >
@@ -192,6 +215,7 @@
                     </button>
                     <button
                       v-if="isAdmin || isPI || isInvestigator"
+                      type="button"
                       @click="viewStudy(study)"
                       class="btn-minimal btn-equal"
                     >
@@ -199,44 +223,13 @@
                     </button>
                   </div>
                 </td>
-
-                <td class="menu-cell">
-                  <div class="row-menu-wrap">
-                    <button
-                      class="icon-ellipsis"
-                      @click.stop="toggleRowMenu(study.id)"
-                      :aria-expanded="openMenuId === study.id ? 'true' : 'false'"
-                      aria-haspopup="menu"
-                      :aria-label="`More actions for ${study.study_name}`"
-                    >
-                      <i :class="icons.ellipsis" aria-hidden="true"></i>
-                    </button>
-
-                    <div
-                      v-if="openMenuId === study.id"
-                      class="menu-dropdown"
-                      role="menu"
-                    >
-                      <button class="menu-item" role="menuitem" @click="handleExportStudy(study)">
-                        Export Study Template
-                      </button>
-                      <button class="menu-item" role="menuitem" @click="handleDownloadStudy(study)">
-                        Download Study (ZIP)
-                      </button>
-                      <button class="menu-item" role="menuitem" @click="handleMergeStudy(study)">
-                        Merge study
-                      </button>
-                    </div>
-                  </div>
-                </td>
-
               </tr>
             </tbody>
           </table>
         </div>
       </div>
 
-      <router-view/>
+      <router-view />
     </main>
   </div>
 </template>
@@ -244,7 +237,6 @@
 <script>
 import axios from "axios";
 import icons from "@/assets/styles/icons";
-import { downloadStudyBundle } from "@/utils/studyDownload";
 import ImportStudy from "@/components/ImportStudy.vue";
 
 export default {
@@ -258,7 +250,6 @@ export default {
       studies: [],
       icons,
       actionStyle: "cards",
-      openMenuId: null,
 
       showImportData: false,
       importMaximized: false,
@@ -283,19 +274,22 @@ export default {
     "$route.query.view"() {
       this.syncFromRoute();
     },
-    // keep: optional global lock, but now we also fix the real cause (grid shrink)
     showImportData(val) {
       this.setPageNoXScroll(!!val);
-    }
+    },
   },
   computed: {
+    //  Hide sidebar ONLY on View Study + Add Data inside dashboard
+    hideSidebar() {
+      return this.$route.name === "StudyView" || this.$route.name === "DashboardAddData";
+    },
+
     currentUser() {
       return this.$store.getters.getUser || {};
     },
     role() {
       return this.currentUser.profile?.role || "";
     },
-    // Graceful username fallback chain
     userName() {
       const p = this.currentUser.profile || {};
       const firstLast = [p.first_name, p.last_name].filter(Boolean).join(" ").trim();
@@ -374,7 +368,6 @@ export default {
     },
 
     openImportData() {
-      this.openMenuId = null;
       this.showStudyOptions = false;
       this.showImportData = true;
       this.importMaximized = false;
@@ -424,9 +417,12 @@ export default {
       });
     },
 
+    //  Add Data inside dashboard layout
     addData(study) {
-      this.$router.push({ name: "StudyDetail", params: { id: study.id } });
+      this.$router.push({ name: "DashboardAddData", params: { id: study.id } });
     },
+
+    // View Study inside dashboard layout (already)
     viewStudy(study) {
       this.$router.push({ name: "StudyView", params: { id: study.id } });
     },
@@ -443,45 +439,8 @@ export default {
       this.$store.commit("setToken", null);
       this.$router.push("/login");
     },
-
-    toggleRowMenu(id) {
-      this.openMenuId = this.openMenuId === id ? null : id;
-    },
-    handleDocClick(e) {
-      if (!this.$el.contains(e.target)) {
-        this.openMenuId = null;
-      } else {
-        const btn = e.target.closest(".icon-ellipsis");
-        const dd = e.target.closest(".menu-dropdown");
-        if (!btn && !dd) this.openMenuId = null;
-      }
-    },
-    handleExportStudy(study) {
-      this.openMenuId = null;
-      this.$router.push(`/dashboard/export-study/${study.id}`);
-    },
-    handleMergeStudy(study) {
-      this.openMenuId = null;
-      this.$router.push(`/dashboard/merge-study/${study.id}`);
-    },
-    async handleDownloadStudy(study) {
-      this.openMenuId = null;
-      const token = this.$store.state.token;
-      if (!token) {
-        alert("Please log in again.");
-        this.$router.push("/login");
-        return;
-      }
-      try {
-        await downloadStudyBundle({ studyId: study.id, token });
-      } catch (e) {
-        console.error("Failed to download study bundle:", e);
-        alert("Failed to download study bundle.");
-      }
-    },
   },
   mounted() {
-    document.addEventListener("click", this.handleDocClick, true);
     this.syncFromRoute();
     this.setPageNoXScroll(!!this.showImportData);
 
@@ -490,7 +449,6 @@ export default {
     }
   },
   beforeUnmount() {
-    document.removeEventListener("click", this.handleDocClick, true);
     this.setPageNoXScroll(false);
   },
 };
@@ -513,6 +471,14 @@ export default {
   height: 100vh;
   font-family: "Inter", sans-serif;
   transition: grid-template-columns 0.3s ease;
+}
+
+/*  When sidebar should be hidden entirely (View Study / Add Data) */
+.dashboard-layout.sidebar-hidden {
+  grid-template-areas:
+    "header header"
+    "main main";
+  grid-template-columns: 0 1fr;
 }
 
 .dashboard-header {
@@ -612,15 +578,18 @@ export default {
 /* Main Content */
 .dashboard-main {
   grid-area: main;
-  padding: 30px;
+  padding: 20px;
   background: #fff;
   transition: margin-left 0.3s ease;
-
-  /* allow grid item to shrink; prevents wide tables from expanding whole page */
   min-width: 0;
 }
 .dashboard-main.expanded {
   margin-left: -150px;
+}
+
+/*  If sidebar hidden, ensure no funky shift */
+.dashboard-layout.sidebar-hidden .dashboard-main {
+  margin-left: 0 !important;
 }
 
 /* Study Management Heading + Subtitle (centered) */
@@ -781,65 +750,6 @@ export default {
   text-align: center;
 }
 
-/* menu column */
-.study-table th.menu-col,
-.study-table td.menu-cell {
-  width: 56px;
-  text-align: right;
-}
-
-/* 3-dot icon + dropdown */
-.row-menu-wrap {
-  position: relative;
-  display: inline-block;
-}
-.icon-ellipsis {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  height: 34px;
-  width: 36px;
-  border: 1px solid #e0e0e0;
-  border-radius: 6px;
-  background: #fff;
-  cursor: pointer;
-  transition: background 0.2s ease, border-color 0.2s ease;
-}
-.icon-ellipsis:hover {
-  background: #f3f4f6;
-  border-color: #d6d6d6;
-}
-.icon-ellipsis i {
-  font-size: 14px;
-  color: #555;
-}
-.menu-dropdown {
-  position: absolute;
-  right: 0;
-  top: 40px;
-  min-width: 160px;
-  background: #fff;
-  border: 1px solid #e5e7eb;
-  border-radius: 8px;
-  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.08);
-  padding: 6px;
-  z-index: 5;
-}
-.menu-item {
-  width: 100%;
-  text-align: left;
-  background: none;
-  border: none;
-  padding: 8px 10px;
-  border-radius: 6px;
-  font-size: 14px;
-  color: #111827;
-  cursor: pointer;
-}
-.menu-item:hover {
-  background: #f3f4f6;
-}
-
 /* Uniform minimal button */
 .btn-minimal {
   background: none;
@@ -872,14 +782,12 @@ export default {
 .import-overlay {
   display: flex;
   flex-direction: column;
-
   height: calc(100vh - 70px - 60px);
   border: 1px solid #e5e7eb;
   border-radius: 12px;
   background: #fff;
   box-shadow: 0 10px 25px rgba(16, 24, 40, 0.06);
   overflow: hidden;
-
   max-width: 100%;
   min-width: 0;
   width: 100%;
@@ -902,10 +810,7 @@ export default {
   background: #fff;
   border-bottom: 1px solid #e5e7eb;
   display: grid;
-
-  /* prevents center content from expanding the whole header width */
   grid-template-columns: minmax(0, 1fr) minmax(0, 720px) minmax(0, 1fr);
-
   align-items: center;
   padding: 10px 12px;
 }
@@ -917,7 +822,6 @@ export default {
   min-width: 0;
 }
 
-/* two-line title/subtitle */
 .import-overlay-center {
   display: flex;
   flex-direction: column;
@@ -952,7 +856,7 @@ export default {
   max-width: 720px;
   line-height: 1.3;
   padding: 0 8px;
-  white-space: normal; /* allow wrap */
+  white-space: normal;
 }
 
 .import-overlay-content {
@@ -961,12 +865,10 @@ export default {
   overflow-y: auto;
   overflow-x: hidden;
   padding: 12px;
-
   max-width: 100%;
   min-width: 0;
 }
 
-/* Ensure embedded ImportStudy respects container width */
 .import-overlay-content :deep(.import-study) {
   max-width: none;
   width: 100%;
@@ -974,12 +876,10 @@ export default {
   min-width: 0;
 }
 
-/* Defensive */
 .import-overlay-content :deep(table) {
   max-width: 100%;
 }
 
-/* Responsive */
 @media (max-width: 768px) {
   .dashboard-layout {
     grid-template-columns: 70px 1fr;
@@ -995,6 +895,14 @@ export default {
   }
   .import-overlay {
     height: calc(100vh - 70px - 40px);
+  }
+
+  /*  Keep sidebar hidden behavior on mobile too */
+  .dashboard-layout.sidebar-hidden {
+    grid-template-columns: 0 1fr;
+    grid-template-areas:
+      "header header"
+      "main main";
   }
 }
 </style>
