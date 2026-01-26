@@ -266,9 +266,37 @@
     <!-- STEP 7: Infer + Preview -->
     <section class="card">
       <h2>7) Infer structure</h2>
-      <button class="btn" @click="inferStructure" :disabled="!mapping.subject.idCol">
-        Infer structure
-      </button>
+
+      <div class="infer-controls">
+        <button class="btn" @click="inferStructure" :disabled="!mapping.subject.idCol">
+          Infer structure
+        </button>
+
+        <div class="bids-toggle" :class="{ disabled: saving }">
+          <button
+          type="button"
+          class="toggle-btn"
+          :class="{ on: createBidsOnImport }"
+          :disabled="saving"
+          @click="createBidsOnImport = !createBidsOnImport"
+          :title="createBidsOnImport ? 'BIDS folder creation enabled' : 'BIDS folder creation disabled'"
+        >
+          <i :class="createBidsOnImport ? icons.toggleOn : icons.toggleOff"></i>
+        </button>
+
+
+          <div class="bids-toggle-text">
+            <div class="bids-question">
+              Do you want to create BIDS data folder for imported study data?
+            </div>
+
+            <div class="bids-warning">
+              <i :class="icons.info"></i>
+              <span>Creating folder sturcture for larger data files may take lot of time.</span>
+            </div>
+          </div>
+        </div>
+      </div>
 
       <div v-if="structureReady" class="structure">
         <div class="chips">
@@ -357,6 +385,7 @@ import Papa from "papaparse";
 import axios from "axios";
 import yaml from "js-yaml";
 import { useStore } from "vuex";
+import icons from "@/assets/styles/icons";
 
 export default {
   name: "ImportStudy",
@@ -366,6 +395,11 @@ export default {
   },
   data() {
     return {
+      icons,
+
+      // BIDS folder creation toggle (default OFF)
+      createBidsOnImport: false,
+
       // file/preview
       fileName: "",
       headers: [],
@@ -901,6 +935,9 @@ export default {
         return;
       }
 
+      const createBids = !!this.createBidsOnImport;
+      const createBidsQS = `create_bids=${createBids ? 1 : 0}`;
+
       try {
         this.saving = true;
 
@@ -944,8 +981,9 @@ export default {
           study_content: { study_data }
         };
 
+        // pass create_bids flag to study creation
         const { data: created } = await axios.post(
-          "/forms/studies/",
+          `/forms/studies/?${createBidsQS}`,
           createPayload,
           { headers: { Authorization: `Bearer ${this.token}` } }
         );
@@ -973,7 +1011,7 @@ export default {
 
         const postBulk = async (chunk) => {
           const resp = await axios.post(
-            `/forms/studies/${studyId}/data/bulk`,
+            `/forms/studies/${studyId}/data/bulk?${createBidsQS}`,   // gate BIDS mirroring here
             { entries: chunk },
             { headers: { Authorization: `Bearer ${this.token}` } }
           );
@@ -1053,6 +1091,9 @@ export default {
       this.failures = [];
       this.saveError = "";
       this.successStudyId = null;
+
+      // keep default OFF on new file
+      this.createBidsOnImport = false;
       // DO NOT clear studyMeta so user-typed values persist
     },
 
@@ -1164,4 +1205,94 @@ input, select { padding:10px; border:1px solid #ddd; border-radius:8px; }
 .pillbox { display:flex; flex-wrap:wrap; gap:8px; margin-top: 6px; min-width:0; }
 .pill { border:1px solid #ddd; padding:6px 8px; border-radius:999px; background:#fff; font-size:12px; }
 .select-all { display:flex; gap:8px; align-items:center; margin-top:8px; }
+
+/* NEW: Infer row controls */
+.infer-controls {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.bids-toggle {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 8px 10px;
+  background: #fff;
+  border: 1px solid #eee;
+  border-radius: 10px;
+  min-width: 260px;
+  max-width: 560px;
+}
+
+.bids-toggle.disabled {
+  opacity: .6;
+}
+
+/* BIDS toggle button */
+.toggle-btn {
+  border: none;
+  background: transparent;
+  padding: 6px 10px;
+  border-radius: 999px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+/* BIGGER toggle icon */
+.toggle-btn i {
+  font-size: 26px;   /* increased size */
+  line-height: 1;
+}
+
+/* ON state: blue background */
+.toggle-btn.on {
+  background-color: #2f6fed;      /* project primary blue */
+  box-shadow: 0 0 0 2px rgba(47, 111, 237, 0.25);
+}
+
+/* ON state icon color */
+.toggle-btn.on i {
+  color: #ffffff;
+}
+
+/* OFF state icon color */
+.toggle-btn:not(.on) i {
+  color: #9ca3af; /* subtle gray */
+}
+
+/* Disabled state */
+.toggle-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+
+.bids-toggle-text {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.bids-question {
+  font-size: 12px;
+  color: #333;
+}
+
+.bids-warning {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  font-size: 12px;
+  color: #777;
+}
+
+.bids-warning i {
+  font-size: 14px;
+}
 </style>
