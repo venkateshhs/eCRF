@@ -292,7 +292,7 @@
 
             <div class="bids-warning">
               <i :class="icons.info"></i>
-              <span>Creating folder sturcture for larger data files may take lot of time.</span>
+              <span>Creating folder structure for larger data files may take lot of time.</span>
             </div>
           </div>
         </div>
