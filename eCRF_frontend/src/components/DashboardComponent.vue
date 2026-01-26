@@ -24,7 +24,7 @@
       </div>
     </header>
 
-    <!-- Sidebar (HIDDEN for View Study + Add Data) -->
+    <!-- Sidebar (HIDDEN for View Study + Add Data + Scratch Form) -->
     <aside v-if="!hideSidebar" :class="['dashboard-sidebar', { collapsed: sidebarCollapsed }]">
       <button type="button" class="hamburger-menu" @click="toggleSidebar" aria-label="Toggle sidebar">
         <span></span>
@@ -48,11 +48,11 @@
 
           <!-- User Management: visible to all roles -->
           <li
-            @click="() => { setActiveSection(''); navigate('/dashboard/user-info') }"
+            @click="() => { setActiveSection(''); navigate({ name: 'UserInfo' }) }"
             class="nav-item"
             tabindex="0"
-            @keydown.enter="() => { setActiveSection(''); navigate('/dashboard/user-info') }"
-            @keydown.space.prevent="() => { setActiveSection(''); navigate('/dashboard/user-info') }"
+            @keydown.enter="() => { setActiveSection(''); navigate({ name: 'UserInfo' }) }"
+            @keydown.space.prevent="() => { setActiveSection(''); navigate({ name: 'UserInfo' }) }"
           >
             <i :class="icons.user || 'fas fa-user'" v-if="sidebarCollapsed"></i>
             <span v-if="!sidebarCollapsed">User Management</span>
@@ -63,173 +63,177 @@
 
     <!-- Main Content -->
     <main :class="['dashboard-main', { expanded: sidebarCollapsed && !hideSidebar }]">
-      <!-- IMPORT STUDY (DATA) embedded in Dashboard -->
-      <div v-if="$route.name === 'Dashboard' && showImportData">
-        <div :class="['import-overlay', { maximized: importMaximized }]">
-          <div class="import-overlay-header">
-            <div class="import-overlay-left">
-              <button type="button" class="btn-minimal" @click="closeImportData">
-                <span>Back</span>
-              </button>
-            </div>
+      <!-- Only show Dashboard home content when you're actually ON Dashboard route -->
+      <template v-if="$route.name === 'Dashboard'">
+        <!-- IMPORT STUDY (DATA) embedded in Dashboard -->
+        <div v-if="showImportData">
+          <div :class="['import-overlay', { maximized: importMaximized }]">
+            <div class="import-overlay-header">
+              <div class="import-overlay-left">
+                <button type="button" class="btn-minimal" @click="closeImportData">
+                  <span>Back</span>
+                </button>
+              </div>
 
-            <div class="import-overlay-center">
-              <div class="import-overlay-title">Import Study (Data)</div>
-              <div class="import-overlay-subtitle">
-                Upload a CSV or Excel file and map columns to create a study and import entries (template first, then data).
+              <div class="import-overlay-center">
+                <div class="import-overlay-title">Import Study (Data)</div>
+                <div class="import-overlay-subtitle">
+                  Upload a CSV or Excel file and map columns to create a study and import entries (template first, then data).
+                </div>
+              </div>
+
+              <div class="import-overlay-right">
+                <button
+                  type="button"
+                  class="btn-minimal icon-only"
+                  @click="toggleImportMaximize"
+                  :title="importMaximized ? 'Exit full screen' : 'Full screen'"
+                  aria-label="Toggle full screen"
+                >
+                  <i
+                    :class="importMaximized ? (icons.compress || 'fas fa-compress') : (icons.expand || 'fas fa-expand')"
+                    aria-hidden="true"
+                  ></i>
+                </button>
               </div>
             </div>
 
-            <div class="import-overlay-right">
+            <div class="import-overlay-content">
+              <ImportStudy />
+            </div>
+          </div>
+        </div>
+
+        <!-- Dashboard home: Study Management -->
+        <div v-else-if="activeSection === 'study-management'">
+          <div class="study-management-header">
+            <h1 class="study-management-title">Study Management</h1>
+            <p class="study-management-subtitle">
+              Create a new study, import data, or open an existing one to manage and collect data.
+            </p>
+          </div>
+
+          <!-- Primary Actions -->
+          <div v-if="!showStudyOptions">
+            <!-- Cards -->
+            <div v-if="actionStyle === 'cards'" class="primary-actions-cards">
               <button
+                v-if="isAdmin || isPI"
                 type="button"
-                class="btn-minimal icon-only"
-                @click="toggleImportMaximize"
-                :title="importMaximized ? 'Exit full screen' : 'Full screen'"
-                aria-label="Toggle full screen"
+                class="action-card"
+                @click="navigate({ name: 'CreateStudy' })"
               >
-                <i
-                  :class="importMaximized ? (icons.compress || 'fas fa-compress') : (icons.expand || 'fas fa-expand')"
-                  aria-hidden="true"
-                ></i>
+                <span class="action-card-title">Create Study</span>
+                <span class="action-card-desc">Start a new protocol and forms</span>
+              </button>
+
+              <button
+                v-if="isAdmin || isPI || isInvestigator"
+                type="button"
+                class="action-card"
+                @click="toggleStudyOptions"
+              >
+                <span class="action-card-title">Open Existing Study</span>
+                <span class="action-card-desc">Continue work on an existing study</span>
+              </button>
+
+              <button
+                v-if="isAdmin || isPI || isInvestigator"
+                type="button"
+                class="action-card"
+                @click="openImportData"
+              >
+                <span class="action-card-title">Import Study (Data)</span>
+                <span class="action-card-desc">Ingest participant data from CSV/Excel</span>
+              </button>
+            </div>
+
+            <!-- Wide buttons -->
+            <div v-else class="button-container">
+              <button
+                v-if="isAdmin || isPI"
+                type="button"
+                @click="navigate({ name: 'CreateStudy' })"
+                class="btn-primary"
+              >
+                Create Study
+              </button>
+
+              <button
+                v-if="isAdmin || isPI || isInvestigator"
+                type="button"
+                @click="toggleStudyOptions"
+                class="btn-primary"
+              >
+                Open Existing Study
+              </button>
+
+              <button
+                v-if="isAdmin || isPI || isInvestigator"
+                type="button"
+                @click="openImportData"
+                class="btn-primary"
+              >
+                Import Study (Data)
               </button>
             </div>
           </div>
 
-          <div class="import-overlay-content">
-            <ImportStudy />
-          </div>
-        </div>
-      </div>
-
-      <!-- Dashboard home: Study Management -->
-      <div v-else-if="$route.name === 'Dashboard' && activeSection === 'study-management'">
-        <div class="study-management-header">
-          <h1 class="study-management-title">Study Management</h1>
-          <p class="study-management-subtitle">
-            Create a new study, import data, or open an existing one to manage and collect data.
-          </p>
-        </div>
-
-        <!-- Primary Actions -->
-        <div v-if="!showStudyOptions">
-          <!-- Cards -->
-          <div v-if="actionStyle === 'cards'" class="primary-actions-cards">
-            <button
-              v-if="isAdmin || isPI"
-              type="button"
-              class="action-card"
-              @click="navigate('/dashboard/create-study')"
-            >
-              <span class="action-card-title">Create Study</span>
-              <span class="action-card-desc">Start a new protocol and forms</span>
-            </button>
-
-            <button
-              v-if="isAdmin || isPI || isInvestigator"
-              type="button"
-              class="action-card"
-              @click="toggleStudyOptions"
-            >
-              <span class="action-card-title">Open Existing Study</span>
-              <span class="action-card-desc">Continue work on an existing study</span>
-            </button>
-
-            <button
-              v-if="isAdmin || isPI || isInvestigator"
-              type="button"
-              class="action-card"
-              @click="openImportData"
-            >
-              <span class="action-card-title">Import Study (Data)</span>
-              <span class="action-card-desc">Ingest participant data from CSV/Excel</span>
-            </button>
-          </div>
-
-          <!-- Wide buttons -->
-          <div v-else class="button-container">
-            <button
-              v-if="isAdmin || isPI"
-              type="button"
-              @click="navigate('/dashboard/create-study')"
-              class="btn-primary"
-            >
-              Create Study
-            </button>
-
-            <button
-              v-if="isAdmin || isPI || isInvestigator"
-              type="button"
-              @click="toggleStudyOptions"
-              class="btn-primary"
-            >
-              Open Existing Study
-            </button>
-
-            <button
-              v-if="isAdmin || isPI || isInvestigator"
-              type="button"
-              @click="openImportData"
-              class="btn-primary"
-            >
-              Import Study (Data)
-            </button>
-          </div>
-        </div>
-
-        <!-- Existing Studies Table -->
-        <div v-if="showStudyOptions" class="study-dashboard">
-          <div class="back-header-row">
-            <div class="back-button-container">
-              <button type="button" @click="toggleStudyOptions" class="btn-minimal">Back</button>
+          <!-- Existing Studies Table -->
+          <div v-if="showStudyOptions" class="study-dashboard">
+            <div class="back-header-row">
+              <div class="back-button-container">
+                <button type="button" @click="toggleStudyOptions" class="btn-minimal">Back</button>
+              </div>
+              <h2 class="existing-studies-title">Existing Studies</h2>
             </div>
-            <h2 class="existing-studies-title">Existing Studies</h2>
+
+            <table class="study-table">
+              <thead>
+                <tr>
+                  <th>Study Name</th>
+                  <th>Description</th>
+                  <th>Created At</th>
+                  <th>Updated At</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="study in studies" :key="study.id">
+                  <td>{{ study.study_name }}</td>
+                  <td>{{ study.study_description }}</td>
+                  <td>{{ formatDateTime(study.created_at) }}</td>
+                  <td>{{ formatDateTime(study.updated_at) }}</td>
+
+                  <td class="actions-cell">
+                    <div class="action-buttons">
+                      <button
+                        v-if="isAdmin || isPI || isInvestigator"
+                        type="button"
+                        @click="addData(study)"
+                        class="btn-minimal btn-equal"
+                      >
+                        Add Data
+                      </button>
+                      <button
+                        v-if="isAdmin || isPI || isInvestigator"
+                        type="button"
+                        @click="viewStudy(study)"
+                        class="btn-minimal btn-equal"
+                      >
+                        View Study
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
           </div>
-
-          <table class="study-table">
-            <thead>
-              <tr>
-                <th>Study Name</th>
-                <th>Description</th>
-                <th>Created At</th>
-                <th>Updated At</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="study in studies" :key="study.id">
-                <td>{{ study.study_name }}</td>
-                <td>{{ study.study_description }}</td>
-                <td>{{ formatDateTime(study.created_at) }}</td>
-                <td>{{ formatDateTime(study.updated_at) }}</td>
-
-                <td class="actions-cell">
-                  <div class="action-buttons">
-                    <button
-                      v-if="isAdmin || isPI || isInvestigator"
-                      type="button"
-                      @click="addData(study)"
-                      class="btn-minimal btn-equal"
-                    >
-                      Add Data
-                    </button>
-                    <button
-                      v-if="isAdmin || isPI || isInvestigator"
-                      type="button"
-                      @click="viewStudy(study)"
-                      class="btn-minimal btn-equal"
-                    >
-                      View Study
-                    </button>
-                  </div>
-                </td>
-              </tr>
-            </tbody>
-          </table>
         </div>
-      </div>
+      </template>
 
-      <router-view />
+      <!-- Child routes render here (CreateStudy / StudyView / AddData / ScratchForm etc.) -->
+      <router-view v-else />
     </main>
   </div>
 </template>
@@ -279,9 +283,13 @@ export default {
     },
   },
   computed: {
-    //  Hide sidebar ONLY on View Study + Add Data inside dashboard
+    // Hide dashboard sidebar on View Study + Add Data + Scratch Form
     hideSidebar() {
-      return this.$route.name === "StudyView" || this.$route.name === "DashboardAddData";
+      return (
+        this.$route.name === "StudyView" ||
+        this.$route.name === "DashboardAddData" ||
+        this.$route.name === "CreateFormScratch"
+      );
     },
 
     currentUser() {
@@ -319,7 +327,14 @@ export default {
     },
 
     syncFromRoute() {
-      if (this.$route.name !== "Dashboard") return;
+      // Only apply dashboard home state sync when route is Dashboard itself
+      if (this.$route.name !== "Dashboard") {
+        // ensure overlay scroll lock never leaks into child routes
+        this.showImportData = false;
+        this.importMaximized = false;
+        this.setPageNoXScroll(false);
+        return;
+      }
 
       const view = String(this.$route.query.view || "");
       if (view === "import-data") {
@@ -396,7 +411,7 @@ export default {
         });
         this.studies = data;
       } catch (e) {
-        console.error('Failed to load studies:', e);
+        console.error("Failed to load studies:", e);
         if (e.response?.status === 401) {
           alert("Session expired.");
           this.$router.push("/login");
@@ -405,6 +420,7 @@ export default {
         }
       }
     },
+
     formatDateTime(d) {
       if (!d) return "";
       return new Date(d).toLocaleString("en-GB", {
@@ -427,6 +443,7 @@ export default {
       this.$router.push({ name: "StudyView", params: { id: study.id } });
     },
 
+    // accepts either string path or route object
     navigate(to) {
       this.activeSection = "";
       this.showImportData = false;
@@ -473,7 +490,7 @@ export default {
   transition: grid-template-columns 0.3s ease;
 }
 
-/*  When sidebar should be hidden entirely (View Study / Add Data) */
+/* When sidebar should be hidden entirely (View Study / Add Data / Scratch Form) */
 .dashboard-layout.sidebar-hidden {
   grid-template-areas:
     "header header"
