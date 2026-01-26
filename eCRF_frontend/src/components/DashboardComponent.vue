@@ -12,7 +12,17 @@
     <!-- Header -->
     <header class="dashboard-header">
       <div class="logo-container">
-        <img src="../assets/Logo_CaseE.png" alt="Logo" class="logo" />
+        <!-- Make logo clickable and route to /dashboard -->
+        <img
+          src="../assets/Logo_CaseE.png"
+          alt="Logo"
+          class="logo"
+          role="button"
+          tabindex="0"
+          @click="goToDashboardHome"
+          @keydown.enter.prevent="goToDashboardHome"
+          @keydown.space.prevent="goToDashboardHome"
+        />
       </div>
 
       <div class="user-actions">
@@ -326,6 +336,12 @@ export default {
       document.body.classList.toggle("no-x-scroll", on);
     },
 
+    // Logo click should always take user to /dashboard
+    goToDashboardHome() {
+      // no reload; just route to dashboard
+      this.$router.push({ path: "/dashboard" }).catch(() => null);
+    },
+
     syncFromRoute() {
       // Only apply dashboard home state sync when route is Dashboard itself
       if (this.$route.name !== "Dashboard") {
@@ -510,6 +526,11 @@ export default {
 
 .logo-container img {
   width: 110px;
+}
+
+/*  make it feel clickable without changing layout */
+.logo-container .logo {
+  cursor: pointer;
 }
 
 /* User area */
