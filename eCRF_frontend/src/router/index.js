@@ -25,11 +25,25 @@ const routes = [
     component: DashboardComponent,
     children: [
       { path: "user-info", name: "UserInfo", component: UserInfoComponent },
-      { path: "create-study/:id?", name: "CreateStudy", component: StudyCreationComponent, props: true },
-      //{ path: "create-form", name: "CreateForm", component: CreateFormComponent },
+
+      // Create / Edit Study INSIDE dashboard layout
+      {
+        path: "create-study/:id?",
+        name: "CreateStudy",
+        component: StudyCreationComponent,
+        props: true,
+      },
+
       { path: "analytics", name: "Analytics", component: AnalyticsComponent },
 
-      // Add Data inside Dashboard layout (header/sidebar stay)
+      // MOVE ScratchForm INSIDE dashboard layout (same URL as before)
+      {
+        path: "create-form-scratch",
+        name: "CreateFormScratch",
+        component: ScratchFormComponent,
+      },
+
+      // Add Data inside Dashboard layout
       {
         path: "studies/:id/add-data",
         name: "DashboardAddData",
@@ -37,7 +51,7 @@ const routes = [
         props: true,
       },
 
-
+      // View Study inside Dashboard layout
       {
         path: "studies/:id/view",
         name: "StudyView",
@@ -53,16 +67,16 @@ const routes = [
   //    component: YamlViewerComponent,
   //    props: true,
   //  },
+
   {
-    path: "/dashboard/create-form-scratch",
-    name: "CreateFormScratch",
-    component: ScratchFormComponent,
-  },
-  {
-    path: "/studies/:id",
-    name: "StudyDetail",
-    component: StudyDataEntryComponent,
-  },
+  path: "/studies/:id",
+  name: "StudyDetail",
+  redirect: (to) => ({
+    name: "DashboardAddData",
+    params: { id: to.params.id },
+    query: to.query,
+  }),
+},
   {
     path: "/settings",
     name: "StudySettings",
@@ -73,22 +87,32 @@ const routes = [
     name: "SharedForm",
     component: StudyDataEntryComponent,
   },
-
   {
     path: "/dashboard/study/:id/data",
     name: "StudyDataDashboard",
     component: () => import("@/components/StudyDataDashboard.vue"),
     meta: { requiresAuth: true },
   },
-
-  { path: "/dashboard/export-study/:id", name: "ExportStudy", component: () => import("@/components/ExportStudy.vue") },
+  {
+  path: "/dashboard/export-study/:id",
+  name: "ExportStudy",
+  redirect: (to) => ({
+    name: "StudyView",
+    params: { id: to.params.id },
+    query: { ...to.query, tab: "bids", export: "1" },
+  }),
+},
 
   {
-    path: "/dashboard/merge-study/:id",
-    name: "MergeStudy",
-    component: () => import("@/components/MergeStudy.vue"),
-    props: true,
-  },
+  path: "/dashboard/merge-study/:id",
+  name: "MergeStudy",
+  redirect: (to) => ({
+    name: "DashboardAddData",
+    params: { id: to.params.id },
+    query: { ...to.query, merge: "1" },
+  }),
+},
+
 
   //  {
   //    path: "/studies/:id",

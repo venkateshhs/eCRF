@@ -108,7 +108,7 @@
       <!-- Merge Study panel (replaces matrix within the same container) -->
       <section v-else class="merge-panel">
         <!-- MergeStudy already has its own back button; no extra title/back here -->
-        <MergeStudy :studyId="studyId" :returnTo="`/studies/${studyId}`" />
+        <MergeStudy :studyId="studyId" :returnTo="`/dashboard/studies/${studyId}/add-data`" />
       </section>
     </template>
 
@@ -823,20 +823,33 @@ export default {
   methods: {
     // --- Merge Study controls ---
 
+    // --- Merge Study controls ---
     openMergeStudy() {
       if (this.isShared) return;
-      const id = this.studyId || this.$route.params.id;
+      const id = this.studyId || Number(this.$route.params.id);
+
+      // Stay INSIDE dashboard layout and only toggle query
       this.$router.push({
-        path: `/studies/${id}`,
+        name: "DashboardAddData",
+        params: { id },
         query: { ...this.$route.query, merge: "1" },
       });
     },
-     closeMergeStudy() {
-    const id = this.studyId || this.$route.params.id;
-    const q = { ...this.$route.query };
-    delete q.merge;
-    this.$router.push({ path: `/studies/${id}`, query: q });
-  },
+
+    closeMergeStudy() {
+      const id = this.studyId || Number(this.$route.params.id);
+
+      const q = { ...this.$route.query };
+      delete q.merge;
+
+      // Go back to the Add Data selection view (same screen with header)
+      this.$router.push({
+        name: "DashboardAddData",
+        params: { id },
+        query: q,
+      });
+    },
+
 
     safeVersionParams(v) {
       const n = Number(v);

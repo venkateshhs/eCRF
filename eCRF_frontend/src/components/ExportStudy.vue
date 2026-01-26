@@ -1,9 +1,10 @@
 <template>
-  <div class="export-container">
-    <div class="export-card">
+  <div class="export-container" :class="{ embedded }">
+    <div class="export-card" :class="{ embedded }">
       <!-- Header row -->
-      <div class="header-row">
-        <button class="btn-minimal" type="button" @click="goBack">Back</button>
+      <div class="header-row" :class="{ 'no-back': embedded }">
+        <button v-if="!embedded" class="btn-minimal" type="button" @click="goBack">Back</button>
+
         <div class="title-wrap">
           <h1 class="page-title">Export Study</h1>
           <div class="study-subtitle" :title="studyName">{{ studyName || "—" }}</div>
@@ -135,11 +136,16 @@ import axios from "axios";
 
 export default {
   name: "ExportStudy",
+  props: {
+    embedded: { type: Boolean, default: false },
+    studyId: { type: [Number, String], default: null },
+  },
+  emits: ["close"],
   data() {
     return {
       loading: true,
       error: null,
-      studyId: null,
+      studyIdLocal: null,
       studyName: "",
       studyMeta: {},          // holds backend metadata (including created_by)
       me: null,               // current user
@@ -217,11 +223,26 @@ export default {
       return Array.from(titles);
     },
   },
-  methods: {
-    goBack() {
-      this.$router.back();
+  watch: {
+    studyId: {
+      immediate: false,
+      handler() {
+        this.loadAll();
+      },
     },
-    // --- Helpers for ids/titles/names ---
+  },
+  methods: {
+    resolvedStudyId() {
+      const fromProp = this.studyId != null ? this.studyId : null;
+      const fromRoute = this.$route?.params?.id;
+      return Number(fromProp != null ? fromProp : fromRoute || 0) || null;
+    },
+
+    goBack() {
+      if (this.embedded) this.$emit("close");
+      else this.$router.back();
+    },
+
     subjectId(s, idx) {
       return String(s?.id || s?.subjectId || s?.label || idx + 1).trim();
     },
@@ -340,8 +361,9 @@ export default {
       this.loading = true;
       this.error = null;
       try {
-        const id = Number(this.$route.params.id || 0);
-        this.studyId = id || null;
+        const id = this.resolvedStudyId();
+        this.studyIdLocal = id;
+
         const token = this.token;
         const resp = await axios.get(`/forms/studies/${id}`, {
           headers: { Authorization: `Bearer ${token}` },
@@ -378,25 +400,9 @@ export default {
 
     // --- Group anonymisation helpers ---
     buildAnonGroupNames(count) {
-      const base = [
-        "Arm A",
-        "Arm B",
-        "Arm C",
-        "Arm D",
-        "Arm E",
-        "Arm F",
-        "Arm G",
-        "Arm H",
-        "Arm I",
-        "Arm J",
-        "Arm K",
-        "Arm L",
-      ];
+      const base = ["Arm A","Arm B","Arm C","Arm D","Arm E","Arm F","Arm G","Arm H","Arm I","Arm J","Arm K","Arm L"];
       const out = [];
-      for (let i = 0; i < count; i++) {
-        if (i < base.length) out.push(base[i]);
-        else out.push(`Arm ${i + 1}`);
-      }
+      for (let i = 0; i < count; i++) out.push(i < base.length ? base[i] : `Arm ${i + 1}`);
       return out;
     },
 
@@ -406,53 +412,28 @@ export default {
 
       const shouldAnonymize = !this.canSeeGroups || this.anonymizeGroups;
 
-      if (
-        !shouldAnonymize ||
-        !Array.isArray(groupsOut) ||
-        groupsOut.length === 0
-      ) {
-        // No anonymisation, return original objects
-        return {
-          groups: groupsOut,
-          subjects: subjectsOut,
-        };
+      if (!shouldAnonymize || !Array.isArray(groupsOut) || groupsOut.length === 0) {
+        return { groups: groupsOut, subjects: subjectsOut };
       }
 
       const anonNames = this.buildAnonGroupNames(groupsOut.length);
       const nameMap = new Map();
 
-      // Build anonymised group list and map original -> anonymised names
       groupsOut = groupsOut.map((g, idx) => {
         const origName = String(g.name || g.label || "").trim();
         const anon = anonNames[idx];
-        if (origName) {
-          nameMap.set(origName.toLowerCase(), anon);
-        }
-        return {
-          ...g,
-          name: anon,
-          label: anon,
-        };
+        if (origName) nameMap.set(origName.toLowerCase(), anon);
+        return { ...g, name: anon, label: anon };
       });
 
-      // Apply mapping to subjects' group field
       subjectsOut = selectedSubjects.map((s) => {
         const origGroup = String(s.group || "").trim();
         let newGroup = "";
-        if (origGroup) {
-          const key = origGroup.toLowerCase();
-          newGroup = nameMap.get(key) || "";
-        }
-        return {
-          ...s,
-          group: newGroup || undefined,
-        };
+        if (origGroup) newGroup = nameMap.get(origGroup.toLowerCase()) || "";
+        return { ...s, group: newGroup || undefined };
       });
 
-      return {
-        groups: groupsOut,
-        subjects: subjectsOut,
-      };
+      return { groups: groupsOut, subjects: subjectsOut };
     },
 
     // --- Export ---
@@ -494,9 +475,7 @@ export default {
           filteredAssignments = this.assignments.map((secRow) => {
             const out = [];
             keepVIdx.forEach((vIdx) => {
-              out.push(
-                Array.isArray(secRow?.[vIdx]) ? [...secRow[vIdx]] : secRow?.[vIdx]
-              );
+              out.push(Array.isArray(secRow?.[vIdx]) ? [...secRow[vIdx]] : secRow?.[vIdx]);
             });
             return out;
           });
@@ -507,8 +486,7 @@ export default {
       const { groups: exportGroups, subjects: exportSubjects } =
         this.applyGroupAnonymisation(selectedSubjects);
 
-      // Keep full selectedModels (forms) & constraints; importer can further restrict by subject/visit
-      const payload = {
+      return {
         meta: {
           exported_at: new Date().toISOString(),
           study_name: this.studyName || "",
@@ -522,11 +500,9 @@ export default {
           subjects: exportSubjects,
           selectedModels: this.selectedModels,
           assignments: filteredAssignments,
-          // keep helpful BIDS maps if present (downstream merge can reuse)
           bids: this.sd?.bids || {},
         },
       };
-      return payload;
     },
 
     downloadExport() {
@@ -553,23 +529,29 @@ export default {
         alert("Failed to prepare export: " + (e?.message || e));
       }
     },
+
+    async loadAll() {
+      await this.fetchMe();
+      await this.loadStudy();
+    },
   },
   async mounted() {
-    await this.fetchMe();
-    await this.loadStudy();
+    await this.loadAll();
   },
 };
 </script>
 
 <style scoped>
-/* Page container */
 .export-container {
   padding: 24px;
   display: grid;
   place-items: start center;
 }
+.export-container.embedded {
+  padding: 0;
+  display: block;
+}
 
-/* Single big card */
 .export-card {
   width: min(1100px, 100%);
   background: #fff;
@@ -578,8 +560,10 @@ export default {
   padding: 16px;
   box-shadow: 0 2px 10px rgba(0, 0, 0, 0.04);
 }
+.export-card.embedded {
+  width: 100%;
+}
 
-/* Header: back + title + study name */
 .header-row {
   display: grid;
   grid-template-columns: auto 1fr;
@@ -587,6 +571,10 @@ export default {
   align-items: center;
   margin-bottom: 10px;
 }
+.header-row.no-back {
+  grid-template-columns: 1fr;
+}
+
 .title-wrap {
   text-align: center;
 }
