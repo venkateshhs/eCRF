@@ -464,7 +464,7 @@
                   {{ revokeBusy[confirm.target?.user_id] ? 'Revoking…' : 'Revoke' }}
                 </button>
               </div>
-        </div>
+            </div>
           </div>
 
           <!-- GRANT FORM -->
@@ -524,63 +524,73 @@
           <StudyAuditLogs :study-id="studyId" />
         </div>
 
-        <!-- EXPORT OPTIONS TAB -->
+        <!-- EXPORT OPTIONS TAB (single tab; export screen appears inside it) -->
         <div v-else-if="activeTab === 'bids'">
           <h2 class="panel-title center">Export Options</h2>
 
-          <!-- moved from Dashboard 3-dot menu -->
-          <div class="subsection">
-            <h3 class="sub-title">Study exports</h3>
-            <p class="muted">
-              Export the study template or download a ZIP bundle of the study.
-            </p>
+          <!-- Embedded ExportStudy in SAME container -->
+          <div v-if="showExportTemplate">
 
-            <div class="bids-actions export-actions">
-              <button class="btn-primary" type="button" @click="exportStudyTemplate">
-                Export Study Template
-              </button>
-
-              <button
-                class="btn-primary"
-                type="button"
-                :disabled="downloadingZip"
-                @click="downloadStudyZip"
-              >
-                {{ downloadingZip ? "Downloading…" : "Download Study (ZIP)" }}
-              </button>
+            <div class="subsection" style="margin-top: 12px;">
+              <ExportStudy :embedded="true" :study-id="studyId" />
             </div>
           </div>
 
-          <!-- Existing dataset (kept as-is) -->
-          <div v-if="canSeeBidsButton" class="subsection bids-location">
-            <h3 class="sub-title">Dataset location</h3>
+          <!-- Default Export Options screen -->
+          <template v-else>
+            <div class="subsection">
+              <h3 class="sub-title">Study exports</h3>
+              <p class="muted">
+                Export the study template or download a ZIP bundle of the study.
+              </p>
 
-            <p class="muted">
-              Dataset folder on disk for this study:
-              <span v-if="bidsDatasetPath">
-                <code class="file-path">{{ bidsDatasetPath }}</code>
-                <span v-if="!bidsPathExists" class="muted"> (folder does not exist yet)</span>
-              </span>
-              <span v-else>
-                Not available yet.
-              </span>
-            </p>
+              <div class="bids-actions export-actions">
+                <button class="btn-primary" type="button" @click="exportStudyTemplate">
+                  Export Study Template
+                </button>
 
-            <div class="bids-actions">
-              <button
-                class="btn-primary"
-                type="button"
-                :disabled="openingBids || !bidsDatasetPath || !bidsPathExists"
-                @click="openBidsFolder"
-              >
-                {{ openingBids ? 'Opening…' : 'Open Dataset Folder' }}
-              </button>
+                <button
+                  class="btn-primary"
+                  type="button"
+                  :disabled="downloadingZip"
+                  @click="downloadStudyZip"
+                >
+                  {{ downloadingZip ? "Downloading…" : "Download Study (ZIP)" }}
+                </button>
+              </div>
             </div>
-          </div>
 
-          <p v-else class="muted">
-            Only the study owner or an administrator can view the BIDS dataset location.
-          </p>
+            <!-- Existing dataset (kept as-is) -->
+            <div v-if="canSeeBidsButton" class="subsection bids-location">
+              <h3 class="sub-title">Dataset location</h3>
+
+              <p class="muted">
+                Dataset folder on disk for this study:
+                <span v-if="bidsDatasetPath">
+                  <code class="file-path">{{ bidsDatasetPath }}</code>
+                  <span v-if="!bidsPathExists" class="muted"> (folder does not exist yet)</span>
+                </span>
+                <span v-else>
+                  Not available yet.
+                </span>
+              </p>
+
+              <div class="bids-actions">
+                <button
+                  class="btn-primary"
+                  type="button"
+                  :disabled="openingBids || !bidsDatasetPath || !bidsPathExists"
+                  @click="openBidsFolder"
+                >
+                  {{ openingBids ? 'Opening…' : 'Open Dataset Folder' }}
+                </button>
+              </div>
+            </div>
+
+            <p v-else class="muted">
+              Only the study owner or an administrator can view the BIDS dataset location.
+            </p>
+          </template>
         </div>
       </section>
     </div>
@@ -595,10 +605,11 @@ import TemplateDiffView, { computeTemplateDiff, buildVersionSummary } from "@/co
 import StudyDataDashboard from "@/components/StudyDataDashboard.vue";
 import icons from "@/assets/styles/icons";
 import { downloadStudyBundle } from "@/utils/studyDownload";
+import ExportStudy from "@/components/ExportStudy.vue";
 
 export default {
   name: "StudyView",
-  components: { FieldFileUpload, StudyAuditLogs, TemplateDiffView, StudyDataDashboard },
+  components: { FieldFileUpload, StudyAuditLogs, TemplateDiffView, StudyDataDashboard, ExportStudy },
   data() {
     return {
       studyId: this.$route.params.id,
@@ -644,6 +655,9 @@ export default {
         { key: "audit", label: "Audit logs" },
         { key: "bids", label: "Export Options" },
       ],
+
+      // Export template embedding state (NO new tab, no route)
+      showExportTemplate: false,
 
       //  7-step edit launcher (kept)
       editSteps: [
@@ -752,6 +766,9 @@ export default {
         this.dashboardFullscreen = false;
       }
 
+      // ensure export template doesn't "stick" when you leave Export Options
+      if (val !== "bids") this.showExportTemplate = false;
+
       if (val === "team") this.ensureAccessData();
       if (val === "bids" && this.canSeeBidsButton) this.fetchBidsPath();
 
@@ -781,10 +798,9 @@ export default {
       this.metaCollapsed[key] = !this.metaCollapsed[key];
     },
 
-    //  moved actions
+    // ExportStudy shown in SAME container; no back button + no extra header
     exportStudyTemplate() {
-      // same behavior as Dashboard: route to export-study page
-      this.$router.push(`/dashboard/export-study/${this.studyId}`);
+      this.showExportTemplate = true;
     },
     async downloadStudyZip() {
       const token = this.token;
@@ -1253,8 +1269,6 @@ export default {
         this.openingBids = false;
       }
     },
-
-    // NOTE: other methods you pasted (docs, grant/revoke, save attachments, etc.) remain unchanged in your file
   },
   async mounted() {
     this.scrollToTop?.();

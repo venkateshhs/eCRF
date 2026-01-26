@@ -94,10 +94,15 @@ const routes = [
     meta: { requiresAuth: true },
   },
   {
-    path: "/dashboard/export-study/:id",
-    name: "ExportStudy",
-    component: () => import("@/components/ExportStudy.vue"),
-  },
+  path: "/dashboard/export-study/:id",
+  name: "ExportStudy",
+  redirect: (to) => ({
+    name: "StudyView",
+    params: { id: to.params.id },
+    query: { ...to.query, tab: "bids", export: "1" },
+  }),
+},
+
   {
   path: "/dashboard/merge-study/:id",
   name: "MergeStudy",
