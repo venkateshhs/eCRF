@@ -69,10 +69,14 @@ const routes = [
   //  },
 
   {
-    path: "/studies/:id",
-    name: "StudyDetail",
-    component: StudyDataEntryComponent,
-  },
+  path: "/studies/:id",
+  name: "StudyDetail",
+  redirect: (to) => ({
+    name: "DashboardAddData",
+    params: { id: to.params.id },
+    query: to.query,
+  }),
+},
   {
     path: "/settings",
     name: "StudySettings",
@@ -95,11 +99,15 @@ const routes = [
     component: () => import("@/components/ExportStudy.vue"),
   },
   {
-    path: "/dashboard/merge-study/:id",
-    name: "MergeStudy",
-    component: () => import("@/components/MergeStudy.vue"),
-    props: true,
-  },
+  path: "/dashboard/merge-study/:id",
+  name: "MergeStudy",
+  redirect: (to) => ({
+    name: "DashboardAddData",
+    params: { id: to.params.id },
+    query: { ...to.query, merge: "1" },
+  }),
+},
+
 
   //  {
   //    path: "/studies/:id",
