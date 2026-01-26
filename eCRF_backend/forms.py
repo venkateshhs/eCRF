@@ -167,6 +167,7 @@ def load_yaml_file(file_path):
 def create_study(
     study_metadata: schemas.StudyMetadataCreate,
     study_content: schemas.StudyContentCreate,
+    create_bids: bool = Query(True, description="If false, skip BIDS dataset folder creation for this request"),
     db: Session = Depends(get_db),
     user = Depends(get_current_user)
 ):
@@ -182,8 +183,8 @@ def create_study(
         logger.error("Error creating study: %s", e)
         raise HTTPException(status_code=500, detail=str(e))
 
-    # Initialize BIDS dataset
-    if upsert_bids_dataset:
+    # Initialize BIDS dataset (OPTIONAL)
+    if create_bids and upsert_bids_dataset:
         try:
             dataset_path = upsert_bids_dataset(
                 study_id=metadata.id,
@@ -1488,6 +1489,7 @@ def bulk_insert_data(
     study_id: int,
     payload: BulkPayload,
     version: Optional[int] = Query(None, description="Ignored; bulk inserts always use the latest template version"),
+    create_bids: bool = Query(True, description="If false, skip BIDS folder creation/mirroring for this request"),
     db: Session = Depends(get_db)
 ):
     if not payload.entries:
@@ -1528,6 +1530,10 @@ def bulk_insert_data(
         raise HTTPException(status_code=400, detail=f"Bulk insert failed: {ex}")
 
     inserted_count = len(rows)
+
+    # allow skipping BIDS mirroring for performance (Windows) ----
+    if not create_bids:
+        return {"inserted": inserted_count, "failed": 0, "errors": []}
 
     # Load study context for BIDS
     study = db.query(models.StudyMetadata).filter(models.StudyMetadata.id == study_id).first()
