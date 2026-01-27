@@ -1,6 +1,6 @@
 import datetime
 
-from sqlalchemy import Column, Integer, String, ForeignKey, DateTime, func, JSON, Text, UniqueConstraint
+from sqlalchemy import Column, Integer, String, ForeignKey, DateTime, func, JSON, Text, UniqueConstraint, Index
 from sqlalchemy.orm import relationship
 from .database import Base
 from .utils import local_now
@@ -13,7 +13,7 @@ class User(Base):
     username = Column(String(50), unique=True, nullable=False)
     email = Column(String(255), unique=True, nullable=False)
     password = Column(String(255), nullable=False)
-    created_at = Column(DateTime,default=local_now)
+    created_at = Column(DateTime, default=local_now)
 
     # Update relationship to reference StudyMetadata instead of Study
     studies = relationship("StudyMetadata", back_populates="user")
@@ -21,6 +21,9 @@ class User(Base):
 
     # Relationship back to audit events (one-to-many)
     events = relationship("AuditEvent", back_populates="user")
+
+    # sessions (one-to-many)
+    sessions = relationship("UserSession", back_populates="user", cascade="all, delete-orphan")
 
 
 class UserProfile(Base):
@@ -30,7 +33,7 @@ class UserProfile(Base):
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     first_name = Column(String(50), nullable=False)
     last_name = Column(String(50), nullable=False)
-    updated_at = Column(DateTime,default=local_now, onupdate=local_now)
+    updated_at = Column(DateTime, default=local_now, onupdate=local_now)
     role = Column(String(20), nullable=False, server_default="Investigator")
 
     user = relationship("User", back_populates="profile")
@@ -164,5 +167,31 @@ class AuditEvent(Base):
     action = Column(String, nullable=False)
     details = Column(JSON, nullable=True)  # JSON column to store event details (flexible schema)
 
-    # Relationships
     user = relationship("User", back_populates="events")
+
+
+# server-side sessions for inactivity timeout
+class UserSession(Base):
+    __tablename__ = "user_sessions"
+    __table_args__ = (
+        UniqueConstraint("jti", name="uq_user_sessions_jti"),
+        Index("ix_user_sessions_user_id", "user_id"),
+        Index("ix_user_sessions_last_activity_at", "last_activity_at"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+
+    # JWT ID – ties token to server session row
+    jti = Column(String(128), nullable=False, unique=True)
+
+    created_at = Column(DateTime(timezone=True), default=local_now, nullable=False)
+    last_activity_at = Column(DateTime(timezone=True), default=local_now, nullable=False)
+
+    # Absolute cap regardless of activity (e.g., 24h)
+    absolute_expires_at = Column(DateTime(timezone=True), nullable=True)
+
+    # When revoked/logged out / timed out
+    revoked_at = Column(DateTime(timezone=True), nullable=True)
+
+    user = relationship("User", back_populates="sessions")

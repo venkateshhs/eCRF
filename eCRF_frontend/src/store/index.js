@@ -1,11 +1,56 @@
+// src/store/index.js
 import { createStore } from "vuex";
 import axios from "axios";
 import createPersistedState from "vuex-persistedstate";
+import activityTracker from "@/utils/activityTracker"; // ✅ Activity tracker
 
 // Same-origin by default (relative URLs). If VUE_APP_API_URL is set, we use it.
 const envBase = (process.env.VUE_APP_API_URL || "").trim();
 const API_BASE_URL = envBase ? envBase.replace(/\/+$/, "") : ""; // "" + "/users/..." => same-origin
 
+// ---------------------------------------------------------
+// Axios Activity Hooks (with "skip tracker" support)
+// ---------------------------------------------------------
+// Any request can opt-out by setting config.__skipActivityTracker = true
+// Also auto-ignore some endpoints (like keepalive ping) so ping doesn't count as activity.
+const IGNORE_ACTIVITY_RE = /\/users\/ping($|\?)/;
+
+function shouldIgnoreActivity(config) {
+  const url = config?.url || "";
+  return !!config?.__skipActivityTracker || IGNORE_ACTIVITY_RE.test(url);
+}
+
+axios.interceptors.request.use(
+  (config) => {
+    if (!shouldIgnoreActivity(config)) {
+      activityTracker.markApiActivity("axios_request");
+      console.log("[Axios] request activity:", config?.method?.toUpperCase(), config?.url);
+    } else {
+      console.log("[Axios] activity ignored:", config?.method?.toUpperCase(), config?.url);
+    }
+    return config;
+  },
+  (error) => Promise.reject(error)
+);
+
+axios.interceptors.response.use(
+  (response) => {
+    if (!shouldIgnoreActivity(response?.config)) {
+      activityTracker.markApiActivity("axios_response");
+    }
+    return response;
+  },
+  (error) => {
+    if (!shouldIgnoreActivity(error?.config)) {
+      activityTracker.markApiActivity("axios_error");
+    }
+    return Promise.reject(error);
+  }
+);
+
+// ---------------------------------------------------------
+// Vuex Store
+// ---------------------------------------------------------
 const store = createStore({
   state: {
     user: null,          // User object after login
@@ -37,7 +82,7 @@ const store = createStore({
     setStudyDetails(state, payload) {
       state.studyDetails = {
         ...state.studyDetails,
-        ...payload
+        ...payload,
       };
     },
     resetStudyDetails(state) {
@@ -53,8 +98,7 @@ const store = createStore({
         console.log("Login successful, API response:", response.data);
         const { access_token } = response.data;
         commit("setToken", access_token);
-        console.log("access token:", response.data.access_token);
-        localStorage.setItem("access_token", response.data.access_token);
+        localStorage.setItem("access_token", access_token);
 
         const userResponse = await axios.get(`${API_BASE_URL}/users/me`, {
           headers: { Authorization: `Bearer ${access_token}` },

@@ -252,6 +252,7 @@
 import axios from "axios";
 import icons from "@/assets/styles/icons";
 import ImportStudy from "@/components/ImportStudy.vue";
+import activityTracker from "@/utils/activityTracker";
 
 export default {
   name: "DashboardComponent",
@@ -467,11 +468,42 @@ export default {
       this.$router.push(to);
     },
 
-    logout() {
-      this.$store.commit("setUser", null);
-      this.$store.commit("setToken", null);
-      this.$router.push("/login");
-    },
+    async logout(message) {
+  console.log("[Dashboard] logout()", message || "");
+
+  // stop tracker first to prevent any late pings racing with logout
+  activityTracker.stop();
+
+  const token =
+    this.$store.state.token || localStorage.getItem("access_token");
+
+  // Best-effort server revoke (do NOT block logout if this fails)
+  try {
+    if (token) {
+      console.log("[Dashboard] calling POST /users/logout");
+      await axios.post("/users/logout", null, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      console.log("[Dashboard] server session revoked");
+    }
+  } catch (e) {
+    console.warn(
+      "[Dashboard] /users/logout failed (ignoring):",
+      e?.response?.status,
+      e?.message
+    );
+  }
+
+  if (message) alert(message);
+
+  // clear local auth
+  this.$store.commit("setUser", null);
+  this.$store.commit("setToken", null);
+  localStorage.removeItem("access_token");
+
+  this.$router.push("/login");
+},
+
   },
   mounted() {
     this.syncFromRoute();
@@ -480,12 +512,43 @@ export default {
     if (this.$route.path === "/dashboard" && this.$route.name === "Dashboard") {
       this.activeSection = "study-management";
     }
+
+    console.log("[Dashboard] starting ActivityTracker (DOM sampled + API activity)");
+
+    activityTracker.start({
+      getToken: () => this.$store.state.token,
+      onLogout: (msg) => this.logout(msg),
+
+      // only called every 5 min if there was activity in that window
+      pingFn: (token) => {
+        console.log("[Dashboard] ActivityTracker pingFn() called");
+        return axios.post("/users/ping", null, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+      },
+
+      config: {
+        debug: true,
+
+        // server policy
+        pingIntervalMs: 5 * 60 * 1000,
+        inactivityMs: 30 * 60 * 1000,
+        idleCheckMs: 30 * 1000,
+
+        // IMPORTANT: reduced DOM listener overhead
+        eventCooldownMs: 5 * 60 * 1000,            // record DOM activity at most once per 5 min
+        detachListenersDuringCooldown: true,       // stop listening for 5 min after first activity
+      },
+    });
   },
   beforeUnmount() {
     this.setPageNoXScroll(false);
+    console.log("[Dashboard] stopping ActivityTracker (unmount)");
+    activityTracker.stop();
   },
 };
 </script>
+
 
 <style scoped>
 /* page-level horizontal scroll lock when import overlay open */

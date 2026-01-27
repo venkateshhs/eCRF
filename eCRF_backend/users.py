@@ -1,18 +1,18 @@
-# eCRF_backend/users.py
-from datetime import datetime
+from datetime import timedelta, datetime, timezone
 import jwt
 import re
+import secrets
 from fastapi import APIRouter, Depends, HTTPException, Header, status
 from fastapi.security import OAuth2PasswordBearer
-from jwt import decode, ExpiredSignatureError, InvalidTokenError
+
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from pydantic import BaseModel, Field
 
 from . import schemas, models
 from .schemas import LoginRequest, UserResponse, UserRegister
-from .crud import get_user_by_username  # create_user not used here
-from .auth import hash_password, verify_password, create_access_token
+from .crud import get_user_by_username
+from .auth import hash_password, verify_password, create_access_token, SECRET_KEY, ALGORITHM
 from .database import get_db
 from .logger import logger
 
@@ -21,10 +21,11 @@ from .bids_exporter import audit_change_both
 from .utils import local_now
 
 # --------------------------------------------------------------------
-# Security config
+# Inactivity / Session config
 # --------------------------------------------------------------------
-SECRET_KEY = "your-very-secure-secret-key"
-ALGORITHM = "HS256"
+INACTIVITY_MINUTES = 30
+ABSOLUTE_SESSION_HOURS = 24
+LAST_ACTIVITY_THROTTLE_SECONDS = 30  # reduce DB writes
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="users/login")
 
@@ -41,12 +42,35 @@ def _display_name(u: Optional[models.User]) -> str:
     return full or u.username or u.email or f"User#{u.id}"
 
 
+def _to_naive_utc(dt: Optional[datetime]) -> Optional[datetime]:
+    """
+    Normalize datetimes so comparisons never crash:
+    - If dt is tz-aware => convert to UTC, then strip tzinfo (naive UTC)
+    - If dt is naive => treat it as-is (already naive)
+    This avoids "offset-naive vs offset-aware" TypeError.
+    """
+    if dt is None:
+        return None
+    if dt.tzinfo is not None and dt.utcoffset() is not None:
+        return dt.astimezone(timezone.utc).replace(tzinfo=None)
+    return dt
+
+
+def _revoke_session(db: Session, sess: models.UserSession) -> None:
+    try:
+        sess.revoked_at = local_now()
+        db.commit()
+    except Exception:
+        db.rollback()
+
+
 def get_current_user(
     authorization: str = Header(None),
     db: Session = Depends(get_db)
 ) -> models.User:
     """
     Header-based JWT decoding helper for protected endpoints (no audit).
+    Enforces inactivity timeout using UserSession.last_activity_at.
     """
     if not authorization:
         raise HTTPException(status_code=401, detail="Authorization header missing")
@@ -55,23 +79,77 @@ def get_current_user(
 
     token = authorization.split("Bearer ")[1]
     try:
-        payload = decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        # Decode without exp auto-check so we can keep behavior consistent with local_now()
+        payload = jwt.decode(
+            token,
+            SECRET_KEY,
+            algorithms=[ALGORITHM],
+            options={"verify_exp": False},
+        )
+
         username = payload.get("sub")
         exp = payload.get("exp")
+        jti = payload.get("jti")  # session id
+
         if not username or not exp:
             raise HTTPException(status_code=401, detail="Invalid token payload")
-        if local_now().timestamp() > exp:
+
+        # Normalize "now" for safe comparisons
+        now_raw = local_now()
+        now = _to_naive_utc(now_raw) or datetime.utcnow()
+
+        # Absolute JWT expiry (cap) - compare timestamps (safe for naive/aware)
+        if now_raw.timestamp() > float(exp):
             raise HTTPException(status_code=401, detail="Token expired")
 
         user = db.query(models.User).filter(models.User.username == username).first()
         if not user:
             raise HTTPException(status_code=404, detail="User not found")
+
+        # Backward compatibility: old tokens without jti governed only by exp.
+        if not jti:
+            logger.info("Authenticated user %s via legacy token (no jti).", user.username)
+            return user
+
+        sess = (
+            db.query(models.UserSession)
+            .filter(models.UserSession.jti == jti, models.UserSession.user_id == user.id)
+            .first()
+        )
+        if not sess or sess.revoked_at is not None:
+            raise HTTPException(status_code=401, detail="Session expired")
+
+        # Normalize DB datetimes for safe comparisons
+        abs_exp = _to_naive_utc(sess.absolute_expires_at)
+        last_act = _to_naive_utc(sess.last_activity_at)
+        created = _to_naive_utc(sess.created_at)
+
+        # Absolute session cap (server-side)
+        if abs_exp and now > abs_exp:
+            _revoke_session(db, sess)
+            raise HTTPException(status_code=401, detail="Session expired")
+
+        # Inactivity timeout
+        effective_last = last_act or created or now
+        if (now - effective_last) > timedelta(minutes=INACTIVITY_MINUTES):
+            _revoke_session(db, sess)
+            raise HTTPException(status_code=401, detail="Session expired due to inactivity")
+
+        # Update last activity (throttled) - use raw local_now() to preserve your existing storage style
+        try:
+            if (now - effective_last).total_seconds() > LAST_ACTIVITY_THROTTLE_SECONDS:
+                sess.last_activity_at = now_raw
+                db.commit()
+        except Exception:
+            db.rollback()
+            # don't fail the request due to an activity write
+
         logger.info("User %s authenticated successfully.", user.username)
         return user
 
-    except ExpiredSignatureError:
+    except jwt.ExpiredSignatureError:
         raise HTTPException(status_code=401, detail="Token expired")
-    except InvalidTokenError:
+    except jwt.InvalidTokenError:
         raise HTTPException(status_code=401, detail="Invalid token")
 
 
@@ -82,16 +160,10 @@ def get_current_user_oauth(
 ):
     """
     OAuth2PasswordBearer-based /me endpoint (no audit).
+    Must enforce inactivity as well => reuse get_current_user.
     """
-    payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-    username = payload.get("sub")
-    if username is None:
-        raise HTTPException(status_code=401, detail="Invalid token")
+    return get_current_user(authorization=f"Bearer {token}", db=db)
 
-    user = get_user_by_username(db, username)
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-    return user
 
 @router.post("/register", response_model=UserResponse)
 def register_user(user_data: UserRegister, db: Session = Depends(get_db)):
@@ -149,7 +221,8 @@ def register_user(user_data: UserRegister, db: Session = Depends(get_db)):
 @router.post("/login")
 def login_user(request: LoginRequest, db: Session = Depends(get_db)):
     """
-    Note: No audit here (by request). Only return token on success.
+    Returns token on success.
+    Now creates a server-side session for inactivity enforcement.
     """
     logger.info("Login attempt for username: %s", request.username)
 
@@ -163,9 +236,91 @@ def login_user(request: LoginRequest, db: Session = Depends(get_db)):
             detail="Your account does not have permission to access this application.",
         )
 
-    token = create_access_token(user.username)
+    jti = secrets.token_urlsafe(32)
+
+    now = local_now()
+    sess = models.UserSession(
+        user_id=user.id,
+        jti=jti,
+        last_activity_at=now,
+        absolute_expires_at=now + timedelta(hours=ABSOLUTE_SESSION_HOURS),
+    )
+    db.add(sess)
+    db.commit()
+
+    token = create_access_token(user.username, jti=jti, max_age_hours=ABSOLUTE_SESSION_HOURS)
     logger.info("User %s logged in successfully.", request.username)
     return {"access_token": token, "token_type": "bearer"}
+
+
+@router.post("/ping")
+def ping(current_user: models.User = Depends(get_current_user)):
+    """
+    Optional: Frontend can call this periodically or on user interactions.
+    It counts as activity and keeps the session alive.
+    """
+    return {"ok": True}
+
+@router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
+def logout_user(
+    authorization: str = Header(None),
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    """
+    Best-effort logout:
+    - Revokes the current server-side session row by jti.
+    - If token is legacy (no jti), revoke all active sessions for that user (safest fallback).
+    Always returns 204 (idempotent).
+    """
+    try:
+        if not authorization or not authorization.startswith("Bearer "):
+            return  # 204
+
+        token = authorization.split("Bearer ")[1]
+        payload = jwt.decode(
+            token,
+            SECRET_KEY,
+            algorithms=[ALGORITHM],
+            options={"verify_exp": False},
+        )
+        jti = payload.get("jti")
+        now = local_now()
+
+        if jti:
+            sess = (
+                db.query(models.UserSession)
+                .filter(
+                    models.UserSession.user_id == current_user.id,
+                    models.UserSession.jti == jti,
+                    models.UserSession.revoked_at.is_(None),
+                )
+                .first()
+            )
+            if sess:
+                sess.revoked_at = now
+                db.commit()
+            return  # 204
+
+        # Legacy fallback: revoke all active sessions for this user
+        sessions = (
+            db.query(models.UserSession)
+            .filter(
+                models.UserSession.user_id == current_user.id,
+                models.UserSession.revoked_at.is_(None),
+            )
+            .all()
+        )
+        if sessions:
+            for s in sessions:
+                s.revoked_at = now
+            db.commit()
+
+        return  # 204
+
+    except Exception:
+        db.rollback()
+        return  # 204
 
 
 # Request body model (accepts either just new_password, or username + new_password)
@@ -262,10 +417,10 @@ def admin_create_user(
     db.refresh(user)
 
     profile = models.UserProfile(
-        user_id   = user.id,
-        first_name= new.first_name,
-        last_name = new.last_name,
-        role      = new.role
+        user_id=user.id,
+        first_name=new.first_name,
+        last_name=new.last_name,
+        role=new.role
     )
     db.add(profile)
     db.commit()
