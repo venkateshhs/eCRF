@@ -1,20 +1,28 @@
 // src/utils/activityTracker.js
 // Singleton activity tracker: user events + optional API activity.
-// - Logs out after 30 min of inactivity (no user events AND no API activity).
-// - Every 5 min: if there was activity since last ping, sends a ping.
-// - DOM activity is sampled: record once, then detach listeners for 5 minutes (super low overhead).
+// - Logs out after inactivityMs of inactivity (no user events AND no API activity).
+// - Every pingIntervalMs: if there was activity since last ping window, sends a ping.
+// - DOM activity is sampled: record once, then optionally detach listeners for eventCooldownMs.
+// - IMPORTANT FIX: screen lock/unlock + alt-tab should NOT count as activity by default.
+//   -> focus/visibility are ignored unless explicitly enabled.
 
 const DEFAULTS = {
-  inactivityMs: 30 * 60 * 1000,        // 30 minutes
-  pingIntervalMs: 5 * 60 * 1000,       // ping decision window
-  idleCheckMs: 30 * 1000,              // check idle every 30s (accurate logout timing)
+  // Server policy
+  inactivityMs: 30 * 60 * 1000, // 30 minutes
+  pingIntervalMs: 5 * 60 * 1000, // 5 minutes
+  idleCheckMs: 30 * 1000, // check idle every 30s
 
-  // NEW: reduce client load
-  eventCooldownMs: 5 * 60 * 1000,      // record DOM activity at most once per 5 min
-  detachListenersDuringCooldown: true, // after first DOM event, detach listeners for eventCooldownMs
+  // Reduce client load
+  eventCooldownMs: 5 * 60 * 1000, // record DOM activity at most once per 5 min
+  detachListenersDuringCooldown: true, // detach listeners during cooldown
 
   // still used if detachListenersDuringCooldown is false
-  mousemoveThrottleMs: 5000,           // treat mousemove as activity at most once/5s
+  mousemoveThrottleMs: 5000, // treat mousemove as activity at most once/5s
+
+  //  Strict activity rules (fix for screen lock / alt-tab)
+  countFocusAsActivity: false, // focus gained should NOT count by default
+  countVisibilityAsActivity: false, // tab visible should NOT count by default
+  ignoreModifierKeys: true, // Alt/Ctrl/Shift/Meta alone should NOT count
 
   debug: false,
 };
@@ -66,6 +74,28 @@ function inUserCooldown() {
   return nowMs() < (state.userCooldownUntil || 0);
 }
 
+function setUserActivity(kind = "event") {
+  const t = nowMs();
+  state.lastUserAt = t;
+  state.activitySinceLastPing = true;
+
+  if (state.cfg.debug && t - state.lastActivityLogAt > 5000) {
+    state.lastActivityLogAt = t;
+    dbg(`user activity recorded (${kind})`);
+  }
+}
+
+function setApiActivity(kind = "api") {
+  const t = nowMs();
+  state.lastApiAt = t;
+  state.activitySinceLastPing = true;
+
+  if (state.cfg.debug && t - state.lastActivityLogAt > 5000) {
+    state.lastActivityLogAt = t;
+    dbg(`api activity detected (${kind})`);
+  }
+}
+
 function enterUserCooldown() {
   const t = nowMs();
   state.userCooldownUntil = t + state.cfg.eventCooldownMs;
@@ -89,33 +119,10 @@ function enterUserCooldown() {
 
   state.cooldownReattachId = window.setTimeout(() => {
     state.cooldownReattachId = null;
-    if (!state.started) return; // safety: don't reattach after stop()
+    if (!state.started) return; // don't reattach after stop()
     attachListeners();
     dbg("user event cooldown ended → listeners reattached");
   }, Math.max(0, state.userCooldownUntil - nowMs()));
-}
-
-function setUserActivity(kind = "event") {
-  const t = nowMs();
-  state.lastUserAt = t;
-  state.activitySinceLastPing = true;
-
-  // log only occasionally (avoid spam)
-  if (state.cfg.debug && t - state.lastActivityLogAt > 5000) {
-    state.lastActivityLogAt = t;
-    dbg(`user activity recorded (${kind})`);
-  }
-}
-
-function setApiActivity(kind = "api") {
-  const t = nowMs();
-  state.lastApiAt = t;
-  state.activitySinceLastPing = true;
-
-  if (state.cfg.debug && t - state.lastActivityLogAt > 5000) {
-    state.lastActivityLogAt = t;
-    dbg(`api activity detected (${kind})`);
-  }
 }
 
 function handleUserEvent(kind, eType) {
@@ -136,7 +143,7 @@ async function maybePing() {
   if (!token) return; // not logged in
 
   const t = nowMs();
-  const due = (t - (state.lastPingAt || 0)) >= state.cfg.pingIntervalMs;
+  const due = t - (state.lastPingAt || 0) >= state.cfg.pingIntervalMs;
   if (!due) return;
 
   if (!state.activitySinceLastPing) {
@@ -174,7 +181,7 @@ function checkIdleAndLogout() {
   if (idleFor >= state.cfg.inactivityMs) {
     dbg(`idle timeout reached (${Math.round(idleFor / 1000)}s) → logout`);
     if (typeof state.onLogout === "function") {
-      state.onLogout("Logged out after 30 minutes of inactivity.");
+      state.onLogout("Logged out due to inactivity.");
     }
   }
 }
@@ -191,6 +198,16 @@ function ensureHandlers() {
 
   state.handlers = {
     onGeneric: (e) => handleUserEvent("generic", e?.type),
+
+    //  keydown with modifier-only ignore
+    onKeydown: (e) => {
+      if (state.cfg.ignoreModifierKeys) {
+        const k = e?.key;
+        if (k === "Alt" || k === "Shift" || k === "Control" || k === "Meta") return;
+      }
+      handleUserEvent("keydown", e?.type);
+    },
+
     onMouseMove: (e) => {
       // If we are *not* detaching listeners during cooldown, keep mousemove extra-throttled
       if (!state.cfg.detachListenersDuringCooldown) {
@@ -200,11 +217,26 @@ function ensureHandlers() {
       }
       handleUserEvent("mousemove", e?.type);
     },
-    onVisibility: () => {
-      if (document.visibilityState === "visible") {
-        handleUserEvent("visible", "visibilitychange");
+
+    //  focus is ignored unless countFocusAsActivity=true
+    onFocus: (e) => {
+      if (!state.cfg.countFocusAsActivity) {
+        dbg("focus ignored");
+        return;
       }
+      handleUserEvent("focus", e?.type || "focus");
     },
+
+    //  visibilitychange is ignored unless countVisibilityAsActivity=true
+    onVisibility: () => {
+      if (document.visibilityState !== "visible") return;
+      if (!state.cfg.countVisibilityAsActivity) {
+        dbg("visibilitychange (visible) ignored");
+        return;
+      }
+      handleUserEvent("visible", "visibilitychange");
+    },
+
     onInputCapture: (e) => handleUserEvent("input", e?.type),
     onChangeCapture: (e) => handleUserEvent("change", e?.type),
   };
@@ -215,37 +247,46 @@ function addListeners() {
 
   // window-level events
   window.addEventListener("click", state.handlers.onGeneric, { passive: true });
-  window.addEventListener("keydown", state.handlers.onGeneric, { passive: true });
+  window.addEventListener("keydown", state.handlers.onKeydown, { passive: true });
   window.addEventListener("scroll", state.handlers.onGeneric, { passive: true });
   window.addEventListener("touchstart", state.handlers.onGeneric, { passive: true });
   window.addEventListener("pointerdown", state.handlers.onGeneric, { passive: true });
   window.addEventListener("wheel", state.handlers.onGeneric, { passive: true });
-  window.addEventListener("focus", state.handlers.onGeneric, { passive: true });
   window.addEventListener("mousemove", state.handlers.onMouseMove, { passive: true });
+
+  //  ONLY attach focus/visibility if you explicitly want them to count
+  if (state.cfg.countFocusAsActivity) {
+    window.addEventListener("focus", state.handlers.onFocus, { passive: true });
+  }
+  if (state.cfg.countVisibilityAsActivity) {
+    document.addEventListener("visibilitychange", state.handlers.onVisibility);
+  }
 
   // capture ensures deep child components still count
   document.addEventListener("input", state.handlers.onInputCapture, true);
   document.addEventListener("change", state.handlers.onChangeCapture, true);
-
-  // returning to tab counts as activity
-  document.addEventListener("visibilitychange", state.handlers.onVisibility);
 }
 
 function removeListeners() {
   if (!state.handlers) return;
 
   window.removeEventListener("click", state.handlers.onGeneric);
-  window.removeEventListener("keydown", state.handlers.onGeneric);
+  window.removeEventListener("keydown", state.handlers.onKeydown);
   window.removeEventListener("scroll", state.handlers.onGeneric);
   window.removeEventListener("touchstart", state.handlers.onGeneric);
   window.removeEventListener("pointerdown", state.handlers.onGeneric);
   window.removeEventListener("wheel", state.handlers.onGeneric);
-  window.removeEventListener("focus", state.handlers.onGeneric);
   window.removeEventListener("mousemove", state.handlers.onMouseMove);
+
+  if (state.cfg.countFocusAsActivity) {
+    window.removeEventListener("focus", state.handlers.onFocus);
+  }
+  if (state.cfg.countVisibilityAsActivity) {
+    document.removeEventListener("visibilitychange", state.handlers.onVisibility);
+  }
 
   document.removeEventListener("input", state.handlers.onInputCapture, true);
   document.removeEventListener("change", state.handlers.onChangeCapture, true);
-  document.removeEventListener("visibilitychange", state.handlers.onVisibility);
 }
 
 function attachListeners() {
@@ -315,6 +356,9 @@ function start(options = {}) {
     idleCheckMs: state.cfg.idleCheckMs,
     eventCooldownMs: state.cfg.eventCooldownMs,
     detachListenersDuringCooldown: state.cfg.detachListenersDuringCooldown,
+    countFocusAsActivity: state.cfg.countFocusAsActivity,
+    countVisibilityAsActivity: state.cfg.countVisibilityAsActivity,
+    ignoreModifierKeys: state.cfg.ignoreModifierKeys,
   });
 }
 
