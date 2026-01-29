@@ -36,7 +36,7 @@
           <!-- Hide details toggle while Merge panel is open (keeps UI clean) -->
           <button v-if="!isMergeMode" @click="toggleDetails" class="details-toggle-btn">
             <i :class="showDetails ? icons.toggleUp : icons.toggleDown"></i>
-            {{ showDetails ? 'Hide Details' : 'Show Details' }}
+            {{ showDetails ? 'Hide Study Details' : 'Show Study Details' }}
           </button>
 
           <!-- Merge Study button placed in the same row (simple, no teleport/mount hacks) -->
@@ -46,7 +46,7 @@
             class="btn-merge-study"
             @click="openMergeStudy"
           >
-            Merge Study
+            Import data from other device
           </button>
 
           <!-- Share icon hidden for shared mode -->
