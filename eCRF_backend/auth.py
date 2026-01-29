@@ -1,7 +1,8 @@
 import bcrypt
 import jwt
-from datetime import datetime, timedelta
-from fastapi import Request, HTTPException, status, Depends
+from datetime import timedelta
+from typing import Optional
+from fastapi import Request, HTTPException, status
 
 from .utils import local_now
 
@@ -19,9 +20,21 @@ def verify_password(password: str, hashed_password: str) -> bool:
         return bcrypt.checkpw(password.encode("utf-8"), hashed_password.encode("utf-8"))
     return password == hashed_password
 
-def create_access_token(username: str) -> str:
-    expire = local_now() + timedelta(minutes=30)
-    payload = {"sub": username, "exp": int(expire.timestamp())}
+
+def create_access_token(username: str, jti: Optional[str] = None, max_age_hours: int = 24) -> str:
+    """
+    Create JWT token.
+    - exp: absolute JWT expiry (e.g. 24h)
+    - jti: optional session id used by server-side inactivity enforcement
+    """
+    expire = local_now() + timedelta(hours=max_age_hours)
+    payload = {
+        "sub": username,
+        "exp": int(expire.timestamp()),
+    }
+    if jti:
+        payload["jti"] = jti
+
     return jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
 
 def extract_token(request: Request) -> str:
