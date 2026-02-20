@@ -47,11 +47,32 @@ class StudyMetadata(Base):
     created_by = Column(Integer, ForeignKey("users.id"), nullable=False)
     study_name = Column(String(255), nullable=False)
     study_description = Column(Text)
+
+    #  Draft/Publish workflow fields
+    # NOTE: server_default keeps old rows working (treated as PUBLISHED)
+    status = Column(String(20), nullable=False, server_default="PUBLISHED", index=True)
+
+    # If this row is a draft created to edit an already-published study,
+    # this points to the published study id. NULL means "new study draft".
+    draft_of_study_id = Column(
+        Integer,
+        ForeignKey("study_metadata.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
+    # Which wizard step was last saved (optional but useful for resume)
+    last_completed_step = Column(Integer, nullable=True)
+
     created_at = Column(DateTime(timezone=True), default=local_now)
     updated_at = Column(DateTime(timezone=True), default=local_now, onupdate=local_now)
 
     # Relationship back to User
     user = relationship("User", back_populates="studies")
+
+    # Self-referential relationship: published study -> drafts
+    draft_of = relationship("StudyMetadata", remote_side=[id], backref="drafts")
+
     # One-to-one relationship with StudyContent
     content = relationship("StudyContent", uselist=False, back_populates="study_metadata", cascade="all, delete")
     shared_links = relationship("SharedFormAccess", back_populates="study", cascade="all, delete-orphan")

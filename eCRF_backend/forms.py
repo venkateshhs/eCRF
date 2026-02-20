@@ -23,7 +23,7 @@ from .bids_exporter import (
     audit_change_both,  # unified audit (DB + BIDS)
     audit_access_change_both,  # unified access audit
     log_dataset_change_to_changes,  # optional BIDS CHANGES mirror
-    bump_bids_version, bulk_write_entries_to_bids, _dataset_path,
+    bump_bids_version, bulk_write_entries_to_bids, _dataset_path, _delete_bids_folder_safe,
 )
 from .logger import logger
 from .models import User, StudyTemplateVersion
@@ -38,6 +38,21 @@ router = APIRouter(prefix="/forms", tags=["forms"])
 
 TEMPLATE_DIR = Path(os.environ.get("ECRF_TEMPLATES_DIR", "")) if os.environ.get("ECRF_TEMPLATES_DIR") \
     else (Path(__file__).resolve().parent / "templates")
+
+ALLOWED_STUDY_STATUS = {"DRAFT", "PUBLISHED", "ARCHIVED"}
+
+def _norm_status(s: Optional[str]) -> Optional[str]:
+    if not s:
+        return None
+    s2 = str(s).strip().upper()
+    return s2 if s2 in ALLOWED_STUDY_STATUS else None
+
+def _get_meta_status(meta: models.StudyMetadata) -> str:
+    # DB default should keep this non-null, but be defensive
+    return (getattr(meta, "status", None) or "PUBLISHED").strip().upper()
+
+def _is_publish_transition(old_status: str, new_status: str) -> bool:
+    return old_status != "PUBLISHED" and new_status == "PUBLISHED"
 
 def _flags_dict_to_list(flags, selected_models):
     # Already normalized
@@ -168,11 +183,31 @@ def create_study(
     study_metadata: schemas.StudyMetadataCreate,
     study_content: schemas.StudyContentCreate,
     create_bids: bool = Query(True, description="If false, skip BIDS dataset folder creation for this request"),
+
+    # allow draft creation without new endpoints
+    status: Optional[str] = Query(None, description="Optional: DRAFT|PUBLISHED|ARCHIVED (defaults to PUBLISHED)"),
+    draft_of_study_id: Optional[int] = Query(None, description="Optional: published study id if creating an edit-draft"),
+    last_completed_step: Optional[int] = Query(None, description="Optional: resume helper"),
+
     db: Session = Depends(get_db),
     user = Depends(get_current_user)
 ):
     if study_metadata.created_by != user.id:
         raise HTTPException(status_code=403, detail="Not authorized to create study for this user")
+
+    desired_status = _norm_status(status) or "PUBLISHED"
+    if desired_status == "DRAFT":
+        # Drafts should not create BIDS folders by default (prevents clutter)
+        create_bids = False
+
+    # If this is an edit-draft, validate the referenced published study exists + permissions
+    if draft_of_study_id is not None:
+        base = db.query(models.StudyMetadata).filter(models.StudyMetadata.id == draft_of_study_id).first()
+        if not base:
+            raise HTTPException(status_code=404, detail="draft_of_study_id study not found")
+        if base.created_by != user.id and getattr(user.profile, "role", None) != "Administrator":
+            raise HTTPException(status_code=403, detail="Not authorized to draft-edit this study")
+        desired_status = "DRAFT"  # force
 
     # Keep a *pre-BIDS* snapshot (so labels/IDs aren’t rewritten) for versioning
     incoming_snapshot = _deepcopy_json(study_content.study_data or {})
@@ -183,8 +218,21 @@ def create_study(
         logger.error("Error creating study: %s", e)
         raise HTTPException(status_code=500, detail=str(e))
 
-    # Initialize BIDS dataset (OPTIONAL)
-    if create_bids and upsert_bids_dataset:
+    # persist workflow fields on metadata (keeps crud unchanged)
+    try:
+        metadata.status = desired_status
+        metadata.draft_of_study_id = draft_of_study_id
+        if last_completed_step is not None:
+            metadata.last_completed_step = int(last_completed_step)
+        db.commit()
+        db.refresh(metadata)
+    except Exception as e:
+        db.rollback()
+        logger.error("Error updating draft workflow fields: %s", e)
+        raise HTTPException(status_code=500, detail="Error creating draft workflow fields")
+
+    # Initialize BIDS dataset (OPTIONAL) — skip for drafts by default
+    if create_bids and upsert_bids_dataset and _get_meta_status(metadata) != "DRAFT":
         try:
             dataset_path = upsert_bids_dataset(
                 study_id=metadata.id,
@@ -223,33 +271,34 @@ def create_study(
 
 @router.get("/studies", response_model=List[schemas.StudyMetadataOut])
 def list_studies(
+    status: Optional[str] = Query(None, description="Optional: DRAFT|PUBLISHED|ARCHIVED"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     role = (current_user.profile.role or "").strip()
+    status_norm = _norm_status(status)
+
+    q = db.query(models.StudyMetadata)
 
     # Admin sees everything
-    if role == "Administrator":
-        return db.query(models.StudyMetadata).all()
+    if role != "Administrator":
+        grant_subq = (
+            db.query(models.StudyAccessGrant.study_id)
+              .filter(models.StudyAccessGrant.user_id == current_user.id)
+              .subquery()
+        )
+        q = q.filter(
+            or_(
+                models.StudyMetadata.created_by == current_user.id,
+                models.StudyMetadata.id.in_(grant_subq)
+            )
+        )
 
-    # Everyone else: include (a) studies they own, plus (b) studies they were granted access to
-    grant_subq = (
-        db.query(models.StudyAccessGrant.study_id)
-          .filter(models.StudyAccessGrant.user_id == current_user.id)
-          .subquery()
-    )
+    if status_norm:
+        q = q.filter(models.StudyMetadata.status == status_norm)
 
-    studies = (
-        db.query(models.StudyMetadata)
-          .filter(
-              or_(
-                  models.StudyMetadata.created_by == current_user.id,
-                  models.StudyMetadata.id.in_(grant_subq)
-              )
-          )
-          .all()
-    )
-    return studies
+    return q.all()
+
 
 
 
@@ -378,14 +427,183 @@ def update_study(
     if metadata.created_by != user.id and user.profile.role != "Administrator":
         raise HTTPException(status_code=403, detail="Not authorized to update this study")
 
-    # Ensure id present
+    # normalize payload
+    if not study_content.study_data:
+        study_content.study_data = {}
+
+    # Ensure id present in study_data
     if not study_content.study_data.get("id"):
         study_content.study_data["id"] = study_id
 
-    old_sd = _deepcopy_json(content.study_data or {})
-    new_sd_incoming = _deepcopy_json(study_content.study_data or {})
+    old_status = _get_meta_status(metadata)
 
-    # capture previous latest template version
+    incoming_status = _norm_status(getattr(study_metadata, "status", None))
+    if not incoming_status:
+        incoming_status = old_status  # no change
+
+    # Track last_completed_step if provided in schema; ignore if schema doesn't include it
+    if hasattr(study_metadata, "last_completed_step") and getattr(study_metadata, "last_completed_step", None) is not None:
+        try:
+            metadata.last_completed_step = int(getattr(study_metadata, "last_completed_step"))
+            db.commit()
+            db.refresh(metadata)
+        except Exception:
+            db.rollback()
+
+    is_edit_draft = (getattr(metadata, "draft_of_study_id", None) is not None)
+    publish_edit_draft = is_edit_draft and _is_publish_transition(old_status, incoming_status)
+
+    # --------------------------
+    # Case A: publishing an edit-draft
+    # --------------------------
+    if publish_edit_draft:
+        published_id = int(metadata.draft_of_study_id)
+
+        # 1) First, persist the last changes into the draft row itself (no BIDS/versioning for drafts)
+        try:
+            crud.update_study(db, study_id, study_metadata, study_content)
+        except Exception as e:
+            logger.error("Error updating draft before publish: %s", e)
+            raise HTTPException(status_code=500, detail=str(e))
+
+        # Reload draft after update
+        draft_meta, draft_content = crud.get_study_full(db, study_id)
+
+        # 2) Load published target and authorize
+        published_full = crud.get_study_full(db, published_id)
+        if not published_full:
+            raise HTTPException(status_code=404, detail="Published study not found for draft_of_study_id")
+
+        pub_meta, pub_content = published_full
+        if pub_meta.created_by != user.id and user.profile.role != "Administrator":
+            raise HTTPException(status_code=403, detail="Not authorized to publish changes to this study")
+
+        # Capture previous latest template version for published
+        prev_v_row = (
+            db.query(StudyTemplateVersion)
+              .filter(StudyTemplateVersion.study_id == published_id)
+              .order_by(StudyTemplateVersion.version.desc())
+              .first()
+        )
+        prev_latest_v = int(prev_v_row.version) if prev_v_row else 1
+
+        old_sd_published = _deepcopy_json(pub_content.study_data or {})
+        new_sd_from_draft = _deepcopy_json(draft_content.study_data or {})
+        new_sd_from_draft["id"] = published_id  # critical: keep canonical id stable
+
+        # 3) Apply draft -> published in a transaction
+        try:
+            pub_meta.study_name = draft_meta.study_name
+            pub_meta.study_description = draft_meta.study_description
+            pub_meta.status = "PUBLISHED"
+            pub_content.study_data = new_sd_from_draft
+            db.commit()
+            db.refresh(pub_meta)
+            db.refresh(pub_content)
+        except Exception as e:
+            db.rollback()
+            logger.error("Error applying draft to published: %s", e)
+            raise HTTPException(status_code=500, detail="Failed to publish draft changes")
+
+        # 4) BIDS update for published (now that it's updated)
+        if upsert_bids_dataset:
+            try:
+                dataset_path = upsert_bids_dataset(
+                    study_id=pub_meta.id,
+                    study_name=pub_meta.study_name,
+                    study_description=pub_meta.study_description,
+                    study_data=pub_content.study_data,
+                )
+                db.query(models.StudyContent).filter(models.StudyContent.id == pub_content.id).update(
+                    {"study_data": pub_content.study_data}
+                )
+                db.commit()
+                db.refresh(pub_content)
+                logger.info("BIDS dataset updated at %s (study_id=%s)", dataset_path, pub_meta.id)
+
+                log_dataset_change_to_changes(
+                    pub_meta.id,
+                    pub_meta.study_name,
+                    action="dataset_structure_updated",
+                    actor_id=user.id,
+                    actor_name=_display_name(user),
+                    detail="Published changes from draft",
+                )
+
+                try:
+                    audit_change_both(
+                        scope="study",
+                        action="study_edited",
+                        actor=_display_name(user),
+                        extra={"study_name": pub_meta.study_name, "published_from_draft": study_id},
+                        study_id=pub_meta.id,
+                        study_name=pub_meta.study_name,
+                        db=db,
+                        actor_id=user.id,
+                    )
+                except Exception:
+                    pass
+            except Exception as be:
+                logger.error("BIDS export (publish draft) failed for study %s: %s", pub_meta.id, be)
+
+        # 5) Versioning on published (diff old published vs new published)
+        def _audit(action: str, extra: Dict[str, Any]):
+            try:
+                audit_change_both(
+                    scope="study",
+                    action=action,
+                    actor=_display_name(user),
+                    extra=extra or {},
+                    study_id=pub_meta.id,
+                    study_name=pub_meta.study_name,
+                    db=db,
+                    actor_id=user.id,
+                )
+            except Exception:
+                pass
+
+        try:
+            VersionManager.apply_on_update(
+                db,
+                published_id,
+                old_sd_published,
+                _deepcopy_json(pub_content.study_data or {}),
+                audit_callback=_audit,
+            )
+        except Exception as ve:
+            logger.error("Versioning apply_on_update failed for published study %s: %s", published_id, ve)
+
+        # Detect template version bump and copy BIDS tree non-destructively
+        new_v_row = (
+            db.query(StudyTemplateVersion)
+              .filter(StudyTemplateVersion.study_id == published_id)
+              .order_by(StudyTemplateVersion.version.desc())
+              .first()
+        )
+        new_latest_v = int(new_v_row.version) if new_v_row else prev_latest_v
+        if new_latest_v > prev_latest_v:
+            try:
+                bump_bids_version(pub_meta.id, pub_meta.study_name, prev_latest_v, new_latest_v)
+            except Exception as be:
+                logger.error("BIDS version bump copy failed for study %s: %s", published_id, be)
+
+        # 6) Archive the draft row so it no longer appears as unfinished
+        try:
+            draft_meta.status = "ARCHIVED"
+            db.commit()
+        except Exception:
+            db.rollback()
+
+        return {"metadata": pub_meta, "content": pub_content}
+
+    # --------------------------
+    # Case B: normal update (draft save step OR published edit in-place)
+    # --------------------------
+
+    # snapshots for versioning (only for non-drafts)
+    old_sd = _deepcopy_json(content.study_data or {})
+
+    # capture previous latest template version (only meaningful for non-drafts)
     prev_v_row = (
         db.query(StudyTemplateVersion)
           .filter(StudyTemplateVersion.study_id == study_id)
@@ -401,6 +619,21 @@ def update_study(
         raise HTTPException(status_code=500, detail=str(e))
 
     metadata, content = result
+
+    # Apply status change (schema might not include it; keep safe)
+    try:
+        if incoming_status:
+            metadata.status = incoming_status
+        db.commit()
+        db.refresh(metadata)
+    except Exception:
+        db.rollback()
+
+    # If this is a draft update: do NOT touch BIDS/versioning (prevents clutter + avoids noisy versions)
+    if _get_meta_status(metadata) == "DRAFT":
+        return {"metadata": metadata, "content": content}
+
+    # ---- existing behavior for published updates stays as-is ----
 
     # Update BIDS structure (and persist any label updates)
     if upsert_bids_dataset:
@@ -422,7 +655,7 @@ def update_study(
             log_dataset_change_to_changes(metadata.id, metadata.study_name,
                                           action="dataset_structure_updated",
                                           actor_id=user.id, actor_name=_display_name(user),
-                detail="Study metadata/content updated"
+                                          detail="Study metadata/content updated"
             )
 
             # AUDIT: study edited
@@ -1687,6 +1920,104 @@ def open_study_bids_folder(
             status_code=500,
             detail=f"Failed to open BIDS folder: {e}",
         )
+
+    # 204 No Content
+    return
+
+
+
+
+
+@router.delete("/studies/{study_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_study(
+    study_id: int,
+    include_drafts: bool = Query(
+        True,
+        description="If true, also delete any drafts (DRAFT/ARCHIVED) whose draft_of_study_id == this study_id",
+    ),
+    delete_bids: bool = Query(
+        True,
+        description="If true, also delete the BIDS dataset folder from disk (best-effort).",
+    ),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    meta = db.query(models.StudyMetadata).filter(models.StudyMetadata.id == study_id).first()
+    if not meta:
+        raise HTTPException(status_code=404, detail="Study not found")
+
+    # Owner or Admin
+    _assert_owner_or_admin(meta, current_user)
+
+    # Build list of ids to delete (optionally include drafts of a published study)
+    ids_to_delete = [int(study_id)]
+
+    if include_drafts:
+        draft_rows = (
+            db.query(models.StudyMetadata.id)
+              .filter(models.StudyMetadata.draft_of_study_id == study_id)
+              .all()
+        )
+        for (did,) in draft_rows:
+            did_int = int(did)
+            if did_int not in ids_to_delete:
+                ids_to_delete.append(did_int)
+
+    # Capture BIDS delete targets BEFORE DB delete (needs names)
+    bids_targets = []
+    if delete_bids:
+        metas = (
+            db.query(models.StudyMetadata.id, models.StudyMetadata.study_name)
+              .filter(models.StudyMetadata.id.in_(ids_to_delete))
+              .all()
+        )
+        bids_targets = [(int(i), (n or "")) for (i, n) in metas]
+
+    # Child tables: delete first to avoid FK violations (even if cascades exist)
+    FileModel = getattr(models, "File", None)  # keep safe if model name differs
+    SharedModel = getattr(models, "SharedFormAccess", None)
+
+    try:
+        # Entries (participant data)
+        db.query(models.StudyEntryData).filter(models.StudyEntryData.study_id.in_(ids_to_delete)) \
+          .delete(synchronize_session=False)
+
+        # Files table (DB records)
+        if FileModel is not None:
+            db.query(FileModel).filter(FileModel.study_id.in_(ids_to_delete)) \
+              .delete(synchronize_session=False)
+
+        # Template versions
+        db.query(StudyTemplateVersion).filter(StudyTemplateVersion.study_id.in_(ids_to_delete)) \
+          .delete(synchronize_session=False)
+
+        # Access grants
+        db.query(models.StudyAccessGrant).filter(models.StudyAccessGrant.study_id.in_(ids_to_delete)) \
+          .delete(synchronize_session=False)
+
+        # Share links
+        if SharedModel is not None:
+            db.query(SharedModel).filter(SharedModel.study_id.in_(ids_to_delete)) \
+              .delete(synchronize_session=False)
+
+        # Study content rows
+        db.query(models.StudyContent).filter(models.StudyContent.study_id.in_(ids_to_delete)) \
+          .delete(synchronize_session=False)
+
+        # Finally metadata rows
+        db.query(models.StudyMetadata).filter(models.StudyMetadata.id.in_(ids_to_delete)) \
+          .delete(synchronize_session=False)
+
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        logger.exception("Failed deleting study ids=%s: %s", ids_to_delete, e)
+        raise HTTPException(status_code=500, detail="Failed to delete study")
+
+    # Best-effort BIDS folder delete AFTER commit
+    if delete_bids:
+        for sid, sname in bids_targets:
+            _delete_bids_folder_safe(sid, sname)
 
     # 204 No Content
     return

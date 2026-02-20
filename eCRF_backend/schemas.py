@@ -58,6 +58,11 @@ class StudyMetadataBase(BaseModel):
     study_name: str
     study_description: Optional[str] = None
 
+    #  workflow fields (optional to avoid regressions)
+    status: Optional[str] = None                 # "DRAFT" | "PUBLISHED" | "ARCHIVED"
+    draft_of_study_id: Optional[int] = None      # if this is an edit-draft of an existing study
+    last_completed_step: Optional[int] = None    # wizard resume helper
+
 
 class StudyMetadataCreate(StudyMetadataBase):
     created_by: int
@@ -240,7 +245,7 @@ class StudyDataEntryOut(BaseModel):
 
 class StudyDataEntryUpdate(BaseModel):
     data: Optional[Dict[str, Any]] = None
-    skipped_required_flags: Optional[List[List[bool]]]
+    skipped_required_flags: Optional[List[List[bool]]] = None
 
 
 class PaginatedStudyDataEntries(BaseModel):
