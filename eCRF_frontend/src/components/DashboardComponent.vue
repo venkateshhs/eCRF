@@ -210,7 +210,12 @@
               </thead>
               <tbody>
                 <tr v-for="study in studies" :key="study.id">
-                  <td>{{ study.study_name }}</td>
+                  <td>
+                   <span class="study-name-cell">
+                        <span>{{ study.study_name }}</span>
+                        <span v-if="isDraftStudy(study)" class="status-tag status-tag--draft">DRAFT</span>
+                      </span>
+                    </td>
                   <td>{{ study.study_description }}</td>
                   <td>{{ formatDateTime(study.created_at) }}</td>
                   <td>{{ formatDateTime(study.updated_at) }}</td>
@@ -335,6 +340,22 @@ export default {
     setPageNoXScroll(on) {
       document.documentElement.classList.toggle("no-x-scroll", on);
       document.body.classList.toggle("no-x-scroll", on);
+    },
+
+    // ONLY CHANGE (logic): helper to detect draft state safely
+    isDraftStudy(study) {
+      if (!study) return false;
+
+      // common flags first
+      if (study.is_draft === true) return true;
+
+      // status strings (case-insensitive)
+      const status = String(study.status || "").trim().toUpperCase();
+      if (status === "DRAFT") return true;
+
+      // fallback: if backend uses lifecycle/step semantics
+      // (kept conservative: only treat as draft if explicitly marked draft-like)
+      return false;
     },
 
     // Logo click should always take user to /dashboard
@@ -469,40 +490,40 @@ export default {
     },
 
     async logout(message) {
-  console.log("[Dashboard] logout()", message || "");
+      console.log("[Dashboard] logout()", message || "");
 
-  // stop tracker first to prevent any late pings racing with logout
-  activityTracker.stop();
+      // stop tracker first to prevent any late pings racing with logout
+      activityTracker.stop();
 
-  const token =
-    this.$store.state.token || localStorage.getItem("access_token");
+      const token =
+        this.$store.state.token || localStorage.getItem("access_token");
 
-  // Best-effort server revoke (do NOT block logout if this fails)
-  try {
-    if (token) {
-      console.log("[Dashboard] calling POST /users/logout");
-      await axios.post("/users/logout", null, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      console.log("[Dashboard] server session revoked");
-    }
-  } catch (e) {
-    console.warn(
-      "[Dashboard] /users/logout failed (ignoring):",
-      e?.response?.status,
-      e?.message
-    );
-  }
+      // Best-effort server revoke (do NOT block logout if this fails)
+      try {
+        if (token) {
+          console.log("[Dashboard] calling POST /users/logout");
+          await axios.post("/users/logout", null, {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          console.log("[Dashboard] server session revoked");
+        }
+      } catch (e) {
+        console.warn(
+          "[Dashboard] /users/logout failed (ignoring):",
+          e?.response?.status,
+          e?.message
+        );
+      }
 
-  if (message) alert(message);
+      if (message) alert(message);
 
-  // clear local auth
-  this.$store.commit("setUser", null);
-  this.$store.commit("setToken", null);
-  localStorage.removeItem("access_token");
+      // clear local auth
+      this.$store.commit("setUser", null);
+      this.$store.commit("setToken", null);
+      localStorage.removeItem("access_token");
 
-  this.$router.push("/login");
-},
+      this.$router.push("/login");
+    },
 
   },
   mounted() {
@@ -836,6 +857,24 @@ export default {
   background-color: #f9f9f9;
 }
 
+/*  ONLY CHANGE (style): draft tag */
+.status-tag {
+  display: inline-block;
+  padding: 3px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  line-height: 1;
+  border: 1px solid transparent;
+  user-select: none;
+}
+.status-tag--draft {
+  background: #fff7ed;
+  border-color: #fdba74;
+  color: #9a3412;
+}
+
 /* Actions column */
 .actions-cell .action-buttons {
   display: flex;
@@ -1005,5 +1044,10 @@ export default {
       "header header"
       "main main";
   }
+}
+.study-name-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
 }
 </style>
