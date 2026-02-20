@@ -211,11 +211,11 @@
               <tbody>
                 <tr v-for="study in studies" :key="study.id">
                   <td>
-                   <span class="study-name-cell">
-                        <span>{{ study.study_name }}</span>
-                        <span v-if="isDraftStudy(study)" class="status-tag status-tag--draft">DRAFT</span>
-                      </span>
-                    </td>
+                    <span class="study-name-cell">
+                      <span>{{ study.study_name }}</span>
+                      <span v-if="isDraftStudy(study)" class="status-tag status-tag--draft">DRAFT</span>
+                    </span>
+                  </td>
                   <td>{{ study.study_description }}</td>
                   <td>{{ formatDateTime(study.created_at) }}</td>
                   <td>{{ formatDateTime(study.updated_at) }}</td>
@@ -225,7 +225,7 @@
                       <button
                         v-if="isAdmin || isPI || isInvestigator"
                         type="button"
-                        @click="addData(study)"
+                        @click="handleAddDataClick(study)"
                         class="btn-minimal btn-equal"
                       >
                         Add Data
@@ -233,7 +233,7 @@
                       <button
                         v-if="isAdmin || isPI || isInvestigator"
                         type="button"
-                        @click="viewStudy(study)"
+                        @click="handleViewStudyClick(study)"
                         class="btn-minimal btn-equal"
                       >
                         View Study
@@ -247,8 +247,126 @@
         </div>
       </template>
 
-      <!-- Child routes render here (CreateStudy / StudyView / AddData / ScratchForm etc.) -->
       <router-view v-else />
+
+      <!-- Draft blocker / discard confirm dialog (custom) -->
+      <div
+        v-if="draftDialog.open"
+        class="modal-backdrop"
+        role="dialog"
+        aria-modal="true"
+        @click.self="closeDraftDialog"
+      >
+        <div class="modal">
+          <div class="modal-header">
+            <div class="modal-title">
+              <template v-if="draftDialog.step === 'block'">
+                {{ draftDialog.mode === 'add-data' ? 'Study setup is not finished' : 'Study is still a draft' }}
+              </template>
+              <template v-else>Discard draft study?</template>
+            </div>
+            <button class="modal-close" type="button" @click="closeDraftDialog" aria-label="Close dialog">×</button>
+          </div>
+
+          <div class="modal-body">
+            <template v-if="draftDialog.step === 'block'">
+              <p class="modal-lead">
+                <strong>{{ draftDialog.study?.study_name || 'This study' }}</strong>
+                hasn’t been finalized yet.
+              </p>
+
+              <p class="modal-text" v-if="draftDialog.mode === 'add-data'">
+                You can’t add participant data until the study setup is completed (protocol, forms, and required
+                settings). Finish the setup first, then come back to add data.
+              </p>
+
+              <p class="modal-text" v-else>
+                This study is not finalized yet. You can finish the setup now, or open the study view anyway if you
+                understand it may be incomplete.
+              </p>
+
+              <div class="modal-warning">
+                <div class="modal-warning-title">Choose an option</div>
+                <ul class="modal-warning-list">
+                  <li><strong>Continue setup</strong> to complete the study creation.</li>
+                  <li><strong>Discard draft</strong> to permanently delete this draft template.</li>
+                  <li v-if="draftDialog.mode === 'view-study'">
+                    <strong>View anyway</strong> to open the study view even if incomplete.
+                  </li>
+                </ul>
+              </div>
+            </template>
+
+            <template v-else>
+              <p class="modal-lead">
+                You’re about to discard <strong>{{ draftDialog.study?.study_name || 'this draft study' }}</strong
+                >.
+              </p>
+              <p class="modal-text">
+                This will permanently delete the draft template and any configuration saved under it. This action cannot
+                be undone.
+              </p>
+              <div class="modal-warning modal-warning--danger">
+                <div class="modal-warning-title">Permanent action</div>
+                <div class="modal-text" style="margin: 0">
+                  If you still want to keep this study, click <strong>Go back</strong> and choose
+                  <strong>Continue setup</strong>.
+                </div>
+              </div>
+            </template>
+          </div>
+
+          <div class="modal-footer">
+            <template v-if="draftDialog.step === 'block'">
+              <button type="button" class="btn-minimal" @click="closeDraftDialog" :disabled="draftDialog.busy">
+                Cancel
+              </button>
+
+              <button
+                type="button"
+                class="btn-minimal btn-danger"
+                @click="goToDiscardConfirm"
+                :disabled="draftDialog.busy"
+              >
+                Discard draft
+              </button>
+
+              <button type="button" class="btn-primary-solid" @click="continueStudyCreation" :disabled="draftDialog.busy">
+                Continue setup
+              </button>
+
+              <button
+                v-if="draftDialog.mode === 'view-study'"
+                type="button"
+                class="btn-primary-outline"
+                @click="viewStudyAnyway"
+                :disabled="draftDialog.busy"
+              >
+                View anyway
+              </button>
+            </template>
+
+            <template v-else>
+              <button type="button" class="btn-minimal" @click="draftDialog.step = 'block'" :disabled="draftDialog.busy">
+                Go back
+              </button>
+
+              <button type="button" class="btn-minimal" @click="closeDraftDialog" :disabled="draftDialog.busy">
+                Cancel
+              </button>
+
+              <button
+                type="button"
+                class="btn-primary-solid btn-danger-solid"
+                @click="discardDraftStudy"
+                :disabled="draftDialog.busy"
+              >
+                {{ draftDialog.busy ? 'Discarding…' : 'Yes, discard draft' }}
+              </button>
+            </template>
+          </div>
+        </div>
+      </div>
     </main>
   </div>
 </template>
@@ -273,6 +391,15 @@ export default {
 
       showImportData: false,
       importMaximized: false,
+
+      // Draft-blocker dialog state
+      draftDialog: {
+        open: false,
+        mode: "", // 'add-data' | 'view-study'
+        step: "block", // 'block' | 'confirm-discard'
+        study: null,
+        busy: false,
+      },
     };
   },
   watch: {
@@ -342,7 +469,6 @@ export default {
       document.body.classList.toggle("no-x-scroll", on);
     },
 
-    // ONLY CHANGE (logic): helper to detect draft state safely
     isDraftStudy(study) {
       if (!study) return false;
 
@@ -351,11 +477,215 @@ export default {
 
       // status strings (case-insensitive)
       const status = String(study.status || "").trim().toUpperCase();
-      if (status === "DRAFT") return true;
+      return status === "DRAFT";
+    },
 
-      // fallback: if backend uses lifecycle/step semantics
-      // (kept conservative: only treat as draft if explicitly marked draft-like)
-      return false;
+    // Draft dialog control
+    openDraftDialog(mode, study) {
+      this.draftDialog.open = true;
+      this.draftDialog.mode = mode;
+      this.draftDialog.step = "block";
+      this.draftDialog.study = study || null;
+      this.draftDialog.busy = false;
+    },
+    closeDraftDialog() {
+      // prevent closing during destructive delete
+      if (this.draftDialog.busy) return;
+
+      this.draftDialog.open = false;
+      this.draftDialog.mode = "";
+      this.draftDialog.step = "block";
+      this.draftDialog.study = null;
+      this.draftDialog.busy = false;
+    },
+    goToDiscardConfirm() {
+      if (this.draftDialog.busy) return;
+      this.draftDialog.step = "confirm-discard";
+    },
+
+    // Load study into store (same approach as your StudyView edit launcher)
+    async loadStudyIntoStoreForEdit(studyId) {
+      localStorage.removeItem("setStudyDetails");
+      localStorage.removeItem("scratchForms");
+
+      const token = this.$store.state.token;
+      if (!token) {
+        alert("Please log in again.");
+        this.$router.push("/login");
+        return false;
+      }
+
+      try {
+        const resp = await axios.get(`/forms/studies/${studyId}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+
+        const sd = resp.data?.content?.study_data;
+        const meta = resp.data?.metadata || {};
+
+        if (!sd) {
+          alert("Study content is empty.");
+          return false;
+        }
+
+        let assignments = Array.isArray(sd.assignments) ? sd.assignments : [];
+        if (!assignments.length && Array.isArray(sd.selectedModels) && sd.selectedModels.length) {
+          const m = sd.selectedModels.length;
+          const v = sd.visits?.length || 0;
+          const g = sd.groups?.length || 0;
+          assignments = Array.from({ length: m }, () =>
+            Array.from({ length: v }, () => Array.from({ length: g }, () => false))
+          );
+        }
+
+        const studyInfo = {
+          id: meta.id,
+          name: meta.study_name,
+          description: meta.study_description,
+          created_at: meta.created_at,
+          updated_at: meta.updated_at,
+          created_by: meta.created_by,
+        };
+
+        this.$store.commit("setStudyDetails", {
+          study_metadata: studyInfo,
+          study: { id: meta.id, ...(sd.study || {}) },
+          groups: sd.groups || [],
+          visits: sd.visits || [],
+          subjectCount: sd.subjectCount || 0,
+          assignmentMethod: sd.assignmentMethod || "random",
+          subjects: sd.subjects || [],
+          assignments: assignments,
+          forms: Array.isArray(sd.selectedModels)
+            ? [
+                {
+                  sections: sd.selectedModels.map((model) => ({
+                    title: model.title,
+                    fields: model.fields,
+                    source: "template",
+                  })),
+                },
+              ]
+            : [],
+        });
+
+        if (Array.isArray(sd.selectedModels)) {
+          const scratchForms = [
+            {
+              sections: sd.selectedModels.map((model) => ({
+                title: model.title,
+                fields: model.fields,
+                source: "template",
+              })),
+            },
+          ];
+          localStorage.setItem("scratchForms", JSON.stringify(scratchForms));
+        }
+
+        return true;
+      } catch (e) {
+        console.error("Failed to load study details:", e);
+        alert("Failed to load study details.");
+        return false;
+      }
+    },
+
+    // FIX: allow dialog to close after successful "Continue setup"
+    async continueStudyCreation() {
+      const s = this.draftDialog.study;
+      if (!s?.id) return;
+
+      this.draftDialog.busy = true;
+
+      const ok = await this.loadStudyIntoStoreForEdit(s.id);
+      if (!ok) {
+        this.draftDialog.busy = false;
+        return;
+      }
+
+      //  IMPORTANT FIX:
+      // closeDraftDialog() blocks closing while busy, so drop busy first, then close.
+      this.draftDialog.busy = false;
+      this.closeDraftDialog();
+
+      this.$router
+        .push({
+          name: "CreateStudy",
+          params: { id: s.id },
+          query: {
+            mode: "edit",
+            returnTo: "Dashboard",
+            returnOpenStudies: "true",
+          },
+        })
+        .catch(() => null);
+    },
+
+    viewStudyAnyway() {
+      const s = this.draftDialog.study;
+      this.closeDraftDialog();
+      if (!s?.id) return;
+      this.$router.push({ name: "StudyView", params: { id: s.id } }).catch(() => null);
+    },
+
+    async discardDraftStudy() {
+      const s = this.draftDialog.study;
+      if (!s?.id) return;
+
+      const token = this.$store.state.token;
+      if (!token) {
+        alert("Please log in again.");
+        this.closeDraftDialog();
+        return this.$router.push("/login");
+      }
+
+      this.draftDialog.busy = true;
+
+      try {
+        // If your backend uses a different delete path, change ONLY this line.
+        await axios.delete(`/forms/studies/${s.id}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+
+        // Hard reset dialog so it never gets stuck
+        this.draftDialog.open = false;
+        this.draftDialog.mode = "";
+        this.draftDialog.step = "block";
+        this.draftDialog.study = null;
+        this.draftDialog.busy = false;
+
+        // Keep user in Existing Studies list
+        await this.$router.push({ name: "Dashboard", query: { openStudies: "true" } }).catch(() => null);
+
+        this.activeSection = "study-management";
+        this.showImportData = false;
+        this.importMaximized = false;
+        this.showStudyOptions = true;
+
+        await this.loadStudies();
+      } catch (e) {
+        console.error("Failed to discard draft study:", e);
+        const msg =
+          e?.response?.data?.detail || e?.response?.data?.message || "Failed to discard the draft. Please try again.";
+        alert(msg);
+        this.draftDialog.busy = false;
+      }
+    },
+
+    handleAddDataClick(study) {
+      if (this.isDraftStudy(study)) {
+        this.openDraftDialog("add-data", study);
+        return;
+      }
+      this.addData(study);
+    },
+
+    handleViewStudyClick(study) {
+      if (this.isDraftStudy(study)) {
+        this.openDraftDialog("view-study", study);
+        return;
+      }
+      this.viewStudy(study);
     },
 
     // Logo click should always take user to /dashboard
@@ -555,10 +885,8 @@ export default {
         pingIntervalMs: 5 * 60 * 1000,
         inactivityMs: 30 * 60 * 1000,
         idleCheckMs: 30 * 1000,
-
-        // IMPORTANT: reduced DOM listener overhead
-        eventCooldownMs: 5 * 60 * 1000,            // record DOM activity at most once per 5 min
-        detachListenersDuringCooldown: true,       // stop listening for 5 min after first activity
+        eventCooldownMs: 5 * 60 * 1000,
+        detachListenersDuringCooldown: true,
       },
     });
   },
@@ -857,7 +1185,7 @@ export default {
   background-color: #f9f9f9;
 }
 
-/*  ONLY CHANGE (style): draft tag */
+/* draft tag */
 .status-tag {
   display: inline-block;
   padding: 3px 8px;
@@ -873,6 +1201,11 @@ export default {
   background: #fff7ed;
   border-color: #fdba74;
   color: #9a3412;
+}
+.study-name-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
 }
 
 /* Actions column */
@@ -916,9 +1249,137 @@ export default {
   font-size: 14px;
 }
 
-/* =========================
-   IMPORT OVERLAY (scroll + full screen)
-   ========================= */
+/* solid/outline buttons for dialog */
+.btn-primary-solid {
+  border: 1px solid #245fe0;
+  background: #2f6fed;
+  color: #fff;
+  border-radius: 10px;
+  padding: 10px 14px;
+  font-size: 14px;
+  cursor: pointer;
+}
+.btn-primary-solid:hover {
+  background: #285fce;
+}
+.btn-primary-outline {
+  border: 1px solid #245fe0;
+  background: transparent;
+  color: #245fe0;
+  border-radius: 10px;
+  padding: 10px 14px;
+  font-size: 14px;
+  cursor: pointer;
+}
+.btn-primary-outline:hover {
+  background: rgba(47, 111, 237, 0.08);
+}
+.btn-danger {
+  border-color: #fecaca !important;
+  background: #fff1f2 !important;
+  color: #9f1239 !important;
+}
+.btn-danger:hover {
+  background: #ffe4e6 !important;
+}
+.btn-danger-solid {
+  border-color: #9f1239 !important;
+  background: #9f1239 !important;
+  color: #fff !important;
+}
+.btn-danger-solid:hover {
+  background: #881337 !important;
+  border-color: #881337 !important;
+}
+
+/* modal */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  background: rgba(0, 0, 0, 0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 18px;
+}
+.modal {
+  width: 100%;
+  max-width: 560px;
+  background: #fff;
+  border-radius: 14px;
+  box-shadow: 0 25px 70px rgba(0, 0, 0, 0.25);
+  border: 1px solid #e5e7eb;
+  overflow: hidden;
+}
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px;
+  border-bottom: 1px solid #e5e7eb;
+}
+.modal-title {
+  font-size: 16px;
+  font-weight: 800;
+  color: #111827;
+}
+.modal-close {
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font-size: 22px;
+  line-height: 1;
+  color: #6b7280;
+}
+.modal-close:hover {
+  color: #111827;
+}
+.modal-body {
+  padding: 14px 16px 6px 16px;
+}
+.modal-lead {
+  margin: 0 0 10px 0;
+  color: #111827;
+}
+.modal-text {
+  margin: 0 0 12px 0;
+  color: #374151;
+  line-height: 1.45;
+}
+.modal-warning {
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  padding: 12px 12px;
+  margin-top: 10px;
+}
+.modal-warning--danger {
+  background: #fff1f2;
+  border-color: #fecaca;
+}
+.modal-warning-title {
+  font-weight: 700;
+  color: #111827;
+  margin-bottom: 6px;
+}
+.modal-warning-list {
+  margin: 0;
+  padding-left: 18px;
+  color: #374151;
+}
+.modal-warning-list li {
+  margin: 6px 0;
+}
+.modal-footer {
+  padding: 12px 16px 16px 16px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
+/* IMPORT OVERLAY */
 .import-overlay {
   display: flex;
   flex-direction: column;
@@ -932,7 +1393,6 @@ export default {
   min-width: 0;
   width: 100%;
 }
-
 .import-overlay.maximized {
   position: fixed;
   inset: 0;
@@ -942,7 +1402,6 @@ export default {
   border: none;
   box-shadow: none;
 }
-
 .import-overlay-header {
   position: sticky;
   top: 0;
@@ -954,14 +1413,12 @@ export default {
   align-items: center;
   padding: 10px 12px;
 }
-
 .import-overlay-left {
   display: flex;
   align-items: center;
   justify-content: flex-start;
   min-width: 0;
 }
-
 .import-overlay-center {
   display: flex;
   flex-direction: column;
@@ -971,14 +1428,12 @@ export default {
   text-align: center;
   gap: 2px;
 }
-
 .import-overlay-right {
   display: flex;
   justify-content: flex-end;
   align-items: center;
   min-width: 0;
 }
-
 .import-overlay-title {
   font-size: 16px;
   font-weight: 700;
@@ -988,7 +1443,6 @@ export default {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-
 .import-overlay-subtitle {
   display: block;
   font-size: 12px;
@@ -998,7 +1452,6 @@ export default {
   padding: 0 8px;
   white-space: normal;
 }
-
 .import-overlay-content {
   flex: 1;
   min-height: 0;
@@ -1008,14 +1461,12 @@ export default {
   max-width: 100%;
   min-width: 0;
 }
-
 .import-overlay-content :deep(.import-study) {
   max-width: none;
   width: 100%;
   margin: 0;
   min-width: 0;
 }
-
 .import-overlay-content :deep(table) {
   max-width: 100%;
 }
@@ -1036,18 +1487,17 @@ export default {
   .import-overlay {
     height: calc(100vh - 70px - 40px);
   }
-
-  /*  Keep sidebar hidden behavior on mobile too */
   .dashboard-layout.sidebar-hidden {
     grid-template-columns: 0 1fr;
     grid-template-areas:
       "header header"
       "main main";
   }
-}
-.study-name-cell {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
+  .modal-footer {
+    justify-content: stretch;
+  }
+  .modal-footer > * {
+    flex: 1 1 auto;
+  }
 }
 </style>
