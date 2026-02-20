@@ -214,12 +214,27 @@
   </div>
 
   <!-- Dialog -->
-  <div v-if="showDialog" class="dialog-backdrop">
+  <div v-if="showDialog" class="dialog-backdrop" @click.self="dialogMode !== 'unsaved' ? closeDialog() : null">
     <div class="dialog-box">
       <p>{{ dialogMessage }}</p>
 
+      <!-- Unsaved changes dialog -->
+      <div
+        v-if="dialogMode === 'unsaved'"
+        class="dialog-actions"
+        style="grid-template-columns: repeat(3, minmax(0, 1fr));"
+      >
+        <button class="btn-option" @click="onUnsavedKeepEditing" :disabled="unsavedBusy">Keep editing</button>
+
+        <button class="btn-option" @click="onUnsavedExitWithoutSaving" :disabled="unsavedBusy">Exit without saving</button>
+
+        <button class="btn-option" @click="onUnsavedSaveAndExit" :disabled="unsavedBusy">
+          {{ unsavedBusy ? "Saving…" : saveExitLabel }}
+        </button>
+      </div>
+
       <!-- Import success dialog actions -->
-      <div v-if="dialogMode === 'importSuccess'" class="dialog-actions">
+      <div v-else-if="dialogMode === 'importSuccess'" class="dialog-actions">
         <button class="btn-option" @click="goDashboardAfterImport">Go to Dashboard</button>
         <button class="btn-option" @click="viewImportedStudy">View Study</button>
         <button class="btn-option" @click="editImportedStudy">Edit Study</button>
@@ -232,8 +247,8 @@
 </template>
 
 <script>
-import { ref, onMounted, inject, computed, watch } from "vue";
-import { useRouter, useRoute } from "vue-router";
+import { ref, onMounted, inject, computed, watch, onBeforeUnmount } from "vue";
+import { useRouter, useRoute, onBeforeRouteLeave } from "vue-router";
 import { useStore } from "vuex";
 import axios from "axios";
 import yaml from "js-yaml";
@@ -287,9 +302,13 @@ export default {
     const showStudyErrors = ref(false);
     const showDialog = ref(false);
     const dialogMessage = ref("");
-    const dialogMode = ref("default"); // 'default' | 'importSuccess'
+    const dialogMode = ref("default"); // 'default' | 'importSuccess' | 'unsaved'
+    const unsavedBusy = ref(false);
 
     const skipSubjectCreationNow = ref(false);
+
+    // always show unsaved dialog on navigation/logout/logo/window close (irrespective of status)
+    const guardEnabled = computed(() => true);
 
     // --- import template state ---
     const templateFileInput = ref(null);
@@ -301,17 +320,23 @@ export default {
     const importedStudyId = ref(null);
     const importedStudyName = ref("");
 
-    const stepErrors = ref({
-      1: false,
-      2: false,
-      3: false,
-      4: false,
-      5: false,
-      6: false,
-    });
+    // draft creation happens ONLY on Save & Exit (or explicit Save button in edit)
+    const draftStudyId = ref(null);
+
+    // unsaved tracking + route interception
+    const lastSavedSnapshot = ref(null);
+    const isDirty = ref(false);
+    const allowInternalNav = ref(false);
+
+    const stepErrors = ref({ 1: false, 2: false, 3: false, 4: false, 5: false, 6: false });
 
     const editId = computed(() => props.id || route.params.id || null);
     const isEditing = computed(() => !!editId.value);
+
+    const saveExitLabel = computed(() => {
+      // keep wording stable, but behavior is now: save (draft if new; update if editing) then exit
+      return isEditing.value ? "Save & Exit" : "Save as Draft & Exit";
+    });
 
     const stepLabelById = {
       1: "Create a New Study",
@@ -367,6 +392,15 @@ export default {
     function closeDialog() {
       showDialog.value = false;
       dialogMode.value = "default";
+      dialogMessage.value = "";
+    }
+
+    function openUnsavedDialog(message) {
+      dialogMode.value = "unsaved";
+      dialogMessage.value =
+        message ||
+        "You have unsaved changes. You can keep editing, exit without saving, or save your changes and return to the Dashboard.";
+      showDialog.value = true;
     }
 
     function fieldError(f, value) {
@@ -416,7 +450,37 @@ export default {
       }
     }
 
-    //  Centralized: populate component refs from store.state.studyDetails
+    function buildSnapshot() {
+      return _deepClone({
+        step: step.value,
+        studyData: studyData.value || {},
+        groupData: groupData.value || [],
+        subjectData: subjectData.value || [],
+        visitData: visitData.value || [],
+        subjectCount: subjectCount.value,
+        assignmentMethod: assignmentMethod.value,
+        assignments: assignments.value || [],
+        skipSubjectCreationNow: !!skipSubjectCreationNow.value,
+        draftStudyId: draftStudyId.value,
+        editId: editId.value,
+      });
+    }
+
+    function markSavedSnapshot() {
+      lastSavedSnapshot.value = buildSnapshot();
+      isDirty.value = false;
+    }
+
+    function computeDirty() {
+      try {
+        const a = JSON.stringify(buildSnapshot());
+        const b = JSON.stringify(lastSavedSnapshot.value || {});
+        isDirty.value = a !== b;
+      } catch {
+        isDirty.value = true;
+      }
+    }
+
     function populateRefsFromStore() {
       const details = store.state.studyDetails || {};
 
@@ -439,20 +503,24 @@ export default {
       assignments.value = Array.isArray(details.assignments)
         ? JSON.parse(JSON.stringify(details.assignments))
         : initializeAssignments(details.selectedModels || [], details.visits || [], details.groups || []);
+      // When editing a draft, subjects can be empty even though subject creation isn't skipped.
+      // Reuse the original generator logic (no dialogs, no step change).
+      const disableSubjects = !!skipSubjectCreationNow.value || assignmentMethod.value === "Skip";
+      if (!disableSubjects && (!Array.isArray(subjectData.value) || subjectData.value.length === 0)) {
+      checkSubjectsSetup({ advance: false, silent: true });
+    }
     }
 
-    async function saveCurrentStepToBackend() {
-      if (!isEditing.value) return true;
-      if (!token.value) {
-        router.push("/login");
-        return false;
-      }
-
+    function buildBackendPayload() {
       const s = studyData.value || {};
-      const payload = {
+      const study_name = s.title || s.study_name || s.name || "Untitled Study";
+      const study_description = s.description || s.study_description || "";
+
+      return {
         study_metadata: {
-          study_name: s.title || s.study_name || s.name,
-          study_description: s.description || s.study_description,
+          created_by: currentUserId.value,
+          study_name,
+          study_description,
         },
         study_content: {
           study_data: {
@@ -467,18 +535,65 @@ export default {
           },
         },
       };
+    }
+
+    // save logic used ONLY by:
+    // - Save button in edit mode
+    // - Unsaved dialog "Save & Exit"
+    async function saveNow() {
+      if (!token.value) {
+        router.push("/login");
+        return false;
+      }
+
+      const payload = buildBackendPayload();
 
       try {
-        await axios.put(`/forms/studies/${editId.value}`, payload, {
+        if (isEditing.value) {
+          await axios.put(`/forms/studies/${editId.value}`, payload, { headers: authHeader.value });
+          markSavedSnapshot();
+          return true;
+        }
+
+        // create new: create as DRAFT
+        const resp = await axios.post(`/forms/studies/?status=DRAFT&last_completed_step=${encodeURIComponent(String(step.value))}`, payload, {
           headers: authHeader.value,
         });
+
+        const meta = resp.data?.metadata || resp.data?.study_metadata || {};
+        const createdId = meta?.id ?? resp.data?.id;
+        if (createdId == null) throw new Error("Draft created, but ID was not returned.");
+
+        draftStudyId.value = Number(createdId);
+
+        store.commit("setStudyDetails", {
+          study_metadata: {
+            id: Number(createdId),
+            name: meta.study_name || payload.study_metadata.study_name,
+            description: meta.study_description || payload.study_metadata.study_description,
+            created_by: meta.created_by || payload.study_metadata.created_by,
+            created_at: meta.created_at,
+            updated_at: meta.updated_at,
+            status: String(meta.status || "DRAFT").toUpperCase(),
+          },
+          study: { ...(payload.study_content.study_data.study || {}), id: Number(createdId) },
+          groups: payload.study_content.study_data.groups || [],
+          visits: payload.study_content.study_data.visits || [],
+          subjectCount: payload.study_content.study_data.subjectCount || 0,
+          assignmentMethod: payload.study_content.study_data.assignmentMethod || "Random",
+          subjects: payload.study_content.study_data.subjects || [],
+          assignments: payload.study_content.study_data.assignments || [],
+          skipSubjectCreationNow: !!payload.study_content.study_data.skipSubjectCreationNow,
+        });
+
+        markSavedSnapshot();
         return true;
       } catch (e) {
         const msg =
           e?.response?.data?.detail ||
           e?.response?.data?.message ||
           e?.message ||
-          "Failed to save study changes.";
+          "Failed to save.";
         dialogMessage.value = String(msg);
         dialogMode.value = "default";
         showDialog.value = true;
@@ -491,7 +606,7 @@ export default {
       if (stepId === 2) return checkGroups({ advance: false });
       if (stepId === 3) return checkSubjectsSetup({ advance: false });
       if (stepId === 4) return checkSubjectsAssigned({ advance: false });
-      if (stepId === 5) return checkVisits({ advance: false });
+      if (stepId === 5) return checkVisits();
       return true;
     }
 
@@ -515,7 +630,7 @@ export default {
       const ok = validateStepOnly(step.value);
       if (!ok) return;
 
-      const saved = await saveCurrentStepToBackend();
+      const saved = await saveNow();
       if (!saved) return;
 
       router.push(resolveReturnRoute());
@@ -531,11 +646,16 @@ export default {
         q.returnTab = q.returnTab || "edit";
       }
 
-      router.push({
-        name: "CreateFormScratch",
-        params: { assignments: assignments.value },
-        query: q,
-      });
+      allowInternalNav.value = true;
+      router
+        .push({
+          name: "CreateFormScratch",
+          params: { assignments: assignments.value },
+          query: q,
+        })
+        .finally(() => {
+          allowInternalNav.value = false;
+        });
     }
 
     // -----------------------
@@ -625,6 +745,7 @@ export default {
         created_at: meta.created_at,
         updated_at: meta.updated_at,
         created_by: meta.created_by,
+        status: meta.status,
       };
 
       const mergedStudy = mergeMetaIntoStudyNode(sd.study, meta);
@@ -706,12 +827,8 @@ export default {
         const created = await axios.post("/forms/studies/", payload, { headers: authHeader.value });
         const meta = created.data?.study_metadata || created.data?.metadata || {};
         const createdId = meta.id ?? created.data?.id;
+        if (createdId == null) throw new Error("Study created but ID was not returned.");
 
-        if (createdId == null) {
-          throw new Error("Study created but ID was not returned.");
-        }
-
-        // hydrate store (so Edit action works immediately)
         await hydrateStoreFromStudyId(createdId);
 
         importedStudyId.value = String(createdId);
@@ -721,7 +838,6 @@ export default {
         dialogMessage.value = `Imported study “${importedStudyName.value}” is saved successfully. What would you like to do next?`;
         showDialog.value = true;
       } catch (err) {
-        // eslint-disable-next-line no-console
         console.error(err);
         templateImportError.value =
           err?.message || "Failed to import JSON. Please select a valid template file.";
@@ -730,7 +846,6 @@ export default {
       }
     }
 
-    // Dialog actions for import-success
     function goDashboardAfterImport() {
       closeDialog();
       router.push({ name: "Dashboard", query: { openStudies: "true" } });
@@ -751,8 +866,6 @@ export default {
         return;
       }
       closeDialog();
-      // IMPORTANT: navigating create -> edit reuses the same component instance
-      // The watch(editId) below will re-hydrate and repopulate all refs.
       router.push({
         name: "CreateStudy",
         params: { id: importedStudyId.value },
@@ -772,7 +885,6 @@ export default {
       showStudyErrors.value = true;
       const hasMissing = studySchema.value.some((f) => f.required && !studyData.value[f.field]);
       stepErrors.value[1] = hasMissing;
-
       if (hasMissing) return false;
 
       showStudyErrors.value = false;
@@ -783,22 +895,20 @@ export default {
       const selected = studyData.value.type;
       const skips = skipConfig[selected] || [];
 
-      const payload = {
+      store.commit("setStudyDetails", {
         study: studyData.value,
         groups: [],
         visits: [],
         assignments: assignments.value,
         skipSubjectCreationNow: skipSubjectCreationNow.value,
-      };
-
-      store.commit("setStudyDetails", payload);
+      });
 
       if (!isEditing.value && opts.advance) {
         if (skips.includes("groups") && skips.includes("visits")) {
-          router.push({
-            name: "CreateFormScratch",
-            params: { assignments: assignments.value },
-          });
+          allowInternalNav.value = true;
+          router
+            .push({ name: "CreateFormScratch", params: { assignments: assignments.value } })
+            .finally(() => (allowInternalNav.value = false));
           return false;
         }
       }
@@ -823,10 +933,6 @@ export default {
       stepErrors.value[2] = hasErrors;
       if (hasErrors) return false;
 
-      if (assignments.value.length > 0 && assignments.value[0]?.[0]?.length !== groupData.value.length) {
-        assignments.value = initializeAssignments(studyData.value.selectedModels || [], visitData.value, groupData.value);
-      }
-
       store.commit("setStudyDetails", {
         study: studyData.value,
         groups: groupData.value,
@@ -841,7 +947,7 @@ export default {
     }
 
     // ============ STEP 3 ============
-    function checkSubjectsSetup(opts = { advance: true }) {
+    function checkSubjectsSetup(opts = { advance: true, silent: false }) {
       if (skipSubjectCreationNow.value) {
         stepErrors.value[3] = false;
         if (opts.advance) step.value = 5;
@@ -849,12 +955,18 @@ export default {
       }
 
       if (!subjectCount.value || !assignmentMethod.value) {
-        dialogMessage.value = "Please provide subject count and assignment method.";
+      // In silent mode (used during edit-hydration), default safely and continue.
+      if (opts?.silent) {
+        if (!subjectCount.value) subjectCount.value = 1;
+        if (!assignmentMethod.value) assignmentMethod.value = "Random";
+      } else {
+        dialogMessage.value = "Please provide the subject count and the assignment method before continuing.";
         dialogMode.value = "default";
         showDialog.value = true;
         stepErrors.value[3] = true;
         return false;
       }
+    }
 
       const N = subjectCount.value;
       const prefix =
@@ -868,11 +980,7 @@ export default {
 
       if (isEditing.value && subjectData.value.length > 0) {
         const currentCount = subjectData.value.length;
-        if (N === currentCount) {
-          stepErrors.value[3] = false;
-          if (opts.advance) step.value = assignmentMethod.value === "Skip" ? 5 : 4;
-          return true;
-        } else if (N > currentCount) {
+        if (N > currentCount) {
           const additionalSubjects = Array(N - currentCount)
             .fill()
             .map((_, idx) => ({
@@ -883,7 +991,7 @@ export default {
                   : "",
             }));
           subjectData.value = [...subjectData.value, ...additionalSubjects];
-        } else {
+        } else if (N < currentCount) {
           subjectData.value = subjectData.value.slice(0, N);
         }
       } else {
@@ -936,7 +1044,7 @@ export default {
     }
 
     // ============ STEP 5 ============
-    function checkVisits(opts = { advance: true }) {
+    function checkVisits() {
       if (!visitData.value || visitData.value.length === 0) {
         stepErrors.value[5] = true;
         dialogMessage.value = "Please add at least one visit.";
@@ -963,20 +1071,7 @@ export default {
       });
 
       stepErrors.value[5] = false;
-
-      if (!isEditing.value && opts.advance) {
-        openFinishRoute();
-      }
       return true;
-    }
-
-    function goToStudyManagement() {
-      router.push({ name: "Dashboard", query: { openStudies: "false" } });
-    }
-
-    function backFromStep1() {
-      if (isEditing.value) router.push(resolveReturnRoute());
-      else goToStudyManagement();
     }
 
     function goBackFromVisits() {
@@ -985,7 +1080,7 @@ export default {
     }
 
     async function goToFinish() {
-      const ok = checkVisits({ advance: false });
+      const ok = checkVisits();
       if (!ok) return;
       openFinishRoute();
     }
@@ -1042,7 +1137,7 @@ export default {
         2: () => checkGroups({ advance: true }),
         3: () => checkSubjectsSetup({ advance: true }),
         4: () => checkSubjectsAssigned({ advance: true }),
-        5: () => checkVisits({ advance: true }),
+        5: () => checkVisits(),
       };
 
       const maxLogicalStep = targetStep === 6 ? 5 : Math.min(targetStep - 1, 5);
@@ -1063,7 +1158,15 @@ export default {
         if (!ok) return;
       }
 
+      if (targetStep === 6) {
+        // Finish in stepper should behave exactly like the Finish button:
+        // validate required steps, then go to ScratchForm component.
+        openFinishRoute();
+        return;
+      }
+
       if (targetStep <= 5) step.value = targetStep;
+
     }
 
     function normalizeTargetStep(n) {
@@ -1108,18 +1211,15 @@ export default {
       try {
         await hydrateStoreFromStudyId(editId.value);
       } catch (err) {
-        // eslint-disable-next-line no-console
         console.warn("Failed to fetch study for edit URL load:", err?.response?.data || err?.message || err);
       }
     }
 
-    //  CRITICAL FIX: when route changes create -> edit (same component instance), reload everything
     watch(
       () => editId.value,
       async (newVal, oldVal) => {
         if (newVal === oldVal) return;
 
-        // switching to "create new"
         if (!newVal) {
           store.commit("resetStudyDetails");
           const base = {};
@@ -1133,14 +1233,88 @@ export default {
           assignments.value = [];
           skipSubjectCreationNow.value = false;
           step.value = 1;
+          draftStudyId.value = null;
+          markSavedSnapshot();
           return;
         }
 
-        // switching to edit mode (or switching ids)
         await ensureStoreDetailsLoadedForEdit();
         populateRefsFromStore();
         applyInitialStepFromQuery();
+        markSavedSnapshot();
       }
+    );
+
+    // beforeunload (close tab/window)
+    function beforeUnloadHandler(e) {
+      if (!guardEnabled.value) return;
+      computeDirty();
+      if (!isDirty.value) return;
+      e.preventDefault();
+      e.returnValue = "";
+    }
+
+    // route leave guard (covers logout/logo navigation/etc.)
+    onBeforeRouteLeave((to, from, next) => {
+      if (!guardEnabled.value) return next();
+      if (allowInternalNav.value) return next();
+
+      computeDirty();
+      if (!isDirty.value) return next();
+
+      openUnsavedDialog();
+      next(false);
+    });
+
+    async function onUnsavedSaveAndExit() {
+      if (unsavedBusy.value) return;
+      unsavedBusy.value = true;
+      try {
+        const ok = validateStepOnly(step.value);
+        if (!ok) {
+          unsavedBusy.value = false;
+          return;
+        }
+
+        const saved = await saveNow();
+        if (!saved) {
+          unsavedBusy.value = false;
+          return;
+        }
+
+        showDialog.value = false;
+        dialogMode.value = "default";
+        dialogMessage.value = "";
+
+        allowInternalNav.value = true;
+        router.push("/dashboard").finally(() => {
+          allowInternalNav.value = false;
+        });
+      } finally {
+        unsavedBusy.value = false;
+      }
+    }
+
+    function onUnsavedKeepEditing() {
+      closeDialog();
+    }
+
+    function onUnsavedExitWithoutSaving() {
+      closeDialog();
+      allowInternalNav.value = true;
+      router.push("/dashboard").finally(() => {
+        allowInternalNav.value = false;
+      });
+    }
+
+    // dirty tracking
+    watch(
+      [studyData, groupData, subjectData, visitData, subjectCount, assignmentMethod, assignments, skipSubjectCreationNow, draftStudyId],
+      () => {
+        if (!guardEnabled.value) return;
+        computeDirty();
+      },
+      { deep: true }
     );
 
     onMounted(async () => {
@@ -1151,8 +1325,22 @@ export default {
       await loadYaml("/visit_schema.yaml", visitSchema);
 
       await ensureStoreDetailsLoadedForEdit();
-      populateRefsFromStore();
-      applyInitialStepFromQuery();
+
+      if (isEditing.value) {
+        populateRefsFromStore();
+        applyInitialStepFromQuery();
+      } else {
+        const base = {};
+        (studySchema.value || []).forEach((f) => (base[f.field] = ""));
+        studyData.value = base;
+      }
+
+      markSavedSnapshot();
+      window.addEventListener("beforeunload", beforeUnloadHandler);
+    });
+
+    onBeforeUnmount(() => {
+      window.removeEventListener("beforeunload", beforeUnloadHandler);
     });
 
     return {
@@ -1170,6 +1358,7 @@ export default {
       showDialog,
       dialogMessage,
       dialogMode,
+      unsavedBusy,
       skipSubjectCreationNow,
 
       steps,
@@ -1181,6 +1370,8 @@ export default {
       nextLabelFromStep3,
       prevLabelForVisits,
 
+      saveExitLabel,
+
       fieldError,
       validateStudy,
       checkGroups,
@@ -1188,10 +1379,15 @@ export default {
       checkSubjectsAssigned,
       checkVisits,
 
-      goToStudyManagement,
       goBackFromVisits,
       onStepClick,
-      backFromStep1,
+      backFromStep1() {
+        if (isEditing.value) router.push(resolveReturnRoute());
+        else {
+          allowInternalNav.value = true;
+          router.push("/dashboard").finally(() => (allowInternalNav.value = false));
+        }
+      },
       saveThisStepAndBackToStudy,
       goToFinish,
 
@@ -1206,6 +1402,10 @@ export default {
       goDashboardAfterImport,
       viewImportedStudy,
       editImportedStudy,
+
+      onUnsavedKeepEditing,
+      onUnsavedExitWithoutSaving,
+      onUnsavedSaveAndExit,
     };
   },
 };
@@ -1457,8 +1657,6 @@ export default {
   overflow-y: auto;
   width: min(720px, 92vw);
 }
-
-/*  Uniform buttons: grid avoids 3+1 wrap */
 .dialog-actions {
   margin-top: 14px;
   display: grid;
