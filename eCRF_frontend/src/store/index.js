@@ -58,6 +58,7 @@ const store = createStore({
     forms: [],           // Store all forms
     currentForm: null,   // Store the currently selected form for editing/viewing
     studyDetails: null,  // Store study details (used in study creation)
+    studyCreationDirty: false,
   },
   mutations: {
     setUser(state, user) {
@@ -87,6 +88,12 @@ const store = createStore({
     },
     resetStudyDetails(state) {
       state.studyDetails = {};
+    },
+    setStudyCreationDirty(state, val) {
+      state.studyCreationDirty = !!val;
+    },
+    clearStudyCreationDirty(state) {
+      state.studyCreationDirty = false;
     },
   },
   actions: {
