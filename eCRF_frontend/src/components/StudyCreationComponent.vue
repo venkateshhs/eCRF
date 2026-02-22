@@ -387,6 +387,7 @@ export default {
 
     const token = computed(() => store.state.token);
     const authHeader = computed(() => ({ Authorization: `Bearer ${token.value}` }));
+    const globalDirty = computed(() => !!store.state.studyCreationDirty);
     const currentUserId = computed(() => store.state.user?.id || null);
 
     function closeDialog() {
@@ -469,6 +470,7 @@ export default {
     function markSavedSnapshot() {
       lastSavedSnapshot.value = buildSnapshot();
       isDirty.value = false;
+      store.commit("setStudyCreationDirty", false);
     }
 
     function computeDirty() {
@@ -479,6 +481,96 @@ export default {
       } catch {
         isDirty.value = true;
       }
+      if (isDirty.value) store.commit("setStudyCreationDirty", true);
+    }
+
+    /* ============================================================
+       FORMS PRESERVATION FIX
+       - Preserve already-built ScratchForm/template data when saving
+         from StudyCreationComponent (even if user only changed step 1).
+       ============================================================ */
+    function parseScratchFormsFromLocalStorage() {
+      try {
+        const parsed = JSON.parse(localStorage.getItem("scratchForms") || "[]");
+        return Array.isArray(parsed) ? parsed : [];
+      } catch {
+        return [];
+      }
+    }
+
+    function normalizeFormsArray(candidate) {
+      if (!Array.isArray(candidate)) return [];
+      return candidate
+        .filter((f) => f && typeof f === "object")
+        .map((f) => ({
+          ...f,
+          sections: Array.isArray(f.sections)
+            ? f.sections.map((sec) => ({
+                ...sec,
+                title: sec?.title ?? "Untitled Section",
+                fields: Array.isArray(sec?.fields) ? sec.fields : [],
+                source: sec?.source || "template",
+              }))
+            : [],
+        }));
+    }
+
+    function deriveSelectedModelsFromForms(formsArr) {
+      const first = Array.isArray(formsArr) && formsArr.length ? formsArr[0] : null;
+      const sections = Array.isArray(first?.sections) ? first.sections : [];
+      return sections.map((sec) => ({
+        title: sec.title,
+        fields: _deepClone(sec.fields || []),
+      }));
+    }
+
+    function getFormsForSavePayload() {
+      const details = store.state.studyDetails || {};
+
+      // 1) Prefer store.forms if present (most stable when draft was hydrated from backend)
+      const storeForms = normalizeFormsArray(details.forms);
+
+      // 2) Fallback to local scratch cache (when ScratchForm was used and store got partially overwritten)
+      const lsForms = normalizeFormsArray(parseScratchFormsFromLocalStorage());
+
+      // 3) Fallback to store.selectedModels (convert to forms shape)
+      let selectedModelDerived = [];
+      if (Array.isArray(details.selectedModels) && details.selectedModels.length) {
+        selectedModelDerived = [
+          {
+            sections: details.selectedModels.map((m) => ({
+              title: m.title,
+              fields: Array.isArray(m.fields) ? _deepClone(m.fields) : [],
+              source: "template",
+            })),
+          },
+        ];
+      }
+
+      const selectedModelDerivedNorm = normalizeFormsArray(selectedModelDerived);
+
+      const picked =
+        (storeForms.length ? storeForms : null) ||
+        (lsForms.length ? lsForms : null) ||
+        (selectedModelDerivedNorm.length ? selectedModelDerivedNorm : null) ||
+        [{ sections: [] }];
+
+      return _deepClone(picked);
+    }
+
+    function getSelectedModelsForSavePayload() {
+      return deriveSelectedModelsFromForms(getFormsForSavePayload());
+    }
+
+    function commitStudyDetailsPreservingForms(partial) {
+      const existing = store.state.studyDetails || {};
+      const formsToPersist = getFormsForSavePayload();
+
+      store.commit("setStudyDetails", {
+        ...existing,
+        ...partial,
+        forms: formsToPersist,
+      });
     }
 
     function populateRefsFromStore() {
@@ -507,14 +599,17 @@ export default {
       // Reuse the original generator logic (no dialogs, no step change).
       const disableSubjects = !!skipSubjectCreationNow.value || assignmentMethod.value === "Skip";
       if (!disableSubjects && (!Array.isArray(subjectData.value) || subjectData.value.length === 0)) {
-      checkSubjectsSetup({ advance: false, silent: true });
-    }
+        checkSubjectsSetup({ advance: false, silent: true });
+      }
     }
 
     function buildBackendPayload() {
       const s = studyData.value || {};
       const study_name = s.title || s.study_name || s.name || "Untitled Study";
       const study_description = s.description || s.study_description || "";
+
+      // CRITICAL: preserve ScratchForm/template data even if step-1 only edits happened
+      const selectedModelsToPersist = getSelectedModelsForSavePayload();
 
       return {
         study_metadata: {
@@ -532,6 +627,7 @@ export default {
             subjects: _deepClone(subjectData.value || []),
             assignments: _deepClone(assignments.value || []),
             skipSubjectCreationNow: !!skipSubjectCreationNow.value,
+            selectedModels: _deepClone(selectedModelsToPersist || []),
           },
         },
       };
@@ -547,18 +643,49 @@ export default {
       }
 
       const payload = buildBackendPayload();
+      const formsToPersist = getFormsForSavePayload();
 
       try {
         if (isEditing.value) {
           await axios.put(`/forms/studies/${editId.value}`, payload, { headers: authHeader.value });
+
+          // Keep local store consistent and preserve forms/template after save
+          commitStudyDetailsPreservingForms({
+            study_metadata: {
+              ...(store.state.studyDetails?.study_metadata || {}),
+              id: Number(editId.value),
+              name: payload.study_metadata.study_name,
+              study_name: payload.study_metadata.study_name,
+              description: payload.study_metadata.study_description,
+              study_description: payload.study_metadata.study_description,
+            },
+            study: {
+              ...(store.state.studyDetails?.study || {}),
+              ..._deepClone(payload.study_content.study_data.study || {}),
+              id: Number(editId.value),
+            },
+            groups: _deepClone(payload.study_content.study_data.groups || []),
+            visits: _deepClone(payload.study_content.study_data.visits || []),
+            subjectCount: payload.study_content.study_data.subjectCount || 0,
+            assignmentMethod: payload.study_content.study_data.assignmentMethod || "Random",
+            subjects: _deepClone(payload.study_content.study_data.subjects || []),
+            assignments: _deepClone(payload.study_content.study_data.assignments || []),
+            skipSubjectCreationNow: !!payload.study_content.study_data.skipSubjectCreationNow,
+            selectedModels: _deepClone(payload.study_content.study_data.selectedModels || deriveSelectedModelsFromForms(formsToPersist)),
+          });
+
           markSavedSnapshot();
           return true;
         }
 
         // create new: create as DRAFT
-        const resp = await axios.post(`/forms/studies/?status=DRAFT&last_completed_step=${encodeURIComponent(String(step.value))}`, payload, {
-          headers: authHeader.value,
-        });
+        const resp = await axios.post(
+          `/forms/studies/?status=DRAFT&last_completed_step=${encodeURIComponent(String(step.value))}`,
+          payload,
+          {
+            headers: authHeader.value,
+          }
+        );
 
         const meta = resp.data?.metadata || resp.data?.study_metadata || {};
         const createdId = meta?.id ?? resp.data?.id;
@@ -566,11 +693,13 @@ export default {
 
         draftStudyId.value = Number(createdId);
 
-        store.commit("setStudyDetails", {
+        commitStudyDetailsPreservingForms({
           study_metadata: {
             id: Number(createdId),
             name: meta.study_name || payload.study_metadata.study_name,
+            study_name: meta.study_name || payload.study_metadata.study_name,
             description: meta.study_description || payload.study_metadata.study_description,
+            study_description: meta.study_description || payload.study_metadata.study_description,
             created_by: meta.created_by || payload.study_metadata.created_by,
             created_at: meta.created_at,
             updated_at: meta.updated_at,
@@ -584,6 +713,7 @@ export default {
           subjects: payload.study_content.study_data.subjects || [],
           assignments: payload.study_content.study_data.assignments || [],
           skipSubjectCreationNow: !!payload.study_content.study_data.skipSubjectCreationNow,
+          selectedModels: _deepClone(payload.study_content.study_data.selectedModels || deriveSelectedModelsFromForms(formsToPersist)),
         });
 
         markSavedSnapshot();
@@ -760,6 +890,7 @@ export default {
         subjects: sd.subjects || [],
         assignments: assignmentsLocal,
         skipSubjectCreationNow: !!sd.skipSubjectCreationNow,
+        selectedModels: Array.isArray(sd.selectedModels) ? _deepClone(sd.selectedModels) : [],
         forms: sd.selectedModels
           ? [
               {
@@ -895,7 +1026,7 @@ export default {
       const selected = studyData.value.type;
       const skips = skipConfig[selected] || [];
 
-      store.commit("setStudyDetails", {
+      commitStudyDetailsPreservingForms({
         study: studyData.value,
         groups: [],
         visits: [],
@@ -933,7 +1064,7 @@ export default {
       stepErrors.value[2] = hasErrors;
       if (hasErrors) return false;
 
-      store.commit("setStudyDetails", {
+      commitStudyDetailsPreservingForms({
         study: studyData.value,
         groups: groupData.value,
         visits: [],
@@ -955,18 +1086,18 @@ export default {
       }
 
       if (!subjectCount.value || !assignmentMethod.value) {
-      // In silent mode (used during edit-hydration), default safely and continue.
-      if (opts?.silent) {
-        if (!subjectCount.value) subjectCount.value = 1;
-        if (!assignmentMethod.value) assignmentMethod.value = "Random";
-      } else {
-        dialogMessage.value = "Please provide the subject count and the assignment method before continuing.";
-        dialogMode.value = "default";
-        showDialog.value = true;
-        stepErrors.value[3] = true;
-        return false;
+        // In silent mode (used during edit-hydration), default safely and continue.
+        if (opts?.silent) {
+          if (!subjectCount.value) subjectCount.value = 1;
+          if (!assignmentMethod.value) assignmentMethod.value = "Random";
+        } else {
+          dialogMessage.value = "Please provide the subject count and the assignment method before continuing.";
+          dialogMode.value = "default";
+          showDialog.value = true;
+          stepErrors.value[3] = true;
+          return false;
+        }
       }
-    }
 
       const N = subjectCount.value;
       const prefix =
@@ -1059,7 +1190,7 @@ export default {
       stepErrors.value[5] = hasErrors;
       if (hasErrors) return false;
 
-      store.commit("setStudyDetails", {
+      commitStudyDetailsPreservingForms({
         study: studyData.value,
         groups: groupData.value,
         subjectCount: subjectCount.value,
@@ -1166,7 +1297,6 @@ export default {
       }
 
       if (targetStep <= 5) step.value = targetStep;
-
     }
 
     function normalizeTargetStep(n) {
@@ -1249,7 +1379,7 @@ export default {
     function beforeUnloadHandler(e) {
       if (!guardEnabled.value) return;
       computeDirty();
-      if (!isDirty.value) return;
+      if (!isDirty.value && !globalDirty.value) return;
       e.preventDefault();
       e.returnValue = "";
     }
@@ -1260,7 +1390,7 @@ export default {
       if (allowInternalNav.value) return next();
 
       computeDirty();
-      if (!isDirty.value) return next();
+      if (!isDirty.value && !globalDirty.value) return next();
 
       openUnsavedDialog();
       next(false);
@@ -1309,7 +1439,17 @@ export default {
 
     // dirty tracking
     watch(
-      [studyData, groupData, subjectData, visitData, subjectCount, assignmentMethod, assignments, skipSubjectCreationNow, draftStudyId],
+      [
+        studyData,
+        groupData,
+        subjectData,
+        visitData,
+        subjectCount,
+        assignmentMethod,
+        assignments,
+        skipSubjectCreationNow,
+        draftStudyId,
+      ],
       () => {
         if (!guardEnabled.value) return;
         computeDirty();
