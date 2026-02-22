@@ -39,7 +39,7 @@ export default {
       default: () => ["Random", "Manual", "Skip"],
     },
   },
-  emits: ["update:subjectCount", "update:assignmentMethod"],
+  emits: ["update:subjectCount", "update:assignmentMethod", "changed"],
   setup(props, { emit }) {
     watch(
       () => props.subjectCount,
@@ -52,13 +52,20 @@ export default {
     watch(
       () => props.assignmentMethod,
       (val) => {
-        if (!val) emit("update:assignmentMethod", "random");
+        if (!val) emit("update:assignmentMethod", "Random");
       },
       { immediate: true }
     );
 
-    const updateCount = (val) => emit("update:subjectCount", val);
-    const updateMethod = (val) => emit("update:assignmentMethod", val);
+    const updateCount = (val) => {
+      emit("update:subjectCount", val);
+      emit("changed", { kind: "subjectCount", value: val });
+    };
+
+    const updateMethod = (val) => {
+      emit("update:assignmentMethod", val);
+      emit("changed", { kind: "assignmentMethod", value: val });
+    };
 
     return { updateCount, updateMethod };
   },

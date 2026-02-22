@@ -36,14 +36,15 @@ export default {
     subjects: { type: Array, required: true },
     groupData: { type: Array, required: true },
   },
-  emits: ["update:subjects"],
+  emits: ["update:subjects", "changed"],
   setup(props, { emit }) {
     const groupNames = computed(() =>
-      props.groupData.map((g) => g.name || g.label || "Unnamed")
+      (props.groupData || []).map((g) => g.name || g.label || "Unnamed")
     );
 
     const emitSubjects = () => {
       emit("update:subjects", props.subjects);
+      emit("changed", { kind: "subjectAssignment" });
     };
 
     return { groupNames, emitSubjects };

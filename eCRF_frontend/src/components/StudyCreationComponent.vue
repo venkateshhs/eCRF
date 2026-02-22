@@ -163,7 +163,7 @@
         </label>
       </div>
 
-      <SubjectForm v-model:subjectCount="subjectCount" v-model:assignmentMethod="assignmentMethod" />
+      <SubjectForm v-model:subjectCount="subjectCount" v-model:assignmentMethod="assignmentMethod" @changed="onSubjectSetupChanged"/>
 
       <div class="form-actions">
         <button @click="step = 2" class="btn-option">{{ stepLabelById[2] }}</button>
@@ -182,7 +182,7 @@
     <div v-if="step === 4 && assignmentMethod !== 'Skip' && !skipSubjectCreationNow" class="new-study-form">
       <h2>{{ panelTitle }}</h2>
 
-      <SubjectAssignmentForm :subjects="subjectData" :groupData="groupData" v-model:subjects="subjectData" />
+      <SubjectAssignmentForm :subjects="subjectData" :groupData="groupData" v-model:subjects="subjectData" @changed="onSubjectSetupChanged"/>
 
       <div class="form-actions">
         <button @click="step = 3" class="btn-option">{{ stepLabelById[3] }}</button>
@@ -390,6 +390,16 @@ export default {
     const globalDirty = computed(() => !!store.state.studyCreationDirty);
     const currentUserId = computed(() => store.state.user?.id || null);
 
+    function onSubjectSetupChanged() {
+      // Mark Step 4 validation as stale whenever subject setup/assignment changes.
+      // Next click to Step 5 will re-run checkSubjectsAssigned() and block if needed.
+      const step4Applies = !skipSubjectCreationNow.value && assignmentMethod.value !== "Skip";
+      if (step4Applies) {
+        stepErrors.value[4] = true;
+      } else {
+        stepErrors.value[4] = false;
+      }
+    }
     function closeDialog() {
       showDialog.value = false;
       dialogMode.value = "default";
@@ -1235,19 +1245,13 @@ export default {
       });
     });
 
+    // FIX: in edit mode, stepper navigation previously bypassed step-3 regeneration logic,
+    // so changing subjectCount/assignmentMethod left stale subjectData visible in step 4.
+    // Before entering step 4/5/6, re-run subject setup (without advancing steps) to sync subjectData.
     function onStepClick(targetStep) {
       const disableAssign = skipSubjectCreationNow.value || assignmentMethod.value === "Skip";
       if (targetStep === step.value) return;
       if (targetStep === 4 && disableAssign) return;
-
-      if (isEditing.value) {
-        if (targetStep === 6) {
-          openFinishRoute();
-          return;
-        }
-        step.value = targetStep;
-        return;
-      }
 
       goToStep(targetStep);
     }
@@ -1546,6 +1550,7 @@ export default {
       onUnsavedKeepEditing,
       onUnsavedExitWithoutSaving,
       onUnsavedSaveAndExit,
+      onSubjectSetupChanged,
     };
   },
 };
