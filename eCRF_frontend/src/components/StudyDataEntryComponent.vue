@@ -99,6 +99,7 @@
         :statusClass="statusClassFast"
         :selectedVersion="selectedVersion"
         :infoIcon="icons.info"
+        :showGroupColumn="canSeeGroupColumn"
         @update:selectedVisitIndex="selectedVisitIndex = $event"
         @add-subjects="openSubjectDialog"
         @select-cell="selectCell"
@@ -631,6 +632,23 @@ export default {
   },
 
   computed: {
+    canSeeGroupColumn() {
+      if (!this.study?.metadata) return false;
+
+      // creator
+      const isCreator =
+        this.study.metadata.created_by === this.$store.state.user?.id;
+
+      // shared link with add permission
+      const hasAddPermission =
+        this.isShared && this.sharedPermission === "add";
+
+
+      const isAdmin =
+        this.$store.state.user?.role === "Administrator";
+
+      return isCreator || hasAddPermission || isAdmin;
+    },
     studyId() {
       const id = Number(this.$route.params.id);
       return Number.isFinite(id) ? id : null;
