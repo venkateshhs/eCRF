@@ -47,7 +47,7 @@
           type="button"
           class="legend-icon-btn"
           @click="$emit('open-status-legend')"
-          :title="'Legend / Color meaning'"
+          title="Legend / Color meaning"
         >
           <i :class="infoIcon"></i>
         </button>
@@ -60,7 +60,16 @@
         <table class="selection-matrix" :class="{ fluid: isFluidMatrix }">
           <thead>
             <tr>
-              <th class="subject-col" :style="subjectColStyle">Subject / Visit</th>
+              <th ref="subjectHeader" class="subject-col" :style="subjectColStyle">
+                Subject / Visit
+              </th>
+              <th
+                v-if="showGroupColumn"
+                class="group-col"
+              >
+                Group
+              </th>
+
               <th
                 v-for="vIdx in displayedVisitIndices"
                 :key="'visit-th-' + vIdx"
@@ -73,7 +82,19 @@
           </thead>
           <tbody>
             <tr v-for="(subject, sIdx) in subjects" :key="'sv-row-'+sIdx">
-              <td class="subject-cell" :style="subjectColStyle">{{ subject.id }}</td>
+
+              <td class="subject-cell" :style="subjectColStyle">
+                {{ subject.id }}
+              </td>
+
+
+              <td
+                v-if="showGroupColumn"
+                class="group-cell"
+              >
+                {{ subject.group || "—" }}
+              </td>
+
               <td
                 v-for="vIdx in displayedVisitIndices"
                 :key="'visit-td-' + sIdx + '-' + vIdx"
@@ -128,6 +149,8 @@ export default {
     statusClass: { type: Function, required: true },
     selectedVersion: { type: [String, Number, null], default: null },
     infoIcon: { type: String, default: "fas fa-info-circle" },
+
+    showGroupColumn: { type: Boolean, default: false },
   },
   emits: [
     "update:selectedVisitIndex",
@@ -140,6 +163,37 @@ export default {
       const val = parseInt(event.target.value, 10);
       this.$emit("update:selectedVisitIndex", Number.isNaN(val) ? -1 : val);
     },
+  },
+
+  watch: {
+    // IMPORTANT: ref doesn't exist until matrixReady becomes true (v-else)
+    matrixReady(val) {
+      if (!val) return;
+      this.$nextTick(() => {
+        if (this._updateSubjectWidth) this._updateSubjectWidth();
+      });
+    },
+  },
+
+  mounted() {
+    // safe default so group never overlaps even before ref exists
+    this.$el.style.setProperty("--subject-width", "200px");
+
+    this._updateSubjectWidth = () => {
+      const w = this.$refs.subjectHeader?.offsetWidth;
+      if (!w) return; // prevent "undefinedpx"
+      this.$el.style.setProperty("--subject-width", w + "px");
+    };
+
+    this.$nextTick(() => {
+      this._updateSubjectWidth();
+    });
+
+    window.addEventListener("resize", this._updateSubjectWidth);
+  },
+
+  beforeUnmount() {
+    window.removeEventListener("resize", this._updateSubjectWidth);
   },
 };
 </script>
@@ -309,6 +363,7 @@ export default {
   background: #f3f4f6;
   font-weight: 600;
   color: #1f2937;
+   z-index: 6;
 }
 
 /* Default fixed sizing */
@@ -421,6 +476,31 @@ export default {
 }
 .btn-add-subject-inline:hover {
   background: #e5e7eb;
+}
+
+.group-col,
+.group-cell {
+  position: sticky;
+  left: var(--subject-width, 200px);
+  z-index: 4;
+  background: #ffffff;
+  text-align: left;
+  min-width: 160px;
+  width: 180px;
+
+}
+
+/* header styling parity */
+.group-col {
+  background: #f3f4f6;
+  font-weight: 600;
+  color: #1f2937;
+  z-index: 5;
+}
+
+/* zebra parity */
+.selection-matrix tbody tr:nth-child(odd) .group-cell {
+  background: #fafafa;
 }
 
 @media (max-width: 900px) {
