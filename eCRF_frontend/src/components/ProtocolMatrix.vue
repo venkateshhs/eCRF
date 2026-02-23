@@ -201,10 +201,28 @@
       </div>
     </div>
 
-    <!-- 4. Custom Dialog for Notifications -->
+    <!-- 4. Custom Dialog for Notifications (errors/general) -->
     <CustomDialog :message="dialogMessage" :isVisible="showDialog" @close="closeDialog" />
 
-    <!-- 4a. Info dialog for ProtocolMatrix -->
+    <!-- 4a. Success dialog with View Saved Study CTA -->
+    <div v-if="showSaveSuccessDialog" class="modal-overlay">
+      <div class="modal validation-modal">
+        <h3 class="validation-title">
+          <i :class="icons.check" class="li-icon"></i> Save successful
+        </h3>
+        <p class="validation-text">{{ saveSuccessMessage }}</p>
+        <div class="modal-actions">
+          <button class="btn-option" @click="closeSaveSuccessDialog">
+            <i :class="icons.times" class="mr-6"></i> Close
+          </button>
+          <button class="btn-primary" @click="onSuccessViewSavedStudy">
+            <i :class="icons.check" class="mr-6"></i> View Saved Study
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 4b. Info dialog for ProtocolMatrix -->
     <div v-if="showInfo" class="modal-overlay">
       <div class="modal validation-modal">
         <h3 class="validation-title">
@@ -316,8 +334,6 @@
       <button @click="saveStudy('publish')" class="btn-primary">
         Publish Study
       </button>
-
-      <button @click="goToSaved" class="btn-option">View Saved Study</button>
     </div>
   </div>
 </template>
@@ -360,6 +376,10 @@ export default {
     const showInfo = ref(false);
     const showDialog = ref(false);
     const dialogMessage = ref("");
+
+    // Success dialog state (with CTA)
+    const showSaveSuccessDialog = ref(false);
+    const saveSuccessMessage = ref("");
 
     // Empty-visit modal state
     const showEmptyVisitsModal = ref(false);
@@ -731,6 +751,21 @@ export default {
       dialogMessage.value = "";
     }
 
+    function openSaveSuccessDialog(message) {
+      saveSuccessMessage.value = message;
+      showSaveSuccessDialog.value = true;
+    }
+
+    function closeSaveSuccessDialog() {
+      showSaveSuccessDialog.value = false;
+      saveSuccessMessage.value = "";
+    }
+
+    function onSuccessViewSavedStudy() {
+      closeSaveSuccessDialog();
+      goToSaved();
+    }
+
     function cancelConfirm() {
       showConfirmChanges.value = false;
     }
@@ -887,9 +922,13 @@ export default {
         await nextTick();
         markSavedSnapshot();
 
-        // Normal Save must show success dialog (restore previous behavior)
+        // Publish save => success dialog with CTA
         if (mode === "publish") {
-          showDialogMessage(studyId ? "Study successfully updated and published!" : "Study successfully saved and published!");
+          openSaveSuccessDialog(
+            studyId
+              ? "Study successfully updated and published!"
+              : "Study successfully saved and published!"
+          );
         }
 
         return true;
@@ -1059,6 +1098,12 @@ export default {
       showDialog,
       dialogMessage,
       closeDialog,
+
+      // success dialog
+      showSaveSuccessDialog,
+      saveSuccessMessage,
+      closeSaveSuccessDialog,
+      onSuccessViewSavedStudy,
 
       // unsaved dialog
       showUnsavedDialog,
