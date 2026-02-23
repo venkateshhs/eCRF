@@ -10,10 +10,10 @@
        <!-- Normal behavior -->
        <template v-else>
          <button v-if="showSelection" @click="goToDashboard" class="btn-back">
-           <i :class="icons.back"></i> Back to Dashboard
+          Back to Dashboard
          </button>
          <button v-else @click="backToSelection" class="btn-back">
-           <i :class="icons.back"></i> Back to Selection
+          Back to Selection
          </button>
        </template>
      </div>
@@ -3076,26 +3076,35 @@ export default {
 .back-buttons-container {
   margin-bottom: 16px;
 }
-.btn-back {
-  background: #d1d5db;
-  color: #1f2937;
-  border: none;
-  padding: 8px 16px;
-  border-radius: 6px;
-  font-size: 14px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: background 0.2s;
-  display: flex;
+ .btn-back {
+  display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
+
+  background: #fff;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  padding: 10px 14px;
+
+  cursor: pointer;
+  color: $text-color;
+  font-size: 14px;
+  line-height: 1;
+  transition: background 0.15s ease, border-color 0.15s ease, transform 0.02s ease;
 }
+
 .btn-back:hover {
-  background: #9ca3af;
+  background: #f9fafb;
+  border-color: #d1d5db;
 }
+
+.btn-back:active {
+  transform: scale(0.98);
+}
+
 .btn-back i {
   font-size: 14px;
-}
+ }
 
 /* Header */
 .study-header-container {
