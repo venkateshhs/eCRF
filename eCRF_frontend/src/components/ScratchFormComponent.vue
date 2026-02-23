@@ -716,11 +716,19 @@ export default {
     FieldFileUpload
   },
   beforeRouteLeave(to, from, next) {
-      // Allow navigation if explicitly allowed (save/discard flows)
-      if (this.scratchAllowInternalNav) {
-        next();
-        return;
-      }
+  // IMPORTANT:
+  // When ProtocolMatrix is open, let ProtocolMatrix handle unsaved guard/dialog.
+  // This prevents double dialogs (one from Scratch + one from ProtocolMatrix).
+  if (this.showMatrix) {
+    next();
+    return;
+  }
+
+  // Allow navigation if explicitly allowed (save/discard flows)
+  if (this.scratchAllowInternalNav) {
+    next();
+    return;
+  }
 
   // If dialog already open, block duplicate navigation attempts
   if (this.showUnsavedDialog) {
@@ -738,7 +746,7 @@ export default {
   // Block route navigation and open the same dialog
   this.openScratchUnsavedDialog(() => this.$router.push(to.fullPath));
   next(false);
-    },
+},
   data() {
     let initialForms = [];
     try {
@@ -1644,6 +1652,12 @@ export default {
     },
 
     goBack() {
+      // If ProtocolMatrix is open, let ProtocolMatrix own the unsaved dialog logic
+      if (this.showMatrix) {
+        this.$router.back();
+        return;
+      }
+
       // If internal navigation is already allowed (after save / explicit discard), just go back
       if (this.scratchAllowInternalNav) {
         this.$router.back();
