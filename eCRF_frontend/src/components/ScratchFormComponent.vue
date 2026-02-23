@@ -3,7 +3,7 @@
     <!-- Header -->
     <div class="header-container">
       <button @click="goBack" class="btn-back" title="Go Back">
-        <i :class="icons.back"></i> Back
+       Back
       </button>
     </div>
 
@@ -2423,11 +2423,35 @@ export default {
   margin-bottom: 15px;
 }
 
-.btn-back {
-  @include button-reset;
-  font-size: 16px;
+ .btn-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+
+  background: #fff;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  padding: 10px 14px;
+
+  cursor: pointer;
   color: $text-color;
+  font-size: 14px;
+  line-height: 1;
+  transition: background 0.15s ease, border-color 0.15s ease, transform 0.02s ease;
 }
+
+.btn-back:hover {
+  background: #f9fafb;
+  border-color: #d1d5db;
+}
+
+.btn-back:active {
+  transform: scale(0.98);
+}
+
+.btn-back i {
+  font-size: 14px;
+ }
 
 .scratch-form-content {
   display: flex;
