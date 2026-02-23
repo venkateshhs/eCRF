@@ -94,10 +94,10 @@
         <tbody>
           <!-- hide models with no fields -->
           <tr
-              v-for="(model, mIdx) in selectedModels"
-              :key="`m-${mIdx}`"
-              v-show="model.fields && model.fields.length"
-            >
+            v-for="(model, mIdx) in selectedModels"
+            :key="`m-${mIdx}`"
+            v-show="model.fields && model.fields.length"
+          >
             <td class="model-cell">
               <div class="model-header-row">
                 <span class="model-title">{{ model.title }}</span>
@@ -181,7 +181,7 @@
           <button @click="prevPreviewGroup" :disabled="previewGroupPos === 0" class="nav-btn">&lt;</button>
           <span class="preview-label">
             Group:
-            <span class="th-chip">{{ groupList[assignedGroups[previewGroupPos]].name }}</span>
+            <span class="th-chip">{{ groupList[assignedGroups[previewGroupPos]]?.name }}</span>
           </span>
           <button
             @click="nextPreviewGroup"
@@ -283,19 +283,48 @@
       </div>
     </div>
 
-    <!-- 5. Footer Actions -->
+    <!-- Unsaved changes dialog -->
+    <div v-if="showUnsavedDialog" class="modal-overlay">
+      <div class="modal validation-modal">
+        <h3 class="validation-title">
+          <i :class="icons.infoCircle" class="li-icon"></i> Unsaved changes
+        </h3>
+        <p class="validation-text">
+          You have unsaved changes in the Visit Schedule. You can keep editing, exit without saving,
+          or save as draft and exit.
+        </p>
+        <div class="modal-actions unsaved-actions">
+          <button class="btn-option" @click="onUnsavedKeepEditing" :disabled="unsavedBusy">
+            Keep editing
+          </button>
+          <button class="btn-option" @click="onUnsavedExitWithoutSaving" :disabled="unsavedBusy">
+            Exit without saving
+          </button>
+          <button class="btn-primary" @click="onUnsavedSaveAndExit" :disabled="unsavedBusy">
+            {{ unsavedBusy ? "Saving…" : "Save as Draft & Exit" }}
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Footer Actions -->
     <div class="matrix-actions card-surface">
       <button @click="$emit('edit-template')" class="btn-option">Back to Edit Template</button>
       <button @click="openPreview" :disabled="!hasAssignment(currentVisitIndex)" class="btn-option">Preview</button>
-      <button @click="saveStudy" class="btn-primary">Save</button>
+
+      <!-- FIX: explicit publish mode -->
+      <button @click="saveStudy('publish')" class="btn-primary">
+        Publish Study
+      </button>
+
       <button @click="goToSaved" class="btn-option">View Saved Study</button>
     </div>
   </div>
 </template>
 
 <script>
-import { ref, computed, onMounted } from "vue";
-import { useRouter } from "vue-router";
+import { ref, computed, onMounted, watch, onBeforeUnmount, nextTick } from "vue";
+import { useRouter, onBeforeRouteLeave } from "vue-router";
 import { useStore } from "vuex";
 import axios from "axios";
 import FormPreview from "@/components/FormPreview.vue";
@@ -307,10 +336,10 @@ export default {
   name: "ProtocolMatrix",
   components: { FormPreview, CustomDialog, TemplateDiffView },
   props: {
-    visits:         { type: Array, required: true },
-    groups:         { type: Array, required: true },
+    visits: { type: Array, required: true },
+    groups: { type: Array, required: true },
     selectedModels: { type: Array, required: true },
-    assignments:    { type: Array, required: true }
+    assignments: { type: Array, required: true },
   },
   emits: ["assignment-updated", "edit-template"],
   setup(props, { emit }) {
@@ -323,7 +352,7 @@ export default {
     const currentVisitIndex = ref(0);
 
     // Preview indices + modal control
-    const showPreviewModal  = ref(false);
+    const showPreviewModal = ref(false);
     const previewVisitIndex = ref(0);
     const previewGroupIndex = ref(0);
 
@@ -340,7 +369,7 @@ export default {
     // Confirm changes
     const showConfirmChanges = ref(false);
     const snapshotFrom = ref(null);
-    const snapshotTo   = ref(null);
+    const snapshotTo = ref(null);
 
     // Baseline (server)
     const baseline = ref(null);
@@ -348,13 +377,98 @@ export default {
     // Has any data already been saved for this study?
     const hasAnyData = ref(false);
 
+    // ---------- UNSAVED GUARD STATE ----------
+    const showUnsavedDialog = ref(false);
+    const unsavedBusy = ref(false);
+    const allowInternalNav = ref(false);
+
+    // Prevent duplicate unsaved dialogs (route guard + parent guard/logo nav race)
+    const unsavedDialogOpenOrPending = ref(false);
+
+    // Local dirty tracking
+    const isDirty = ref(false);
+    const lastSavedSnapshot = ref(null);
+
+    const globalDirty = computed(() => !!store.state.studyCreationDirty);
+
     // Display lists
-     const visitList = computed(() => props.visits.length ? props.visits : [{ name: "All Visits" }]);
-    const groupList = computed(() => props.groups.length ? props.groups : [{ name: "All Groups" }]);
+    const visitList = computed(() =>
+      props.visits.length ? props.visits : [{ name: "All Visits" }]
+    );
+    const groupList = computed(() =>
+      props.groups.length ? props.groups : [{ name: "All Groups" }]
+    );
     const totalModels = computed(() => props.selectedModels.length);
     const totalVisits = computed(() => props.visits.length);
     const totalGroups = computed(() => props.groups.length);
 
+    // ---------- DIRTY SNAPSHOT HELPERS ----------
+    function buildDirtySnapshot() {
+      const sd = store.state.studyDetails || {};
+      const meta = sd.study_metadata || {};
+      return deepClone({
+        // Matrix props
+        visits: props.visits || [],
+        groups: props.groups || [],
+        selectedModels: props.selectedModels || [],
+        assignments: props.assignments || [],
+
+        // Upstream study data that affects final payload and can change before matrix
+        study: sd.study || {},
+        subjects: sd.subjects || [],
+        subjectCount: sd.subjectCount ?? 0,
+        assignmentMethod: sd.assignmentMethod ?? "random",
+        skipSubjectCreationNow: !!sd.skipSubjectCreationNow,
+
+        // Metadata fields relevant to publish/draft transitions
+        studyId: meta.id ?? null,
+        status: meta.status ?? null,
+        study_name: meta.study_name ?? meta.name ?? "",
+        study_description: meta.study_description ?? meta.description ?? "",
+      });
+    }
+
+    function markSavedSnapshot() {
+      lastSavedSnapshot.value = buildDirtySnapshot();
+      isDirty.value = false;
+      if (store?._mutations?.setStudyCreationDirty) {
+        store.commit("setStudyCreationDirty", false);
+      }
+    }
+
+    function computeDirty() {
+      try {
+        const a = JSON.stringify(buildDirtySnapshot());
+        const b = JSON.stringify(lastSavedSnapshot.value || {});
+        isDirty.value = a !== b;
+      } catch {
+        isDirty.value = true;
+      }
+
+      // only set global dirty to true here; clearing happens only on successful save
+      if (isDirty.value && store?._mutations?.setStudyCreationDirty) {
+        store.commit("setStudyCreationDirty", true);
+      }
+    }
+
+    function hasUnsavedChanges() {
+      computeDirty();
+      return isDirty.value || globalDirty.value;
+    }
+
+    function openUnsavedDialog() {
+      if (unsavedDialogOpenOrPending.value || showUnsavedDialog.value) return;
+      unsavedDialogOpenOrPending.value = true;
+      showUnsavedDialog.value = true;
+    }
+
+    function closeUnsavedDialog() {
+      showUnsavedDialog.value = false;
+      unsavedBusy.value = false;
+      unsavedDialogOpenOrPending.value = false;
+    }
+
+    // ---------- MATRIX TOGGLES ----------
     function onToggle(mIdx, vIdx, gIdx, checked) {
       emit("assignment-updated", { mIdx, vIdx, gIdx, checked });
     }
@@ -532,7 +646,7 @@ export default {
       try {
         const resp = await axios.get(`/forms/studies/${studyId}`, { headers: { Authorization: `Bearer ${store.state.token}` } });
         const payload = resp.data || {};
-        const metadata = payload.metadata || {};
+        const metadata = payload.metadata || payload.study_metadata || {};
         const studyData = payload.content?.study_data || {};
 
         baseline.value = {
@@ -555,86 +669,112 @@ export default {
 
     async function loadHasAnyData() {
       const studyId = store.state.studyDetails?.study_metadata?.id;
-      if (!studyId) { hasAnyData.value = false; return; }
+      if (!studyId) {
+        hasAnyData.value = false;
+        return;
+      }
+
       try {
-        const resp = await axios.get(
-          `/forms/studies/${studyId}/data_entries`,
-          { headers: { Authorization: `Bearer ${store.state.token}` } }
-        );
-        const list = Array.isArray(resp.data) ? resp.data : (resp.data?.entries || []);
+        const resp = await axios.get(`/forms/studies/${studyId}/data_entries`, {
+          headers: { Authorization: `Bearer ${store.state.token}` },
+        });
+        const list = Array.isArray(resp.data) ? resp.data : resp.data?.entries || [];
         hasAnyData.value = list.length > 0;
       } catch (e) {
-        // If we cannot check, assume no data to avoid false prompts
+        // If check fails, avoid false structural prompts
         hasAnyData.value = false;
       }
     }
 
-    onMounted(async () => {
-      await Promise.all([loadBaselineFromServer(), loadHasAnyData()]);
-    });
-
     // ---------- SAVE ----------
-    async function saveStudy() {
-      const empties = computeEmptyVisits();
-      if (empties.length > 0) {
-        emptyVisitIndices.value = empties;
-        showEmptyVisitsModal.value = true;
-        return;
+    // mode:
+    // - "publish" => actual Save button
+    // - "draft"   => unsaved dialog Save as Draft & Exit
+    async function saveStudy(mode = "publish") {
+      const isDraftMode = mode === "draft";
+
+      // Publish path only: empty-visit warning
+      if (!isDraftMode) {
+        const empties = computeEmptyVisits();
+        if (empties.length > 0) {
+          emptyVisitIndices.value = empties;
+          showEmptyVisitsModal.value = true;
+          return;
+        }
       }
 
-      if (isEditing.value) {
+      // Publish path only: structural confirm for editing with existing data
+      if (!isDraftMode && isEditing.value) {
         const fromSnap = buildSnapshotFromBaseline(baseline.value);
-        const toSnap   = buildSnapshotFromCurrent();
+        const toSnap = buildSnapshotFromCurrent();
         const diff = computeTemplateDiff(fromSnap, toSnap);
 
-        //  Only prompt when we ALREADY have data AND the change is STRUCTURAL.
         const shouldPrompt = hasAnyData.value && diff.anyStructural;
         if (shouldPrompt) {
           snapshotFrom.value = fromSnap;
-          snapshotTo.value   = toSnap;
+          snapshotTo.value = toSnap;
           showConfirmChanges.value = true;
           return;
         }
       }
-      await saveStudyImpl();
+
+      await saveStudyImpl({ mode });
     }
 
-    function showDialogMessage(message) { dialogMessage.value = message; showDialog.value = true; }
-    function closeDialog() { showDialog.value = false; dialogMessage.value = ""; }
+    function showDialogMessage(message) {
+      dialogMessage.value = message;
+      showDialog.value = true;
+    }
 
-    function cancelConfirm() { showConfirmChanges.value = false; }
+    function closeDialog() {
+      showDialog.value = false;
+      dialogMessage.value = "";
+    }
+
+    function cancelConfirm() {
+      showConfirmChanges.value = false;
+    }
+
     async function confirmAndSave() {
       showConfirmChanges.value = false;
-      await saveStudyImpl();
+      await saveStudyImpl({ mode: "publish" });
     }
 
-    function closeEmptyVisitsModal() { showEmptyVisitsModal.value = false; }
+    function closeEmptyVisitsModal() {
+      showEmptyVisitsModal.value = false;
+    }
+
     function goToFirstEmptyVisit() {
       if (emptyVisitIndices.value.length) currentVisitIndex.value = emptyVisitIndices.value[0];
       showEmptyVisitsModal.value = false;
     }
+
     async function saveAnyway() {
       isSavingInProgress.value = true;
-      try { await saveStudyImpl(); }
-      finally {
+      try {
+        await saveStudyImpl({ mode: "publish" });
+      } finally {
         isSavingInProgress.value = false;
         showEmptyVisitsModal.value = false;
       }
     }
 
-    // --- Save impl (unchanged logic aside from baseline refresh) ---
-    async function saveStudyImpl() {
+    // --- Save impl ---
+    // mode = "publish" | "draft"
+    async function saveStudyImpl({ mode = "publish" } = {}) {
       const studyDetails = store.state.studyDetails || {};
       const userId = store.state.user?.id;
       const studyId = studyDetails.study_metadata?.id;
 
       if (!userId) {
         showDialogMessage("Please log in again.");
-        return;
+        return false;
       }
 
-      // Use new values first, then fall back to existing, then empty.
       const existingMeta = studyDetails.study_metadata || {};
+      const targetStatus = mode === "draft" ? "DRAFT" : "PUBLISHED";
+
+      // IMPORTANT: explicit status is sent so backend PUT can transition DRAFT -> PUBLISHED
       const metadata = studyId
         ? {
             created_by: existingMeta.created_by ?? userId,
@@ -648,25 +788,22 @@ export default {
               existingMeta.study_description ??
               existingMeta.description ??
               "",
+            status: targetStatus,
+            last_completed_step: 6,
           }
         : {
             created_by: userId,
             study_name: studyDetails.study?.title ?? "",
             study_description: studyDetails.study?.description ?? "",
+            status: targetStatus,
+            last_completed_step: 6,
           };
 
-      // Build schema explicitly — do NOT spread all of studyDetails.
       const studyData = {
         study: {
           ...(studyDetails.study || {}),
-          title:
-            studyDetails.study?.title ??
-            metadata.study_name ??
-            "",
-          description:
-            studyDetails.study?.description ??
-            metadata.study_description ??
-            "",
+          title: studyDetails.study?.title ?? metadata.study_name ?? "",
+          description: studyDetails.study?.description ?? metadata.study_description ?? "",
         },
         groups: props.groups,
         visits: props.visits,
@@ -675,20 +812,48 @@ export default {
         assignments: props.assignments,
         subjectCount: studyDetails.subjectCount ?? 0,
         assignmentMethod: studyDetails.assignmentMethod ?? "random",
+        skipSubjectCreationNow: !!studyDetails.skipSubjectCreationNow,
       };
 
       const payload = { study_metadata: metadata, study_content: { study_data: studyData } };
-      const url = studyId ? `/forms/studies/${studyId}` : "/forms/studies/";
-      const method = studyId ? "put" : "post";
+
+      // Keep your backend's existing "draft create via query param" behavior for POST,
+      // but use explicit metadata.status for PUT/transition logic.
+      let url;
+      let method;
+
+      if (studyId) {
+        method = "put";
+        // PUT uses explicit study_metadata.status; query params are optional/noise.
+        url = `/forms/studies/${studyId}`;
+      } else {
+        method = "post";
+        if (mode === "draft") {
+          url = `/forms/studies/?status=DRAFT&last_completed_step=6`;
+        } else {
+          url = `/forms/studies/`;
+        }
+      }
+
+      // Debug logs (you asked for visibility)
+      console.log("[ProtocolMatrix saveStudyImpl] mode=", mode);
+      console.log("[ProtocolMatrix saveStudyImpl] studyId=", studyId);
+      console.log("[ProtocolMatrix saveStudyImpl] URL=", url, "method=", method);
+      console.log("[ProtocolMatrix saveStudyImpl] existingMeta.status=", existingMeta.status);
+      console.log("[ProtocolMatrix saveStudyImpl] payload.study_metadata=", payload.study_metadata);
 
       try {
         const headers = { headers: { Authorization: `Bearer ${store.state.token}` } };
         const response = await axios[method](url, payload, headers);
 
-        const updatedMetadata = response.data.study_metadata || response.data.metadata || metadata;
-        const updatedStudyData = response.data.content?.study_data || studyData;
+        console.log(
+          "[ProtocolMatrix saveStudyImpl] response metadata=",
+          response.data?.metadata || response.data?.study_metadata
+        );
 
-        // Store both `study_name` and `name` so old code paths keep working.
+        const updatedMetadata = response.data?.study_metadata || response.data?.metadata || metadata;
+        const updatedStudyData = response.data?.content?.study_data || studyData;
+
         store.commit("setStudyDetails", {
           study_metadata: {
             id: studyId || updatedMetadata?.id,
@@ -699,6 +864,12 @@ export default {
             created_at: updatedMetadata.created_at,
             updated_at: updatedMetadata.updated_at,
             created_by: updatedMetadata.created_by,
+            status: updatedMetadata.status ?? targetStatus,
+            draft_of_study_id: updatedMetadata.draft_of_study_id,
+            last_completed_step:
+              updatedMetadata.last_completed_step ??
+              metadata.last_completed_step ??
+              existingMeta.last_completed_step,
           },
           study: { id: studyId || updatedMetadata?.id, ...(updatedStudyData.study || {}) },
           groups: updatedStudyData.groups || [],
@@ -708,15 +879,24 @@ export default {
           subjects: updatedStudyData.subjects || [],
           assignments: updatedStudyData.assignments || [],
           selectedModels: updatedStudyData.selectedModels || [],
+          skipSubjectCreationNow: !!updatedStudyData.skipSubjectCreationNow,
         });
 
-        // Refresh baseline AND data presence so subsequent diffs are against latest snapshot
+        // Refresh baseline/data and clear dirty markers only after successful save
         await Promise.all([loadBaselineFromServer(), loadHasAnyData()]);
+        await nextTick();
+        markSavedSnapshot();
 
-        showDialogMessage(studyId ? "Study successfully updated!" : "Study successfully saved!");
+        // Normal Save must show success dialog (restore previous behavior)
+        if (mode === "publish") {
+          showDialogMessage(studyId ? "Study successfully updated and published!" : "Study successfully saved and published!");
+        }
+
+        return true;
       } catch (error) {
-        console.error(`Error ${studyId ? "updating" : "saving"} study:`, error);
+        console.error(`[ProtocolMatrix saveStudyImpl] Error ${studyId ? "updating" : "saving"} study:`, error);
         showDialogMessage(`Failed to ${studyId ? "update" : "save"} study. Check console for details.`);
+        return false;
       }
     }
 
@@ -726,11 +906,114 @@ export default {
       setFirstGroup(currentVisitIndex.value);
       showPreviewModal.value = true;
     }
-    function closePreview() { showPreviewModal.value = false; }
+
+    function closePreview() {
+      showPreviewModal.value = false;
+    }
 
     function goToSaved() {
-      router.push({ name: "Dashboard", query: { openStudies: "true" } });
+      allowInternalNav.value = true;
+      router
+        .push({ name: "Dashboard", query: { openStudies: "true" } })
+        .finally(() => {
+          allowInternalNav.value = false;
+        });
     }
+
+    // ---------- UNSAVED DIALOG ACTIONS ----------
+    function onUnsavedKeepEditing() {
+      closeUnsavedDialog();
+    }
+
+    function onUnsavedExitWithoutSaving() {
+      closeUnsavedDialog();
+      allowInternalNav.value = true;
+      router
+        .push({ name: "Dashboard", query: { openStudies: "true" } })
+        .finally(() => {
+          allowInternalNav.value = false;
+        });
+    }
+
+    async function onUnsavedSaveAndExit() {
+      if (unsavedBusy.value) return;
+      unsavedBusy.value = true;
+
+      try {
+        const ok = await saveStudyImpl({ mode: "draft" });
+        if (!ok) return;
+
+        closeUnsavedDialog();
+
+        allowInternalNav.value = true;
+        router
+          .push({ name: "Dashboard", query: { openStudies: "true" } })
+          .finally(() => {
+            allowInternalNav.value = false;
+          });
+      } finally {
+        unsavedBusy.value = false;
+      }
+    }
+
+    // ---------- NAVIGATION / UNLOAD GUARDS ----------
+    function beforeUnloadHandler(e) {
+      if (!hasUnsavedChanges()) return;
+      e.preventDefault();
+      e.returnValue = "";
+    }
+
+    onBeforeRouteLeave((to, from, next) => {
+      if (allowInternalNav.value) return next();
+
+      // Do not stack dialogs if one is already open/pending
+      if (showUnsavedDialog.value || unsavedDialogOpenOrPending.value) {
+        return next(false);
+      }
+
+      if (!hasUnsavedChanges()) return next();
+
+      openUnsavedDialog();
+      next(false);
+    });
+
+    // ---------- DIRTY WATCHERS ----------
+    // Watch matrix props + upstream study state so unsaved dialog also triggers
+    // when user changed earlier steps / scratch form and reaches protocol matrix.
+    watch(
+      () => [
+        props.visits,
+        props.groups,
+        props.selectedModels,
+        props.assignments,
+        store.state.studyDetails?.study,
+        store.state.studyDetails?.subjects,
+        store.state.studyDetails?.subjectCount,
+        store.state.studyDetails?.assignmentMethod,
+        store.state.studyDetails?.skipSubjectCreationNow,
+        store.state.studyDetails?.study_metadata?.status,
+        store.state.studyDetails?.study_metadata?.id,
+      ],
+      () => computeDirty(),
+      { deep: true }
+    );
+
+    onMounted(async () => {
+      await Promise.all([loadBaselineFromServer(), loadHasAnyData()]);
+
+      // Baseline is current snapshot when entering screen, but keep global dirty alive.
+      // If upstream steps/scratchform were dirty before entering matrix, route guard must still prompt.
+      lastSavedSnapshot.value = buildDirtySnapshot();
+      isDirty.value = false;
+
+      window.addEventListener("beforeunload", beforeUnloadHandler);
+    });
+
+    onBeforeUnmount(() => {
+      window.removeEventListener("beforeunload", beforeUnloadHandler);
+    });
+
+
 
     return {
       icons,
@@ -777,6 +1060,13 @@ export default {
       dialogMessage,
       closeDialog,
 
+      // unsaved dialog
+      showUnsavedDialog,
+      unsavedBusy,
+      onUnsavedKeepEditing,
+      onUnsavedExitWithoutSaving,
+      onUnsavedSaveAndExit,
+
       // empty-visit modal
       showEmptyVisitsModal,
       emptyVisitIndices,
@@ -795,8 +1085,9 @@ export default {
       // save + route
       saveStudy,
       goToSaved,
+
     };
-  }
+  },
 };
 </script>
 
@@ -875,12 +1166,24 @@ export default {
 .validation-text { margin: 0 0 10px; color: #475467; }
 .modal-actions { display: flex; justify-content: flex-end; gap: 12px; margin-top: 16px; }
 
+/* Unsaved dialog actions */
+.unsaved-actions {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  width: 100%;
+}
+@media (max-width: 760px) {
+  .unsaved-actions {
+    grid-template-columns: 1fr;
+  }
+}
+
 /* Confirm changes scroll handling */
 .confirm-scroll { max-width: 1100px; }
 .diff-scroll {
-  max-height: 60vh; /* vertical scroll */
+  max-height: 60vh;
   overflow-y: auto;
-  overflow-x: auto; /* horizontal scroll */
+  overflow-x: auto;
   border: 1px solid $border-color;
   border-radius: 10px;
   padding: 12px;
@@ -913,54 +1216,7 @@ export default {
   color: #111827;
   cursor: pointer;
 }
-.bulk-toggle.small {
-  font-size: 11px;
-}
-.bulk-toggle-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
-  margin-bottom: 8px;
-  align-items: center;
-}
-
-.bulk-toggle-label {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 13px;
-  color: #111827;
-}
-
-.bulk-toggle-wrap {
-  --size: 18px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: var(--size);
-  height: var(--size);
-  position: relative;
-  cursor: pointer;
-}
-
-.bulk-toggle-wrap input {
-  opacity: 0;
-  width: var(--size);
-  height: var(--size);
-  position: absolute;
-  margin: 0;
-}
-
-.bulk-fa-chk {
-  font-size: 18px;
-  line-height: 1;
-  pointer-events: none;
-  color: #98a2b3;
-}
-
-.bulk-toggle-wrap input:checked + .bulk-fa-chk {
-  color: #2563eb;
-}
+.bulk-toggle.small { font-size: 11px; }
 .visit-bulk-bar,
 .global-bulk-bar {
   display: flex;
@@ -987,12 +1243,10 @@ export default {
   margin: 0;
   cursor: pointer;
 }
-
 .bulk-toggle input:checked {
   background: $primary-color;
   border-color: $primary-color;
 }
-
 .bulk-toggle input:checked::after {
   content: "";
   position: absolute;
@@ -1005,8 +1259,5 @@ export default {
   border-left: none;
   transform: rotate(45deg);
 }
-
-.bulk-toggle span {
-  line-height: 1.2;
-}
+.bulk-toggle span { line-height: 1.2; }
 </style>
