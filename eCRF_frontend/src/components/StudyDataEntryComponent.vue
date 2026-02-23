@@ -4,7 +4,7 @@
      <div class="back-buttons-container" v-if="!isShared">
        <!-- Merge mode back button (same styling/position) -->
        <button v-if="isMergeMode" @click="closeMergeStudy" class="btn-back">
-         <i :class="icons.back"></i> Back to Selection
+        Back to Selection
        </button>
 
        <!-- Normal behavior -->
