@@ -3,7 +3,7 @@
     <!-- Header -->
     <div class="header-container">
       <button @click="goBack" class="btn-back" title="Go Back">
-        <i :class="icons.back"></i> Back
+       Back
       </button>
     </div>
 
@@ -665,6 +665,21 @@
         <button @click="closeGenericDialog" class="btn-primary">OK</button>
       </div>
     </div>
+
+    <!-- ───────── UNSAVED CHANGES DIALOG (ScratchFormComponent exit guard) ───────── -->
+    <div v-if="showUnsavedDialog" class="modal-overlay" @click.self="unsavedBusy ? null : onUnsavedKeepEditing()">
+      <div class="modal">
+        <p>{{ unsavedDialogMessage }}</p>
+       <div class="modal-actions" style="display:grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px;">
+      <button class="btn-option" @click="onUnsavedKeepEditing" :disabled="unsavedBusy">Keep editing</button>
+      <button class="btn-option" @click="confirmScratchExitWithoutSaving" :disabled="unsavedBusy">Exit without saving</button>
+      <button class="btn-primary" @click="onUnsavedSaveAndExit" :disabled="unsavedBusy">
+        {{ unsavedBusy ? "Saving…"  : "Save & Exit" }}
+      </button>
+    </div>
+      </div>
+    </div>
+
   </div>
 </template>
 
@@ -700,9 +715,52 @@ export default {
     FieldLinearScale,
     FieldFileUpload
   },
+  beforeRouteLeave(to, from, next) {
+  // IMPORTANT:
+  // When ProtocolMatrix is open, let ProtocolMatrix handle unsaved guard/dialog.
+  // This prevents double dialogs (one from Scratch + one from ProtocolMatrix).
+  if (this.showMatrix) {
+    next();
+    return;
+  }
+
+  // Allow navigation if explicitly allowed (save/discard flows)
+  if (this.scratchAllowInternalNav) {
+    next();
+    return;
+  }
+
+  // If dialog already open, block duplicate navigation attempts
+  if (this.showUnsavedDialog) {
+    next(false);
+    return;
+  }
+
+  const isDirty = !!this.$store.state.studyCreationDirty;
+
+  if (!isDirty) {
+    next();
+    return;
+  }
+
+  // Block route navigation and open the same dialog
+  this.openScratchUnsavedDialog(() => this.$router.push(to.fullPath));
+  next(false);
+},
   data() {
+    let initialForms = [];
+    try {
+      const parsed = JSON.parse(localStorage.getItem("scratchForms") || "[]");
+      initialForms = Array.isArray(parsed) ? parsed : [];
+    } catch {
+      initialForms = [];
+    }
+
+    // FIX: never allow empty forms array at startup
+    if (!initialForms.length) initialForms = [{ sections: [] }];
+
     return {
-      forms: JSON.parse(localStorage.getItem("scratchForms") || "[]"),
+      forms: initialForms,
       currentFormIndex: 0,
       activeSection: 0,
       activeTab: "template",
@@ -753,12 +811,12 @@ export default {
       modelTargetSectionIndex: 0,
 
       dragState: {
-        kind: null,          // "section" | "field" | null
+        kind: null,
         fromSection: null,
         fromField: null,
         overSection: null,
         overField: null,
-        position: null       // "before" | "after" | "end" | null
+        position: null
       },
 
       uidCounter: 1,
@@ -766,26 +824,53 @@ export default {
       fieldUidMap: new WeakMap(),
 
       showAdditionalOptions: false,
+
+      // --- GLOBAL DIRTY FLAG (do not mark dirty during initial hydration) ---
+      hydratingScratch: true,
+
+      // --- SAVE & EXIT (Scratch local dialog/handler) ---
+      scratchUnsavedBusy: false,
+      scratchAllowInternalNav: false,
+      // --- UNSAVED CHANGES DIALOG (ScratchFormComponent exit guard) ---
+      showUnsavedDialog: false,
+      unsavedDialogMessage: "You are exiting study creation. Do you want to continue editing? If you leave now, your current progress will be saved as Draft in Dashboard.",
+      unsavedPendingAction: null,
+      unsavedBusy: false,
+
+
     };
   },
+
   computed: {
-    icons()         { return icons; },
-    studyDetails()  { return this.$store.state.studyDetails || {}; },
-    currentForm()   { return this.forms[this.currentFormIndex] || { sections: [] }; },
-    selectedModels(){
-      return this.currentForm.sections.map(sec => ({ title: sec.title, fields: sec.fields }));
+    icons() { return icons; },
+    studyDetails() { return this.$store.state.studyDetails || {}; },
+
+    // FIX: self-healing current form so UI always has a real mutable target
+    currentForm() {
+      this.ensureCurrentFormExists();
+      return this.forms[this.currentFormIndex];
     },
+
+    selectedModels() {
+      return (this.currentForm.sections || []).map(sec => ({
+        title: sec.title,
+        fields: sec.fields
+      }));
+    },
+
     filteredDataModels() {
       const models = this.dataModels || [];
       const q = (this.searchQuery || "").trim().toLowerCase();
       if (!q) return models;
+
       return models
         .map(m => {
           const titleMatches = (m.title || "").toLowerCase().includes(q);
           const matchingFields = (m.fields || []).filter(f =>
             (f.label || "").toLowerCase().includes(q) ||
-            (f.name  || "").toLowerCase().includes(q)
+            (f.name || "").toLowerCase().includes(q)
           );
+
           if (titleMatches || matchingFields.length) {
             return { ...m, fields: matchingFields.length ? matchingFields : m.fields };
           }
@@ -793,42 +878,69 @@ export default {
         })
         .filter(Boolean);
     },
+
     canShowMore() {
       const qOk = this.obiQuery.trim().length >= 2;
       return qOk && (this.obiResults.length >= this.requestedLimit) && !this.obiLoading;
+    },
+
+    authHeader() {
+      const token = this.$store.state.token;
+      return token ? { Authorization: `Bearer ${token}` } : {};
+    },
+
+    currentUserId() {
+      return this.$store.state.user?.id || null;
+    },
+
+    currentStudyId() {
+      return this.studyDetails?.study_metadata?.id ?? this.studyDetails?.study?.id ?? null;
     }
   },
+
   watch: {
     visits: { handler() { this.adjustAssignments(); }, immediate: true, deep: true },
     groups: { handler() { this.adjustAssignments(); }, immediate: true, deep: true },
     selectedModels: { handler() { this.adjustAssignments(); }, immediate: true, deep: true },
+
     forms: {
       deep: true,
-      handler(f) { localStorage.setItem("scratchForms", JSON.stringify(f)); }
-    },
-    // If user leaves the template tab, clear the search to avoid confusion when returning
-    activeTab(newVal) {
-      if (newVal !== 'template' && this.searchQuery) this.searchQuery = "";
-      if (newVal !== 'obi') {
-        this.resetObiState();
+      handler(f) {
+        localStorage.setItem("scratchForms", JSON.stringify(f));
+        if (!this.hydratingScratch) {
+          this.$store.commit("setStudyCreationDirty", true);
+        }
       }
     },
 
-    // when adding to existing section, pre-check/disable already-added props
+    activeTab(newVal) {
+      if (newVal !== "template" && this.searchQuery) this.searchQuery = "";
+      if (newVal !== "obi") this.resetObiState();
+    },
+
     modelAddToExisting() {
       this.$nextTick(() => this.syncSelectedPropsForExistingSection());
     },
+
     modelTargetSectionIndex() {
       this.$nextTick(() => this.syncSelectedPropsForExistingSection());
     }
   },
+
   async mounted() {
     document.addEventListener("click", this.onGlobalClick);
+    this.hydratingScratch = true;
+
     if (this.studyDetails.study_metadata?.id) {
       const stored = localStorage.getItem("scratchForms");
       if (stored) {
-        try { this.forms = JSON.parse(stored); } catch { this.forms = [{ sections: [] }]; }
-      } else if (Array.isArray(this.studyDetails.forms)) {
+        try {
+          const parsed = JSON.parse(stored);
+          this.forms = (Array.isArray(parsed) && parsed.length) ? parsed : [{ sections: [] }];
+        } catch {
+          this.forms = [{ sections: [] }];
+        }
+      } else if (Array.isArray(this.studyDetails.forms) && this.studyDetails.forms.length) {
         this.forms = JSON.parse(JSON.stringify(this.studyDetails.forms));
         localStorage.setItem("scratchForms", JSON.stringify(this.forms));
       } else {
@@ -840,8 +952,15 @@ export default {
       this.forms = [{ sections: [] }];
     }
 
-    this.visits = Array.isArray(this.studyDetails.visits) ? JSON.parse(JSON.stringify(this.studyDetails.visits)) : [];
-    this.groups  = Array.isArray(this.studyDetails.groups)  ? JSON.parse(JSON.stringify(this.studyDetails.groups))  : [];
+    // FIX: ensure current slot always exists after hydration too
+    this.ensureCurrentFormExists();
+
+    this.visits = Array.isArray(this.studyDetails.visits)
+      ? JSON.parse(JSON.stringify(this.studyDetails.visits))
+      : [];
+    this.groups = Array.isArray(this.studyDetails.groups)
+      ? JSON.parse(JSON.stringify(this.studyDetails.groups))
+      : [];
     this.adjustAssignments();
 
     try {
@@ -850,8 +969,8 @@ export default {
         ...f,
         name: f.name || `${f.type}_${idx}`,
         description: f.helpText || f.placeholder || "",
-        options: (f.type === 'select' || f.type === 'radio')
-          ? (Array.isArray(f.options) && f.options.length ? f.options : ['Option 1'])
+        options: (f.type === "select" || f.type === "radio")
+          ? (Array.isArray(f.options) && f.options.length ? f.options : ["Option 1"])
           : (f.options || []),
         constraints: f.constraints || {}
       }));
@@ -860,12 +979,282 @@ export default {
     }
 
     await this.loadDataModels();
+
+    this.$nextTick(() => {
+      this.hydratingScratch = false;
+    });
   },
-   beforeUnmount() {
-      document.removeEventListener("click", this.onGlobalClick);
-    },
+
+  beforeUnmount() {
+    document.removeEventListener("click", this.onGlobalClick);
+  },
+
   methods: {
-    /* ---------- Stable keys (no mutation) ---------- */
+    openScratchUnsavedDialog(pendingAction) {
+      this.unsavedPendingAction = typeof pendingAction === "function" ? pendingAction : null;
+      this.showUnsavedDialog = true;
+    },
+
+    onUnsavedKeepEditing() {
+      if (this.unsavedBusy) return;
+      this.showUnsavedDialog = false;
+      this.unsavedPendingAction = null;
+    },
+
+    async confirmScratchExitWithoutSaving() {
+      if (this.unsavedBusy) return;
+
+      try {
+        this.unsavedBusy = true;
+
+        // User chose to leave without saving -> clear dirty flag
+        this.$store.commit("setStudyCreationDirty", false);
+
+        // allow one internal navigation without reopening dialog
+        this.scratchAllowInternalNav = true;
+
+        const pending = this.unsavedPendingAction;
+        this.showUnsavedDialog = false;
+        this.unsavedPendingAction = null;
+
+        if (pending) {
+          await Promise.resolve(pending());
+        } else {
+          await this.$router.back();
+        }
+      } finally {
+        this.unsavedBusy = false;
+        // release flag after nav tick
+        this.$nextTick(() => {
+          this.scratchAllowInternalNav = false;
+        });
+      }
+    },
+    /* ============================================================
+       CORE FIX: ensure mutable forms[currentFormIndex].sections exists
+       ============================================================ */
+    ensureCurrentFormExists() {
+      if (!Array.isArray(this.forms)) {
+        this.forms = [{ sections: [] }];
+      }
+
+      if (!Number.isInteger(this.currentFormIndex) || this.currentFormIndex < 0) {
+        this.currentFormIndex = 0;
+      }
+
+      if (!this.forms.length) {
+        this.forms.push({ sections: [] });
+      }
+
+      if (!this.forms[this.currentFormIndex]) {
+        // pad missing indexes if needed
+        while (this.forms.length <= this.currentFormIndex) {
+          this.forms.push({ sections: [] });
+        }
+      }
+
+      const form = this.forms[this.currentFormIndex];
+      if (!form || typeof form !== "object") {
+        this.$set
+          ? this.$set(this.forms, this.currentFormIndex, { sections: [] })
+          : (this.forms[this.currentFormIndex] = { sections: [] });
+      }
+
+      if (!Array.isArray(this.forms[this.currentFormIndex].sections)) {
+        if (this.$set) this.$set(this.forms[this.currentFormIndex], "sections", []);
+        else this.forms[this.currentFormIndex].sections = [];
+      }
+
+      return this.forms[this.currentFormIndex];
+    },
+
+    /* ============================================================
+       SAVE & EXIT FIX: backend persistence so dashboard shows draft
+       ============================================================ */
+    buildScratchStudyPayload() {
+      const details = this.studyDetails || {};
+      const studyNode = JSON.parse(JSON.stringify(details.study || {}));
+      const meta = details.study_metadata || {};
+
+      const selectedModels = this.selectedModels.map(sec => ({
+        title: sec.title,
+        fields: JSON.parse(JSON.stringify(sec.fields || []))
+      }));
+
+      const studyName =
+        studyNode.title ||
+        studyNode.study_name ||
+        studyNode.name ||
+        meta.study_name ||
+        "Untitled Study";
+
+      const studyDescription =
+        studyNode.description ||
+        studyNode.study_description ||
+        meta.study_description ||
+        "";
+
+      const normalizedStudy = {
+        ...studyNode,
+        title: studyName,
+        name: studyName,
+        study_name: studyName,
+        description: studyDescription,
+        study_description: studyDescription
+      };
+
+      return {
+        study_metadata: {
+          created_by: meta.created_by || this.currentUserId,
+          study_name: studyName,
+          study_description: studyDescription
+        },
+        study_content: {
+          study_data: {
+            study: normalizedStudy,
+            groups: JSON.parse(JSON.stringify(details.groups || this.groups || [])),
+            visits: JSON.parse(JSON.stringify(details.visits || this.visits || [])),
+            subjectCount: Number(details.subjectCount ?? 0),
+            assignmentMethod: details.assignmentMethod || "Random",
+            subjects: JSON.parse(JSON.stringify(details.subjects || [])),
+            assignments: JSON.parse(JSON.stringify(this.assignments || details.assignments || [])),
+            skipSubjectCreationNow: !!details.skipSubjectCreationNow,
+            selectedModels
+          }
+        }
+      };
+    },
+
+    async persistScratchToBackend() {
+      const token = this.$store.state.token;
+      if (!token) {
+        this.$router.push("/login");
+        return { ok: false, message: "Please log in again." };
+      }
+
+      this.ensureCurrentFormExists();
+
+      const selectedFormsForStore = [{
+        sections: JSON.parse(JSON.stringify(this.currentForm.sections || [])).map(sec => ({
+          title: sec.title,
+          fields: sec.fields,
+          source: sec.source
+        }))
+      }];
+
+      this.$store.commit("setStudyDetails", {
+        ...this.studyDetails,
+        assignments: JSON.parse(JSON.stringify(this.assignments || [])),
+        forms: selectedFormsForStore
+      });
+
+      const payload = this.buildScratchStudyPayload();
+      const existingId = this.currentStudyId;
+
+      try {
+        if (existingId) {
+          await axios.put(`/forms/studies/${existingId}`, payload, {
+            headers: this.authHeader
+          });
+
+          this.$store.commit("setStudyDetails", {
+            ...this.studyDetails,
+            study_metadata: {
+              ...(this.studyDetails.study_metadata || {}),
+              id: Number(existingId),
+              study_name: payload.study_metadata.study_name,
+              study_description: payload.study_metadata.study_description
+            },
+            study: {
+              ...(this.studyDetails.study || {}),
+              ...payload.study_content.study_data.study,
+              id: Number(existingId)
+            },
+            assignments: payload.study_content.study_data.assignments,
+            forms: selectedFormsForStore
+          });
+
+          return { ok: true, id: Number(existingId), mode: "update" };
+        }
+
+        const lastCompletedStep =
+          this.$route?.query?.step != null ? String(this.$route.query.step) : "6";
+
+        const resp = await axios.post(
+          `/forms/studies/?status=DRAFT&last_completed_step=${encodeURIComponent(lastCompletedStep)}`,
+          payload,
+          { headers: this.authHeader }
+        );
+
+        const meta = resp.data?.metadata || resp.data?.study_metadata || {};
+        const createdId = meta.id ?? resp.data?.id;
+
+        if (createdId == null) {
+          return { ok: false, message: "Draft created but ID was not returned." };
+        }
+
+        this.$store.commit("setStudyDetails", {
+          ...this.studyDetails,
+          study_metadata: {
+            ...(this.studyDetails.study_metadata || {}),
+            id: Number(createdId),
+            study_name: meta.study_name || payload.study_metadata.study_name,
+            study_description: meta.study_description || payload.study_metadata.study_description,
+            status: String(meta.status || "DRAFT").toUpperCase()
+          },
+          study: {
+            ...(payload.study_content.study_data.study || {}),
+            id: Number(createdId)
+          },
+          groups: payload.study_content.study_data.groups || [],
+          visits: payload.study_content.study_data.visits || [],
+          subjectCount: payload.study_content.study_data.subjectCount || 0,
+          assignmentMethod: payload.study_content.study_data.assignmentMethod || "Random",
+          subjects: payload.study_content.study_data.subjects || [],
+          assignments: payload.study_content.study_data.assignments || [],
+          skipSubjectCreationNow: !!payload.study_content.study_data.skipSubjectCreationNow,
+          forms: selectedFormsForStore
+        });
+
+        return { ok: true, id: Number(createdId), mode: "create" };
+      } catch (e) {
+        const msg =
+          e?.response?.data?.detail ||
+          e?.response?.data?.message ||
+          e?.message ||
+          "Failed to save study from Scratch.";
+        console.error("[ScratchForm] Save & Exit failed:", e);
+        return { ok: false, message: String(msg) };
+      }
+    },
+
+    // Hook your "Save & Exit" button/dialog to this method
+    async onUnsavedSaveAndExit() {
+      if (this.unsavedBusy) return;
+      this.unsavedBusy = true;
+
+      try {
+        const res = await this.persistScratchToBackend();
+        if (!res.ok) {
+          this.openGenericDialog(res.message || "Failed to save.");
+          return;
+        }
+
+        // Saved successfully -> clear dirty + close dialog
+        this.$store.commit("setStudyCreationDirty", false);
+        this.showUnsavedDialog = false;
+        this.unsavedPendingAction = null;
+
+        this.scratchAllowInternalNav = true;
+        this.$router.push("/dashboard").finally(() => {
+          this.scratchAllowInternalNav = false;
+        });
+      } finally {
+        this.unsavedBusy = false;
+      }
+    },
+
+    /* ---------- Stable keys ---------- */
     getSectionUid(sectionObj) {
       if (!sectionObj || typeof sectionObj !== "object") return String(Math.random());
       if (!this.sectionUidMap.has(sectionObj)) {
@@ -881,19 +1270,22 @@ export default {
       return this.fieldUidMap.get(fieldObj);
     },
 
-    /* ---------- Model dialog helpers (prevent duplicates) ---------- */
     clampSectionIndex(i) {
+      this.ensureCurrentFormExists();
       const n = this.currentForm.sections.length;
       if (!n) return 0;
       const x = Number.isInteger(i) ? i : 0;
       return Math.max(0, Math.min(x, n - 1));
     },
+
     getTargetSectionForModelDialog() {
+      this.ensureCurrentFormExists();
       const sections = this.currentForm.sections || [];
       if (!sections.length) return null;
       const idx = this.clampSectionIndex(this.modelTargetSectionIndex);
       return sections[idx] || null;
     },
+
     isPropAlreadyInTargetSection(prop) {
       if (!this.modelAddToExisting) return false;
       const sec = this.getTargetSectionForModelDialog();
@@ -902,8 +1294,8 @@ export default {
       if (!name) return false;
       return Array.isArray(sec.fields) && sec.fields.some(f => String(f?.name || "") === name);
     },
+
     syncSelectedPropsForExistingSection() {
-      // Only apply pre-checking when user is adding to an existing section.
       if (!this.showModelDialog) return;
       if (!this.modelAddToExisting) return;
       if (!this.currentModel || !Array.isArray(this.currentModel.fields)) return;
@@ -915,13 +1307,11 @@ export default {
       this.currentModel.fields.forEach((p, i) => {
         const nm = String(p?.name || "");
         if (nm && existing.has(nm)) {
-          // Check it (informational) and disable via template condition.
           this.$set(this.selectedProps, i, true);
         }
       });
     },
 
-    /* ---------- Drag helpers ---------- */
     onDragEnd() {
       this.dragState = {
         kind: null,
@@ -938,6 +1328,7 @@ export default {
       if (this.dragState.overSection !== si) return "";
       return this.dragState.position === "after" ? "drop-after" : "drop-before";
     },
+
     getFieldDropClass(si, fi) {
       if (this.dragState.kind !== "field") return "";
       if (this.dragState.overSection !== si) return "";
@@ -945,7 +1336,6 @@ export default {
       return this.dragState.position === "after" ? "drop-after" : "drop-before";
     },
 
-    /* ---------- Section drag/drop ---------- */
     onSectionDragStart(si, evt) {
       if (this.showMatrix) return;
       this.dragState.kind = "section";
@@ -955,8 +1345,9 @@ export default {
       try {
         evt.dataTransfer.effectAllowed = "move";
         evt.dataTransfer.setData("text/plain", "section");
-      } catch { /* ignore */ }
+      } catch (err){console.error(err);}
     },
+
     onSectionDragOver(targetIndex, evt) {
       if (this.dragState.kind !== "section") return;
       const el = evt.currentTarget;
@@ -967,8 +1358,10 @@ export default {
       this.dragState.overField = null;
       this.dragState.position = after ? "after" : "before";
     },
+
     onSectionDrop(targetIndex) {
       if (this.dragState.kind !== "section") return;
+      this.ensureCurrentFormExists();
 
       const sections = this.forms[this.currentFormIndex].sections || [];
       const from = this.dragState.fromSection;
@@ -977,18 +1370,14 @@ export default {
       }
 
       const movingObj = sections[from];
-
       let to = targetIndex + (this.dragState.position === "after" ? 1 : 0);
       if (from < to) to -= 1;
       to = Math.max(0, Math.min(to, sections.length - 1));
 
-      // Even if dropped back on itself, requirement says moved section should be active
-      // so we'll still set active to its current index.
       if (to !== from) {
         sections.splice(from, 1);
         sections.splice(to, 0, movingObj);
 
-        // Move matching assignments slice (critical: no regression)
         if (Array.isArray(this.assignments) && this.assignments.length) {
           const a = this.assignments;
           if (from >= 0 && from < a.length) {
@@ -1000,15 +1389,12 @@ export default {
         }
       }
 
-      // Requirement: moved section becomes active
       const newIdx = sections.indexOf(movingObj);
       this.activeSection = newIdx >= 0 ? newIdx : 0;
-
       this.$nextTick(() => this.focusSection(this.activeSection));
       this.onDragEnd();
     },
 
-    /* ---------- Field drag/drop ---------- */
     onFieldDragStart(si, fi, evt) {
       if (this.showMatrix) return;
       this.dragState.kind = "field";
@@ -1018,8 +1404,9 @@ export default {
       try {
         evt.dataTransfer.effectAllowed = "move";
         evt.dataTransfer.setData("text/plain", "field");
-      } catch { /* ignore */ }
+      } catch (err){console.error(err);}
     },
+
     onFieldDragOver(si, fi, evt) {
       if (this.dragState.kind !== "field") return;
       const el = evt.currentTarget;
@@ -1031,8 +1418,10 @@ export default {
       this.dragState.overField = fi;
       this.dragState.position = after ? "after" : "before";
     },
+
     onFieldDrop(si, fi) {
       if (this.dragState.kind !== "field") return;
+      this.ensureCurrentFormExists();
 
       const form_s = this.dragState.fromSection;
       const fromF = this.dragState.fromField;
@@ -1058,7 +1447,6 @@ export default {
       insertAt = Math.max(0, Math.min(insertAt, toFields.length));
       toFields.splice(insertAt, 0, moved);
 
-      // Requirement: destination section becomes active
       this.activeSection = toS;
       this.$nextTick(() => this.focusSection(this.activeSection));
       this.onDragEnd();
@@ -1070,8 +1458,10 @@ export default {
       this.dragState.overField = null;
       this.dragState.position = "end";
     },
+
     onFieldDropEnd(si) {
       if (this.dragState.kind !== "field") return;
+      this.ensureCurrentFormExists();
 
       const form_s = this.dragState.fromSection;
       const fromF = this.dragState.fromField;
@@ -1096,7 +1486,6 @@ export default {
       insertAt = Math.max(0, Math.min(insertAt, toFields.length));
       toFields.splice(insertAt, 0, moved);
 
-      // Requirement: destination section becomes active
       this.activeSection = toS;
       this.$nextTick(() => this.focusSection(this.activeSection));
       this.onDragEnd();
@@ -1108,12 +1497,12 @@ export default {
       this.dragState.overField = null;
       this.dragState.position = "end";
     },
+
     onFieldContainerDrop(si) {
       if (this.dragState.kind !== "field") return;
       this.onFieldDropEnd(si);
     },
 
-    /* ---------- OBI search ---------- */
     resetObiState() {
       this.obiQuery = "";
       this.obiResults = [];
@@ -1123,14 +1512,15 @@ export default {
       clearTimeout(this.obiDebounceTimer);
       this.obiDebounceTimer = null;
     },
+
     onObiInput() {
-      // new query → reset limit to default
       this.requestedLimit = 50;
       clearTimeout(this.obiDebounceTimer);
       this.obiDebounceTimer = setTimeout(() => {
         this.fetchObiTerms();
       }, 250);
     },
+
     async fetchObiTerms() {
       const q = (this.obiQuery || "").trim();
       if (q.length < 2) {
@@ -1138,15 +1528,18 @@ export default {
         this.obiError = "";
         return;
       }
+
       this.obiLoading = true;
       this.obiError = "";
       try {
         const { data } = await axios.get("/ontology/obi/search", {
           params: { query: q, limit: this.requestedLimit }
         });
+
         const arr = Array.isArray(data?.results) ? data.results : [];
         const seen = new Set();
         const out = [];
+
         arr.forEach(term => {
           const id = String(term.id || "").trim();
           if (!id || seen.has(id)) return;
@@ -1158,6 +1551,7 @@ export default {
             synonyms: Array.isArray(term.synonyms) ? term.synonyms : []
           });
         });
+
         this.obiResults = out;
       } catch (e) {
         this.obiError = e?.response?.data?.detail || e.message || "Search failed.";
@@ -1166,10 +1560,12 @@ export default {
         this.obiLoading = false;
       }
     },
+
     showMore() {
-      this.requestedLimit = this.requestedLimit + this.limitStep;
+      this.requestedLimit += this.limitStep;
       this.fetchObiTerms();
     },
+
     obiHighlight(text) {
       const q = (this.obiQuery || "").trim();
       const src = String(text || "");
@@ -1181,25 +1577,29 @@ export default {
         return this.escapeHtml(src);
       }
     },
+
     formatSynonyms(list) {
-      // keep it reasonable in UI
-      const arr = (list || []).slice(0, 6);
-      return arr.join(", ");
+      return (list || []).slice(0, 6).join(", ");
     },
+
     onToggleObiTerm(termId, evt) {
       const next = new Set(this.selectedTermIds);
       if (evt?.target?.checked) next.add(termId);
       else next.delete(termId);
       this.selectedTermIds = new Set(next);
     },
+
     toggleByBody(termId) {
       const next = new Set(this.selectedTermIds);
       if (next.has(termId)) next.delete(termId);
       else next.add(termId);
       this.selectedTermIds = next;
     },
+
     addSelectedObiTerms() {
+      this.ensureCurrentFormExists();
       if (!this.currentForm.sections.length) this.addNewSection();
+
       const si = this.activeSection;
       const sec = this.currentForm.sections[si];
       if (sec.collapsed) this.toggleSection(si);
@@ -1225,6 +1625,7 @@ export default {
       this.selectedTermIds = new Set();
       this.openGenericDialog(`Added ${selected.length} OBI field(s) to "${sec.title}".`);
     },
+
     slugify(s) {
       return String(s || "")
         .toLowerCase()
@@ -1232,8 +1633,8 @@ export default {
         .replace(/^_+|_+$/g, "");
     },
 
-    /* ---------- Existing functionality ---------- */
     onShaclTakeover(section) {
+      this.ensureCurrentFormExists();
       const insertAt = Math.min(this.activeSection + 1, this.currentForm.sections.length);
       const sec = {
         title: section.title,
@@ -1250,18 +1651,44 @@ export default {
       this.adjustAssignments();
     },
 
-    goBack() { this.$router.back() },
-    prettyModelTitle(s) { return this.$formatLabel ? this.$formatLabel(s) : String(s || '') },
-    modelIcon(title) {
-      const key = String(title || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-      return this.icons[key] || 'fas fa-book';
-    },
-    fieldIcon(label) {
-      const key = String(label || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-      return this.icons[key] || 'fas fa-dot-circle';
+    goBack() {
+      // If ProtocolMatrix is open, let ProtocolMatrix own the unsaved dialog logic
+      if (this.showMatrix) {
+        this.$router.back();
+        return;
+      }
+
+      // If internal navigation is already allowed (after save / explicit discard), just go back
+      if (this.scratchAllowInternalNav) {
+        this.$router.back();
+        return;
+      }
+
+      // Use the SAME global dirty flag
+      const isDirty = !!this.$store.state.studyCreationDirty;
+
+      if (!isDirty) {
+        this.$router.back();
+        return;
+      }
+
+      // Open scratch unsaved dialog and remember the action
+      this.unsavedPendingAction = () => this.$router.back();
+      this.showUnsavedDialog = true;
     },
 
-    // highlight helper for search matches
+    prettyModelTitle(s) { return this.$formatLabel ? this.$formatLabel(s) : String(s || ""); },
+
+    modelIcon(title) {
+      const key = String(title || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+      return this.icons[key] || "fas fa-book";
+    },
+
+    fieldIcon(label) {
+      const key = String(label || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+      return this.icons[key] || "fas fa-dot-circle";
+    },
+
     highlight(text) {
       const q = (this.searchQuery || "").trim();
       if (!q) return this.escapeHtml(text || "");
@@ -1272,13 +1699,16 @@ export default {
         return this.escapeHtml(text || "");
       }
     },
+
     titleMatches(title) {
       const q = (this.searchQuery || "").trim().toLowerCase();
-      return q && (String(title || "").toLowerCase().includes(q));
+      return q && String(title || "").toLowerCase().includes(q);
     },
+
     previewMatches(fields) {
       return (fields || []).slice(0, 5);
     },
+
     escapeHtml(s) {
       return String(s || "")
         .replace(/&/g, "&amp;")
@@ -1287,27 +1717,65 @@ export default {
     },
 
     onSectionClick(i) {
+      this.ensureCurrentFormExists();
       this.activeSection = i;
       const section = this.currentForm.sections[i];
       if (section && section.collapsed) section.collapsed = false;
       this.focusSection(i);
     },
 
-    openConfirmDialog(msg, cb) { this.confirmDialogMessage = msg; this.confirmCallback = cb; this.showConfirmDialog = true; },
-    confirmDialogYes() { this.showConfirmDialog = false; if (this.confirmCallback) this.confirmCallback(); },
-    closeConfirmDialog() { this.showConfirmDialog = false; },
-    openGenericDialog(msg, cb) { this.genericDialogMessage = msg; this.genericCallback = cb; this.showGenericDialog = true; },
-    closeGenericDialog() { this.showGenericDialog = false; if (this.genericCallback) this.genericCallback(); },
+    openConfirmDialog(msg, cb) {
+      this.confirmDialogMessage = msg;
+      this.confirmCallback = cb;
+      this.showConfirmDialog = true;
+    },
 
-    openInputDialog(msg, def, cb) { this.inputDialogMessage = msg; this.inputDialogValue = def; this.inputDialogCallback = cb; this.showInputDialog = true; },
-    confirmInputDialog() { this.showInputDialog = false; if (this.inputDialogCallback) this.inputDialogCallback(this.inputDialogValue); },
-    cancelInputDialog() { this.showInputDialog = false; },
+    confirmDialogYes() {
+      this.showConfirmDialog = false;
+      if (this.confirmCallback) this.confirmCallback();
+    },
+
+    closeConfirmDialog() {
+      this.showConfirmDialog = false;
+    },
+
+    openGenericDialog(msg, cb) {
+      this.genericDialogMessage = msg;
+      this.genericCallback = cb;
+      this.showGenericDialog = true;
+    },
+
+    closeGenericDialog() {
+      this.showGenericDialog = false;
+      if (this.genericCallback) this.genericCallback();
+    },
+
+    openInputDialog(msg, def, cb) {
+      this.inputDialogMessage = msg;
+      this.inputDialogValue = def;
+      this.inputDialogCallback = cb;
+      this.showInputDialog = true;
+    },
+
+    confirmInputDialog() {
+      this.showInputDialog = false;
+      if (this.inputDialogCallback) this.inputDialogCallback(this.inputDialogValue);
+    },
+
+    cancelInputDialog() {
+      this.showInputDialog = false;
+    },
 
     adjustAssignments() {
       const m = this.selectedModels.length;
       const v = this.visits.length;
       const g = this.groups.length;
-      if (m === 0 || v === 0 || g === 0) { this.assignments = []; return; }
+
+      if (m === 0 || v === 0 || g === 0) {
+        this.assignments = [];
+        return;
+      }
+
       if (this.studyDetails.study_metadata?.id && Array.isArray(this.studyDetails.assignments)) {
         const old = this.studyDetails.assignments;
         const fresh = [];
@@ -1317,7 +1785,7 @@ export default {
             fresh[mi][vi] = [];
             for (let gi = 0; gi < g; gi++) {
               const ov = old[mi]?.[vi]?.[gi];
-              fresh[mi][vi][gi] = typeof ov === 'boolean' ? ov : false;
+              fresh[mi][vi][gi] = typeof ov === "boolean" ? ov : false;
             }
           }
         }
@@ -1331,39 +1799,41 @@ export default {
 
     handleProtocolClick() { this.showMatrix = true; },
     editTemplate() { this.showMatrix = false; },
+
     onAssignmentUpdated({ mIdx, vIdx, gIdx, checked }) {
       this.assignments[mIdx][vIdx][gIdx] = checked;
       this.$store.commit("setStudyDetails", { ...this.studyDetails, assignments: this.assignments });
+      if (!this.hydratingScratch) this.$store.commit("setStudyCreationDirty", true);
     },
 
     focusSection(i) {
       this.$nextTick(() => {
         const ref = this.$refs[`section-${i}`];
         const el = Array.isArray(ref) ? ref[0] : ref;
-        if (el?.scrollIntoView) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        if (el?.scrollIntoView) el.scrollIntoView({ behavior: "smooth", block: "start" });
       });
     },
 
     openModelDialog(model) {
+      this.ensureCurrentFormExists();
+
       const full = this.dataModels.find(d => d.title === model.title) || model;
       this.currentModel = full;
       this.selectedProps = full.fields.map(() => false);
 
-      // Default: add as new section (below current active section)
       this.modelAddToExisting = false;
       this.modelTargetSectionIndex = this.clampSectionIndex(this.activeSection);
 
       this.showModelDialog = true;
-
-      // If user later toggles to existing, watcher will pre-check already-added props.
     },
 
     takeoverModel() {
+      this.ensureCurrentFormExists();
+
       const chosen = this.currentModel.fields
         .filter((_, i) => this.selectedProps[i])
         .map(f => ({ ...f, description: f.description || "", constraints: f.constraints || {} }));
 
-      // Add to existing section: NO DUPLICATES (skip already-present field.name)
       if (this.modelAddToExisting && this.currentForm.sections.length) {
         const sections = this.forms[this.currentFormIndex].sections;
         const idx = this.clampSectionIndex(this.modelTargetSectionIndex);
@@ -1376,23 +1846,19 @@ export default {
         if (targetSec.collapsed) targetSec.collapsed = false;
 
         const existingNames = new Set((targetSec.fields || []).map(ff => String(ff?.name || "")));
-
         let added = 0;
+
         chosen.forEach(f => {
           const nm = String(f?.name || "");
-          // Skip duplicates instead of renaming (prevents “selected twice” duplicates)
           if (nm && existingNames.has(nm)) return;
-
           existingNames.add(nm);
           targetSec.fields.push({ ...f });
           added += 1;
         });
 
-        // Requirement: destination section becomes active
         this.activeSection = idx;
         this.$nextTick(() => this.focusSection(idx));
 
-        // If nothing new was added, still close; optional info dialog:
         if (added === 0) {
           this.openGenericDialog(`All selected field(s) already exist in "${targetSec.title}".`);
         }
@@ -1401,9 +1867,14 @@ export default {
         return;
       }
 
-      // Add as a NEW section (existing behavior)
       const insertAt = Math.min(this.activeSection + 1, this.currentForm.sections.length);
-      const sec = { title: this.currentModel.title, fields: chosen, collapsed: false, source: "template" };
+      const sec = {
+        title: this.currentModel.title,
+        fields: chosen,
+        collapsed: false,
+        source: "template"
+      };
+
       this.forms[this.currentFormIndex].sections.splice(insertAt, 0, sec);
       this.activeSection = insertAt;
       this.$nextTick(() => this.focusSection(insertAt));
@@ -1412,17 +1883,31 @@ export default {
     },
 
     addNewSection() {
-      const sec = { title: `Section ${this.currentForm.sections.length + 1}`, fields: [], collapsed: false, source: "manual" };
+      // FIX: guard before mutation
+      this.ensureCurrentFormExists();
+
+      const sec = {
+        title: `Section ${this.currentForm.sections.length + 1}`,
+        fields: [],
+        collapsed: false,
+        source: "manual"
+      };
+
       this.forms[this.currentFormIndex].sections.push(sec);
       this.activeSection = this.currentForm.sections.length - 1;
       this.adjustAssignments();
       this.focusSection(this.activeSection);
     },
+
     addNewSectionBelow(i) {
+      this.ensureCurrentFormExists();
+
       const current = this.currentForm.sections[i];
+      if (!current) return;
+
       const sec = {
         title: `${current.title} (Copy)`,
-        fields: current.fields.map(field => ({
+        fields: (current.fields || []).map(field => ({
           ...field,
           name: `${field.name}_${Date.now()}`,
           constraints: field.constraints || {}
@@ -1430,6 +1915,7 @@ export default {
         collapsed: false,
         source: current.source
       };
+
       const idx = i + 1;
       this.forms[this.currentFormIndex].sections.splice(idx, 0, sec);
       this.activeSection = idx;
@@ -1439,6 +1925,7 @@ export default {
 
     confirmDeleteSection(i) {
       this.openConfirmDialog("Delete this section?", () => {
+        this.ensureCurrentFormExists();
         this.currentForm.sections.splice(i, 1);
         this.activeSection = Math.max(0, this.activeSection - 1);
         this.adjustAssignments();
@@ -1447,6 +1934,7 @@ export default {
 
     confirmClearForm() {
       this.openConfirmDialog("Do you want to clear all sections?", () => {
+        this.ensureCurrentFormExists();
         this.forms[this.currentFormIndex].sections = [];
         this.activeSection = 0;
         this.adjustAssignments();
@@ -1454,55 +1942,63 @@ export default {
     },
 
     toggleSection(i) {
+      this.ensureCurrentFormExists();
       const section = this.forms[this.currentFormIndex].sections[i];
+      if (!section) return;
       section.collapsed = !section.collapsed;
     },
-    setActiveSection(i) { this.activeSection = i; this.focusSection(i); },
+
+    setActiveSection(i) {
+      this.ensureCurrentFormExists();
+      this.activeSection = i;
+      this.focusSection(i);
+    },
 
     addFieldToActiveSection(field) {
+      // FIX: guard before mutation
+      this.ensureCurrentFormExists();
+
       if (!this.currentForm.sections.length) this.addNewSection();
+
       const sec = this.currentForm.sections[this.activeSection];
+      if (!sec) return;
       if (sec.collapsed) this.toggleSection(this.activeSection);
 
       const base = {
         name: `${(field.name || field.type)}_${Date.now()}`,
         label: field.label,
         type: field.type,
-        options: (field.type === 'select' || field.type === 'radio')
-          ? (Array.isArray(field.options) && field.options.length ? [...field.options] : ['Option 1'])
+        options: (field.type === "select" || field.type === "radio")
+          ? (Array.isArray(field.options) && field.options.length ? [...field.options] : ["Option 1"])
           : (field.options || []),
-        placeholder: field.description || field.placeholder || '',
-        value: field.type === 'checkbox' ? false : "",
+        placeholder: field.description || field.placeholder || "",
+        value: field.type === "checkbox" ? false : "",
         constraints: field.constraints || {}
       };
 
-      // SLIDER defaults
-      if (base.type === 'slider') {
+      if (base.type === "slider") {
         base.value = null;
         base.constraints = {
           ...(base.constraints || {}),
-          mode: base.constraints?.mode || 'slider',
+          mode: base.constraints?.mode || "slider",
           percent: !!base.constraints?.percent,
-          min: Number.isFinite(base.constraints?.min) ? base.constraints.min : (base.constraints?.percent ? 1 : 1),
-          max: Number.isFinite(base.constraints?.max) ? base.constraints.max : (base.constraints?.percent ? 100 : 100),
+          min: Number.isFinite(base.constraints?.min) ? base.constraints.min : 1,
+          max: Number.isFinite(base.constraints?.max) ? base.constraints.max : 100,
           step: Number.isFinite(base.constraints?.step) ? base.constraints.step : 1,
           marks: Array.isArray(base.constraints?.marks) ? base.constraints.marks : (base.constraints?.marks || [])
         };
       }
 
-      // Date defaults
-      if (base.type === 'date') {
-        base.constraints = { ...base.constraints, dateFormat: base.constraints?.dateFormat || 'dd.MM.yyyy' };
+      if (base.type === "date") {
+        base.constraints = { ...base.constraints, dateFormat: base.constraints?.dateFormat || "dd.MM.yyyy" };
         base.placeholder = base.placeholder || base.constraints.dateFormat;
       }
 
-      // File defaults
-      if (base.type === 'file') {
+      if (base.type === "file") {
         base.value = null;
         base.icon = base.icon || icons.paperclip;
         const provided = base.constraints || {};
-        // default modality from label (or fallback to name)
-        const fallbackMod = (String(base.label || '').trim()) || base.name;
+        const fallbackMod = (String(base.label || "").trim()) || base.name;
 
         base.constraints = {
           helpText: provided.helpText || "",
@@ -1515,11 +2011,9 @@ export default {
             ? Number(provided.maxSizeMB)
             : undefined,
           storagePreference: (provided.storagePreference === "url") ? "url" : "local",
-          //  Default to label/name when user hasn’t picked any modality
           modalities: (Array.isArray(provided.modalities) && provided.modalities.length)
             ? provided.modalities
             : [fallbackMod],
-          // default true when not specified
           allowMultipleFiles: (provided.allowMultipleFiles === undefined) ? true : !!provided.allowMultipleFiles
         };
       }
@@ -1527,130 +2021,154 @@ export default {
       sec.fields.push(base);
     },
 
-    editSection(i, v) { if (v) this.currentForm.sections[i].title = v; },
+    editSection(i, v) {
+      this.ensureCurrentFormExists();
+      if (v) this.currentForm.sections[i].title = v;
+    },
+
     editField(si, fi, v) {
+      this.ensureCurrentFormExists();
       if (!v) return;
-      const f = this.currentForm.sections[si].fields[fi];
+
+      const f = this.currentForm.sections[si]?.fields?.[fi];
+      if (!f) return;
+
       const prevLabel = f.label;
       f.label = v;
 
-      // If it's a file field and modalities were not explicitly chosen,
-      // keep the auto-derived modality in sync with the label.
-      if (f.type === 'file') {
+      if (f.type === "file") {
         const mods = Array.isArray(f.constraints?.modalities) ? f.constraints.modalities : [];
-        const prevTrim = String(prevLabel || '').trim();
+        const prevTrim = String(prevLabel || "").trim();
 
-        // Update when: none selected OR was previously auto-derived from the old label
-        if (!mods.length || (mods.length === 1 && String(mods[0] || '').trim() === prevTrim)) {
-          const next = (String(v || '').trim()) || f.name;
+        if (!mods.length || (mods.length === 1 && String(mods[0] || "").trim() === prevTrim)) {
+          const next = (String(v || "").trim()) || f.name;
           f.constraints = { ...(f.constraints || {}), modalities: [next] };
         }
       }
     },
 
     enforceNumberDigitLimits(sectionIndex, fieldIndex, evt, onBlur = false) {
-      const field = this.currentForm.sections[sectionIndex].fields[fieldIndex];
+      this.ensureCurrentFormExists();
+
+      const field = this.currentForm.sections[sectionIndex]?.fields?.[fieldIndex];
+      if (!field) return;
+
       const c = field.constraints || {};
       if (!c.integerOnly) return;
+
       const el = evt?.target || null;
       let raw = el ? String(el.value ?? "") : String(field.value ?? "");
       const digits = raw.replace(/\D+/g, "");
+
       if (Number.isFinite(c.maxDigits) && c.maxDigits > 0 && digits.length > c.maxDigits) {
         const trimmed = digits.slice(0, c.maxDigits);
         field.value = trimmed === "" ? "" : Number(trimmed);
         if (el) el.value = field.value;
         return;
       }
+
       if (onBlur && Number.isFinite(c.minDigits) && c.minDigits > 0) {
         if (digits.length > 0 && digits.length < c.minDigits) {
-          // leave as-is; validate elsewhere
+          // no-op, validation elsewhere
         }
       }
     },
 
     addSimilarField(si, fi) {
-      const f = this.currentForm.sections[si].fields[fi];
+      this.ensureCurrentFormExists();
+
+      const f = this.currentForm.sections[si]?.fields?.[fi];
+      if (!f) return;
+
       const clone = {
         ...f,
         name: `${f.name}_${Date.now()}`,
         options: f.options ? [...f.options] : [],
         constraints: f.constraints || {},
         value:
-          f.type === 'radio' && f.constraints?.allowMultiple ? [] :
-          (f.type === 'radio' || f.type === 'select') ? '' :
-          (f.type === 'slider' ? null :
-          (f.type === 'file' ? null : f.value))
+          f.type === "radio" && f.constraints?.allowMultiple ? [] :
+          (f.type === "radio" || f.type === "select") ? "" :
+          (f.type === "slider" ? null :
+          (f.type === "file" ? null : f.value))
       };
+
       this.currentForm.sections[si].fields.splice(fi + 1, 0, clone);
     },
-    removeField(si, fi) { this.currentForm.sections[si].fields.splice(fi, 1); },
+
+    removeField(si, fi) {
+      this.ensureCurrentFormExists();
+      this.currentForm.sections[si]?.fields?.splice(fi, 1);
+    },
 
     openConstraintsDialog(si, fi) {
-      const f = this.currentForm.sections[si].fields[fi];
+      this.ensureCurrentFormExists();
+
+      const f = this.currentForm.sections[si]?.fields?.[fi];
+      if (!f) return;
+
       this.currentFieldIndices = { sectionIndex: si, fieldIndex: fi };
-      this.currentFieldType = f.type === 'slider' ? 'slider' : f.type;
+      this.currentFieldType = f.type === "slider" ? "slider" : f.type;
 
       this.constraintsForm = {
         ...(f.constraints || {}),
         type: this.currentFieldType,
-        options: (f.type === 'select' || f.type === 'radio') ? (f.options || []) : undefined,
-        dateFormat: f.type === 'date'
-          ? (f.constraints?.dateFormat || 'dd.MM.yyyy')
+        options: (f.type === "select" || f.type === "radio") ? (f.options || []) : undefined,
+        dateFormat: f.type === "date"
+          ? (f.constraints?.dateFormat || "dd.MM.yyyy")
           : undefined,
-        ...(f.type === 'slider' ? {
-          mode: f.constraints?.mode === 'linear' ? 'linear' : 'slider',
+        ...(f.type === "slider" ? {
+          mode: f.constraints?.mode === "linear" ? "linear" : "slider",
           min: Number.isFinite(f.constraints?.min) ? f.constraints.min : 1,
           max: Number.isFinite(f.constraints?.max) ? f.constraints.max : 100,
           step: Number.isFinite(f.constraints?.step) ? f.constraints.step : 1,
           percent: !!f.constraints?.percent
         } : {})
-        // file-specific keys already present in f.constraints (allowedFormats, maxSizeMB, etc.)
       };
+
       this.showConstraintsDialog = true;
     },
+
     confirmConstraintsDialog(c) {
       const { sectionIndex, fieldIndex } = this.currentFieldIndices;
-      const f = this.currentForm.sections[sectionIndex].fields[fieldIndex];
+      const f = this.currentForm.sections[sectionIndex]?.fields?.[fieldIndex];
+      if (!f) {
+        this.showConstraintsDialog = false;
+        return;
+      }
+
       const originalType = f.type;
 
-      if (originalType === 'file') {
-        // Assign cleaned constraints as emitted by FieldConstraintsDialog
+      if (originalType === "file") {
         const cleaned = {
           helpText: c.helpText || "",
           required: !!c.required,
           readonly: !!c.readonly,
           allowedFormats: Array.isArray(c.allowedFormats) ? c.allowedFormats : [],
           maxSizeMB: (Number.isFinite(c.maxSizeMB) && c.maxSizeMB > 0) ? Number(c.maxSizeMB) : undefined,
-          storagePreference: (c.storagePreference === 'url') ? 'url' : 'local',
-          modalities: Array.isArray(c.modalities)
-            ? c.modalities.filter(Boolean).map(String)
-            : [],
-          allowMultipleFiles: c.allowMultipleFiles !== false // default true
+          storagePreference: (c.storagePreference === "url") ? "url" : "local",
+          modalities: Array.isArray(c.modalities) ? c.modalities.filter(Boolean).map(String) : [],
+          allowMultipleFiles: c.allowMultipleFiles !== false
         };
 
-        // If user hasn’t selected any modality, default to field label
         if (!cleaned.modalities.length) {
-          const fallback = (String(f.label || '').trim()) || f.name;
+          const fallback = (String(f.label || "").trim()) || f.name;
           cleaned.modalities = [fallback];
-          console.log("[ScratchForm] Constraints: defaulted modalities to", cleaned.modalities, "for", fallback);
         }
 
         f.constraints = cleaned;
-        // Keep current value as-is; builder doesn’t persist files
         this.showConstraintsDialog = false;
         return;
       }
-      // Non-slider
-      if (originalType !== 'slider') {
+
+      if (originalType !== "slider") {
         const norm = normalizeConstraints(originalType, c);
 
-        // Choice types: keep existing handling
-        if ((f.type === 'select' || f.type === 'radio') && Array.isArray(c.options)) {
-          const cleaned = c.options.map(o => String(o || '').trim()).filter(Boolean);
-          f.options = cleaned.length ? cleaned : ['Option 1'];
+        if ((f.type === "select" || f.type === "radio") && Array.isArray(c.options)) {
+          const cleaned = c.options.map(o => String(o || "").trim()).filter(Boolean);
+          f.options = cleaned.length ? cleaned : ["Option 1"];
         }
 
-        if (f.type === 'radio') {
+        if (f.type === "radio") {
           if (norm.allowMultiple) {
             if (!Array.isArray(f.value)) f.value = [];
             f.value = f.value.filter(v => f.options.includes(v));
@@ -1659,60 +2177,49 @@ export default {
               f.value = dv.filter(v => f.options.includes(v));
             }
           } else {
-            if (Array.isArray(f.value)) f.value = f.value[0] || '';
-            if (!f.options.includes(f.value)) f.value = '';
+            if (Array.isArray(f.value)) f.value = f.value[0] || "";
+            if (!f.options.includes(f.value)) f.value = "";
             if (Object.prototype.hasOwnProperty.call(norm, "defaultValue")) {
-              const dv = typeof norm.defaultValue === 'string' ? norm.defaultValue : '';
-              f.value = f.options.includes(dv) ? dv : '';
+              const dv = typeof norm.defaultValue === "string" ? norm.defaultValue : "";
+              f.value = f.options.includes(dv) ? dv : "";
             }
           }
-        } else if (f.type === 'select') {
-          if (Array.isArray(f.value)) f.value = f.value[0] || '';
-          if (!f.options.includes(f.value)) f.value = '';
+        } else if (f.type === "select") {
+          if (Array.isArray(f.value)) f.value = f.value[0] || "";
+          if (!f.options.includes(f.value)) f.value = "";
           if (Object.prototype.hasOwnProperty.call(norm, "defaultValue")) {
-            const dv = typeof norm.defaultValue === 'string' ? norm.defaultValue : '';
-            f.value = f.options.includes(dv) ? dv : '';
+            const dv = typeof norm.defaultValue === "string" ? norm.defaultValue : "";
+            f.value = f.options.includes(dv) ? dv : "";
           }
         }
 
-        if (Object.prototype.hasOwnProperty.call(norm, "placeholder") && f.type !== 'checkbox' && f.type !== 'file') {
+        if (Object.prototype.hasOwnProperty.call(norm, "placeholder") && f.type !== "checkbox" && f.type !== "file") {
           f.placeholder = norm.placeholder || "";
         }
 
         if (
-          f.type !== 'radio' &&
-          f.type !== 'select' &&
-          f.type !== 'slider' &&
-          f.type !== 'file' &&
+          f.type !== "radio" &&
+          f.type !== "select" &&
+          f.type !== "slider" &&
+          f.type !== "file" &&
           Object.prototype.hasOwnProperty.call(norm, "defaultValue")
         ) {
           const coerced = coerceDefaultForType(f.type, norm.defaultValue);
           if (coerced !== undefined) f.value = coerced;
         }
 
-        if (f.type === 'date' && (c.dateFormat || norm.dateFormat)) {
+        if (f.type === "date" && (c.dateFormat || norm.dateFormat)) {
           const fmt = c.dateFormat || norm.dateFormat;
           f.placeholder = fmt;
           norm.dateFormat = fmt;
         }
 
-        if (originalType === 'file') {
-          const fileKeys = [
-            "allowedFormats","maxSizeMB","allowLocal","allowUrl","storagePreference","modalities","allowMultipleFiles"
-          ];
-          const extra = {};
-          fileKeys.forEach(k => {
-            if (Object.prototype.hasOwnProperty.call(c, k)) extra[k] = c[k];
-          });
-          f.constraints = { ...norm, ...extra };
-        } else {
-          f.constraints = { ...norm };
-        }
+        f.constraints = { ...norm };
 
         if (
-          (f.value === '' || f.value === undefined || f.value === null) &&
-          Object.prototype.hasOwnProperty.call(f.constraints, 'defaultValue') &&
-          f.type !== 'file'
+          (f.value === "" || f.value === undefined || f.value === null) &&
+          Object.prototype.hasOwnProperty.call(f.constraints, "defaultValue") &&
+          f.type !== "file"
         ) {
           f.value = f.constraints.defaultValue;
         }
@@ -1721,38 +2228,36 @@ export default {
         return;
       }
 
-      // Slider -> Linear mode
-      if (c.mode === 'linear') {
+      if (c.mode === "linear") {
         let min = Number.isFinite(+c.min) ? Math.round(+c.min) : 1;
         let max = Number.isFinite(+c.max) ? Math.round(+c.max) : 5;
         if (max <= min) max = min + 1;
         if (max - min + 1 > 10) max = min + 9;
 
         f.constraints = {
-          mode: 'linear',
+          mode: "linear",
           required: !!c.required,
           readonly: !!c.readonly,
-          helpText: c.helpText || '',
+          helpText: c.helpText || "",
           min, max,
-          leftLabel: c.leftLabel || '',
-          rightLabel: c.rightLabel || ''
+          leftLabel: c.leftLabel || "",
+          rightLabel: c.rightLabel || ""
         };
         f.value = null;
         this.showConstraintsDialog = false;
         return;
       }
 
-      // Slider -> Slider mode
       let min = Number.isFinite(+c.min) ? +c.min : 1;
       let max = Number.isFinite(+c.max) ? +c.max : (c.percent ? 100 : 5);
       if (max <= min) max = min + 1;
-      let step = Number.isFinite(+c.step) && +c.step > 0 ? +c.step : (c.percent ? 1 : 1);
+      let step = Number.isFinite(+c.step) && +c.step > 0 ? +c.step : 1;
 
       f.constraints = {
-        mode: 'slider',
+        mode: "slider",
         required: !!c.required,
         readonly: !!c.readonly,
-        helpText: c.helpText || '',
+        helpText: c.helpText || "",
         percent: !!c.percent,
         min, max, step,
         marks: Array.isArray(c.marks) ? c.marks : []
@@ -1763,9 +2268,13 @@ export default {
       this.showConstraintsDialog = false;
     },
 
-    cancelConstraintsDialog() { this.showConstraintsDialog = false; },
+    cancelConstraintsDialog() {
+      this.showConstraintsDialog = false;
+    },
 
     downloadFormData() {
+      this.ensureCurrentFormExists();
+
       const payload = {
         sections: this.currentForm.sections.map(sec => ({
           title: sec.title,
@@ -1773,20 +2282,27 @@ export default {
           source: sec.source
         }))
       };
+
       const str = JSON.stringify(payload, null, 2);
       const name = "sections.json";
       const blob = new Blob([str], { type: "application/json" });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
-      a.href = url; a.download = name; a.click();
+      a.href = url;
+      a.download = name;
+      a.click();
       URL.revokeObjectURL(url);
     },
 
     openUploadDialog() { this.showUploadDialog = true; },
     closeUploadDialog() { this.showUploadDialog = false; },
+
     handleFileChange(e) {
+      this.ensureCurrentFormExists();
+
       const file = e.target.files[0];
       if (!file) return this.openGenericDialog("No file selected.");
+
       const reader = new FileReader();
       reader.onload = evt => {
         try {
@@ -1794,27 +2310,30 @@ export default {
           if (Array.isArray(pd.sections)) {
             pd.sections = pd.sections.map(sec => ({
               ...sec,
-              fields: sec.fields.map(field => ({
+              fields: (sec.fields || []).map(field => ({
                 ...field,
                 constraints: field.constraints || {}
               }))
             }));
             this.currentForm.sections = pd.sections;
             this.adjustAssignments();
-          } else throw new Error("Bad format");
+          } else {
+            throw new Error("Bad format");
+          }
         } catch (err) {
           console.error(err);
-          this.openGenericDialog("Invalid file. Expect `{ \"sections\": [...] }`.");
+          this.openGenericDialog('Invalid file. Expect `{ "sections": [...] }`.');
         }
       };
+
       reader.readAsText(file);
       this.showUploadDialog = false;
     },
 
     async loadDataModels() {
       try {
-        const res = await fetch("/template_schema.yaml")
-        const doc = yaml.load(await res.text())
+        const res = await fetch("/template_schema.yaml");
+        const doc = yaml.load(await res.text());
         this.dataModels = Object.entries(doc.classes)
           .filter(([n]) => n !== "Study")
           .map(([n, cls]) => ({
@@ -1830,27 +2349,34 @@ export default {
               constraints: { required: !!def.required, ...(def.constraints || {}) },
               placeholder: def.ui?.placeholder || def.description || ""
             }))
-          }))
-      } catch (e) { console.error("Failed to load data models:", e) }
+          }));
+      } catch (e) {
+        console.error("Failed to load data models:", e);
+      }
     },
+
     resolveType(def) {
-      const ui = def.ui || {}
-      const dt = String(def.datatype || '').toLowerCase()
-      const range = String(def.range || '').toLowerCase()
-      if (ui.widget === 'textarea' || dt === 'textarea') return 'textarea'
-      if (ui.widget === 'radio'    || dt === 'radio')    return 'radio'
-      if (ui.widget === 'dropdown' || dt === 'dropdown' || def.enum) return 'select'
-      if (range === 'date' || range === 'datetime') return 'date'
-      if (['integer','decimal','number'].includes(range)) return 'number'
-      if (ui.widget === 'file' || dt === 'file' || range === 'file') return 'file'
-      return 'text'
+      const ui = def.ui || {};
+      const dt = String(def.datatype || "").toLowerCase();
+      const range = String(def.range || "").toLowerCase();
+
+      if (ui.widget === "textarea" || dt === "textarea") return "textarea";
+      if (ui.widget === "radio" || dt === "radio") return "radio";
+      if (ui.widget === "dropdown" || dt === "dropdown" || def.enum) return "select";
+      if (range === "date" || range === "datetime") return "date";
+      if (["integer", "decimal", "number"].includes(range)) return "number";
+      if (ui.widget === "file" || dt === "file" || range === "file") return "file";
+      return "text";
     },
+
     toggleAdditionalOptions() {
       this.showAdditionalOptions = !this.showAdditionalOptions;
     },
+
     closeAdditionalOptions() {
       this.showAdditionalOptions = false;
     },
+
     onGlobalClick(e) {
       if (!this.showAdditionalOptions) return;
 
@@ -1870,10 +2396,11 @@ export default {
       this.closeAdditionalOptions();
       this.downloadFormData();
     },
+
     onUploadTemplate() {
       this.closeAdditionalOptions();
       this.openUploadDialog();
-    },
+    }
   }
 };
 </script>
@@ -1881,6 +2408,7 @@ export default {
 <style lang="scss" scoped>
 @import "@/assets/styles/_base.scss";
 
+/* (styles unchanged from your pasted file) */
 .create-form-container {
   width: 100%;
   min-height: 100vh;
@@ -1895,11 +2423,35 @@ export default {
   margin-bottom: 15px;
 }
 
-.btn-back {
-  @include button-reset;
-  font-size: 16px;
+ .btn-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+
+  background: #fff;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  padding: 10px 14px;
+
+  cursor: pointer;
   color: $text-color;
+  font-size: 14px;
+  line-height: 1;
+  transition: background 0.15s ease, border-color 0.15s ease, transform 0.02s ease;
 }
+
+.btn-back:hover {
+  background: #f9fafb;
+  border-color: #d1d5db;
+}
+
+.btn-back:active {
+  transform: scale(0.98);
+}
+
+.btn-back i {
+  font-size: 14px;
+ }
 
 .scratch-form-content {
   display: flex;
@@ -2073,7 +2625,7 @@ export default {
   margin: 2px 0 4px;
   word-break: break-all;
 }
-.obi-id { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+
 .obi-def, .obi-syn {
   font-size: 12px;
   color: #374151;
@@ -2433,5 +2985,4 @@ input, textarea, select {
   /* optional: nicer alignment */
   transform: translateY(1px);
 }
-
 </style>

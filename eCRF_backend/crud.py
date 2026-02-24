@@ -8,6 +8,26 @@ from .models import User, AuditEvent
 from .logger import logger
 from zoneinfo import ZoneInfo
 
+
+_ALLOWED_STUDY_STATUS = {"DRAFT", "PUBLISHED", "ARCHIVED"}
+
+
+def _norm_status(s: Optional[str]) -> Optional[str]:
+    if not s:
+        return None
+    s2 = str(s).strip().upper()
+    return s2 if s2 in _ALLOWED_STUDY_STATUS else None
+
+
+def _dump_exclude_unset(pydantic_model) -> Dict[str, Any]:
+    """
+    Works for both pydantic v1 (.dict) and v2 (.model_dump).
+    """
+    if hasattr(pydantic_model, "model_dump"):
+        return pydantic_model.model_dump(exclude_unset=True)
+    return pydantic_model.dict(exclude_unset=True)
+
+
 def get_user_by_username(db: Session, username: str):
     logger.debug(f"Fetching user by username: {username}")
     return db.query(User).filter(User.username == username).first()
@@ -38,7 +58,12 @@ def create_study(db: Session, metadata: schemas.StudyMetadataCreate, content: sc
         db_metadata = models.StudyMetadata(
             created_by=metadata.created_by,
             study_name=metadata.study_name,
-            study_description=metadata.study_description
+            study_description=metadata.study_description,
+
+
+            status=_norm_status(getattr(metadata, "status", None)),
+            draft_of_study_id=getattr(metadata, "draft_of_study_id", None),
+            last_completed_step=getattr(metadata, "last_completed_step", None),
         )
         db.add(db_metadata)
         db.commit()
@@ -75,7 +100,13 @@ def update_study(db: Session, study_id: int, metadata_update: schemas.StudyMetad
     if not db_metadata:
         return None
     try:
-        for key, value in metadata_update.dict(exclude_unset=True).items():
+        payload = _dump_exclude_unset(metadata_update)
+
+        # Normalize status if present
+        if "status" in payload:
+            payload["status"] = _norm_status(payload.get("status")) or payload.get("status")
+
+        for key, value in payload.items():
             setattr(db_metadata, key, value)
         db_metadata.updated_at = datetime.now(ZoneInfo("Europe/Paris"))
         db.commit()

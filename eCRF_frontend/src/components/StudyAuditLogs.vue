@@ -737,9 +737,6 @@ export default {
 }
 
 /* Cells */
-.mono {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-}
 .strong {
   font-weight: 600;
 }

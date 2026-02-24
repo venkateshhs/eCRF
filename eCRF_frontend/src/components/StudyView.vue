@@ -700,6 +700,16 @@ export default {
     };
   },
   computed: {
+    // --- permission object helpers (Option A shape: resp.data.metadata.permissions) ---
+    studyPerms() {
+      const p = this.studyMeta?.permissions;
+      return p && typeof p === "object" ? p : null;
+    },
+    hasEditStudyPermission() {
+      const p = this.studyPerms;
+      return p ? p.edit_study === true : false;
+    },
+
     visibleTabs() {
       return (this.tabs || []).filter(t => !t.requiresEdit || this.canEditStudy);
     },
@@ -739,7 +749,10 @@ export default {
       const meId = this.me?.id;
       return meId != null && this.studyMeta.created_by_id != null && Number(meId) === Number(this.studyMeta.created_by_id);
     },
-    canEditStudy() { return this.isAdmin || this.isOwner; },
+
+    // FIX: Edit Study tab visibility/control = Admin OR Owner OR edit_study permission
+    canEditStudy() { return this.isAdmin || this.isOwner || this.hasEditStudyPermission; },
+
     canManageAccess() { return this.isAdmin || this.isOwner; },
     canSeeBidsButton() { return this.isAdmin || this.isOwner; },
 
@@ -759,6 +772,12 @@ export default {
   },
   watch: {
     activeTab(val) {
+      // Guard: if someone deep-links to ?tab=edit but can't edit, bounce to meta
+      if (val === "edit" && !this.canEditStudy) {
+        this.activeTab = "meta";
+        return;
+      }
+
       if (val === "viewdata") {
         this.dataSidebarCollapsed = true;
       } else {
@@ -945,6 +964,7 @@ export default {
           createdByDisplay = resolved || String(meta.created_by);
         }
 
+        // IMPORTANT: keep permissions on studyMeta for Option A checks
         this.studyMeta = {
           id: meta.id,
           study_name: meta.study_name,
@@ -954,8 +974,14 @@ export default {
           created_by_email: meta.created_by_email || "",
           created_at: meta.created_at,
           updated_at: meta.updated_at,
+          permissions: meta.permissions || null,
         };
         this.studyData = sd || {};
+
+        // If user doesn't have edit permission, prevent landing on edit tab after refresh
+        if (this.activeTab === "edit" && !this.canEditStudy) {
+          this.activeTab = "meta";
+        }
       } catch (e) { console.error("Failed to fetch study view:", e); }
     },
     async fetchStudyFiles() {
@@ -1278,6 +1304,10 @@ export default {
 
     await this.fetchMe();
     await this.fetchStudy();
+
+    // After we know perms, ensure we don't stay on edit without rights
+    if (this.activeTab === "edit" && !this.canEditStudy) this.activeTab = "meta";
+
     if (this.canSeeBidsButton) await this.fetchBidsPath();
     await Promise.all([this.fetchStudyFiles(), this.fetchVersionsAndDiffs()]);
   },
@@ -1292,6 +1322,10 @@ export default {
     Promise.resolve()
       .then(() => this.fetchStudy())
       .then(() => {
+        // If the route query wants edit but user can't, force meta
+        if (this.activeTab === "edit" && !this.canEditStudy) this.activeTab = "meta";
+      })
+      .then(() => {
         if (this.canSeeBidsButton) return this.fetchBidsPath();
       })
       .then(() => Promise.all([this.fetchStudyFiles(), this.fetchVersionsAndDiffs()]))
@@ -1304,8 +1338,7 @@ export default {
 /* IMPORTANT: do NOT apply font-family to * (breaks FontAwesome icons).
    Keep typography scoped to the page container only. */
 .study-view-layout {
-  font-family: "Inter", system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial, sans-serif;
-  letter-spacing: 0.1px;
+ letter-spacing: 0.1px;
 }
 
 .study-view-layout { display: flex; flex-direction: column; gap: 16px; padding: 24px; background: #f9fafb; min-height: 100%; }
@@ -1369,7 +1402,6 @@ export default {
 .meta-item { border: 1px solid #f1f1f1; border-radius: 10px; padding: 10px 12px; background: #fff; }
 .meta-label { font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; color: #6b7280; margin-bottom: 6px; }
 .meta-value { font-size: 14px; color: #111827; word-break: break-word; }
-.monospace { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; }
 
 /* Collapsible meta sections: consistent containers */
 .meta-sections { margin-top: 14px; display: flex; flex-direction: column; gap: 12px; }
@@ -1426,7 +1458,7 @@ export default {
 
 .doc-path { margin-top: 6px; font-size: 12px; color: #6b7280; display: flex; gap: 6px; align-items: flex-start; }
 .doc-path .label { flex: 0 0 auto; color: #6b7280; }
-.doc-path .file-path { flex: 1 1 auto; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; word-break: break-word; overflow-wrap: anywhere; white-space: normal; }
+.doc-path .file-path { flex: 1 1 auto; word-break: break-word; overflow-wrap: anywhere; white-space: normal; }
 
 /* Attach */
 .attach-row { margin-bottom: 10px; }
@@ -1501,7 +1533,7 @@ export default {
 .vc-summary-line { display: block; margin-top: 2px; }
 .diff-scroll { overflow: auto; border: 1px solid #f1f1f1; border-radius: 10px; padding: 12px; background: #fff; }
 
-.bids-location .file-path { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; word-break: break-all; }
+.bids-location .file-path {word-break: break-all; }
 .bids-actions { margin-top: 8px; }
 
 /* edit steps grid */

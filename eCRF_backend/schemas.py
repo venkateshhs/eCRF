@@ -4,6 +4,14 @@ from typing import Any, Optional, Dict, List, Literal
 from pydantic import BaseModel, EmailStr, constr, Field
 
 
+class StudyPermissionsOut(BaseModel):
+    view: bool = False
+    add_data: bool = False
+    edit_study: bool = False
+
+    class Config:
+        from_attributes = True
+
 class UserBase(BaseModel):
     username: constr(min_length=3, max_length=50)
     email: EmailStr
@@ -58,6 +66,11 @@ class StudyMetadataBase(BaseModel):
     study_name: str
     study_description: Optional[str] = None
 
+    #  workflow fields (optional to avoid regressions)
+    status: Optional[str] = None                 # "DRAFT" | "PUBLISHED" | "ARCHIVED"
+    draft_of_study_id: Optional[int] = None      # if this is an edit-draft of an existing study
+    last_completed_step: Optional[int] = None    # wizard resume helper
+    permissions: Optional[StudyPermissionsOut] = None
 
 class StudyMetadataCreate(StudyMetadataBase):
     created_by: int
@@ -72,7 +85,6 @@ class StudyMetadataOut(StudyMetadataBase):
     created_by: int
     created_at: datetime
     updated_at: datetime
-
     class Config:
         from_attributes = True
 
@@ -240,7 +252,7 @@ class StudyDataEntryOut(BaseModel):
 
 class StudyDataEntryUpdate(BaseModel):
     data: Optional[Dict[str, Any]] = None
-    skipped_required_flags: Optional[List[List[bool]]]
+    skipped_required_flags: Optional[List[List[bool]]] = None
 
 
 class PaginatedStudyDataEntries(BaseModel):

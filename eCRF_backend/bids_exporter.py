@@ -1576,3 +1576,23 @@ def _json_clone(obj: Any) -> Any:
         return json.loads(json.dumps(obj, ensure_ascii=False))
     except Exception:
         return {}
+
+
+def _delete_bids_folder_safe(study_id: int, study_name: str) -> None:
+    """
+    Best-effort delete of BIDS dataset folder.
+    Never blocks the API response (logs errors only).
+    """
+    try:
+        dataset_path = _dataset_path(study_id, study_name or "")
+    except Exception as e:
+        logger.error("Could not compute BIDS dataset path for study_id=%s: %s", study_id, e)
+        return
+
+    try:
+        if dataset_path and os.path.isdir(dataset_path):
+            shutil.rmtree(dataset_path)
+            logger.info("Deleted BIDS dataset folder: %s", dataset_path)
+    except Exception as e:
+        logger.error("Failed to delete BIDS dataset folder %s: %s", dataset_path, e)
+
