@@ -264,7 +264,7 @@ jobs:
         with:
           token: ${{ github.token }}
           tag: ${{ github.ref_name }}
-          commit: ${{ github.ref_name }}
+          commit: main
           name: ${{ github.ref_name }} (downloads hosted in case-e)
           makeLatest: false
           allowUpdates: true
