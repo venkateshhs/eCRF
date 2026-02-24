@@ -87,7 +87,9 @@
               Subject ID
               <i :class="sortIcon('subjectId')"></i>
             </th>
-            <th rowspan="2" @click="sortTable('group')">
+
+            <!-- Group column: Admin OR Creator/Owner OR has add_data/edit_study (NOT view-only) -->
+            <th v-if="canViewGroupColumn" rowspan="2" @click="sortTable('group')">
               Group
               <i :class="sortIcon('group')"></i>
             </th>
@@ -111,7 +113,7 @@
           </tr>
           <tr class="filter-row">
             <th><input v-model="filters.subjectId" placeholder="Filter Subject ID"></th>
-            <th><input v-model="filters.group" placeholder="Filter Group"></th>
+            <th v-if="canViewGroupColumn"><input v-model="filters.group" placeholder="Filter Group"></th>
             <th><input v-model="filters.visit" placeholder="Filter Visit"></th>
             <template v-for="(section, sIdx) in sections" :key="'filter-sec-'+sIdx">
               <template v-for="(field, fIdx) in section.fields" :key="'filter-fld-'+sIdx+'-'+fIdx">
@@ -129,9 +131,9 @@
         <tbody>
           <template v-for="(row, rowIdx) in paginatedData" :key="'row-'+rowIdx">
             <tr>
-              <td>{{ row.subjectId }}</td>
-              <td>{{ row.group }}</td>
-              <td>{{ row.visit }}</td>
+              <td class="fixed-col">{{ row.subjectId }}</td>
+              <td v-if="canViewGroupColumn" class="fixed-col">{{ row.group }}</td>
+              <td class="fixed-col">{{ row.visit }}</td>
               <template v-for="(section, sIdx) in sections" :key="'row-sec-'+rowIdx+'-s'+sIdx">
                 <template v-for="(field, fIdx) in section.fields" :key="'cell-'+rowIdx+'-s'+sIdx+'-f'+fIdx">
                   <td :class="cellClass(row.__sIdx, row.__vIdx, sIdx, fIdx)">
@@ -209,6 +211,65 @@ export default {
     totalGridRows() { return (this.subjects?.length || 0) * (this.visits?.length || 0); },
     canViewAll() { return this.totalGridRows > 0 && this.totalGridRows <= this.VIEW_ALL_MAX_ROWS; },
 
+    currentUser() {
+      return this.$store.getters.getUser || {};
+    },
+    role() {
+      return this.currentUser.profile?.role || "";
+    },
+    userName() {
+      const p = this.currentUser.profile || {};
+      const firstLast = [p.first_name, p.last_name].filter(Boolean).join(" ").trim();
+      return (
+        p.name ||
+        p.full_name ||
+        firstLast ||
+        this.currentUser.username ||
+        this.currentUser.email ||
+        "User"
+      );
+    },
+    isAdmin() {
+      return this.role === "Administrator";
+    },
+
+    // Owner/author (creator) check (matches backend created_by being numeric)
+    isCreator() {
+      const meta = this.study?.metadata || {};
+      const createdBy = meta.created_by;
+      if (createdBy == null) return false;
+
+      const myId = this.currentUser?.id ?? this.currentUser?.user_id ?? this.currentUser?.profile?.id ?? null;
+      if (myId == null) return false;
+
+      return String(createdBy) === String(myId);
+    },
+
+    // permissions are expected at `study.metadata.permissions` (same as dashboard option-a)
+    studyPerms() {
+      const perms = this.study?.metadata?.permissions;
+      return perms && typeof perms === "object" ? perms : null;
+    },
+
+    hasAddPermission() {
+      const p = this.studyPerms;
+      return p ? p.add_data === true : false;
+    },
+    hasEditPermission() {
+      const p = this.studyPerms;
+      return p ? p.edit_study === true : false;
+    },
+
+    // IMPORTANT FIX:
+    // Group column visible only to:
+    // - Admin
+    // - Creator/Owner
+    // - users with add_data OR edit_study
+    // View-only users do NOT see Group column.
+    canViewGroupColumn() {
+      return this.isAdmin || this.isCreator || this.hasAddPermission || this.hasEditPermission;
+    },
+
     filteredData() {
       let data = [];
       const { subjectIdxPageSet, visitIdxPageSet } = this.currentWindowIndexSets();
@@ -242,7 +303,7 @@ export default {
 
       data = data.filter(row => {
         if (this.filters.subjectId && !String(row.subjectId).toLowerCase().includes(this.filters.subjectId.toLowerCase())) return false;
-        if (this.filters.group && !String(row.group).toLowerCase().includes(this.filters.group.toLowerCase())) return false;
+        if (this.canViewGroupColumn && this.filters.group && !String(row.group).toLowerCase().includes(this.filters.group.toLowerCase())) return false;
         if (this.filters.visit && !String(row.visit).toLowerCase().includes(this.filters.visit.toLowerCase())) return false;
 
         for (const key in this.filters) {
@@ -259,6 +320,10 @@ export default {
         data.sort((a, b) => {
           let valA = a[key] ?? '';
           let valB = b[key] ?? '';
+          if (key === 'group' && !this.canViewGroupColumn) {
+            valA = '';
+            valB = '';
+          }
           valA = String(valA).toLowerCase();
           valB = String(valB).toLowerCase();
           if (valA < valB) return -1 * dir;
@@ -386,6 +451,8 @@ export default {
           next[key] = this.filters[key] || '';
         });
       });
+
+      if (!this.canViewGroupColumn) next.group = '';
       this.filters = next;
     },
 
@@ -576,6 +643,7 @@ export default {
     },
 
     sortTable(key) {
+      if (key === 'group' && !this.canViewGroupColumn) return;
       if (this.sortConfig.key === key) {
         this.sortConfig.direction = this.sortConfig.direction === 'asc' ? 'desc' : 'asc';
       } else {
@@ -674,8 +742,12 @@ export default {
     },
     downloadDelimited(rows, kind) {
       const quote = v => `"${String(v).replace(/"/g, '""')}"`;
-      const hdr1 = ['Subject ID', 'Group', 'Visit', ...this.sections.flatMap((s, i) => Array(this.fieldsPerSection[i]).fill(s.title))];
-      const hdr2 = ['', '', '', ...this.sections.flatMap(sec => sec.fields.map(f => f.label || f.name || f.title))];
+      const hdr1 = this.canViewGroupColumn
+        ? ['Subject ID', 'Group', 'Visit', ...this.sections.flatMap((s, i) => Array(this.fieldsPerSection[i]).fill(s.title))]
+        : ['Subject ID', 'Visit', ...this.sections.flatMap((s, i) => Array(this.fieldsPerSection[i]).fill(s.title))];
+      const hdr2 = this.canViewGroupColumn
+        ? ['', '', '', ...this.sections.flatMap(sec => sec.fields.map(f => f.label || f.name || f.title))]
+        : ['', '', ...this.sections.flatMap(sec => sec.fields.map(f => f.label || f.name || f.title))];
 
       const lines = [];
       lines.push(hdr1.map(quote).join(','));
@@ -683,7 +755,7 @@ export default {
 
       const filteredRows = rows.filter(row => {
         if (this.filters.subjectId && !String(row.subjectId).toLowerCase().includes(this.filters.subjectId.toLowerCase())) return false;
-        if (this.filters.group && !String(row.group).toLowerCase().includes(this.filters.group.toLowerCase())) return false;
+        if (this.canViewGroupColumn && this.filters.group && !String(row.group).toLowerCase().includes(this.filters.group.toLowerCase())) return false;
         if (this.filters.visit && !String(row.visit).toLowerCase().includes(this.filters.visit.toLowerCase())) return false;
         for (const key in this.filters) {
           if (key === 'subjectId' || key === 'group' || key === 'visit') continue;
@@ -694,7 +766,7 @@ export default {
       });
 
       filteredRows.forEach(row => {
-        const cells = [row.subjectId, row.group, row.visit];
+        const cells = this.canViewGroupColumn ? [row.subjectId, row.group, row.visit] : [row.subjectId, row.visit];
         this.sections.forEach((section, sIdx) => {
           section.fields.forEach((_, fIdx) => {
             cells.push(row[`s${sIdx}_f${fIdx}`]);
@@ -856,12 +928,10 @@ export default {
 .dashboard-table thead tr:nth-child(1) th { background: #e5e7eb; font-weight: 600; color: #1f2937; }
 .dashboard-table thead tr:nth-child(2) th { background: #f3f4f6; font-weight: 600; color: #374151; }
 
-.dashboard-table tbody td:first-child,
-.dashboard-table tbody td:nth-child(2),
-.dashboard-table tbody td:nth-child(3) {
+.dashboard-table tbody td.fixed-col {
   background: #f9fafb; font-weight: 600; color: #1f2937;
 }
-.dashboard-table tbody td:not(:first-child):not(:nth-child(2)):not(:nth-child(3)) { background: #ffffff; color: #4b5563; }
+.dashboard-table tbody td:not(.fixed-col) { background: #ffffff; color: #4b5563; }
 .dashboard-table tbody tr:hover td { background: #f1f5f9; }
 
 .cell-unassigned { background: #e5e7eb !important; color: #374151; border-color: #d1d5db !important; }
