@@ -2625,7 +2625,7 @@ export default {
   margin: 2px 0 4px;
   word-break: break-all;
 }
-.obi-id { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+
 .obi-def, .obi-syn {
   font-size: 12px;
   color: #374151;

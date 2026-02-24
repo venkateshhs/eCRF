@@ -91,7 +91,6 @@ export default {
   align-items: center;
   height: 100vh;
   background-color: #f4f4f9;
-  font-family: Arial, sans-serif;
 }
 
 .login-container {

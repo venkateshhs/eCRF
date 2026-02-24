@@ -946,7 +946,6 @@ export default {
   grid-template-rows: 70px 1fr;
   grid-template-columns: 220px 1fr;
   height: 100vh;
-  font-family: "Inter", sans-serif;
   transition: grid-template-columns 0.3s ease;
 }
 

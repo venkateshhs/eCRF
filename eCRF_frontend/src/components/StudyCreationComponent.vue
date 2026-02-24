@@ -1560,7 +1560,6 @@ export default {
 .study-creation-container {
   max-width: none;
   margin: 0 auto;
-  font-family: Arial, sans-serif;
 }
 
 /* Step 1 header row (title + import action) */

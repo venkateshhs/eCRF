@@ -1338,8 +1338,7 @@ export default {
 /* IMPORTANT: do NOT apply font-family to * (breaks FontAwesome icons).
    Keep typography scoped to the page container only. */
 .study-view-layout {
-  font-family: "Inter", system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial, sans-serif;
-  letter-spacing: 0.1px;
+ letter-spacing: 0.1px;
 }
 
 .study-view-layout { display: flex; flex-direction: column; gap: 16px; padding: 24px; background: #f9fafb; min-height: 100%; }
@@ -1403,7 +1402,6 @@ export default {
 .meta-item { border: 1px solid #f1f1f1; border-radius: 10px; padding: 10px 12px; background: #fff; }
 .meta-label { font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; color: #6b7280; margin-bottom: 6px; }
 .meta-value { font-size: 14px; color: #111827; word-break: break-word; }
-.monospace { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; }
 
 /* Collapsible meta sections: consistent containers */
 .meta-sections { margin-top: 14px; display: flex; flex-direction: column; gap: 12px; }
@@ -1460,7 +1458,7 @@ export default {
 
 .doc-path { margin-top: 6px; font-size: 12px; color: #6b7280; display: flex; gap: 6px; align-items: flex-start; }
 .doc-path .label { flex: 0 0 auto; color: #6b7280; }
-.doc-path .file-path { flex: 1 1 auto; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; word-break: break-word; overflow-wrap: anywhere; white-space: normal; }
+.doc-path .file-path { flex: 1 1 auto; word-break: break-word; overflow-wrap: anywhere; white-space: normal; }
 
 /* Attach */
 .attach-row { margin-bottom: 10px; }
@@ -1535,7 +1533,7 @@ export default {
 .vc-summary-line { display: block; margin-top: 2px; }
 .diff-scroll { overflow: auto; border: 1px solid #f1f1f1; border-radius: 10px; padding: 12px; background: #fff; }
 
-.bids-location .file-path { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; word-break: break-all; }
+.bids-location .file-path {word-break: break-all; }
 .bids-actions { margin-top: 8px; }
 
 /* edit steps grid */
