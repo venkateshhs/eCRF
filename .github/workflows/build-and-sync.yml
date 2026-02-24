@@ -57,26 +57,26 @@ jobs:
       - name: PyInstaller build
         run: pyinstaller -y ecrf.spec
 
-      # Package artifacts uniformly
+      # Package artifacts uniformly (with OS in filename)
       - name: Package (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
           # dist\eCRF contains the built app + dependencies
-          Compress-Archive -Path dist\eCRF\* -DestinationPath case-e.zip
+          Compress-Archive -Path dist\eCRF\* -DestinationPath case-e-Windows.zip
 
       - name: Package (macOS)
         if: runner.os == 'macOS'
         run: |
           # Pack the 'eCRF' folder under dist into a tar.gz at repo root
-          tar -C dist -czf case-e.tar.gz eCRF
+          tar -C dist -czf case-e-macOS.tar.gz eCRF
 
       - name: Upload artifact (Windows)
         if: runner.os == 'Windows'
         uses: actions/upload-artifact@v4
         with:
           name: case-e-windows
-          path: case-e.zip
+          path: case-e-Windows.zip
           retention-days: 7
           if-no-files-found: error
 
@@ -85,7 +85,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: case-e-macos
-          path: case-e.tar.gz
+          path: case-e-macOS.tar.gz
           retention-days: 7
           if-no-files-found: error
 
@@ -137,14 +137,10 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p builds/latest/{macos,windows}
-          cp -f artifacts/macos/case-e.tar.gz   builds/latest/macos/
-          cp -f artifacts/windows/case-e.zip    builds/latest/windows/
+          cp -f artifacts/macos/case-e-macOS.tar.gz   builds/latest/macos/
+          cp -f artifacts/windows/case-e-Windows.zip  builds/latest/windows/
 
-          # checksums
-          (cd builds/latest/macos   && sha256sum case-e.tar.gz  > case-e.tar.gz.sha256)
-          (cd builds/latest/windows && sha256sum case-e.zip     > case-e.zip.sha256)
-        
-          # manifest.json 
+          # manifest.json
           NOW="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
           cat > builds/latest/manifest.json <<EOF
           {
@@ -154,12 +150,10 @@ jobs:
             "ref_name": "${REF_NAME}",
             "artifacts": {
               "macos": {
-                "file": "case-e.tar.gz",
-                "sha256_file": "case-e.tar.gz.sha256"
+                "file": "case-e-macOS.tar.gz"
               },
               "windows": {
-                "file": "case-e.zip",
-                "sha256_file": "case-e.zip.sha256"
+                "file": "case-e-Windows.zip"
               }
             }
           }
@@ -169,8 +163,8 @@ jobs:
           if [[ "${REF_TYPE}" == "tag" ]]; then
             TAG="${REF_NAME}"
             mkdir -p "builds/${TAG}/macos" "builds/${TAG}/windows"
-            cp -f builds/latest/macos/case-e.tar.gz* "builds/${TAG}/macos/"
-            cp -f builds/latest/windows/case-e.zip* "builds/${TAG}/windows/"
+            cp -f builds/latest/macos/case-e-macOS.tar.gz "builds/${TAG}/macos/"
+            cp -f builds/latest/windows/case-e-Windows.zip "builds/${TAG}/windows/"
             cp -f builds/latest/manifest.json "builds/${TAG}/"
           fi
 
@@ -213,10 +207,8 @@ jobs:
           body: |
             Automated sync from eCRF @ ${{ github.sha }}
           artifacts: |
-            case-e/builds/latest/macos/case-e.tar.gz
-            case-e/builds/latest/macos/case-e.tar.gz.sha256
-            case-e/builds/latest/windows/case-e.zip
-            case-e/builds/latest/windows/case-e.zip.sha256
+            case-e/builds/latest/macos/case-e-macOS.tar.gz
+            case-e/builds/latest/windows/case-e-Windows.zip
           artifactErrorsFailBuild: true
 
       - name: Publish main branch build GitHub Release on case-e
@@ -226,8 +218,8 @@ jobs:
           token: ${{ secrets[matrix.token_secret] }}
           owner: ${{ matrix.owner }}
           repo: case-e
-          tag: main-build-${{ github.run_id }}    # unique tag per run
-          name: main build ${{ github.run_id }}
+          tag: main-${{ github.run_number }}-${{ github.sha }}
+          name: main-${{ github.run_number }}-${{ github.sha }}
           commit: main                            # branch in case-e
           makeLatest: true
           allowUpdates: false
@@ -238,10 +230,8 @@ jobs:
           body: |
             Automated sync from eCRF @ ${{ github.sha }} (main branch build)
           artifacts: |
-            case-e/builds/latest/macos/case-e.tar.gz
-            case-e/builds/latest/macos/case-e.tar.gz.sha256
-            case-e/builds/latest/windows/case-e.zip
-            case-e/builds/latest/windows/case-e.zip.sha256
+            case-e/builds/latest/macos/case-e-macOS.tar.gz
+            case-e/builds/latest/windows/case-e-Windows.zip
           artifactErrorsFailBuild: true
 
       # Pointer releases in *this* repo (eCRF) that link to case-e
@@ -263,8 +253,8 @@ jobs:
             Assets are hosted in **[venkateshhs/case-e -> Releases -> Latest](https://github.com/venkateshhs/case-e/releases/latest)**.
 
             **Direct download links:**
-            - **macOS:** https://github.com/venkateshhs/case-e/releases/latest/download/case-e.tar.gz
-            - **Windows:** https://github.com/venkateshhs/case-e/releases/latest/download/case-e.zip
+            - **macOS:** https://github.com/venkateshhs/case-e/releases/latest/download/case-e-macOS.tar.gz
+            - **Windows:** https://github.com/venkateshhs/case-e/releases/latest/download/case-e-Windows.zip
 
             _This release is a pointer only. Binaries are published in the case-e repo._
 
@@ -285,7 +275,7 @@ jobs:
             Assets are hosted in **[venkateshhs/case-e -> Releases -> ${{ github.ref_name }}](https://github.com/venkateshhs/case-e/releases/tag/${{ github.ref_name }})**.
 
             **Direct download links:**
-            - **macOS:** https://github.com/venkateshhs/case-e/releases/download/${{ github.ref_name }}/case-e.tar.gz
-            - **Windows:** https://github.com/venkateshhs/case-e/releases/download/${{ github.ref_name }}/case-e.zip
+            - **macOS:** https://github.com/venkateshhs/case-e/releases/download/${{ github.ref_name }}/case-e-macOS.tar.gz
+            - **Windows:** https://github.com/venkateshhs/case-e/releases/download/${{ github.ref_name }}/case-e-Windows.zip
 
             _This release is a pointer only. Binaries are published in the case-e repo._
