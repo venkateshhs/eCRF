@@ -87,6 +87,10 @@
               Subject ID
               <i :class="sortIcon('subjectId')"></i>
             </th>
+            <th rowspan="2" @click="sortTable('group')">
+              Group
+              <i :class="sortIcon('group')"></i>
+            </th>
             <th rowspan="2" @click="sortTable('visit')">
               Visit
               <i :class="sortIcon('visit')"></i>
@@ -107,6 +111,7 @@
           </tr>
           <tr class="filter-row">
             <th><input v-model="filters.subjectId" placeholder="Filter Subject ID"></th>
+            <th><input v-model="filters.group" placeholder="Filter Group"></th>
             <th><input v-model="filters.visit" placeholder="Filter Visit"></th>
             <template v-for="(section, sIdx) in sections" :key="'filter-sec-'+sIdx">
               <template v-for="(field, fIdx) in section.fields" :key="'filter-fld-'+sIdx+'-'+fIdx">
@@ -125,6 +130,7 @@
           <template v-for="(row, rowIdx) in paginatedData" :key="'row-'+rowIdx">
             <tr>
               <td>{{ row.subjectId }}</td>
+              <td>{{ row.group }}</td>
               <td>{{ row.visit }}</td>
               <template v-for="(section, sIdx) in sections" :key="'row-sec-'+rowIdx+'-s'+sIdx">
                 <template v-for="(field, fIdx) in section.fields" :key="'cell-'+rowIdx+'-s'+sIdx+'-f'+fIdx">
@@ -181,7 +187,7 @@ export default {
       icons,
 
       sortConfig: { key: 'subjectId', direction: 'asc' },
-      filters: { subjectId: '', visit: '' },
+      filters: { subjectId: '', group: '', visit: '' },
 
       currentPage: 1,
       pageSize: 50,
@@ -211,10 +217,11 @@ export default {
         if (!subjectIdxPageSet.has(subjIdx)) return;
 
         const groupIdx = this.resolveGroup(subjIdx);
+        const groupName = this.resolveGroupName(subjIdx);
         this.visits.forEach((visit, vIdx) => {
           if (!visitIdxPageSet.has(vIdx)) return;
 
-          const row = { subjectId: subject.id, visit: visit.name, __sIdx: subjIdx, __vIdx: vIdx };
+          const row = { subjectId: subject.id, group: groupName, visit: visit.name, __sIdx: subjIdx, __vIdx: vIdx };
           this.sections.forEach((section, sIdx) => {
             const assigned = this.isAssigned(sIdx, vIdx, groupIdx);
             section.fields.forEach((field, fIdx) => {
@@ -235,10 +242,11 @@ export default {
 
       data = data.filter(row => {
         if (this.filters.subjectId && !String(row.subjectId).toLowerCase().includes(this.filters.subjectId.toLowerCase())) return false;
+        if (this.filters.group && !String(row.group).toLowerCase().includes(this.filters.group.toLowerCase())) return false;
         if (this.filters.visit && !String(row.visit).toLowerCase().includes(this.filters.visit.toLowerCase())) return false;
 
         for (const key in this.filters) {
-          if (key === 'subjectId' || key === 'visit') continue;
+          if (key === 'subjectId' || key === 'group' || key === 'visit') continue;
           const filterVal = this.filters[key];
           if (filterVal && !String(row[key] ?? '').toLowerCase().includes(String(filterVal).toLowerCase())) return false;
         }
@@ -370,7 +378,7 @@ export default {
     },
 
     initDynamicFilters() {
-      const base = { subjectId: this.filters.subjectId || '', visit: this.filters.visit || '' };
+      const base = { subjectId: this.filters.subjectId || '', group: this.filters.group || '', visit: this.filters.visit || '' };
       const next = { ...base };
       this.sections.forEach((section, sIdx) => {
         section.fields.forEach((_, fIdx) => {
@@ -506,6 +514,13 @@ export default {
       const idx = grpList.findIndex(g => (g.name || '').trim().toLowerCase() === subjGroup);
       return idx >= 0 ? idx : 0;
     },
+    resolveGroupName(subjIdx) {
+      const subjGroup = (this.subjects[subjIdx]?.group || '').trim();
+      const subjGroupNorm = subjGroup.toLowerCase();
+      const grpList = this.study?.content?.study_data?.groups || [];
+      const hit = grpList.find(g => (g.name || '').trim().toLowerCase() === subjGroupNorm);
+      return hit?.name || subjGroup || '';
+    },
     isAssigned(sectionIdx, visitIdx, groupIdx) {
       return !!(this.study?.content?.study_data?.assignments?.[sectionIdx]?.[visitIdx]?.[groupIdx]);
     },
@@ -633,8 +648,9 @@ export default {
       const rows = [];
       this.subjects.forEach((subject, subjIdx) => {
         const groupIdx = this.resolveGroup(subjIdx);
+        const groupName = this.resolveGroupName(subjIdx);
         this.visits.forEach((visit, vIdx) => {
-          const row = { subjectId: subject.id, visit: visit.name };
+          const row = { subjectId: subject.id, group: groupName, visit: visit.name };
           this.sections.forEach((section, sIdx) => {
             const assigned = this.isAssigned(sIdx, vIdx, groupIdx);
             section.fields.forEach((field, fIdx) => {
@@ -658,8 +674,8 @@ export default {
     },
     downloadDelimited(rows, kind) {
       const quote = v => `"${String(v).replace(/"/g, '""')}"`;
-      const hdr1 = ['Subject ID', 'Visit', ...this.sections.flatMap((s, i) => Array(this.fieldsPerSection[i]).fill(s.title))];
-      const hdr2 = ['', '', ...this.sections.flatMap(sec => sec.fields.map(f => f.label || f.name || f.title))];
+      const hdr1 = ['Subject ID', 'Group', 'Visit', ...this.sections.flatMap((s, i) => Array(this.fieldsPerSection[i]).fill(s.title))];
+      const hdr2 = ['', '', '', ...this.sections.flatMap(sec => sec.fields.map(f => f.label || f.name || f.title))];
 
       const lines = [];
       lines.push(hdr1.map(quote).join(','));
@@ -667,9 +683,10 @@ export default {
 
       const filteredRows = rows.filter(row => {
         if (this.filters.subjectId && !String(row.subjectId).toLowerCase().includes(this.filters.subjectId.toLowerCase())) return false;
+        if (this.filters.group && !String(row.group).toLowerCase().includes(this.filters.group.toLowerCase())) return false;
         if (this.filters.visit && !String(row.visit).toLowerCase().includes(this.filters.visit.toLowerCase())) return false;
         for (const key in this.filters) {
-          if (key === 'subjectId' || key === 'visit') continue;
+          if (key === 'subjectId' || key === 'group' || key === 'visit') continue;
           const f = this.filters[key];
           if (f && !String(row[key] ?? '').toLowerCase().includes(String(f).toLowerCase())) return false;
         }
@@ -677,7 +694,7 @@ export default {
       });
 
       filteredRows.forEach(row => {
-        const cells = [row.subjectId, row.visit];
+        const cells = [row.subjectId, row.group, row.visit];
         this.sections.forEach((section, sIdx) => {
           section.fields.forEach((_, fIdx) => {
             cells.push(row[`s${sIdx}_f${fIdx}`]);
@@ -840,10 +857,11 @@ export default {
 .dashboard-table thead tr:nth-child(2) th { background: #f3f4f6; font-weight: 600; color: #374151; }
 
 .dashboard-table tbody td:first-child,
-.dashboard-table tbody td:nth-child(2) {
+.dashboard-table tbody td:nth-child(2),
+.dashboard-table tbody td:nth-child(3) {
   background: #f9fafb; font-weight: 600; color: #1f2937;
 }
-.dashboard-table tbody td:not(:first-child):not(:nth-child(2)) { background: #ffffff; color: #4b5563; }
+.dashboard-table tbody td:not(:first-child):not(:nth-child(2)):not(:nth-child(3)) { background: #ffffff; color: #4b5563; }
 .dashboard-table tbody tr:hover td { background: #f1f5f9; }
 
 .cell-unassigned { background: #e5e7eb !important; color: #374151; border-color: #d1d5db !important; }
