@@ -1503,33 +1503,66 @@ export default {
   max-width: 100%;
 }
 
-@media (max-width: 768px) {
+
+@media (min-width: 1700px) {
+
+  /* ---- Typography scale up ---- */
   .dashboard-layout {
-    grid-template-columns: 70px 1fr;
+    font-size: 16px;
   }
-  .dashboard-sidebar {
-    width: 70px;
+
+  .user-role {
+    font-size: 14px;
   }
+
+  .action-card-desc {
+    font-size: 14px;
+  }
+
+  .btn-minimal {
+    font-size: 15px;
+  }
+
+  /* ---- CENTER CONTENT AREA WIDTH ---- */
   .dashboard-main {
-    padding: 20px;
+    max-width: 1600px;
+    margin: 0 auto;
   }
-  .user-name {
-    max-width: 160px;
+
+  /* ---- ACTION CARDS -> HORIZONTAL GRID ---- */
+  .primary-actions-cards {
+    grid-template-columns: repeat(3, minmax(320px, 1fr));
+    justify-content: center;
+    gap: 28px;
+    margin-top: 32px;
   }
-  .import-overlay {
-    height: calc(100vh - 70px - 40px);
+
+  /* cards become slightly larger */
+  .action-card {
+    padding: 24px 26px;
+    border-radius: 14px;
   }
-  .dashboard-layout.sidebar-hidden {
-    grid-template-columns: 0 1fr;
-    grid-template-areas:
-      "header header"
-      "main main";
+
+  .action-card-title {
+    font-size: 18px;
   }
-  .modal-footer {
-    justify-content: stretch;
+
+  .action-card-desc {
+    font-size: 15px;
   }
-  .modal-footer > * {
-    flex: 1 1 auto;
+
+  /* optional: nicer hover presence on large screens */
+  .action-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 24px rgba(0,0,0,0.08);
   }
+
+
+  .study-table th,
+  .study-table td {
+    padding: 16px;
+    font-size: 15px;
+  }
+
 }
 </style>
