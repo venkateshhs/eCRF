@@ -51,6 +51,15 @@ def _json_clone(obj: Any) -> Any:
 def _norm_str(s: Any) -> str:
     return ("" if s is None else str(s)).strip()
 
+def _is_unassigned_group(g: Any) -> bool:
+    gg = _norm_str(g)
+    if gg == "":
+        return True
+    # Optional: treat "-1" as unassigned if any legacy UI ever sent it
+    if gg.strip() == "-1":
+        return True
+    return False
+
 def _names_from_objs(arr: Any, key: str = "name") -> List[str]:
     out: List[str] = []
     if isinstance(arr, list):
@@ -175,10 +184,24 @@ def _subjects_diff(old_sd: Dict[str, Any], new_sd: Dict[str, Any]) -> Dict[str, 
 
     added = sorted(new_ids - old_ids)
     removed = sorted(old_ids - new_ids)
-    group_changed = sorted(
-        sid for sid in (old_ids & new_ids)
-        if old_by_id.get(sid, "") != new_by_id.get(sid, "")
-    )
+    group_changed = []
+    for sid in (old_ids & new_ids):
+        og = old_by_id.get(sid, "")
+        ng = new_by_id.get(sid, "")
+
+        if og == ng:
+            continue
+
+        # IMPORTANT:
+        # first assignment (unassigned -> assigned) is NON-structural
+        if _is_unassigned_group(og) and not _is_unassigned_group(ng):
+            continue
+
+        # Everything else is structural:
+        # assigned -> assigned (A -> B), assigned -> unassigned, unassigned -> unassigned (rare)
+        group_changed.append(sid)
+
+    group_changed = sorted(group_changed)
 
     return {
         "added": added,

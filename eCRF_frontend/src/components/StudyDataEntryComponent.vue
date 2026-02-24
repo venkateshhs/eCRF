@@ -471,6 +471,74 @@
       @close="closeSubjectDialog"
       @save="saveNewSubjects"
     />
+    <div v-if="showGroupAssignDialog" class="dialog-overlay">
+      <div class="dialog">
+        <h3>Group assignment required</h3>
+        <p>This subject has no group. Choose how you want to assign a group.</p>
+
+        <label>
+          Assignment:
+          <select v-model="groupAssignScope">
+            <option value="one">Assign group to this subject only</option>
+            <option value="all">Assign group to all unassigned subjects</option>
+          </select>
+        </label>
+
+        <!-- Single-subject assignment -->
+        <label v-if="groupAssignScope === 'one'">
+          Group:
+          <select v-model="groupAssignSelectedGroup">
+            <option v-for="g in groupList" :key="g.name" :value="g.name">
+              {{ g.name }}
+            </option>
+          </select>
+        </label>
+
+        <!-- Multi-subject assignment: per-subject selection (NOT blanket assignment) -->
+        <div v-else>
+          <p style="margin: 0 0 10px 0;">
+            Assign a group for each unassigned subject:
+          </p>
+
+          <div style="max-height: 260px; overflow: auto; border: 1px solid #e5e7eb; border-radius: 6px; padding: 8px;">
+            <div
+              v-for="row in groupAssignDrafts"
+              :key="row.index"
+              style="display:flex; align-items:center; justify-content:space-between; gap:10px; padding:6px 0; border-bottom:1px solid #f3f4f6;"
+            >
+              <div style="min-width:0;">
+                <strong>{{ row.id || ('Subject ' + (row.index + 1)) }}</strong>
+              </div>
+
+              <div style="flex: 0 0 180px;">
+                <select v-model="row.group" style="width:100%;">
+                  <option v-for="g in groupList" :key="g.name" :value="g.name">
+                    {{ g.name }}
+                  </option>
+                </select>
+              </div>
+            </div>
+
+            <div v-if="!groupAssignDrafts || !groupAssignDrafts.length" style="font-size: 12px; color: #6b7280; padding: 8px 0;">
+              No unassigned subjects found.
+            </div>
+          </div>
+        </div>
+
+        <p v-if="groupAssignError" style="color:#dc2626; font-size:12px; margin-top:6px;">
+          {{ groupAssignError }}
+        </p>
+
+        <div class="dialog-actions">
+          <button @click="saveGroupAssignment" :disabled="savingGroupAssign">
+            {{ savingGroupAssign ? "Saving..." : "Save" }}
+          </button>
+          <button @click="closeGroupAssignDialog" :disabled="savingGroupAssign">
+            Cancel
+          </button>
+        </div>
+      </div>
+    </div>
 
     <CustomDialog :message="dialogMessage" :isVisible="showDialog" @close="closeDialog" />
 
@@ -628,10 +696,27 @@ export default {
 
       // Merge mode (selection panel toggles to merge UI in same container)
       isMergeMode: false,
+      showGroupAssignDialog: false,
+      groupAssignScope: "one", // "one" | "all"
+      groupAssignSelectedGroup: "",
+      groupAssignSubjectIndex: null,
+      groupAssignVisitIndex: null,
+      groupAssignError: "",
+      savingGroupAssign: false,
+      groupAssignDrafts: [],
     };
   },
 
   computed: {
+    unassignedSubjectIndices() {
+      const subjects = this.sd.subjects || [];
+      const out = [];
+      for (let i = 0; i < subjects.length; i++) {
+        const g = String(subjects[i]?.group || "").trim();
+        if (!g) out.push(i);
+      }
+      return out;
+    },
     canSeeGroupColumn() {
       if (!this.study?.metadata) return false;
 
@@ -1074,7 +1159,8 @@ export default {
             ];
 
       for (let s = 0; s < nS; s++) {
-        const g = this.subjectToGroupIdx[s] ?? 0;
+        const g = this.subjectToGroupIdx[s];
+        if (g == null || g < 0) continue;
         for (const v of vIndices) this.hydrateCell(s, v, g);
       }
     },
@@ -1706,12 +1792,15 @@ export default {
     prepareSubjectGroupIndexMap() {
       const subjects =
         this.study?.content?.study_data?.subjects || [];
-      this.subjectToGroupIdx = subjects.map((s) => {
-        const name = (s.group || "").trim().toLowerCase();
+        this.subjectToGroupIdx = subjects.map((s) => {
+        const raw = (s.group || "");
+        const name = String(raw).trim();
+        if (!name) return -1;
+        const low = name.toLowerCase();
         const gi = this.groupList.findIndex(
-          (g) => (g.name || "").trim().toLowerCase() === name
+          (g) => (g.name || "").trim().toLowerCase() === low
         );
-        return gi >= 0 ? gi : 0;
+        return gi >= 0 ? gi : -1;
       });
     },
 
@@ -1767,7 +1856,11 @@ export default {
             ];
 
       for (let s = 0; s < nS; s++) {
-        const g = this.subjectToGroupIdx[s] ?? 0;
+        const g = this.subjectToGroupIdx[s];
+        if (g == null || g < 0) {
+          for (const v of vIndices) this.statusMap.set(`${s}|${v}`, "none");
+          continue;
+        }
         for (const v of vIndices) {
           const e = this.getBestEntryFor(s, v, g);
           const key = `${s}|${v}`;
@@ -1842,8 +1935,16 @@ export default {
         Math.max(vIdx ?? 0, 0),
         Math.max(nV - 1, 0)
       );
-      this.currentGroupIndex =
-        this.subjectToGroupIdx[this.currentSubjectIndex] ?? 0;
+
+      const g = this.subjectToGroupIdx[this.currentSubjectIndex];
+
+      // if unassigned, prompt user instead of defaulting to 0
+      if (g == null || g < 0) {
+        this.openGroupAssignDialog(this.currentSubjectIndex, this.currentVisitIndex);
+        return;
+      }
+
+      this.currentGroupIndex = g;
 
       this.ensureSlot(
         this.currentSubjectIndex,
@@ -3073,6 +3174,156 @@ export default {
     closeDialog() {
       this.showDialog = false;
       this.dialogMessage = "";
+    },
+    openGroupAssignDialog(subjectIndex, visitIndex) {
+      this.groupAssignSubjectIndex = subjectIndex;
+      this.groupAssignVisitIndex = visitIndex;
+
+      this.groupAssignScope = "one";
+      this.groupAssignSelectedGroup = this.groupList?.[0]?.name || "";
+      this.groupAssignError = "";
+
+      const subjects = this.study?.content?.study_data?.subjects || [];
+      const drafts = [];
+
+      for (let i = 0; i < subjects.length; i++) {
+        const s = subjects[i] || {};
+        const id = String(s.id || s.subject_id || "").trim();
+        const grp = String(s.group || "").trim();
+        if (!grp) {
+          drafts.push({
+            index: i,
+            id,
+            group: this.groupList?.[0]?.name || "",
+          });
+        }
+      }
+
+      this.groupAssignDrafts = drafts;
+      this.showGroupAssignDialog = true;
+    },
+
+    closeGroupAssignDialog() {
+      this.showGroupAssignDialog = false;
+      this.groupAssignError = "";
+      this.groupAssignSubjectIndex = null;
+      this.groupAssignVisitIndex = null;
+    },
+
+    async saveGroupAssignment() {
+      if (this.isShared) {
+        this.groupAssignError = "Group assignment cannot be done from a shared link.";
+        return;
+      }
+
+      const groupName = String(this.groupAssignSelectedGroup || "").trim();
+      if (!groupName) {
+        this.groupAssignError = "Please select a group.";
+        return;
+      }
+
+      const sd = this.study?.content?.study_data || {};
+      const subjects = Array.isArray(sd.subjects) ? [...sd.subjects] : [];
+
+      if (!subjects.length) {
+        this.groupAssignError = "No subjects found.";
+        return;
+      }
+
+      const scope = String(this.groupAssignScope || "one").toLowerCase();
+      const sIdx = Number(this.groupAssignSubjectIndex);
+
+      if (!Number.isInteger(sIdx) || sIdx < 0 || sIdx >= subjects.length) {
+        this.groupAssignError = "Invalid subject.";
+        return;
+      }
+
+      let updatedSubjects;
+
+      if (scope === "all") {
+      const drafts = Array.isArray(this.groupAssignDrafts) ? this.groupAssignDrafts : [];
+
+      if (!drafts.length) {
+        this.groupAssignError = "No unassigned subjects found.";
+        return;
+      }
+
+      for (const d of drafts) {
+        const g = String(d.group || "").trim();
+        if (!g) {
+          this.groupAssignError = "Each listed subject must be assigned to a group.";
+          return;
+        }
+      }
+
+      const map = new Map(drafts.map((d) => [Number(d.index), String(d.group || "").trim()]));
+
+      updatedSubjects = subjects.map((s, idx) => {
+        const cur = String(s.group || "").trim();
+        if (cur) return s; // already assigned stays untouched
+        const chosen = map.get(idx);
+        return chosen ? { ...s, group: chosen } : s;
+      });
+    } else {
+        // Assign ONLY this subject
+        updatedSubjects = subjects.map((s, idx) =>
+          idx === sIdx ? { ...s, group: groupName } : s
+        );
+      }
+
+      const updatedStudyData = {
+        ...sd,
+        subjects: updatedSubjects,
+        subjectCount: updatedSubjects.length,
+      };
+
+      const payload = {
+        study_metadata: this.study.metadata,
+        study_content: { study_data: updatedStudyData },
+      };
+
+      this.savingGroupAssign = true;
+      this.groupAssignError = "";
+
+      try {
+        await axios.put(
+          `/forms/studies/${this.study.metadata.id}`,
+          payload,
+          { headers: { Authorization: `Bearer ${this.token}` } }
+        );
+
+        // Update local
+        this.study.content.study_data.subjects = updatedSubjects;
+        this.study.content.study_data.subjectCount = updatedSubjects.length;
+
+        // Rebuild map
+        this.prepareSubjectGroupIndexMap();
+
+        // Continue into entry for the originally clicked subject only
+        const g = this.subjectToGroupIdx[sIdx];
+        if (g == null || g < 0) {
+          this.groupAssignError = "Group assignment failed. Please try again.";
+          return;
+        }
+
+        this.currentSubjectIndex = sIdx;
+        this.currentVisitIndex = Number(this.groupAssignVisitIndex) || 0;
+        this.currentGroupIndex = g;
+
+        this.ensureSlot(this.currentSubjectIndex, this.currentVisitIndex, this.currentGroupIndex);
+        this.prepareAssignmentsLookup();
+
+        this.showSelection = false;
+        this.validationErrors = {};
+        this.hydrateCell(this.currentSubjectIndex, this.currentVisitIndex, this.currentGroupIndex);
+
+        this.showGroupAssignDialog = false;
+      } catch (e) {
+        console.error("Failed to assign group", e);
+        this.groupAssignError = "Failed to save group assignment. Please try again.";
+      } finally {
+        this.savingGroupAssign = false;
+      }
     },
   },
 };
