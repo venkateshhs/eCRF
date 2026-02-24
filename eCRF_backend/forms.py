@@ -77,6 +77,32 @@ def _effective_study_permissions(db: Session, meta: models.StudyMetadata, user: 
         "add_data": bool(perms.get("add_data", _DEFAULT_GRANT_PERMS["add_data"])),
         "edit_study": bool(perms.get("edit_study", _DEFAULT_GRANT_PERMS["edit_study"])),
     }
+
+
+def _get_grant(db: Session, study_id: int, user_id: int):
+    return (
+        db.query(models.StudyAccessGrant)
+          .filter_by(study_id=study_id, user_id=user_id)
+          .first()
+    )
+
+def _assert_has_study_permission(db: Session, meta: models.StudyMetadata, user: models.User, required: str = "view"):
+    role = (getattr(user.profile, "role", "") or "").strip()
+    is_admin = role == "Administrator"
+    is_owner = (meta.created_by == user.id)
+
+    if is_admin or is_owner:
+        return {"view": True, "add_data": True, "edit_study": True}
+
+    grant = _get_grant(db, meta.id, user.id)
+    perms = (grant.permissions or {}) if grant else {}
+
+    # default to False if missing
+    if not perms.get(required, False):
+        raise HTTPException(status_code=403, detail="Not authorized")
+
+    return perms
+
 def _norm_status(s: Optional[str]) -> Optional[str]:
     if not s:
         return None
@@ -355,7 +381,7 @@ def list_studies(
     # (serialized as `permissions` via schema)
     # ----------------------------
     for m in studies:
-        m.my_permissions = _effective_study_permissions(db, m, current_user)
+        m.permissions = _effective_study_permissions(db, m, current_user)
 
     return studies
 
@@ -374,26 +400,34 @@ def read_study(
 
     metadata, content = result
 
-    # authorize: admin OR owner OR explicit access grant
-    role = (getattr(user.profile, "role", "") or "").strip()
-    is_admin = role == "Administrator"
-    is_owner = (metadata.created_by == user.id)
+    #  canonical auth + returns effective perms
+    perms = _assert_has_study_permission(db, metadata, user, required="view")
 
-    has_grant = (
-        db.query(models.StudyAccessGrant)
-          .filter(
-              models.StudyAccessGrant.study_id == study_id,
-              models.StudyAccessGrant.user_id == user.id,
-          )
-          .first()
-        is not None
-    )
+    # Convert ORM -> schema dict, then attach perms
+    try:
+        meta_out = schemas.StudyMetadataOut.model_validate(metadata).model_dump()
+    except Exception:
+        # fallback if you're not on pydantic v2 in this path
+        meta_out = {
+            "id": metadata.id,
+            "study_name": metadata.study_name,
+            "study_description": metadata.study_description,
+            "status": metadata.status,
+            "draft_of_study_id": metadata.draft_of_study_id,
+            "last_completed_step": metadata.last_completed_step,
+            "created_by": metadata.created_by,
+            "created_at": metadata.created_at,
+            "updated_at": metadata.updated_at,
+        }
 
-    if not (is_admin or is_owner or has_grant):
-        raise HTTPException(status_code=403, detail="Not authorized to view this study")
+    #  this is what StudyView/StudyDataDashboard need
+    meta_out["permissions"] = {
+        "view": bool(perms.get("view", False)),
+        "add_data": bool(perms.get("add_data", False)),
+        "edit_study": bool(perms.get("edit_study", False)),
+    }
 
-    return {"metadata": metadata, "content": content}
-
+    return {"metadata": meta_out, "content": content}
 
 @router.get("/studies/{study_id}/versions")
 def list_study_versions(
@@ -438,7 +472,9 @@ def get_template_version(
     meta = db.query(models.StudyMetadata).filter(models.StudyMetadata.id == study_id).first()
     if not meta:
         raise HTTPException(status_code=404, detail="Study not found")
-    _assert_owner_or_admin(meta, user)
+
+    # allow any user who can view this study (or add/edit)
+    _assert_has_study_permission(db, meta, user, required="view")
 
     q = db.query(StudyTemplateVersion).filter(StudyTemplateVersion.study_id == study_id)
     if version is not None:
@@ -766,16 +802,19 @@ def update_study(
 
     return {"metadata": metadata, "content": content}
 
-
 @router.get("/studies/{study_id}/files", response_model=List[schemas.FileOut])
 def read_files_for_study(
     study_id: int,
     db: Session = Depends(get_db),
     user: models.User = Depends(get_current_user)
 ):
-    study = db.query(models.StudyMetadata).filter(models.StudyMetadata.id == study_id).first()
-    if not study or study.created_by != user.id:
-        raise HTTPException(status_code=403, detail="Not authorized to access files for this study")
+    meta = db.query(models.StudyMetadata).filter(models.StudyMetadata.id == study_id).first()
+    if not meta:
+        raise HTTPException(status_code=404, detail="Study not found")
+
+    # allow view-users to see files (or tighten to edit_study if required)
+    _assert_has_study_permission(db, meta, user, required="view")
+
     files = crud.get_files_for_study(db, study_id)
     return files
 

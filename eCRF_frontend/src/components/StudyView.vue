@@ -700,6 +700,16 @@ export default {
     };
   },
   computed: {
+    // --- permission object helpers (Option A shape: resp.data.metadata.permissions) ---
+    studyPerms() {
+      const p = this.studyMeta?.permissions;
+      return p && typeof p === "object" ? p : null;
+    },
+    hasEditStudyPermission() {
+      const p = this.studyPerms;
+      return p ? p.edit_study === true : false;
+    },
+
     visibleTabs() {
       return (this.tabs || []).filter(t => !t.requiresEdit || this.canEditStudy);
     },
@@ -739,7 +749,10 @@ export default {
       const meId = this.me?.id;
       return meId != null && this.studyMeta.created_by_id != null && Number(meId) === Number(this.studyMeta.created_by_id);
     },
-    canEditStudy() { return this.isAdmin || this.isOwner; },
+
+    // FIX: Edit Study tab visibility/control = Admin OR Owner OR edit_study permission
+    canEditStudy() { return this.isAdmin || this.isOwner || this.hasEditStudyPermission; },
+
     canManageAccess() { return this.isAdmin || this.isOwner; },
     canSeeBidsButton() { return this.isAdmin || this.isOwner; },
 
@@ -759,6 +772,12 @@ export default {
   },
   watch: {
     activeTab(val) {
+      // Guard: if someone deep-links to ?tab=edit but can't edit, bounce to meta
+      if (val === "edit" && !this.canEditStudy) {
+        this.activeTab = "meta";
+        return;
+      }
+
       if (val === "viewdata") {
         this.dataSidebarCollapsed = true;
       } else {
@@ -945,6 +964,7 @@ export default {
           createdByDisplay = resolved || String(meta.created_by);
         }
 
+        // IMPORTANT: keep permissions on studyMeta for Option A checks
         this.studyMeta = {
           id: meta.id,
           study_name: meta.study_name,
@@ -954,8 +974,14 @@ export default {
           created_by_email: meta.created_by_email || "",
           created_at: meta.created_at,
           updated_at: meta.updated_at,
+          permissions: meta.permissions || null,
         };
         this.studyData = sd || {};
+
+        // If user doesn't have edit permission, prevent landing on edit tab after refresh
+        if (this.activeTab === "edit" && !this.canEditStudy) {
+          this.activeTab = "meta";
+        }
       } catch (e) { console.error("Failed to fetch study view:", e); }
     },
     async fetchStudyFiles() {
@@ -1278,6 +1304,10 @@ export default {
 
     await this.fetchMe();
     await this.fetchStudy();
+
+    // After we know perms, ensure we don't stay on edit without rights
+    if (this.activeTab === "edit" && !this.canEditStudy) this.activeTab = "meta";
+
     if (this.canSeeBidsButton) await this.fetchBidsPath();
     await Promise.all([this.fetchStudyFiles(), this.fetchVersionsAndDiffs()]);
   },
@@ -1291,6 +1321,10 @@ export default {
     this.scrollToTop?.();
     Promise.resolve()
       .then(() => this.fetchStudy())
+      .then(() => {
+        // If the route query wants edit but user can't, force meta
+        if (this.activeTab === "edit" && !this.canEditStudy) this.activeTab = "meta";
+      })
       .then(() => {
         if (this.canSeeBidsButton) return this.fetchBidsPath();
       })
