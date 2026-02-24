@@ -223,21 +223,21 @@
                   <td class="actions-cell">
                     <div class="action-buttons">
                       <button
-                        v-if="isAdmin || isPI || isInvestigator"
-                        type="button"
-                        @click="handleAddDataClick(study)"
-                        class="btn-minimal btn-equal"
-                      >
-                        Add Data
-                      </button>
-                      <button
-                        v-if="isAdmin || isPI || isInvestigator"
-                        type="button"
-                        @click="handleViewStudyClick(study)"
-                        class="btn-minimal btn-equal"
-                      >
-                        View Study
-                      </button>
+                          v-if="canAddData(study)"
+                          type="button"
+                          @click="handleAddDataClick(study)"
+                          class="btn-minimal btn-equal"
+                        >
+                          Add Data
+                        </button>
+                        <button
+                          v-if="canViewStudy(study)"
+                          type="button"
+                          @click="handleViewStudyClick(study)"
+                          class="btn-minimal btn-equal"
+                        >
+                          View Study
+                        </button>
                     </div>
                   </td>
                 </tr>
@@ -464,6 +464,38 @@ export default {
     },
   },
   methods: {
+    // ---- Per-study permission helpers (uses backend `study.permissions`) ----
+    studyPerms(study) {
+      const p = study?.permissions;
+      return p && typeof p === "object" ? p : null;
+    },
+
+    isStudyOwner(study) {
+      // backend uses numeric created_by in StudyMetadataOut
+      const createdBy = study?.created_by ?? null;
+      const meId = this.currentUser?.id ?? this.currentUser?.user_id ?? null;
+      if (createdBy == null || meId == null) return false;
+      return String(createdBy) === String(meId);
+    },
+
+    canAddData(study) {
+      // Owner/Admin: always show
+      if (this.isAdmin || this.isStudyOwner(study)) return true;
+
+      // Otherwise: only if permission says add_data
+      const perms = this.studyPerms(study);
+      return perms ? perms.add_data === true : false;
+    },
+
+    canViewStudy(study) {
+      // Owner/Admin: always show
+      if (this.isAdmin || this.isStudyOwner(study)) return true;
+
+      // Otherwise: only if permission says view OR add_data (add implies view)
+      const perms = this.studyPerms(study);
+      return perms ? (perms.view === true || perms.add_data === true) : false;
+    },
+
     setPageNoXScroll(on) {
       document.documentElement.classList.toggle("no-x-scroll", on);
       document.body.classList.toggle("no-x-scroll", on);

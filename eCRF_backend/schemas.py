@@ -77,7 +77,10 @@ class StudyMetadataOut(StudyMetadataBase):
     created_by: int
     created_at: datetime
     updated_at: datetime
-
+    my_permissions: Optional[Dict[str, bool]] = Field(
+        default=None,
+        serialization_alias="permissions",
+    )
     class Config:
         from_attributes = True
 

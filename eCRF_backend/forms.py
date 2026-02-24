@@ -40,7 +40,43 @@ TEMPLATE_DIR = Path(os.environ.get("ECRF_TEMPLATES_DIR", "")) if os.environ.get(
     else (Path(__file__).resolve().parent / "templates")
 
 ALLOWED_STUDY_STATUS = {"DRAFT", "PUBLISHED", "ARCHIVED"}
+_DEFAULT_GRANT_PERMS = {"view": True, "add_data": True, "edit_study": False}
 
+def _is_admin(user: models.User) -> bool:
+    role = (getattr(getattr(user, "profile", None), "role", "") or "").strip()
+    return role == "Administrator"
+
+def _effective_study_permissions(db: Session, meta: models.StudyMetadata, user: models.User) -> Dict[str, bool]:
+    """
+    Effective permissions for (user, study).
+
+    Rules (per your description):
+    - Administrator: full access.
+    - Study owner (created_by): full access.
+    - Otherwise: use StudyAccessGrant.permissions (merged with defaults).
+    """
+    if _is_admin(user) or meta.created_by == user.id:
+        return {"view": True, "add_data": True, "edit_study": True}
+
+    grant = (
+        db.query(models.StudyAccessGrant)
+          .filter(
+              models.StudyAccessGrant.study_id == meta.id,
+              models.StudyAccessGrant.user_id == user.id,
+          )
+          .first()
+    )
+    if not grant:
+        return {"view": False, "add_data": False, "edit_study": False}
+
+    perms = grant.permissions or {}
+
+    # merge with defaults
+    return {
+        "view": bool(perms.get("view", _DEFAULT_GRANT_PERMS["view"])),
+        "add_data": bool(perms.get("add_data", _DEFAULT_GRANT_PERMS["add_data"])),
+        "edit_study": bool(perms.get("edit_study", _DEFAULT_GRANT_PERMS["edit_study"])),
+    }
 def _norm_status(s: Optional[str]) -> Optional[str]:
     if not s:
         return None
@@ -268,36 +304,60 @@ def create_study(
 
     return {"metadata": metadata, "content": content}
 
-
 @router.get("/studies", response_model=List[schemas.StudyMetadataOut])
 def list_studies(
     status: Optional[str] = Query(None, description="Optional: DRAFT|PUBLISHED|ARCHIVED"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    role = (current_user.profile.role or "").strip()
+    role = (getattr(getattr(current_user, "profile", None), "role", "") or "").strip()
     status_norm = _norm_status(status)
 
     q = db.query(models.StudyMetadata)
 
-    # Admin sees everything
+    # ----------------------------
+    # Visibility filter
+    # ----------------------------
     if role != "Administrator":
+        # SQLite JSON filtering:
+        # Include a study if user is owner OR there is a grant row that gives *any* access.
+        # "any access" = view OR add_data OR edit_study
+        # Defaults if key missing/null:
+        #   view: True, add_data: True, edit_study: False
+        view_expr = func.coalesce(func.json_extract(models.StudyAccessGrant.permissions, "$.view"), 1)
+        add_expr  = func.coalesce(func.json_extract(models.StudyAccessGrant.permissions, "$.add_data"), 1)
+        edit_expr = func.coalesce(func.json_extract(models.StudyAccessGrant.permissions, "$.edit_study"), 0)
+
         grant_subq = (
             db.query(models.StudyAccessGrant.study_id)
               .filter(models.StudyAccessGrant.user_id == current_user.id)
+              .filter(
+                  (view_expr == 1) | (add_expr == 1) | (edit_expr == 1)
+              )
               .subquery()
         )
+
         q = q.filter(
             or_(
                 models.StudyMetadata.created_by == current_user.id,
-                models.StudyMetadata.id.in_(grant_subq)
+                models.StudyMetadata.id.in_(grant_subq),
             )
         )
 
+    # Optional status filter
     if status_norm:
         q = q.filter(models.StudyMetadata.status == status_norm)
 
-    return q.all()
+    studies = q.all()
+
+    # ----------------------------
+    # Attach per-study effective permissions for current user
+    # (serialized as `permissions` via schema)
+    # ----------------------------
+    for m in studies:
+        m.my_permissions = _effective_study_permissions(db, m, current_user)
+
+    return studies
 
 
 
