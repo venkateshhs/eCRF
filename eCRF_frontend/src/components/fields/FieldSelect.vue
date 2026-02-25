@@ -128,6 +128,7 @@ export default {
   box-sizing: border-box;
   font-size: 14px;
   color: #1f2937;
+  font-weight: 400; /* force normal */
 }
 .fsel-input:disabled {
   cursor: not-allowed;

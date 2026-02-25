@@ -47,7 +47,7 @@ export default {
   margin-bottom: 0.25rem;
 }
 .form-input {
-  width: 96%;
+  width: 99%;
   padding: 0.5rem;
   border: 1px solid #ccc;
   border-radius: 4px;

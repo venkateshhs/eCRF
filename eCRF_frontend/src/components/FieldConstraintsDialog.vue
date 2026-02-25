@@ -154,17 +154,25 @@
       <div class="row two">
         <div>
           <label>Min value</label>
-          <input type="number" v-model.number="local.min" />
+          <!-- FIX: allow empty -> undefined (avoid v-model.number forcing 0) -->
+          <input type="number" :value="num(local.min)" @input="setNum('min', $event)" />
         </div>
         <div>
           <label>Max value</label>
-          <input type="number" v-model.number="local.max" />
+          <!-- FIX: allow empty -> undefined (avoid v-model.number forcing 0) -->
+          <input type="number" :value="num(local.max)" @input="setNum('max', $event)" />
         </div>
       </div>
 
       <div class="row">
         <label>Step</label>
-        <input type="number" v-model.number="local.step" placeholder="Leave empty if not applicable" />
+        <!-- FIX: allow empty -> undefined -->
+        <input
+          type="number"
+          :value="num(local.step)"
+          @input="setNum('step', $event)"
+          placeholder="Leave empty if not applicable"
+        />
       </div>
 
       <div class="row">
@@ -334,18 +342,27 @@
       <div class="row two">
         <div>
           <label>Min</label>
-          <input type="number" v-model.number="local.min" :disabled="local.percent" />
+          <!-- FIX: allow empty -> undefined (avoid v-model.number forcing 0) -->
+          <input type="number" :value="num(local.min)" @input="setNum('min', $event)" :disabled="local.percent" />
         </div>
         <div>
           <label>Max</label>
-          <input type="number" v-model.number="local.max" :disabled="local.percent" />
+          <!-- FIX: allow empty -> undefined (avoid v-model.number forcing 0) -->
+          <input type="number" :value="num(local.max)" @input="setNum('max', $event)" :disabled="local.percent" />
         </div>
       </div>
 
       <div class="row two">
         <div>
           <label>Step</label>
-          <input type="number" min="0.000001" step="0.000001" v-model.number="local.step" />
+          <!-- FIX: allow empty -> undefined -->
+          <input
+            type="number"
+            min="0.000001"
+            step="0.000001"
+            :value="num(local.step)"
+            @input="setNum('step', $event)"
+          />
         </div>
         <div>
           <label class="chk">
@@ -399,11 +416,13 @@
       <div class="row two">
         <div>
           <label>Min</label>
-          <input type="number" v-model.number="local.min" />
+          <!-- FIX: allow empty -> undefined -->
+          <input type="number" :value="num(local.min)" @input="setNum('min', $event)" />
         </div>
         <div>
           <label>Max</label>
-          <input type="number" v-model.number="local.max" />
+          <!-- FIX: allow empty -> undefined -->
+          <input type="number" :value="num(local.max)" @input="setNum('max', $event)" />
         </div>
       </div>
       <div class="row two">
@@ -508,7 +527,7 @@ export default {
       optionsCount: this.optionsCount,
       allowedFormatsText: this.allowedFormatsText
     };
-    },
+  },
   data() {
     const base = this.constraintsForm || {};
     const type = (this.currentFieldType || "text").toLowerCase();
@@ -798,6 +817,22 @@ export default {
     }
   },
   methods: {
+    /* =========================
+       FIX: numeric fields can be truly cleared ("" -> undefined)
+       ========================= */
+    num(v) {
+      return (v === undefined || v === null || Number.isNaN(v)) ? "" : v;
+    },
+    setNum(key, evt) {
+      const raw = evt?.target?.value;
+      if (raw === "" || raw === null || raw === undefined) {
+        this.local[key] = undefined;
+        return;
+      }
+      const n = Number(raw);
+      this.local[key] = Number.isFinite(n) ? n : undefined;
+    },
+
     // Slider marks
     addOrUpdateMark(kind) {
       if (kind !== 'slider') return;
@@ -1006,14 +1041,73 @@ export default {
       };
       this.$emit("updateConstraints", cleaned);
     },
+
+    /* =========================
+       Clear should remove constraints
+       ========================= */
     clearToInitial() {
-      const s = this._initialSnapshot;
-      if (!s) return;
-      // restore the original values from when dialog was opened
-      this.local = JSON.parse(JSON.stringify(s.local));
-      this.localOptions = JSON.parse(JSON.stringify(s.localOptions));
-      this.optionsCount = s.optionsCount;
-      this.allowedFormatsText = s.allowedFormatsText;
+      const t = this.type;
+
+      // common
+      this.local.required = false;
+      this.local.readonly = false;
+      this.local.helpText = "";
+      if (!this.isCheckbox && !(this.isSlider && this.local.mode === "slider") && !this.isFile) {
+        this.local.placeholder = "";
+      }
+
+      // defaults
+      if (t === "checkbox") this.local.defaultValue = false;
+      else if (t === "radio" && this.local.allowMultiple) this.local.defaultValue = [];
+      else this.local.defaultValue = "";
+
+      // type-specific clears
+      if (t === "number") {
+        this.local.min = undefined;
+        this.local.max = undefined;
+        this.local.step = undefined;
+        this.local.integerOnly = false;
+        this.local.minDigits = undefined;
+        this.local.maxDigits = undefined;
+      } else if (t === "text" || t === "textarea") {
+        this.local.minLength = undefined;
+        this.local.maxLength = undefined;
+        this.local.pattern = "";
+        this.local.transform = "none";
+      } else if (t === "time") {
+        this.local.minTime = "";
+        this.local.maxTime = "";
+        // keep hourCycle as-is
+      } else if (t === "date") {
+        this.local.minDate = "";
+        this.local.maxDate = "";
+        // keep dateFormat as-is
+        this.local.defaultValue = "";
+      } else if (t === "slider") {
+        // clear slider constraints back to base defaults (no forced 0s)
+        this.local.percent = false;
+        this.local.marks = [];
+        if (this.local.mode === "linear") {
+          this.local.min = 1;
+          this.local.max = 5;
+          this.local.leftLabel = "";
+          this.local.rightLabel = "";
+        } else {
+          this.local.min = 1;
+          this.local.max = 5;
+          this.local.step = 1;
+        }
+      } else if (t === "file") {
+        this.allowedFormatsText = "";
+        this.local.allowedFormats = [];
+        this.local.maxSizeMB = undefined;
+        this.local.storagePreference = "local";
+        this.local.allowMultipleFiles = true;
+        this.local.modalities = [];
+      } else if (t === "radio" || t === "select") {
+        // Keep options list; just clear default selection
+        this.local.defaultValue = this.local.allowMultiple ? [] : "";
+      }
 
       // clear transient editor inputs
       this.chipInput = "";

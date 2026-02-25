@@ -216,8 +216,6 @@ export function normalizeConstraints(fieldType = "text", raw = {}) {
     if ("maxSizeMB" in c && c.maxSizeMB !== "" && c.maxSizeMB != null) {
       const n = Number(c.maxSizeMB);
       c.maxSizeMB = Number.isFinite(n) && n > 0 ? n : 100;
-    } else {
-      c.maxSizeMB = 100;
     }
 
     let formats = Array.isArray(c.allowedFormats) ? c.allowedFormats : [];

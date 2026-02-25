@@ -25,6 +25,9 @@ export default {
     readonly: { type: Boolean, default: false },
     required: { type: Boolean, default: false },
     disabled: { type: Boolean, default: false },
+
+    // IMPORTANT: defaultValue exists as a prop even when not passed.
+    // So we must detect "was it provided" by checking !== undefined OR attrs.
     defaultValue: { type: [Boolean, String, Number, null], default: undefined },
   },
   emits: ["update:modelValue"],
@@ -47,20 +50,31 @@ export default {
         this.$attrs.required === true;
       return this.required || attrReq;
     },
+
+    //  only true when defaultValue was really provided
+    hasExplicitDefault() {
+      const attrHas = Object.prototype.hasOwnProperty.call(this.$attrs, "defaultValue");
+      const propHas = this.defaultValue !== undefined;
+      return propHas || attrHas;
+    },
+
     effectiveDefault() {
-      // 1) explicit defaultValue (prop or attr) wins
-      if (Object.prototype.hasOwnProperty.call(this.$props, "defaultValue")) {
+      // 1) explicit defaultValue wins (prop or attr)
+      if (this.defaultValue !== undefined) {
         return !!this.defaultValue;
       }
       if (Object.prototype.hasOwnProperty.call(this.$attrs, "defaultValue")) {
         const v = this.$attrs.defaultValue;
-        return v === "" ? true : v === true || v === "true";
+        return v === "" ? true : v === true || v === "true" || v === 1 || v === "1";
       }
+
       // 2) impossible state: readonly + required => true
       if (this.isReadonly && this.isRequired) return true;
+
       // 3) otherwise false by default
       return false;
     },
+
     proxy: {
       get() {
         return !!this.modelValue;
@@ -70,9 +84,11 @@ export default {
       },
     },
   },
+
   mounted() {
     this.enforceRules(true);
   },
+
   watch: {
     // Re-enforce when constraints or value change
     isReadonly() { this.enforceRules(); },
@@ -80,6 +96,7 @@ export default {
     defaultValue() { this.enforceRules(); },
     modelValue() { this.enforceRules(); },
   },
+
   methods: {
     onMaybeBlock(e) {
       if (this.isReadonly) {
@@ -89,26 +106,34 @@ export default {
       }
       // if editable, do nothing (let v-model toggle)
     },
+
     enforceRules(initial = false) {
-      // If value is "unset" (null/undefined/empty string), apply effective default
-      const isUnset = this.modelValue === null || this.modelValue === undefined || this.modelValue === "";
+      const isUnset =
+        this.modelValue === null ||
+        this.modelValue === undefined ||
+        this.modelValue === "";
+
+      // If value unset -> apply default
       if (isUnset) {
         this.$emit("update:modelValue", this.effectiveDefault);
         return;
       }
 
-      // If readonly + required but not checked, force true
+      // If readonly + required but not checked → force true
       if (this.isReadonly && this.isRequired && this.modelValue !== true) {
         this.$emit("update:modelValue", true);
         return;
       }
 
-      // If an explicit defaultValue is provided and this is the first mount with falsy value,
-      // initialize to that (without overriding a deliberate false later).
-      if (initial && Object.prototype.hasOwnProperty.call(this.$props, "defaultValue")) {
-        if (this.modelValue !== !!this.defaultValue) {
-          this.$emit("update:modelValue", !!this.defaultValue);
-        }
+      //  Only apply explicit default on first mount if it was truly provided.
+      // Do NOT override hydrated values.
+      if (initial && this.hasExplicitDefault) {
+        const want = this.effectiveDefault;
+        // only set if modelValue is still unset-ish (extra safety)
+        // (if hydration already provided true/false, we leave it)
+        // Note: at this point isUnset is false, so we do nothing.
+        // Keeping this block for clarity/future, but it intentionally does not override.
+        void want;
       }
     },
   },

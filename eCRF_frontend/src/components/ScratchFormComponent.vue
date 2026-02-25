@@ -1951,7 +1951,6 @@ export default {
     setActiveSection(i) {
       this.ensureCurrentFormExists();
       this.activeSection = i;
-      this.focusSection(i);
     },
 
     addFieldToActiveSection(field) {
