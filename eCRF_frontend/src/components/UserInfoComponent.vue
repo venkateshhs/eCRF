@@ -737,10 +737,13 @@ export default {
 <style scoped>
 /* Container */
 .user-info-container {
-  max-width: 1100px;
-  margin: 24px auto;
-  padding: 0 16px;
+  /* take ALL available width inside Dashboard main */
+  width: 100%;
+  max-width: none;
+  margin: 0;
+  padding: 16px;
   box-sizing: border-box;
+  min-width: 0;
 }
 
 .layout {
