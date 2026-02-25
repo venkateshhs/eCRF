@@ -39,7 +39,7 @@ export default {
 
 <style scoped>
 .form-textarea {
-  width: 100%;
+  width: 99%;
   padding: 0.5rem;
   border: 1px solid #ccc;
   border-radius: 4px;
