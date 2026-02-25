@@ -210,13 +210,13 @@
 
               <!-- CHECKBOX -->
               <FieldCheckbox
-                v-else-if="field.type === 'checkbox'"
-                :id="fieldId(mIdx, fIdx)"
-                v-model="entryData[currentSubjectIndex][currentVisitIndex][currentGroupIndex][mIdx][fIdx]"
-                v-bind="selectedModels[mIdx].fields[fIdx].constraints"
-                :disabled="!canEdit"
-                @change="validateField(mIdx, fIdx)"
-              />
+                  v-else-if="field.type === 'checkbox'"
+                  :id="fieldId(mIdx, fIdx)"
+                  v-model="entryData[currentSubjectIndex][currentVisitIndex][currentGroupIndex][mIdx][fIdx]"
+                  v-bind="selectedModels[mIdx].fields[fIdx].constraints"
+                  :disabled="!canEdit"
+                  @update:modelValue="() => { clearError(mIdx, fIdx); validateField(mIdx, fIdx); }"
+                />
 
               <!-- RADIO -->
               <FieldRadioGroup
@@ -1170,11 +1170,14 @@ export default {
     },
     fieldDictKey(fieldObj, fallbackIndex) {
       return (
-        fieldObj?.name ||
-        fieldObj?.label ||
-        fieldObj?.key ||
-        fieldObj?.title ||
-        `f${fallbackIndex}`
+            fieldObj?.name ||               //  "checkbox_3_1772010932126"
+            fieldObj?.id ||
+            fieldObj?.field_id ||
+            fieldObj?.uid ||
+            fieldObj?.key ||
+            fieldObj?.label ||
+            fieldObj?.title ||
+            `f${fallbackIndex}`
       );
     },
     arrayToDict(sectionFieldArray) {
@@ -1182,15 +1185,14 @@ export default {
       (this.selectedModels || []).forEach((sec, sIdx) => {
         const sKey = this.sectionDictKey(sec);
         const fields = sec?.fields || [];
-        const row = Array.isArray(sectionFieldArray?.[sIdx])
-          ? sectionFieldArray[sIdx]
-          : [];
+        const row = Array.isArray(sectionFieldArray?.[sIdx]) ? sectionFieldArray[sIdx] : [];
         const inner = {};
+
         fields.forEach((f, fIdx) => {
-          const fKey = this.fieldDictKey(f, fIdx);
-          inner[fKey] =
-            row[fIdx] != null ? row[fIdx] : this.defaultForField(f);
+          const fKey = this.fieldDictKey(f, fIdx); //  now resolves to f.id when present
+          inner[fKey] = row[fIdx] != null ? row[fIdx] : this.defaultForField(f);
         });
+
         out[sKey] = inner;
       });
       return out;
@@ -1213,15 +1215,39 @@ export default {
     },
 
     dictToArray(dataDict) {
-      return (this.selectedModels || []).map((sec, sIdx) => {
+      return (this.selectedModels || []).map((sec) => {
         const sKey = this.sectionDictKey(sec);
-        const inner =
-          dataDict && typeof dataDict === "object"
-            ? dataDict[sKey]
-            : undefined;
+        const inner = (dataDict && typeof dataDict === "object") ? dataDict[sKey] : undefined;
+
         return (sec.fields || []).map((f, fIdx) => {
-          const fKey = this.fieldDictKey(f, fIdx);
-          const v = inner ? inner[fKey] : undefined;
+          // Try multiple candidate keys
+          const candidates = [
+            f?.id,
+            f?.field_id,
+            f?.uid,
+            f?.key,
+            f?.name,
+            f?.label,
+            f?.title,
+            `f${fIdx}`,
+          ].filter(Boolean);
+
+          let v = undefined;
+          if (inner && typeof inner === "object") {
+            for (const k of candidates) {
+              if (Object.prototype.hasOwnProperty.call(inner, k)) {
+                v = inner[k];
+                break;
+              }
+            }
+          }
+
+          // Checkbox must become boolean for FieldCheckbox
+          if (String(f?.type || "").toLowerCase() === "checkbox") {
+            if (v === undefined) return false;
+            return v === true || v === 1 || v === "1" || v === "true";
+          }
+
           return v !== undefined ? v : this.defaultForField(f);
         });
       });
