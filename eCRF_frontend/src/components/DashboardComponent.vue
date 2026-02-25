@@ -75,6 +75,7 @@
     <main :class="['dashboard-main', { expanded: sidebarCollapsed && !hideSidebar }]">
       <!-- Only show Dashboard home content when you're actually ON Dashboard route -->
       <template v-if="$route.name === 'Dashboard'">
+        <div class="dashboard-home">
         <!-- IMPORT STUDY (DATA) embedded in Dashboard -->
         <div v-if="showImportData">
           <div :class="['import-overlay', { maximized: importMaximized }]">
@@ -245,6 +246,7 @@
             </table>
           </div>
         </div>
+       </div>
       </template>
 
       <router-view v-else />
@@ -971,7 +973,7 @@ export default {
   width: 110px;
 }
 
-/*  make it feel clickable without changing layout */
+/* make it feel clickable without changing layout */
 .logo-container .logo {
   cursor: pointer;
 }
@@ -1063,14 +1065,27 @@ export default {
   background: #fff;
   transition: margin-left 0.3s ease;
   min-width: 0;
+
+  /* IMPORTANT: main must NOT constrain routed pages */
+  width: 100%;
+  max-width: none;
+  margin: 0;
 }
+
 .dashboard-main.expanded {
   margin-left: -150px;
 }
 
-/*  If sidebar hidden, ensure no funky shift */
+/* If sidebar hidden, ensure no funky shift */
 .dashboard-layout.sidebar-hidden .dashboard-main {
   margin-left: 0 !important;
+}
+
+/*  constrain ONLY dashboard home content (not router-view routes) */
+.dashboard-home {
+  width: 100%;
+  max-width: none;
+  margin: 0;
 }
 
 /* Study Management Heading + Subtitle (centered) */
@@ -1504,8 +1519,7 @@ export default {
 
 
 @media (min-width: 1700px) {
-
-  /* ---- Typography scale up ---- */
+  /* Typography scale up */
   .dashboard-layout {
     font-size: 16px;
   }
@@ -1522,8 +1536,8 @@ export default {
     font-size: 15px;
   }
 
-  /* ---- CENTER CONTENT AREA WIDTH ---- */
-  .dashboard-main {
+  /* IMPORTANT: constrain only dashboard home area, not routed pages */
+  .dashboard-home {
     max-width: 1600px;
     margin: 0 auto;
   }
@@ -1553,7 +1567,7 @@ export default {
   /* optional: nicer hover presence on large screens */
   .action-card:hover {
     transform: translateY(-2px);
-    box-shadow: 0 8px 24px rgba(0,0,0,0.08);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
   }
 
 
