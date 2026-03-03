@@ -24,21 +24,11 @@
           </div>
 
           <!-- Subject selector when in Subjects tab -->
-          <div
-            v-if="activeTab === 'subjects'"
-            class="subject-select-wrap"
-          >
+          <div v-if="activeTab === 'subjects'" class="subject-select-wrap">
             <label class="subject-label">
               Subject
-              <select
-                v-model="activeSubject"
-                class="subject-select"
-              >
-                <option
-                  v-for="sid in subjectIds"
-                  :key="`sel-${sid}`"
-                  :value="sid"
-                >
+              <select v-model="activeSubject" class="subject-select">
+                <option v-for="sid in subjectIds" :key="`sel-${sid}`" :value="sid">
                   {{ displaySubject(sid) }} ({{ subjectCounts[String(sid)] || 0 }})
                 </option>
               </select>
@@ -66,9 +56,7 @@
         </h2>
         <h2 class="panel-title" v-else>
           Subject audit
-          <span
-            v-if="activeSubject !== null && String(activeSubject) in subjectLabels"
-          >
+          <span v-if="activeSubject !== null && String(activeSubject) in subjectLabels">
             — {{ displaySubject(activeSubject) }}
           </span>
           <span v-else-if="activeSubject !== null">
@@ -95,61 +83,97 @@
               <th class="col-raw"></th>
             </tr>
           </thead>
+
           <tbody>
-            <tr
-              v-for="(row, i) in visibleRows"
-              :key="`row-${i}-${row.id || ''}`"
-            >
-              <td class="mono">{{ fmtTs(row.timestamp) }}</td>
-              <td class="strong">{{ row.action || "—" }}</td>
-              <td class="user-cell">
-                <div>{{ userName(row.user_id) }}</div>
-                <div
-                  v-if="activeTab === 'subjects'"
-                  class="meta"
-                  title="Subject / Visit"
-                >
-                  Subj: {{ resolvedSubject(row) }} · Visit:
-                  {{ resolvedVisit(row) }}
-                </div>
-              </td>
-              <td class="wrap">
-                <div class="detail-main">
-                  {{ summaryText(row) }}
-                </div>
-                <div
-                  v-if="row.details && Object.keys(row.details).length"
-                  class="detail-lines"
-                >
+            <!-- ✅ IMPORTANT:
+                 When using <template v-for>, the ONLY key is on the <template>.
+                 Do NOT put :key on child <tr> nodes (VueCompilerError). -->
+            <template v-for="(row, i) in visibleRows" :key="`blk-${row.id || 'noid'}-${i}`">
+              <tr>
+                <td class="mono">{{ fmtTs(row.timestamp) }}</td>
+                <td class="strong">{{ displayAction(row) }}</td>
+
+                <td class="user-cell">
+                  <div>{{ getUserDisplayName(row.user_id) }}</div>
                   <div
-                    v-for="(val, key) in row.details"
-                    :key="`detail-${row.id || i}-${key}`"
-                    class="detail-line"
+                    v-if="activeTab === 'subjects'"
+                    class="meta"
+                    title="Subject / Visit"
                   >
-                    <span class="detail-key">{{ key }}:</span>
-                    <span class="detail-value">
-                      {{ formatDetailValue(val) }}
-                    </span>
+                    Subj: {{ resolvedSubject(row) }} · Visit: {{ resolvedVisit(row) }}
                   </div>
-                </div>
-              </td>
-              <td>
-                <button class="link-btn" @click="toggleRaw(row)">
-                  {{ row.__showRaw ? "hide" : "view raw" }}
-                </button>
-              </td>
-            </tr>
-            <tr
-              v-for="(row, i) in visibleRows"
-              :key="`raw-${i}-${row.id || ''}`"
-              v-show="row.__showRaw"
-            >
-              <td :colspan="5" class="raw-wrap">
-                <pre class="mini-json">{{ safeDetail(row.details) }}</pre>
-              </td>
-            </tr>
+                </td>
+
+                <td class="wrap">
+                  <div class="detail-main">
+                    {{ summaryText(row) }}
+                  </div>
+
+                  <div
+                    v-if="row.details && Object.keys(row.details).length"
+                    class="detail-lines"
+                  >
+                    <div
+                      v-for="(val, key) in row.details"
+                      :key="`detail-${row.id || i}-${key}`"
+                      class="detail-line"
+                    >
+                      <span class="detail-key">{{ key }}:</span>
+                      <span class="detail-value">{{ formatDetailValue(val) }}</span>
+                    </div>
+                  </div>
+                </td>
+
+                <td class="actions-cell">
+                  <button
+                    v-if="hasDiff(row)"
+                    class="link-btn"
+                    @click="openDiff(row)"
+                    :disabled="diffLoading && diffEventId === row.id"
+                    title="Show diff"
+                  >
+                    {{ diffLoading && diffEventId === row.id ? "loading…" : "diff" }}
+                  </button>
+
+                  <button class="link-btn" @click="toggleRaw(row)">
+                    {{ row.__showRaw ? "hide" : "view raw" }}
+                  </button>
+                </td>
+              </tr>
+
+              <!-- ✅ no :key here (key is on <template>) -->
+              <tr v-show="row.__showRaw">
+                <td :colspan="5" class="raw-wrap">
+                  <pre class="mini-json">{{ safeDetail(row.details) }}</pre>
+                </td>
+              </tr>
+            </template>
           </tbody>
         </table>
+      </div>
+
+      <!-- Diff modal -->
+      <div v-if="diffOpen" class="modal-backdrop" @click.self="closeDiff">
+        <div class="modal">
+          <div class="modal-head">
+            <div class="modal-title">
+              Diff
+              <span v-if="diffPath" class="diff-path">— {{ diffPath }}</span>
+            </div>
+            <button class="btn-close" @click="closeDiff">✕</button>
+          </div>
+
+          <div class="modal-body">
+            <div v-if="diffError" class="diff-error">
+              {{ diffError }}
+            </div>
+            <pre v-else class="diff-json">{{ pretty(diffData) }}</pre>
+          </div>
+
+          <div class="modal-foot">
+            <button class="btn-minimal" @click="closeDiff">Close</button>
+          </div>
+        </div>
       </div>
     </main>
   </div>
@@ -166,16 +190,27 @@ export default {
   data() {
     return {
       loading: false,
-      all: [], // all events (for this study) from API
+      all: [],
+
       search: "",
-      activeTab: "study", // 'study' | 'subjects'
-      activeSubject: null, // subject id string/number or null
-      subjectIds: [], // list of subject indexes as strings
-      subjectCounts: {}, // sid -> count (by index)
-      subjectLabels: {}, // sid (index) -> human subject id/label
-      visitLabels: {}, // visit index -> human visit label
-      nameCache: {}, // user id -> display name
+      activeTab: "study",
+      activeSubject: null,
+
+      subjectIds: [],
+      subjectCounts: {},
+      subjectLabels: {},
+      visitLabels: {},
+
+      nameCache: {},
       timerId: null,
+
+      // diff modal state
+      diffOpen: false,
+      diffLoading: false,
+      diffEventId: null,
+      diffData: null,
+      diffError: "",
+      diffPath: "",
     };
   },
   computed: {
@@ -185,10 +220,8 @@ export default {
     authHeaders() {
       return this.token ? { Authorization: `Bearer ${this.token}` } : {};
     },
-    // rows filtered by current tab & selection
     visibleRows() {
-      const base =
-        this.activeTab === "study" ? this.studyRows() : this.subjectRows();
+      const base = this.activeTab === "study" ? this.studyRows() : this.subjectRows();
       return this.applySearch(base, this.search);
     },
   },
@@ -198,19 +231,16 @@ export default {
       if (!this.token) return;
       this.loading = true;
       try {
-        const { data } = await axios.get(
-          `/audit/studies/${this.studyId}/events`,
-          {
-            headers: this.authHeaders,
-          }
-        );
+        const { data } = await axios.get(`/audit/studies/${this.studyId}/events`, {
+          headers: this.authHeaders,
+        });
         const rows = Array.isArray(data) ? data : data?.items || [];
         this.all = rows.map(this.normalizeRow);
 
         // Resolve user names (best-effort)
         this.primeUsers(this.all.map((r) => r.user_id).filter(Boolean));
 
-        // Build subject list, counts, and labels from resolved subject ids
+        // Build subject list, counts, labels
         const counts = {};
         const labels = {};
         const visitLabels = {};
@@ -224,34 +254,23 @@ export default {
             counts[key] = (counts[key] || 0) + 1;
 
             const label = this.extractSubjectLabel(r, sid);
-            if (label && !labels[key]) {
-              labels[key] = label;
-            }
+            if (label && !labels[key]) labels[key] = label;
           }
 
           const vi = this.getVisitIndexFromRow(r);
           if (vi === 0 || vi) {
             const vKey = String(vi);
             const vLabel = this.extractVisitLabel(r, vi);
-            if (vLabel && !visitLabels[vKey]) {
-              visitLabels[vKey] = vLabel;
-            }
+            if (vLabel && !visitLabels[vKey]) visitLabels[vKey] = vLabel;
           }
         }
 
-        this.subjectIds = Array.from(set).sort(
-          (a, b) => Number(a) - Number(b)
-        );
+        this.subjectIds = Array.from(set).sort((a, b) => Number(a) - Number(b));
         this.subjectCounts = counts;
         this.subjectLabels = labels;
         this.visitLabels = visitLabels;
 
-        // If subjects tab is active but activeSubject is not set, pick the first
-        if (
-          this.activeTab === "subjects" &&
-          this.subjectIds.length &&
-          this.activeSubject === null
-        ) {
+        if (this.activeTab === "subjects" && this.subjectIds.length && this.activeSubject === null) {
           this.activeSubject = this.subjectIds[0];
         }
       } catch (e) {
@@ -266,41 +285,32 @@ export default {
       }
     },
 
-    // ====== tabs / subject selection ======
+    // ====== tabs ======
     activateSubjectsTab() {
       this.activeTab = "subjects";
       if (this.subjectIds.length && this.activeSubject === null) {
         this.activeSubject = this.subjectIds[0];
       }
     },
-    selectSubject(sid) {
-      this.activeSubject = sid;
-    },
 
-    // ====== partition helpers ======
+    // ====== partitions ======
     studyRows() {
-      // study/system-level = those without a resolvable subject id
       return this.all.filter((r) => {
         const sid = this.getSubjectIdFromRow(r);
         return !(sid === 0 || sid);
       });
     },
     subjectRows() {
-      // subject-level = those with a resolvable subject id (and matches activeSubject)
       const withSubject = this.all.filter((r) => {
         const sid = this.getSubjectIdFromRow(r);
         return sid === 0 || sid;
       });
       if (this.activeSubject === null) return withSubject;
-      return withSubject.filter(
-        (r) =>
-          String(this.getSubjectIdFromRow(r)) === String(this.activeSubject)
-      );
+      return withSubject.filter((r) => String(this.getSubjectIdFromRow(r)) === String(this.activeSubject));
     },
 
-    // ====== normalizers / resolvers ======
+    // ====== normalize ======
     normalizeRow(r) {
-      // API guarantees this endpoint is already scoped by studyId; we still normalize fields we use.
       const userId = r.user?.id ?? r.user_id ?? null;
       return {
         id: r.id,
@@ -310,16 +320,16 @@ export default {
         action: r.action || "",
         details: r.details || {},
         timestamp: r.timestamp || r.ts || null,
+        diff_path: r.diff_path || null, // optional
         __showRaw: false,
       };
     },
+
+    // ====== subject/visit resolvers ======
     getSubjectIdFromRow(row) {
-      // prefer explicit subject_id (index)
       if (row.subject_id === 0 || row.subject_id) return row.subject_id;
-      // fallback: details.subject_index
       const idx = row?.details?.subject_index;
       if (idx === 0 || idx) return Number(idx);
-      // do NOT infer from participant_id anymore
       return null;
     },
     getVisitIndexFromRow(row) {
@@ -331,12 +341,9 @@ export default {
     },
     extractSubjectLabel(row, sid) {
       const d = row.details || {};
-      // Always prefer subject id / subject-specific labels; do not use participant_id
-      const fromDetails =
-        d.subject_id || d.subject_label || d.subject_code || null;
+      const fromDetails = d.subject_id || d.subject_label || d.subject_code || null;
       if (fromDetails) return fromDetails;
 
-      // Fallback: look up in global studyDetails.subjects using subject index (sid)
       const sd = (this.$store && this.$store.state && this.$store.state.studyDetails) || {};
       const subjects = Array.isArray(sd.subjects) ? sd.subjects : [];
       const subjectEntry = subjects[sid];
@@ -350,72 +357,64 @@ export default {
           null
         );
       }
-
       return sid === 0 || sid ? `Subject ${sid}` : null;
     },
     extractVisitLabel(row, vi) {
       const d = row.details || {};
-      return (
-        d.visit_label ||
-        d.visit_name ||
-        d.visit_code ||
-        (vi === 0 || vi ? `Visit ${vi}` : null)
-      );
+      return d.visit_label || d.visit_name || d.visit_code || (vi === 0 || vi ? `Visit ${vi}` : null);
     },
     resolvedSubject(row) {
       const sid = this.getSubjectIdFromRow(row);
       if (!(sid === 0 || sid)) return "—";
       const key = String(sid);
       if (this.subjectLabels[key]) return this.subjectLabels[key];
-      const rowLabel = this.extractSubjectLabel(row, sid);
-      return rowLabel || String(sid);
+      return this.extractSubjectLabel(row, sid) || String(sid);
     },
     resolvedVisit(row) {
       const vi = this.getVisitIndexFromRow(row);
       if (!(vi === 0 || vi)) return "—";
       const key = String(vi);
       if (this.visitLabels[key]) return this.visitLabels[key];
-      const rowLabel = this.extractVisitLabel(row, vi);
-      return rowLabel || String(vi);
-    },
-    fmtTs(ts) {
-      // Do NOT convert; just show raw value from backend
-      if (!ts) return "—";
-      return String(ts);
+      return this.extractVisitLabel(row, vi) || String(vi);
     },
     displaySubject(sid) {
       const key = String(sid);
       return this.subjectLabels[key] || String(sid);
     },
 
-    // ====== compact summary (only key fields) ======
+    // ====== formatters ======
+    fmtTs(ts) {
+      if (!ts) return "—";
+      return String(ts);
+    },
+    displayAction(row) {
+      return row.action || "—";
+    },
+
     summaryText(row) {
       const a = (row.action || "").toLowerCase();
       const d = row.details || {};
 
-      // Keep aligned with the *trimmed backend* actions
-      if (a === "study_created") return `Study created`;
-      if (a === "study_edited") return `Study edited`;
+      if (a === "study_created") return "Study created";
+      if (a === "study_edited") return "Study edited";
 
       if (a === "file_added" || a === "share_file_added") {
         const name = d.file_name || "file";
-        const mods =
-          Array.isArray(d.modalities) && d.modalities.length
-            ? ` · ${d.modalities.join(", ")}`
-            : "";
+        const mods = Array.isArray(d.modalities) && d.modalities.length ? ` · ${d.modalities.join(", ")}` : "";
         const vi = this.resolvedVisit(row);
         const part = a === "share_file_added" ? "via share link" : "added";
         const subj = this.resolvedSubject(row);
-        const loc =
-          subj !== "—" || vi !== "—" ? ` (subj ${subj}, visit ${vi})` : "";
+        const loc = subj !== "—" || vi !== "—" ? ` (subj ${subj}, visit ${vi})` : "";
         return `File ${part}: ${name}${mods}${loc}`;
       }
 
-      if (a === "entry_upserted") {
+      // backend now emits entry_upsert
+      if (a === "entry_upsert" || a === "entry_upserted") {
         const subj = this.resolvedSubject(row);
         const vi = this.resolvedVisit(row);
         return `Data saved/edited (subj ${subj}, visit ${vi})`;
       }
+
       if (a === "share_entry_upserted") {
         const subj = this.resolvedSubject(row);
         const vi = this.resolvedVisit(row);
@@ -424,54 +423,30 @@ export default {
 
       if (a === "share_link_created") {
         const p = d.permission || "?";
-        const exp =
-          d.expires_in_days === 0 || d.expires_in_days
-            ? `${d.expires_in_days}d`
-            : "—";
+        const exp = d.expires_in_days === 0 || d.expires_in_days ? `${d.expires_in_days}d` : "—";
         return `Share link created (permission ${p}, expires ${exp})`;
       }
 
       if (a === "access_granted")
-        return `Access granted to ${
-          d.target_user_display ||
-          d.target_user_email ||
-          `User#${d.target_user_id}`
-        }`;
+        return `Access granted to ${d.target_user_display || d.target_user_email || `User#${d.target_user_id}`}`;
       if (a === "access_updated")
-        return `Access updated for ${
-          d.target_user_display ||
-          d.target_user_email ||
-          `User#${d.target_user_id}`
-        }`;
+        return `Access updated for ${d.target_user_display || d.target_user_email || `User#${d.target_user_id}`}`;
       if (a === "access_revoked")
-        return `Access revoked for ${
-          d.target_user_display ||
-          d.target_user_email ||
-          `User#${d.target_user_id}`
-        }`;
+        return `Access revoked for ${d.target_user_display || d.target_user_email || `User#${d.target_user_id}`}`;
 
-      // Fallback: tiny slice of details
       const keys = Object.keys(d || {});
       if (!keys.length) return "—";
       const parts = [];
       for (const k of keys.slice(0, 3)) {
         const val = d[k];
-        if (["string", "number", "boolean"].includes(typeof val)) {
-          parts.push(`${k}: ${String(val)}`);
-        }
+        if (["string", "number", "boolean"].includes(typeof val)) parts.push(`${k}: ${String(val)}`);
       }
       return parts.join(" · ");
     },
 
     formatDetailValue(val) {
       if (val === null || val === undefined) return "—";
-      if (
-        typeof val === "string" ||
-        typeof val === "number" ||
-        typeof val === "boolean"
-      ) {
-        return String(val);
-      }
+      if (typeof val === "string" || typeof val === "number" || typeof val === "boolean") return String(val);
       try {
         const s = JSON.stringify(val);
         return s.length > 120 ? s.slice(0, 117) + "…" : s;
@@ -480,7 +455,7 @@ export default {
       }
     },
 
-    // ====== raw toggle & utils ======
+    // ====== raw ======
     toggleRaw(row) {
       row.__showRaw = !row.__showRaw;
       this.$forceUpdate?.();
@@ -506,17 +481,22 @@ export default {
         const parts = [
           this.fmtTs(r.timestamp),
           r.action || "",
-          this.userName(r.user_id),
+          this.getUserDisplayName(r.user_id),
           this.summaryText(r),
           this.resolvedSubject(r),
           this.resolvedVisit(r),
-        ].map((s) => (s || "").toString().toLowerCase());
+        ]
+          .map((s) => (s || "").toString().toLowerCase());
         return parts.some((s) => s.includes(q));
       });
     },
 
-    // ====== user names ======
+    // ====== user names (✅ regression-proof) ======
     userName(userId) {
+      // keep old name to prevent regressions anywhere
+      return this.getUserDisplayName(userId);
+    },
+    getUserDisplayName(userId) {
       if (!userId) return "—";
       const cached = this.nameCache[userId];
       return cached ? cached : `User#${userId}`;
@@ -524,29 +504,63 @@ export default {
     async primeUsers(userIds) {
       const unique = Array.from(new Set(userIds)).filter(Boolean);
       const missing = unique.filter((id) => !this.nameCache[id]);
+
       for (const id of missing.slice(0, 25)) {
         try {
-          const { data } = await axios.get(`/users/${id}`, {
-            headers: this.authHeaders,
-          });
+          const { data } = await axios.get(`/users/${id}`, { headers: this.authHeaders });
           const u = data || {};
-          const firstLast = [u?.profile?.first_name, u?.profile?.last_name]
-            .filter(Boolean)
-            .join(" ")
-            .trim();
-          const label =
-            u.name ||
-            u.full_name ||
-            firstLast ||
-            u.username ||
-            u.email ||
-            `User#${id}`;
+          const firstLast = [u?.profile?.first_name, u?.profile?.last_name].filter(Boolean).join(" ").trim();
+          const label = u.name || u.full_name || firstLast || u.username || u.email || `User#${id}`;
           if (this.$set) this.$set(this.nameCache, id, label);
           else this.nameCache[id] = label;
         } catch {
           if (this.$set) this.$set(this.nameCache, id, `User#${id}`);
           else this.nameCache[id] = `User#${id}`;
         }
+      }
+    },
+
+    // ====== diff ======
+    hasDiff(row) {
+      const dp = row?.diff_path || row?.details?.diff_path || row?.details?.diffPath || row?.details?.diff_file || null;
+      return !!(dp && String(dp).trim());
+    },
+    async openDiff(row) {
+      if (!row?.id) return;
+
+      this.diffOpen = true;
+      this.diffLoading = true;
+      this.diffEventId = row.id;
+      this.diffData = null;
+      this.diffError = "";
+      this.diffPath = "";
+
+      try {
+        const { data } = await axios.get(`/audit/events/${row.id}/diff`, {
+          headers: this.authHeaders,
+        });
+        this.diffData = data?.diff ?? data ?? null;
+        this.diffPath = data?.diff_path || row?.details?.diff_path || row?.diff_path || "";
+      } catch (e) {
+        const msg = e?.response?.data?.detail || e?.message || "Failed to load diff";
+        this.diffError = String(msg);
+      } finally {
+        this.diffLoading = false;
+      }
+    },
+    closeDiff() {
+      this.diffOpen = false;
+      this.diffLoading = false;
+      this.diffEventId = null;
+      this.diffData = null;
+      this.diffError = "";
+      this.diffPath = "";
+    },
+    pretty(obj) {
+      try {
+        return JSON.stringify(obj ?? {}, null, 2);
+      } catch {
+        return String(obj);
       }
     },
   },
@@ -557,13 +571,11 @@ export default {
 </script>
 
 <style scoped>
-/* Layout */
 .audit-shell {
   display: flex;
   flex-direction: column;
   min-height: 420px;
 }
-
 .content {
   background: #fff;
   border: 1px solid #f1f1f1;
@@ -573,7 +585,6 @@ export default {
   flex-direction: column;
 }
 
-/* Header / toolbar */
 .content-head {
   display: flex;
   align-items: center;
@@ -582,7 +593,6 @@ export default {
   flex-wrap: wrap;
   margin-bottom: 6px;
 }
-
 .left-cluster {
   display: flex;
   align-items: center;
@@ -590,14 +600,12 @@ export default {
   flex-wrap: wrap;
 }
 
-/* Tabs */
 .tabs {
   display: inline-flex;
   background: #eef2ff;
   border-radius: 999px;
   padding: 2px;
 }
-
 .tab {
   border: none;
   background: transparent;
@@ -608,20 +616,17 @@ export default {
   color: #4b5563;
   transition: background 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
 }
-
 .tab.active {
-  background: #dbeafe; /* lighter blue background */
+  background: #dbeafe;
   color: #1d4ed8;
   box-shadow: 0 1px 4px rgba(147, 197, 253, 0.8);
 }
 
-/* Subject dropdown */
 .subject-select-wrap {
   display: flex;
   align-items: center;
   gap: 6px;
 }
-
 .subject-label {
   font-size: 13px;
   color: #374151;
@@ -629,7 +634,6 @@ export default {
   align-items: center;
   gap: 6px;
 }
-
 .subject-select {
   height: 32px;
   padding: 4px 10px;
@@ -639,24 +643,20 @@ export default {
   background: #fff;
 }
 
-/* Title below toolbar */
 .title-wrap {
   margin-bottom: 6px;
 }
-
 .panel-title {
   margin: 0;
   font-size: 15px;
   font-weight: 700;
 }
 
-/* Tools */
 .tools {
   display: flex;
   gap: 8px;
   align-items: center;
 }
-
 .input {
   height: 34px;
   padding: 6px 10px;
@@ -665,7 +665,6 @@ export default {
   font-size: 14px;
   background: #fff;
 }
-
 .search {
   width: 260px;
 }
@@ -686,20 +685,17 @@ export default {
   border-color: #d6d6d6;
 }
 
-/* Table */
 .table-wrap {
   overflow: auto;
   border: 1px solid #f5f5f5;
   border-radius: 10px;
   margin-top: 4px;
 }
-
 .audit-table {
   width: 100%;
   border-collapse: collapse;
   font-size: 13px;
 }
-
 .audit-table thead th,
 .audit-table tbody td {
   padding: 8px 10px;
@@ -707,56 +703,35 @@ export default {
   text-align: left;
   vertical-align: top;
 }
-
 .audit-table thead th {
   background: #f9fafb;
   color: #374151;
   font-weight: 600;
 }
 
-/* Column sizing */
-.col-ts {
-  width: 180px;
-}
-.col-action {
-  width: 140px;
-}
-.col-user {
-  width: 200px;
-}
-.col-details {
-  width: auto;
-}
-.col-raw {
-  width: 80px;
-  text-align: right;
-}
+.col-ts { width: 180px; }
+.col-action { width: 140px; }
+.col-user { width: 200px; }
+.col-details { width: auto; }
+.col-raw { width: 130px; text-align: right; }
 
 .audit-table tr:last-child td {
   border-bottom: none;
 }
 
-/* Cells */
-.strong {
-  font-weight: 600;
-}
-.wrap {
-  white-space: normal;
-  word-break: break-word;
-}
+.strong { font-weight: 600; }
+.wrap { white-space: normal; word-break: break-word; }
 .user-cell .meta {
   color: #6b7280;
   font-size: 12px;
   margin-top: 2px;
 }
 
-/* Details formatting */
 .detail-main {
   margin-bottom: 4px;
   font-weight: 500;
   color: #111827;
 }
-
 .detail-lines {
   display: flex;
   flex-direction: column;
@@ -764,25 +739,18 @@ export default {
   font-size: 12px;
   color: #4b5563;
 }
-
-.detail-line {
-  display: flex;
-  flex-wrap: wrap;
-}
-
-.detail-key {
-  font-weight: 600;
-  margin-right: 4px;
-}
-
-.detail-value {
-  white-space: pre-wrap;
-  word-break: break-word;
-}
+.detail-line { display: flex; flex-wrap: wrap; }
+.detail-key { font-weight: 600; margin-right: 4px; }
+.detail-value { white-space: pre-wrap; word-break: break-word; }
 
 .raw-wrap {
   background: #fafafa;
   border-top: 1px dashed #eee;
+}
+
+.actions-cell {
+  text-align: right;
+  white-space: nowrap;
 }
 
 .link-btn {
@@ -792,30 +760,92 @@ export default {
   cursor: pointer;
   padding: 0;
   font-size: 12px;
+  margin-left: 10px;
 }
-.link-btn:hover {
-  text-decoration: underline;
-}
+.link-btn:hover { text-decoration: underline; }
 
-/* States */
 .empty-state {
   color: #6b7280;
   padding: 8px 0;
 }
+.mini-json { font-size: 11px; margin: 0; }
 
-/* Misc */
-.mini-json {
-  font-size: 11px;
+/* Modal */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.25);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  z-index: 9999;
+}
+.modal {
+  width: min(920px, 96vw);
+  max-height: 86vh;
+  background: #fff;
+  border-radius: 12px;
+  border: 1px solid #eee;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  border-bottom: 1px solid #eee;
+}
+.modal-title {
+  font-weight: 700;
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.diff-path {
+  font-weight: 500;
+  color: #6b7280;
+  font-size: 12px;
+}
+.btn-close {
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+}
+.modal-body {
+  padding: 12px;
+  overflow: auto;
+}
+.diff-json {
   margin: 0;
+  font-size: 12px;
+  background: #fafafa;
+  border: 1px solid #f0f0f0;
+  border-radius: 10px;
+  padding: 10px;
+}
+.diff-error {
+  color: #b91c1c;
+  background: #fef2f2;
+  border: 1px solid #fee2e2;
+  border-radius: 10px;
+  padding: 10px;
+  font-size: 13px;
+}
+.modal-foot {
+  padding: 10px 12px;
+  border-top: 1px solid #eee;
+  display: flex;
+  justify-content: flex-end;
 }
 
-/* Responsive */
 @media (max-width: 720px) {
-  .search {
-    width: 180px;
-  }
-  .col-user {
-    width: 160px;
-  }
+  .search { width: 180px; }
+  .col-user { width: 160px; }
 }
 </style>

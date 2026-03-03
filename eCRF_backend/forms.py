@@ -42,6 +42,83 @@ TEMPLATE_DIR = Path(os.environ.get("ECRF_TEMPLATES_DIR", "")) if os.environ.get(
 ALLOWED_STUDY_STATUS = {"DRAFT", "PUBLISHED", "ARCHIVED"}
 _DEFAULT_GRANT_PERMS = {"view": True, "add_data": True, "edit_study": False}
 
+
+def _norm_audit_label(label: Optional[str]) -> Optional[str]:
+    """
+    Human readable audit label/description passed from frontend.
+    Keep None if absent so you can detect missing frontend wiring.
+    """
+    if label is None:
+        return None
+    s = str(label).strip()
+    return s if s else None
+
+def _json_safe(x: Any) -> Any:
+    try:
+        json.dumps(x, ensure_ascii=False)
+        return x
+    except Exception:
+        try:
+            return str(x)
+        except Exception:
+            return None
+
+def _compute_json_diff(old: Any, new: Any, path: str = "") -> List[Dict[str, Any]]:
+    """
+    Minimal, generic JSON diff.
+    Output entries like:
+      { "op": "replace"|"add"|"remove", "path": "...", "old": ..., "new": ... }
+    """
+    diffs: List[Dict[str, Any]] = []
+
+    if old is new:
+        return diffs
+
+    if isinstance(old, (str, int, float, bool)) or old is None or \
+       isinstance(new, (str, int, float, bool)) or new is None:
+        if old != new:
+            diffs.append({"op": "replace", "path": path or "/", "old": _json_safe(old), "new": _json_safe(new)})
+        return diffs
+
+    if isinstance(old, dict) and isinstance(new, dict):
+        old_keys = set(old.keys())
+        new_keys = set(new.keys())
+
+        for k in sorted(old_keys - new_keys):
+            p = f"{path}/{k}" if path else f"/{k}"
+            diffs.append({"op": "remove", "path": p, "old": _json_safe(old.get(k)), "new": None})
+
+        for k in sorted(new_keys - old_keys):
+            p = f"{path}/{k}" if path else f"/{k}"
+            diffs.append({"op": "add", "path": p, "old": None, "new": _json_safe(new.get(k))})
+
+        for k in sorted(old_keys & new_keys):
+            p = f"{path}/{k}" if path else f"/{k}"
+            diffs.extend(_compute_json_diff(old.get(k), new.get(k), p))
+
+        return diffs
+
+    if isinstance(old, list) and isinstance(new, list):
+        min_len = min(len(old), len(new))
+
+        for i in range(min_len):
+            p = f"{path}/{i}" if path else f"/{i}"
+            diffs.extend(_compute_json_diff(old[i], new[i], p))
+
+        for i in range(len(new), len(old)):
+            p = f"{path}/{i}" if path else f"/{i}"
+            diffs.append({"op": "remove", "path": p, "old": _json_safe(old[i]), "new": None})
+
+        for i in range(len(old), len(new)):
+            p = f"{path}/{i}" if path else f"/{i}"
+            diffs.append({"op": "add", "path": p, "old": None, "new": _json_safe(new[i])})
+
+        return diffs
+
+    if old != new:
+        diffs.append({"op": "replace", "path": path or "/", "old": _json_safe(old), "new": _json_safe(new)})
+    return diffs
+
 def _is_admin(user: models.User) -> bool:
     role = (getattr(getattr(user, "profile", None), "role", "") or "").strip()
     return role == "Administrator"
@@ -250,7 +327,7 @@ def create_study(
     status: Optional[str] = Query(None, description="Optional: DRAFT|PUBLISHED|ARCHIVED (defaults to PUBLISHED)"),
     draft_of_study_id: Optional[int] = Query(None, description="Optional: published study id if creating an edit-draft"),
     last_completed_step: Optional[int] = Query(None, description="Optional: resume helper"),
-
+    audit_label: Optional[str] = Query(None, description="Optional: human-readable audit label from frontend"),
     db: Session = Depends(get_db),
     user = Depends(get_current_user)
 ):
@@ -313,10 +390,22 @@ def create_study(
                                           actor_id=user.id, actor_name=_display_name(user),
                                           detail="Initial BIDS dataset creation")
             try:
-                audit_change_both(scope="study", action="study_created", actor=_display_name(user),
-                                  extra={"study_name": metadata.study_name},
-                                  study_id=metadata.id, study_name=metadata.study_name,
-                                  db=db, actor_id=user.id)
+                # NO DIFF for new study creation
+                audit_change_both(
+                    scope="study",
+                    action="study_created",
+                    actor=_display_name(user),
+                    extra={
+                        "study_name": metadata.study_name,
+                        "ui_label": _norm_audit_label(audit_label),
+                        "has_diff": False,
+                        "diff_payload": None,
+                    },
+                    study_id=metadata.id,
+                    study_name=metadata.study_name,
+                    db=db,
+                    actor_id=user.id
+                )
             except Exception:
                 pass
         except Exception as be:
@@ -513,6 +602,7 @@ def update_study(
     study_id: int,
     study_metadata: schemas.StudyMetadataUpdate = Body(..., embed=True),
     study_content: schemas.StudyContentUpdate = Body(..., embed=True),
+    audit_label: Optional[str] = Query(None, description="Optional: human-readable audit label from frontend"),
     db: Session = Depends(get_db),
     user = Depends(get_current_user)
 ):
@@ -548,6 +638,7 @@ def update_study(
 
     is_edit_draft = (getattr(metadata, "draft_of_study_id", None) is not None)
     publish_edit_draft = is_edit_draft and _is_publish_transition(old_status, incoming_status)
+    ui_label = _norm_audit_label(audit_label)
 
     # --------------------------
     # Case A: publishing an edit-draft
@@ -626,12 +717,22 @@ def update_study(
                     detail="Published changes from draft",
                 )
 
+                # CHANGE => diff payload for study template
+                diffs = _compute_json_diff(old_sd_published, _deepcopy_json(pub_content.study_data or {}))
+
                 try:
                     audit_change_both(
                         scope="study",
                         action="study_edited",
                         actor=_display_name(user),
-                        extra={"study_name": pub_meta.study_name, "published_from_draft": study_id},
+                        extra={
+                            "study_name": pub_meta.study_name,
+                            "published_from_draft": study_id,
+                            "ui_label": ui_label,
+                            "has_diff": bool(diffs),
+                            "diff_payload": diffs if diffs else None,
+                            "diff_kind": "study_template",
+                        },
                         study_id=pub_meta.id,
                         study_name=pub_meta.study_name,
                         db=db,
@@ -649,7 +750,12 @@ def update_study(
                     scope="study",
                     action=action,
                     actor=_display_name(user),
-                    extra=extra or {},
+                    extra={
+                        **(extra or {}),
+                        "ui_label": ui_label,
+                        "has_diff": False,
+                        "diff_payload": None,
+                    },
                     study_id=pub_meta.id,
                     study_name=pub_meta.study_name,
                     db=db,
@@ -747,19 +853,35 @@ def update_study(
             db.refresh(content)
             logger.info("BIDS dataset updated at %s (study_id=%s)", dataset_path, metadata.id)
 
-            # Optional CHANGES mirror
-            log_dataset_change_to_changes(metadata.id, metadata.study_name,
-                                          action="dataset_structure_updated",
-                                          actor_id=user.id, actor_name=_display_name(user),
-                                          detail="Study metadata/content updated"
+            log_dataset_change_to_changes(
+                metadata.id,
+                metadata.study_name,
+                action="dataset_structure_updated",
+                actor_id=user.id,
+                actor_name=_display_name(user),
+                detail="Study metadata/content updated"
             )
 
-            # AUDIT: study edited
+            new_sd = _deepcopy_json(content.study_data or {})
+            diffs = _compute_json_diff(old_sd, new_sd)
+
             try:
-                audit_change_both(scope="study", action="study_edited", actor=_display_name(user),
-                                  extra={"study_name": metadata.study_name},
-                                  study_id=metadata.id, study_name=metadata.study_name,
-                                  db=db, actor_id=user.id)
+                audit_change_both(
+                    scope="study",
+                    action="study_edited",
+                    actor=_display_name(user),
+                    extra={
+                        "study_name": metadata.study_name,
+                        "ui_label": ui_label,
+                        "has_diff": bool(diffs),
+                        "diff_payload": diffs if diffs else None,
+                        "diff_kind": "study_template",
+                    },
+                    study_id=metadata.id,
+                    study_name=metadata.study_name,
+                    db=db,
+                    actor_id=user.id
+                )
             except Exception:
                 pass
         except Exception as be:
@@ -772,7 +894,12 @@ def update_study(
                 scope="study",
                 action=action,
                 actor=_display_name(user),
-                extra=extra or {},
+                extra={
+                    **(extra or {}),
+                    "ui_label": ui_label,
+                    "has_diff": False,
+                    "diff_payload": None,
+                },
                 study_id=metadata.id,
                 study_name=metadata.study_name,
                 db=db,
@@ -786,7 +913,6 @@ def update_study(
     except Exception as ve:
         logger.error("Versioning apply_on_update failed for study %s: %s", study_id, ve)
 
-    # Detect template version bump and copy BIDS tree non-destructively
     new_v_row = (
         db.query(StudyTemplateVersion)
           .filter(StudyTemplateVersion.study_id == study_id)
@@ -812,7 +938,6 @@ def read_files_for_study(
     if not meta:
         raise HTTPException(status_code=404, detail="Study not found")
 
-    # allow view-users to see files (or tighten to edit_study if required)
     _assert_has_study_permission(db, meta, user, required="view")
 
     files = crud.get_files_for_study(db, study_id)
@@ -824,11 +949,12 @@ def upload_file(
     study_id: int,
     uploaded_file: UploadFile = File(...),
     description: str = Form(""),
-    storage_option: str = Form("local"),  # ignored; we force to "bids"
+    storage_option: str = Form("local"),
     subject_index: Optional[int] = Form(None),
     visit_index: Optional[int] = Form(None),
     group_index: Optional[int] = Form(None),
     modalities_json: Optional[str] = Form("[]"),
+    audit_label: Optional[str] = Form(None),
     db: Session = Depends(get_db),
     user: models.User = Depends(get_current_user)
 ):
@@ -850,7 +976,6 @@ def upload_file(
             tmp_path = tmp.name
         logger.info("Staged temp upload: %s", tmp_path)
 
-        # Mirror into BIDS
         content = db.query(models.StudyContent).filter(models.StudyContent.study_id == study_id).first()
         study_data = content.study_data if content else {}
 
@@ -874,11 +999,10 @@ def upload_file(
             form_version=current_form_version,
         )
 
-        # DB record
         file_data = schemas.FileCreate(
             study_id=study_id,
             file_name=uploaded_file.filename,
-            file_path=uploaded_file.filename,   # logical ref; actual path is inside BIDS dataset
+            file_path=uploaded_file.filename,
             description=description,
             storage_option="bids",
             subject_index=subject_index,
@@ -887,7 +1011,6 @@ def upload_file(
         )
         db_file = crud.create_file(db, file_data)
 
-        # AUDIT: file added to study
         try:
             audit_change_both(
                 scope="study",
@@ -898,6 +1021,9 @@ def upload_file(
                     "modalities": modalities,
                     "subject_index": subject_index,
                     "visit_index": visit_index,
+                    "ui_label": _norm_audit_label(audit_label),
+                    "has_diff": False,
+                    "diff_payload": None,
                 },
                 study_id=study_id,
                 study_name=study.study_name,
@@ -932,6 +1058,7 @@ def create_url_file(
     visit_index: Optional[int] = Form(None),
     group_index: Optional[int] = Form(None),
     modalities_json: Optional[str] = Form("[]"),
+    audit_label: Optional[str] = Form(None),
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
@@ -946,7 +1073,6 @@ def create_url_file(
     except Exception:
         modalities = []
 
-    # DB record (URL)
     try:
         parsed = urlparse(url)
         base = os.path.basename(parsed.path) or "link"
@@ -965,7 +1091,6 @@ def create_url_file(
         logger.error("Error creating URL file record: %s", e)
         raise HTTPException(status_code=500, detail="Error creating file record")
 
-    # Mirror into BIDS as .txt pointer
     try:
         content = db.query(models.StudyContent).filter(models.StudyContent.study_id == study_id).first()
         study_data = content.study_data if content else {}
@@ -992,7 +1117,6 @@ def create_url_file(
     except Exception as be:
         logger.error("BIDS mirror (URL) failed for study %s: %s", study_id, be)
 
-    # AUDIT: file added to study (URL)
     try:
         audit_change_both(
             scope="study",
@@ -1004,6 +1128,9 @@ def create_url_file(
                 "modalities": modalities,
                 "subject_index": subject_index,
                 "visit_index": visit_index,
+                "ui_label": _norm_audit_label(audit_label),
+                "has_diff": False,
+                "diff_payload": None,
             },
             study_id=study_id,
             study_name=study.study_name,
@@ -1026,6 +1153,7 @@ def generate_token():
 def create_share_link(
     payload: schemas.ShareLinkCreate,
     request: Request,
+    audit_label: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -1049,7 +1177,6 @@ def create_share_link(
     db.commit()
     db.refresh(access)
 
-    # AUDIT: share link created
     try:
         audit_change_both(
             scope="study",
@@ -1059,6 +1186,9 @@ def create_share_link(
                 "permission": payload.permission,
                 "max_uses": payload.max_uses,
                 "expires_in_days": payload.expires_in_days,
+                "ui_label": _norm_audit_label(audit_label),
+                "has_diff": False,
+                "diff_payload": None,
             },
             study_id=payload.study_id,
             study_name=None,
@@ -1068,7 +1198,6 @@ def create_share_link(
     except Exception:
         pass
 
-    # Build SPA route
     frontend_base = os.getenv("FRONTEND_BASE_URL", "").rstrip("/")
     if not frontend_base:
         origin = (request.headers.get("origin") or "").rstrip("/")
@@ -1157,6 +1286,7 @@ def save_study_data(
     study_id: int,
     payload: schemas.StudyDataEntryCreate,
     version: Optional[int] = Query(None, description="Ignored; data always saved to latest template version"),
+    audit_label: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -1164,7 +1294,6 @@ def save_study_data(
     if not study:
         raise HTTPException(status_code=404, detail="Study not found")
 
-    # Permission: Admin/Owner or explicit grant with add_data=True
     is_admin = getattr(getattr(current_user, "profile", None), "role", "") == "Administrator"
     is_owner = study.created_by == current_user.id
     if not (is_admin or is_owner):
@@ -1172,16 +1301,34 @@ def save_study_data(
         if not grant or not (grant.permissions or {}).get("add_data", False):
             raise HTTPException(status_code=403, detail="Not allowed to add data for this study")
 
-    # Only latest version is writable
     try:
         form_version = VersionManager.assert_latest_is_used(db, study_id, version)
     except ValueError as ve:
         raise HTTPException(status_code=400, detail=str(ve))
 
-    # Always insert a new row (no cross-version overwrite)
+    # If same subject/visit/group already has data in THIS version, compute diff (else: no diff)
+    prev_entry = (
+        db.query(models.StudyEntryData)
+          .filter_by(
+              study_id=study_id,
+              subject_index=payload.subject_index,
+              visit_index=payload.visit_index,
+              group_index=payload.group_index,
+              form_version=form_version,
+          )
+          .order_by(models.StudyEntryData.id.desc())
+          .first()
+    )
+    entry_diffs: List[Dict[str, Any]] = []
+    if prev_entry is not None:
+        try:
+            entry_diffs = _compute_json_diff(_deepcopy_json(prev_entry.data or {}), _deepcopy_json(payload.data or {}))
+        except Exception:
+            entry_diffs = []
+
     content = db.query(models.StudyContent).filter(models.StudyContent.study_id == study_id).first()
-    selected_models = ((content.study_data or {}).get("selectedModels") if content and isinstance(content.study_data,
-                                                                                                  dict) else []) or []
+    selected_models = ((content.study_data or {}).get("selectedModels") if content and isinstance(content.study_data, dict) else []) or []
+
     entry = models.StudyEntryData(
         study_id=study_id,
         subject_index=payload.subject_index,
@@ -1195,7 +1342,6 @@ def save_study_data(
     db.commit()
     db.refresh(entry)
 
-    # BIDS: upsert eCRF row
     content = db.query(models.StudyContent).filter(models.StudyContent.study_id == study_id).first()
     if upsert_bids_dataset and content:
         try:
@@ -1222,12 +1368,34 @@ def save_study_data(
                     actor_id=current_user.id,
                     actor_name=_display_name(current_user),
                 )
+
+            # Diff only if prev_entry existed (and diffs exist). For first-time subject data -> no diff.
             try:
-                audit_change_both(scope="study", action="entry_upserted", actor=_display_name(current_user),
-                                  extra={"entry_id": entry.id, "subject_index": entry.subject_index, "visit_index": entry.visit_index},
-                                  study_id=study.id, study_name=study.study_name, db=db, actor_id=current_user.id)
+                audit_change_both(
+                    scope="study",
+                    action="entry_upserted",
+                    actor=_display_name(current_user),
+                    extra={
+                        "entry_id": entry.id,
+                        "subject_index": entry.subject_index,
+                        "visit_index": entry.visit_index,
+                        "group_index": entry.group_index,
+                        "form_version": entry.form_version,
+                        "ui_label": _norm_audit_label(audit_label),
+                        "has_diff": bool(entry_diffs),
+                        "diff_payload": entry_diffs if entry_diffs else None,
+                        "diff_kind": "entry_data",
+                        "diff_basis": "previous_entry" if prev_entry is not None else "none",
+                        "previous_entry_id": prev_entry.id if prev_entry is not None else None,
+                    },
+                    study_id=study.id,
+                    study_name=study.study_name,
+                    db=db,
+                    actor_id=current_user.id
+                )
             except Exception:
                 pass
+
         except Exception as be:
             logger.error("BIDS export (data save) failed for study %s: %s", study_id, be)
 
@@ -1238,7 +1406,8 @@ def save_study_data(
 def update_study_data_entry(
     study_id: int,
     entry_id: int,
-    payload: schemas.StudyDataEntryCreate,  # contains skipped_required_flags
+    payload: schemas.StudyDataEntryCreate,
+    audit_label: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user)
 ):
@@ -1250,19 +1419,24 @@ def update_study_data_entry(
     if not entry:
         raise HTTPException(status_code=404, detail="Entry not found")
 
+    # Compute diff vs existing entry row
+    entry_diffs: List[Dict[str, Any]] = []
+    try:
+        entry_diffs = _compute_json_diff(_deepcopy_json(entry.data or {}), _deepcopy_json(payload.data or {}))
+    except Exception:
+        entry_diffs = []
+
     entry.subject_index = payload.subject_index
     entry.visit_index   = payload.visit_index
     entry.group_index   = payload.group_index
     entry.data          = payload.data
     if payload.skipped_required_flags is not None:
         content = db.query(models.StudyContent).filter(models.StudyContent.study_id == study_id).first()
-        selected_models = ((content.study_data or {}).get("selectedModels") if content and isinstance(
-            content.study_data, dict) else []) or []
+        selected_models = ((content.study_data or {}).get("selectedModels") if content and isinstance(content.study_data, dict) else []) or []
         entry.skipped_required_flags = _flags_dict_to_list(payload.skipped_required_flags, selected_models)
     db.commit()
     db.refresh(entry)
 
-    # BIDS: upsert eCRF row
     study = db.query(models.StudyMetadata).filter(models.StudyMetadata.id == study_id).first()
     content = db.query(models.StudyContent).filter(models.StudyContent.study_id == study_id).first()
     if upsert_bids_dataset and study and content:
@@ -1273,10 +1447,9 @@ def update_study_data_entry(
                 study_description=study.study_description,
                 study_data=content.study_data,
             )
-            db.query(models.StudyContent).filter(models.StudyContent.id == content.id).update(
-                {"study_data": content.study_data}
-            )
+            db.query(models.StudyContent).filter(models.StudyContent.id == content.id).update({"study_data": content.study_data})
             db.commit()
+
             if write_entry_to_bids:
                 write_entry_to_bids(
                     study_id=study.id,
@@ -1310,6 +1483,14 @@ def update_study_data_entry(
                         "entry_id": entry.id,
                         "subject_index": entry.subject_index,
                         "visit_index": entry.visit_index,
+                        "group_index": entry.group_index,
+                        "form_version": entry.form_version,
+                        "ui_label": _norm_audit_label(audit_label),
+                        "has_diff": bool(entry_diffs),
+                        "diff_payload": entry_diffs if entry_diffs else None,
+                        "diff_kind": "entry_data",
+                        "diff_basis": "same_entry_row",
+                        "previous_entry_id": entry_id,
                     },
                     study_id=study.id,
                     study_name=study.study_name,
@@ -1363,11 +1544,7 @@ def list_study_data_entries(
 
     entries = q.all()
     entries_out = [schemas.StudyDataEntryOut.from_orm(e) for e in entries]
-
     return {"total": total, "entries": entries_out}
-
-
-
 
 
 @router.get("/shared-api/{token}/", response_model=schemas.SharedFormAccessOut)
@@ -1380,13 +1557,10 @@ def shared_upload_file(
     uploaded_file: UploadFile = File(...),
     description: str = Form(""),
     modalities_json: Optional[str] = Form("[]"),
+    audit_label: Optional[str] = Form(None),
     db: Session = Depends(get_db),
 ):
-    access = (
-        db.query(models.SharedFormAccess)
-        .filter_by(token=token)
-        .first()
-    )
+    access = db.query(models.SharedFormAccess).filter_by(token=token).first()
     if not access:
         raise HTTPException(404, "Link not found")
     if access.used_count >= access.max_uses:
@@ -1459,6 +1633,9 @@ def shared_upload_file(
                     "modalities": modalities,
                     "subject_index": access.subject_index,
                     "visit_index": access.visit_index,
+                    "ui_label": _norm_audit_label(audit_label),
+                    "has_diff": False,
+                    "diff_payload": None,
                 },
                 study_id=study.id,
                 study_name=study.study_name,
@@ -1488,6 +1665,7 @@ def shared_create_url_file(
     url: str = Form(...),
     description: str = Form(""),
     modalities_json: Optional[str] = Form("[]"),
+    audit_label: Optional[str] = Form(None),
     db: Session = Depends(get_db),
 ):
     access = (
@@ -1559,14 +1737,21 @@ def shared_create_url_file(
     except Exception as be:
         logger.error("Shared BIDS mirror (URL) failed for study %s: %s", study.id, be)
 
-    # AUDIT: share link file addition (URL)
     try:
         audit_change_both(
             scope="study",
             action="share_file_added",
             actor="",
-            extra={"file_name": base, "url": url, "modalities": modalities,
-                   "subject_index": access.subject_index, "visit_index": access.visit_index},
+            extra={
+                "file_name": base,
+                "url": url,
+                "modalities": modalities,
+                "subject_index": access.subject_index,
+                "visit_index": access.visit_index,
+                "ui_label": _norm_audit_label(audit_label),
+                "has_diff": False,
+                "diff_payload": None,
+            },
             study_id=study.id,
             study_name=study.study_name,
             db=db,
@@ -1583,6 +1768,7 @@ def shared_upsert_data(
     token: str,
     payload: schemas.SharedStudyDataEntryCreate,
     version: Optional[int] = Query(None, description="Ignored; data always saved to latest template version"),
+    audit_label: Optional[str] = Query(None),
     db: Session = Depends(get_db),
 ):
     access = db.query(models.SharedFormAccess).filter_by(token=token).first()
@@ -1608,28 +1794,39 @@ def shared_upsert_data(
           .order_by(models.StudyEntryData.id.desc())
           .first()
     )
+
+    entry_diffs: List[Dict[str, Any]] = []
+    if entry:
+        try:
+            entry_diffs = _compute_json_diff(_deepcopy_json(entry.data or {}), _deepcopy_json(payload.data or {}))
+        except Exception:
+            entry_diffs = []
+
     content = db.query(models.StudyContent).filter(models.StudyContent.study_id == study_id).first()
-    selected_models = ((content.study_data or {}).get("selectedModels") if content and isinstance(content.study_data,
-                                                                                                  dict) else []) or []
+    selected_models = ((content.study_data or {}).get("selectedModels") if content and isinstance(content.study_data, dict) else []) or []
+
     if entry:
         entry.data = payload.data
-        entry.skipped_required_flags =  _flags_dict_to_list(payload.skipped_required_flags, selected_models)
+        entry.skipped_required_flags = _flags_dict_to_list(payload.skipped_required_flags, selected_models)
         db.commit()
         db.refresh(entry)
+        prev_entry_id = entry.id
+        basis = "previous_entry"
     else:
-
         entry = models.StudyEntryData(
             study_id=study_id,
             subject_index=s, visit_index=v, group_index=g,
             data=payload.data,
-            skipped_required_flags= _flags_dict_to_list(payload.skipped_required_flags, selected_models),
+            skipped_required_flags=_flags_dict_to_list(payload.skipped_required_flags, selected_models),
             form_version=form_version
         )
         db.add(entry)
         db.commit()
         db.refresh(entry)
+        prev_entry_id = None
+        basis = "none"
+        entry_diffs = []
 
-    # BIDS mirror (same as authenticated path)
     study = db.query(models.StudyMetadata).filter(models.StudyMetadata.id == study_id).first()
     content = db.query(models.StudyContent).filter(models.StudyContent.study_id == study_id).first()
     if upsert_bids_dataset and study and content:
@@ -1653,9 +1850,28 @@ def shared_upsert_data(
                     actor="Shared link submit", db=db, actor_id=None, actor_name=None,
                 )
             try:
-                audit_change_both(scope="study", action="share_entry_upserted", actor="",
-                                  extra={"entry_id": entry.id, "subject_index": entry.subject_index, "visit_index": entry.visit_index},
-                                  study_id=study.id, study_name=study.study_name, db=db, actor_id=None)
+                audit_change_both(
+                    scope="study",
+                    action="share_entry_upserted",
+                    actor="",
+                    extra={
+                        "entry_id": entry.id,
+                        "subject_index": entry.subject_index,
+                        "visit_index": entry.visit_index,
+                        "group_index": entry.group_index,
+                        "form_version": entry.form_version,
+                        "ui_label": _norm_audit_label(audit_label),
+                        "has_diff": bool(entry_diffs),
+                        "diff_payload": entry_diffs if entry_diffs else None,
+                        "diff_kind": "entry_data",
+                        "diff_basis": basis,
+                        "previous_entry_id": prev_entry_id,
+                    },
+                    study_id=study.id,
+                    study_name=study.study_name,
+                    db=db,
+                    actor_id=None
+                )
             except Exception:
                 pass
         except Exception as be:
@@ -1677,11 +1893,7 @@ def list_study_access(
         raise HTTPException(status_code=404, detail="Study not found")
     _assert_owner_or_admin(meta, current_user)
 
-    grants = (
-        db.query(models.StudyAccessGrant)
-          .filter(models.StudyAccessGrant.study_id == study_id)
-          .all()
-    )
+    grants = db.query(models.StudyAccessGrant).filter(models.StudyAccessGrant.study_id == study_id).all()
 
     out: List[schemas.StudyAccessGrantOut] = []
     for g in grants:
@@ -1707,6 +1919,7 @@ def list_study_access(
 def grant_study_access(
     study_id: int,
     payload: schemas.StudyAccessGrantCreate,
+    audit_label: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -1724,12 +1937,7 @@ def grant_study_access(
 
     perms = payload.permissions or {"view": True, "add_data": True, "edit_study": False}
 
-    # upsert
-    grant = (
-        db.query(models.StudyAccessGrant)
-          .filter_by(study_id=study_id, user_id=payload.user_id)
-          .first()
-    )
+    grant = db.query(models.StudyAccessGrant).filter_by(study_id=study_id, user_id=payload.user_id).first()
     if grant:
         grant.permissions = perms
         action = "access_updated"
@@ -1745,7 +1953,6 @@ def grant_study_access(
     db.commit()
     db.refresh(grant)
 
-    # AUDIT: access granted/updated
     try:
         audit_access_change_both(
             study_id=meta.id,
@@ -1779,6 +1986,7 @@ def grant_study_access(
 def revoke_study_access(
     study_id: int,
     user_id: int,
+    audit_label: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -1800,7 +2008,6 @@ def revoke_study_access(
     db.delete(grant)
     db.commit()
 
-    # AUDIT: access revoked
     try:
         audit_access_change_both(
             study_id=meta.id,
@@ -1816,24 +2023,24 @@ def revoke_study_access(
     except Exception:
         pass
 
+
 @router.post("/studies/{study_id}/data/bulk")
 def bulk_insert_data(
     study_id: int,
     payload: BulkPayload,
     version: Optional[int] = Query(None, description="Ignored; bulk inserts always use the latest template version"),
     create_bids: bool = Query(True, description="If false, skip BIDS folder creation/mirroring for this request"),
+    audit_label: Optional[str] = Query(None),
     db: Session = Depends(get_db)
 ):
     if not payload.entries:
         return {"inserted": 0, "failed": 0, "errors": []}
 
-    # Enforce latest-only
     try:
         form_version = VersionManager.assert_latest_is_used(db, study_id, version)
     except ValueError as ve:
         raise HTTPException(status_code=400, detail=str(ve))
 
-    # Prepare rows for one executemany insert
     now = local_now()
     rows = []
     for e in payload.entries:
@@ -1855,7 +2062,7 @@ def bulk_insert_data(
     """)
 
     try:
-        db.execute(sql, rows)   # executemany
+        db.execute(sql, rows)
         db.commit()
     except Exception as ex:
         db.rollback()
@@ -1871,16 +2078,12 @@ def bulk_insert_data(
     study = db.query(models.StudyMetadata).filter(models.StudyMetadata.id == study_id).first()
     content = db.query(models.StudyContent).filter(models.StudyContent.study_id == study_id).first()
     if not study or not content:
-        # unlikely, but keep safe
         return {"inserted": inserted_count, "failed": 0, "errors": []}
 
     # Re-select just-inserted rows for this request, then one batched BIDS write
     just_inserted = (
         db.query(models.StudyEntryData)
-          .filter(
-              models.StudyEntryData.study_id == study_id,
-              models.StudyEntryData.form_version == form_version,
-          )
+          .filter(models.StudyEntryData.study_id == study_id, models.StudyEntryData.form_version == form_version)
           .order_by(models.StudyEntryData.id.asc())
           .all()
     )
@@ -1905,7 +2108,6 @@ def bulk_insert_data(
             "skipped_required_flags": _json_or_passthrough(r.skipped_required_flags) or [],
         })
 
-    # Ensure dataset structure once (cheap if existing)
     try:
         upsert_bids_dataset(
             study_id=study.id,
@@ -1914,10 +2116,8 @@ def bulk_insert_data(
             study_data=content.study_data or {},
         )
     except Exception:
-        # Non-fatal; bulk BIDS write will attempt again as needed
         pass
 
-    # One fast BIDS write
     try:
         bulk_write_entries_to_bids(
             study_id=study.id,
@@ -1929,8 +2129,28 @@ def bulk_insert_data(
             db=db,
             actor="Bulk import",
         )
+
+        try:
+            audit_change_both(
+                scope="study",
+                action="bulk_entry_upserted",
+                actor="Bulk import",
+                extra={
+                    "inserted": inserted_count,
+                    "form_version": form_version,
+                    "ui_label": _norm_audit_label(audit_label),
+                    "has_diff": False,
+                    "diff_payload": None,
+                },
+                study_id=study.id,
+                study_name=study.study_name,
+                db=db,
+                actor_id=None
+            )
+        except Exception:
+            pass
+
     except Exception as be:
-        # Do not roll back DB; report error but keep inserted count
         return {"inserted": inserted_count, "failed": inserted_count, "errors": [f"BIDS mirror failed: {be}"]}
 
     return {"inserted": inserted_count, "failed": 0, "errors": []}
@@ -1974,10 +2194,8 @@ def get_study_bids_path(
     _ensure_can_see_bids(current_user, study)
 
     dataset_path = _dataset_path(study.id, study.study_name or "")
-    return {
-        "dataset_path": dataset_path,
-        "exists": os.path.isdir(dataset_path),
-    }
+    return {"dataset_path": dataset_path, "exists": os.path.isdir(dataset_path)}
+
 @router.post("/studies/{study_id}/bids_open", status_code=204)
 def open_study_bids_folder(
     study_id: int,
@@ -2015,29 +2233,17 @@ def open_study_bids_folder(
     try:
         subprocess.Popen(cmd)
     except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to open BIDS folder: {e}",
-        )
+        raise HTTPException(status_code=500, detail=f"Failed to open BIDS folder: {e}")
 
-    # 204 No Content
     return
-
-
-
 
 
 @router.delete("/studies/{study_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_study(
     study_id: int,
-    include_drafts: bool = Query(
-        True,
-        description="If true, also delete any drafts (DRAFT/ARCHIVED) whose draft_of_study_id == this study_id",
-    ),
-    delete_bids: bool = Query(
-        True,
-        description="If true, also delete the BIDS dataset folder from disk (best-effort).",
-    ),
+    include_drafts: bool = Query(True, description="If true, also delete any drafts (DRAFT/ARCHIVED) whose draft_of_study_id == this study_id"),
+    delete_bids: bool = Query(True, description="If true, also delete the BIDS dataset folder from disk (best-effort)."),
+    audit_label: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -2045,67 +2251,39 @@ def delete_study(
     if not meta:
         raise HTTPException(status_code=404, detail="Study not found")
 
-    # Owner or Admin
     _assert_owner_or_admin(meta, current_user)
 
-    # Build list of ids to delete (optionally include drafts of a published study)
     ids_to_delete = [int(study_id)]
 
     if include_drafts:
-        draft_rows = (
-            db.query(models.StudyMetadata.id)
-              .filter(models.StudyMetadata.draft_of_study_id == study_id)
-              .all()
-        )
+        draft_rows = db.query(models.StudyMetadata.id).filter(models.StudyMetadata.draft_of_study_id == study_id).all()
         for (did,) in draft_rows:
             did_int = int(did)
             if did_int not in ids_to_delete:
                 ids_to_delete.append(did_int)
 
-    # Capture BIDS delete targets BEFORE DB delete (needs names)
     bids_targets = []
     if delete_bids:
-        metas = (
-            db.query(models.StudyMetadata.id, models.StudyMetadata.study_name)
-              .filter(models.StudyMetadata.id.in_(ids_to_delete))
-              .all()
-        )
+        metas = db.query(models.StudyMetadata.id, models.StudyMetadata.study_name).filter(models.StudyMetadata.id.in_(ids_to_delete)).all()
         bids_targets = [(int(i), (n or "")) for (i, n) in metas]
 
-    # Child tables: delete first to avoid FK violations (even if cascades exist)
-    FileModel = getattr(models, "File", None)  # keep safe if model name differs
+    FileModel = getattr(models, "File", None)
     SharedModel = getattr(models, "SharedFormAccess", None)
 
     try:
-        # Entries (participant data)
-        db.query(models.StudyEntryData).filter(models.StudyEntryData.study_id.in_(ids_to_delete)) \
-          .delete(synchronize_session=False)
+        db.query(models.StudyEntryData).filter(models.StudyEntryData.study_id.in_(ids_to_delete)).delete(synchronize_session=False)
 
-        # Files table (DB records)
         if FileModel is not None:
-            db.query(FileModel).filter(FileModel.study_id.in_(ids_to_delete)) \
-              .delete(synchronize_session=False)
+            db.query(FileModel).filter(FileModel.study_id.in_(ids_to_delete)).delete(synchronize_session=False)
 
-        # Template versions
-        db.query(StudyTemplateVersion).filter(StudyTemplateVersion.study_id.in_(ids_to_delete)) \
-          .delete(synchronize_session=False)
+        db.query(StudyTemplateVersion).filter(StudyTemplateVersion.study_id.in_(ids_to_delete)).delete(synchronize_session=False)
+        db.query(models.StudyAccessGrant).filter(models.StudyAccessGrant.study_id.in_(ids_to_delete)).delete(synchronize_session=False)
 
-        # Access grants
-        db.query(models.StudyAccessGrant).filter(models.StudyAccessGrant.study_id.in_(ids_to_delete)) \
-          .delete(synchronize_session=False)
-
-        # Share links
         if SharedModel is not None:
-            db.query(SharedModel).filter(SharedModel.study_id.in_(ids_to_delete)) \
-              .delete(synchronize_session=False)
+            db.query(SharedModel).filter(SharedModel.study_id.in_(ids_to_delete)).delete(synchronize_session=False)
 
-        # Study content rows
-        db.query(models.StudyContent).filter(models.StudyContent.study_id.in_(ids_to_delete)) \
-          .delete(synchronize_session=False)
-
-        # Finally metadata rows
-        db.query(models.StudyMetadata).filter(models.StudyMetadata.id.in_(ids_to_delete)) \
-          .delete(synchronize_session=False)
+        db.query(models.StudyContent).filter(models.StudyContent.study_id.in_(ids_to_delete)).delete(synchronize_session=False)
+        db.query(models.StudyMetadata).filter(models.StudyMetadata.id.in_(ids_to_delete)).delete(synchronize_session=False)
 
         db.commit()
     except Exception as e:
@@ -2113,10 +2291,29 @@ def delete_study(
         logger.exception("Failed deleting study ids=%s: %s", ids_to_delete, e)
         raise HTTPException(status_code=500, detail="Failed to delete study")
 
-    # Best-effort BIDS folder delete AFTER commit
     if delete_bids:
         for sid, sname in bids_targets:
             _delete_bids_folder_safe(sid, sname)
 
-    # 204 No Content
+    try:
+        audit_change_both(
+            scope="study",
+            action="study_deleted",
+            actor=_display_name(current_user),
+            extra={
+                "study_id": study_id,
+                "deleted_ids": ids_to_delete,
+                "delete_bids": bool(delete_bids),
+                "ui_label": _norm_audit_label(audit_label),
+                "has_diff": False,
+                "diff_payload": None,
+            },
+            study_id=study_id,
+            study_name=None,
+            db=db,
+            actor_id=current_user.id,
+        )
+    except Exception:
+        pass
+
     return

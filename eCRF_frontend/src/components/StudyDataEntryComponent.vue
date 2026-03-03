@@ -961,34 +961,59 @@ export default {
 
     mergeStudyDataFromTemplate(schema) {
       const prev =
-        (this.study &&
-          this.study.content &&
-          this.study.content.study_data) ||
-        {};
+        (this.study && this.study.content && this.study.content.study_data) || {};
       const incoming = schema || {};
 
+      // Preserve ALL existing keys by default, then overlay schema.
+      // Then we normalize the known array fields safely.
       const merged = {
-        study: incoming.study ?? prev.study ?? {},
+        ...prev,
+        ...incoming,
+
+        // keep/merge nested study object instead of overwriting
+        study: {
+          ...(prev.study || {}),
+          ...(incoming.study || {}),
+        },
+
         subjects: Array.isArray(incoming.subjects)
           ? incoming.subjects
-          : prev.subjects || [],
+          : Array.isArray(prev.subjects)
+          ? prev.subjects
+          : [],
+
         groups: Array.isArray(incoming.groups)
           ? incoming.groups
-          : prev.groups || [],
+          : Array.isArray(prev.groups)
+          ? prev.groups
+          : [],
+
         visits: Array.isArray(incoming.visits)
           ? incoming.visits
-          : prev.visits || [],
+          : Array.isArray(prev.visits)
+          ? prev.visits
+          : [],
+
         selectedModels: Array.isArray(incoming.selectedModels)
           ? incoming.selectedModels
-          : prev.selectedModels || [],
+          : Array.isArray(prev.selectedModels)
+          ? prev.selectedModels
+          : [],
+
         assignments: Array.isArray(incoming.assignments)
           ? incoming.assignments
-          : prev.assignments || [],
+          : Array.isArray(prev.assignments)
+          ? prev.assignments
+          : [],
       };
 
-      const content = this.study && this.study.content
-        ? this.study.content
-        : {};
+      //  keep subjectCount stable if schema doesn't provide it
+      if (!Number.isFinite(merged.subjectCount)) {
+        const n = Array.isArray(merged.subjects) ? merged.subjects.length : 0;
+        merged.subjectCount = n;
+      }
+
+      const content = this.study && this.study.content ? this.study.content : {};
       this.study = {
         ...this.study,
         content: {
@@ -1018,42 +1043,72 @@ export default {
 
     applyTemplateSchema(schema) {
       const current =
-        (this.study &&
-          this.study.content &&
-          this.study.content.study_data) ||
-        {};
+        (this.study && this.study.content && this.study.content.study_data) || {};
 
+      const incoming = schema || {};
+
+      //  Preserve current keys (assignmentMethod, skipSubjectCreationNow, etc.)
+      // Overlay schema, then normalize known parts.
       const normalized = {
-        study: schema?.study ?? current.study ?? {},
+        ...current,
+        ...incoming,
+
+        // merge nested study object instead of replacing it
+        study: {
+          ...(current.study || {}),
+          ...(incoming.study || {}),
+        },
+
         subjects:
-          Array.isArray(schema?.subjects) && schema.subjects.length
-            ? schema.subjects
-            : current.subjects || [],
-        subjectCount: Number.isFinite(schema?.subjectCount)
-          ? schema.subjectCount
-          : current.subjectCount ??
-            (current.subjects?.length || 0),
+          Array.isArray(incoming.subjects) && incoming.subjects.length
+            ? incoming.subjects
+            : Array.isArray(current.subjects)
+            ? current.subjects
+            : [],
+
         visits:
-          Array.isArray(schema?.visits) && schema.visits.length
-            ? schema.visits
-            : current.visits || [],
+          Array.isArray(incoming.visits) && incoming.visits.length
+            ? incoming.visits
+            : Array.isArray(current.visits)
+            ? current.visits
+            : [],
+
         groups:
-          Array.isArray(schema?.groups) && schema.groups.length
-            ? schema.groups
-            : current.groups || [],
-        selectedModels: Array.isArray(schema?.selectedModels)
-          ? schema.selectedModels
-          : current.selectedModels || [],
-        assignments: Array.isArray(schema?.assignments)
-          ? schema.assignments
-          : current.assignments || [],
+          Array.isArray(incoming.groups) && incoming.groups.length
+            ? incoming.groups
+            : Array.isArray(current.groups)
+            ? current.groups
+            : [],
+
+        selectedModels: Array.isArray(incoming.selectedModels)
+          ? incoming.selectedModels
+          : Array.isArray(current.selectedModels)
+          ? current.selectedModels
+          : [],
+
+        assignments: Array.isArray(incoming.assignments)
+          ? incoming.assignments
+          : Array.isArray(current.assignments)
+          ? current.assignments
+          : [],
       };
 
-      if (!this.study)
+      //  subjectCount: keep schema value if valid, else keep current, else derive
+      if (Number.isFinite(incoming.subjectCount)) {
+        normalized.subjectCount = incoming.subjectCount;
+      } else if (Number.isFinite(current.subjectCount)) {
+        normalized.subjectCount = current.subjectCount;
+      } else {
+        normalized.subjectCount = Array.isArray(normalized.subjects) ? normalized.subjects.length : 0;
+      }
+
+      if (!this.study) {
         this.study = { metadata: {}, content: { study_data: normalized } };
-      else if (!this.study.content)
+      } else if (!this.study.content) {
         this.study.content = { study_data: normalized };
-      else this.study.content.study_data = normalized;
+      } else {
+        this.study.content.study_data = normalized;
+      }
 
       this.initializeEntryData();
       this.prepareSubjectGroupIndexMap();
