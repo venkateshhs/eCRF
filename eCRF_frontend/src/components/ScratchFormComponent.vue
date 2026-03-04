@@ -1153,9 +1153,15 @@ export default {
 
       try {
         if (existingId) {
-          await axios.put(`/forms/studies/${existingId}`, payload, {
-            headers: this.authHeader
-          });
+          await axios.put(
+              `/forms/studies/${existingId}`,
+              payload,
+              {
+                headers: this.authHeader,
+                // audit_label: user clicked "Save & Exit" from ScratchForm (builder) while a study already exists (edit/update)
+                params: { audit_label: "Existing Study Updated" }
+              }
+            );
 
           this.$store.commit("setStudyDetails", {
             ...this.studyDetails,
@@ -1183,7 +1189,11 @@ export default {
         const resp = await axios.post(
           `/forms/studies/?status=DRAFT&last_completed_step=${encodeURIComponent(lastCompletedStep)}`,
           payload,
-          { headers: this.authHeader }
+          {
+            headers: this.authHeader,
+            // audit_label: user clicked "Save & Exit" from ScratchForm (builder) and backend creates a DRAFT study
+            params: { audit_label: "Save & Exit - Create New Study Draft" }
+          }
         );
 
         const meta = resp.data?.metadata || resp.data?.study_metadata || {};

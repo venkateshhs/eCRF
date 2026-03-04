@@ -878,8 +878,30 @@ export default {
       console.log("[ProtocolMatrix saveStudyImpl] payload.study_metadata=", payload.study_metadata);
 
       try {
-        const headers = { headers: { Authorization: `Bearer ${store.state.token}` } };
-        const response = await axios[method](url, payload, headers);
+        // audit_label rules:
+        // - POST create draft/publish: study did not exist yet
+        // - PUT update draft/publish: study already exists (incl. DRAFT -> PUBLISHED transition)
+        // - Draft save from Unsaved dialog is distinct from Publish button
+
+        const baseHeaders = { Authorization: `Bearer ${store.state.token}` };
+
+        // Decide label by action + mode + create/update
+        const isCreate = !studyId;
+        const isDraftMode = mode === "draft";
+
+        const auditLabel =
+          isDraftMode && isCreate ? "Save & Exit - Create New Study Draft" :
+          isDraftMode && !isCreate ? "Save Draft & Exit - Update Draft" :
+          !isDraftMode && isCreate ? "Create New Study" :
+          "Publish Study";
+
+        const axiosConfig = {
+          headers: baseHeaders,
+          // audit_label is used by backend audit log as a human-readable action label
+          params: { audit_label: auditLabel }
+        };
+
+        const response = await axios[method](url, payload, axiosConfig);
 
         console.log(
           "[ProtocolMatrix saveStudyImpl] response metadata=",
