@@ -2511,7 +2511,7 @@ export default {
                 const resp = await axios.post(
                   `${base}/files`,
                   fd,
-                  { headers }
+                  { headers, params: { audit_label: "Upload File (Local)" } }
                 );
                 const saved = resp?.data || {};
                 items[i] = {
@@ -2545,7 +2545,7 @@ export default {
                 const resp = await axios.post(
                   `${base}/files/url`,
                   fd,
-                  { headers }
+                  { headers, params: { audit_label: "Upload - File (URL)" } }
                 );
                 const saved = resp?.data || {};
                 items[i] = {
@@ -2600,7 +2600,7 @@ export default {
               const resp = await axios.post(
                 `${base}/files`,
                 fd,
-                { headers }
+                { headers, params: { audit_label: "Upload - File (Local)" } }
               );
               const saved = resp?.data || {};
               this.setDeepValue(
@@ -2641,7 +2641,7 @@ export default {
               const resp = await axios.post(
                 `${base}/files/url`,
                 fd,
-                { headers }
+                { headers, params: { audit_label: "Upload - File (URL)" } }
               );
               const saved = resp?.data || {};
               this.setDeepValue(
@@ -2733,6 +2733,11 @@ export default {
         ? this.flagsArrayToDict(rawSkipFlags)
         : rawSkipFlags;
 
+      const hasAnySkip = !!(
+        Array.isArray(rawSkipFlags) &&
+        rawSkipFlags.some((row) => Array.isArray(row) && row.some((x) => !!x))
+      );
+
       const payload = {
         study_id: this.study?.metadata?.id,
         subject_index: s,
@@ -2744,9 +2749,11 @@ export default {
 
       try {
         if (this.isShared) {
+          const auditLabel = hasAnySkip ? "Shared link data Entry (Skipped Required)" : "Shared link data Entry";
           const resp = await axios.post(
             `/forms/shared/${this.shareToken}/data`,
-            payload
+            payload,
+            { params: { audit_label: auditLabel } }
           );
 
           const saved = {
@@ -2787,10 +2794,11 @@ export default {
         const existingId = this.entryIds[s][v][g];
 
         if (existingId) {
+          const auditLabel = hasAnySkip ? "Update/Edit Data Entry (Skipped Required)" : "Update/Edit Data Entry";
           const resp = await axios.put(
             `/forms/studies/${this.study.metadata.id}/data_entries/${existingId}`,
             payload,
-            headers
+            { ...headers, params: { audit_label: auditLabel } }
           );
           this.showDialogMessage(
             "Data updated successfully."
@@ -2804,10 +2812,11 @@ export default {
           const params = this.safeVersionParams(
             this.selectedVersion
           );
+          const auditLabel = hasAnySkip ? "New Data Entry (Skipped Required)" : (params ? "New Data Entry (Versioned)" : "New Data Entry");
           const resp = await axios.post(
             `/forms/studies/${this.study.metadata.id}/data`,
             payload,
-            params ? { ...headers, params } : headers
+            params ? { ...headers, params: { ...params, audit_label: auditLabel } } : { ...headers, params: { audit_label: auditLabel } }
           );
           const newId = resp?.data?.id;
           this.entryIds[s][v][g] = newId;
@@ -2961,6 +2970,7 @@ export default {
           payload,
           {
             headers: { Authorization: `Bearer ${this.token}` },
+            params: { audit_label: "Create - Sharable Link" },
           }
         );
         this.generatedLink = resp.data.link;
@@ -3214,7 +3224,7 @@ export default {
         await axios.put(
           `/forms/studies/${this.study.metadata.id}`,
           payload,
-          { headers: { Authorization: `Bearer ${this.token}` } }
+          { headers: { Authorization: `Bearer ${this.token}` }, params: { audit_label: "New Subjects (Add)" } }
         );
 
         if (
@@ -3370,7 +3380,7 @@ export default {
         await axios.put(
           `/forms/studies/${this.study.metadata.id}`,
           payload,
-          { headers: { Authorization: `Bearer ${this.token}` } }
+          { headers: { Authorization: `Bearer ${this.token}` }, params: { audit_label: scope === "all" ? "Update - Subject Groups (All)" : "Update - Subject Group" } }
         );
 
         // Update local
