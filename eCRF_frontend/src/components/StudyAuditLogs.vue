@@ -12,7 +12,7 @@
               :class="{ active: activeTab === 'study' }"
               @click="activeTab = 'study'"
             >
-              Study (System)
+              Study
             </button>
             <button
               class="tab"
@@ -37,12 +37,6 @@
         </div>
 
         <div class="tools">
-          <input
-            class="input search"
-            v-model="search"
-            placeholder="Search action / user / details…"
-            @input="debouncedFilter"
-          />
           <button class="btn-minimal" @click="refreshAll" :disabled="loading">
             Refresh
           </button>
@@ -167,6 +161,34 @@
             <div v-if="diffError" class="diff-error">
               {{ diffError }}
             </div>
+
+            <!-- Render diff as a table when it's an array -->
+            <div v-else-if="Array.isArray(diffData) && diffData.length" class="diff-table-wrap">
+              <table class="diff-table" aria-label="Diff table">
+                <thead>
+                  <tr>
+                    <th class="d-op">Op</th>
+                    <th class="d-path">Path</th>
+                    <th class="d-old">Old</th>
+                    <th class="d-new">New</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="(d, idx) in diffData" :key="`d-${idx}`">
+                    <td class="d-op mono">{{ d?.op || "—" }}</td>
+                    <td class="d-path mono">{{ d?.path || "—" }}</td>
+                    <td class="d-old">
+                      <pre class="cell-pre">{{ prettyOne(d?.old) }}</pre>
+                    </td>
+                    <td class="d-new">
+                      <pre class="cell-pre">{{ prettyOne(d?.new) }}</pre>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            <!-- fallback -->
             <pre v-else class="diff-json">{{ pretty(diffData) }}</pre>
           </div>
 
@@ -192,7 +214,6 @@ export default {
       loading: false,
       all: [],
 
-      search: "",
       activeTab: "study",
       activeSubject: null,
 
@@ -221,8 +242,7 @@ export default {
       return this.token ? { Authorization: `Bearer ${this.token}` } : {};
     },
     visibleRows() {
-      const base = this.activeTab === "study" ? this.studyRows() : this.subjectRows();
-      return this.applySearch(base, this.search);
+      return this.activeTab === "study" ? this.studyRows() : this.subjectRows();
     },
   },
   methods: {
@@ -387,7 +407,11 @@ export default {
       if (!ts) return "—";
       return String(ts);
     },
+
+    //  Action column: show audit UI label if present; fallback to action
     displayAction(row) {
+      const ui = row?.details?.ui_label;
+      if (ui && String(ui).trim()) return String(ui).trim();
       return row.action || "—";
     },
 
@@ -469,31 +493,8 @@ export default {
       }
     },
 
-    // ====== search ======
-    debouncedFilter() {
-      clearTimeout(this.timerId);
-      this.timerId = setTimeout(() => this.$forceUpdate(), 150);
-    },
-    applySearch(rows, qRaw) {
-      const q = (qRaw || "").toLowerCase();
-      if (!q) return rows;
-      return rows.filter((r) => {
-        const parts = [
-          this.fmtTs(r.timestamp),
-          r.action || "",
-          this.getUserDisplayName(r.user_id),
-          this.summaryText(r),
-          this.resolvedSubject(r),
-          this.resolvedVisit(r),
-        ]
-          .map((s) => (s || "").toString().toLowerCase());
-        return parts.some((s) => s.includes(q));
-      });
-    },
-
-    // ====== user names (✅ regression-proof) ======
+    // ====== user names ( regression-proof) ======
     userName(userId) {
-      // keep old name to prevent regressions anywhere
       return this.getUserDisplayName(userId);
     },
     getUserDisplayName(userId) {
@@ -563,6 +564,16 @@ export default {
         return String(obj);
       }
     },
+    prettyOne(val) {
+      try {
+        if (val === undefined) return "—";
+        if (val === null) return "null";
+        if (typeof val === "string") return val;
+        return JSON.stringify(val, null, 2);
+      } catch {
+        return String(val);
+      }
+    },
   },
   async mounted() {
     await this.refreshAll();
@@ -605,6 +616,9 @@ export default {
   background: #eef2ff;
   border-radius: 999px;
   padding: 2px;
+
+  /*  spacing between Study and Subjects */
+  gap: 6px;
 }
 .tab {
   border: none;
@@ -657,17 +671,6 @@ export default {
   gap: 8px;
   align-items: center;
 }
-.input {
-  height: 34px;
-  padding: 6px 10px;
-  border: 1px solid #d1d5db;
-  border-radius: 8px;
-  font-size: 14px;
-  background: #fff;
-}
-.search {
-  width: 260px;
-}
 
 .btn-minimal {
   background: none;
@@ -710,7 +713,7 @@ export default {
 }
 
 .col-ts { width: 180px; }
-.col-action { width: 140px; }
+.col-action { width: 220px; } /* a bit wider for audit labels */
 .col-user { width: 200px; }
 .col-details { width: auto; }
 .col-raw { width: 130px; text-align: right; }
@@ -782,7 +785,7 @@ export default {
   z-index: 9999;
 }
 .modal {
-  width: min(920px, 96vw);
+  width: min(1100px, 96vw);
   max-height: 86vh;
   background: #fff;
   border-radius: 12px;
@@ -844,8 +847,59 @@ export default {
   justify-content: flex-end;
 }
 
+/*  Diff table (scrollable + sticky header) */
+.diff-table-wrap {
+  overflow: auto;
+  border: 1px solid #f0f0f0;
+  border-radius: 10px;
+  background: #fff;
+}
+.diff-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.diff-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: #f9fafb;
+  border-bottom: 1px solid #eee;
+  padding: 8px 10px;
+  text-align: left;
+  font-weight: 700;
+  color: #374151;
+}
+.diff-table tbody td {
+  border-bottom: 1px solid #f6f6f6;
+  padding: 8px 10px;
+  vertical-align: top;
+}
+.diff-table tbody tr:hover td {
+  background: #fcfcfd;
+}
+
+.d-op { width: 90px; }
+.d-path { width: 260px; }
+.d-old, .d-new { width: 340px; }
+
+.cell-pre {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: #fafafa;
+  border: 1px solid #f0f0f0;
+  border-radius: 8px;
+  padding: 8px;
+  max-height: 200px;
+  overflow: auto;
+}
+
+.mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
+
 @media (max-width: 720px) {
-  .search { width: 180px; }
   .col-user { width: 160px; }
+  .col-action { width: 200px; }
+  .d-path { width: 220px; }
 }
 </style>
