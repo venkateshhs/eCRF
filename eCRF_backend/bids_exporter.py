@@ -887,7 +887,7 @@ def audit_access_change_both(
 
     # 2) changes.txt + DB via the unified helper (scope auto-infers to "study")
     audit_change_both(
-        db=db,
+        db=None,
         study_id=study_id,
         study_name=study_name,
         action=action,
@@ -1195,7 +1195,7 @@ def write_entry_to_bids(
 
     # Unified audit (BIDS + DB)
     audit_change_both(
-        db=db,
+        db=None,
         study_id=study_id,
         study_name=study_name,
         action="entry_upsert",
@@ -1422,7 +1422,7 @@ def bulk_write_entries_to_bids(
     _datalad_save(dataset_path, msg=f"Bulk upsert {len(entries)} entries (v={form_version:03d})")
     try:
         audit_change_both(
-            db=db,
+            db=None,
             study_id=study_id,
             study_name=study_name,
             action="bulk_entry_upsert",
@@ -1515,7 +1515,7 @@ def stage_file_for_modalities(
         if written:
             _datalad_save(dataset_path, msg="Mirror study-level document(s) into metadata/")
             audit_change_both(
-                db=db,
+                db=None,
                 study_id=study_id,
                 study_name=study_name,
                 action="file_mirrored_study_level",
@@ -1589,7 +1589,7 @@ def stage_file_for_modalities(
     if written:
         _datalad_save(dataset_path, msg=f"Mirror files/links for sub-{_alnum(sub_label_num)} (visit={visit_index}, v={target_version:03d})")
         audit_change_both(
-            db=db,
+            db=None,
             study_id=study_id,
             study_name=study_name,
             action="file_mirrored",
@@ -1620,7 +1620,7 @@ def log_dataset_change_to_changes(
     db=None,
 ):
     audit_change_both(
-        db=db,
+        db=None,
         study_id=study_id,
         study_name=study_name,
         action=action,

@@ -745,6 +745,8 @@ def update_study(
 
         # 5) Versioning on published (diff old published vs new published)
         def _audit(action: str, extra: Dict[str, Any]):
+            if action in {"version_snapshot_refreshed"}:
+                return
             try:
                 audit_change_both(
                     scope="study",
@@ -889,6 +891,8 @@ def update_study(
 
     # Versioning: bump only if latest has data; otherwise overwrite; clone rows on bump
     def _audit(action: str, extra: Dict[str, Any]):
+        if action in {"version_snapshot_refreshed"}:
+            return
         try:
             audit_change_both(
                 scope="study",
