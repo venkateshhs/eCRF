@@ -657,7 +657,15 @@ export default {
 
       try {
         if (isEditing.value) {
-          await axios.put(`/forms/studies/${editId.value}`, payload, { headers: authHeader.value });
+          await axios.put(
+              `/forms/studies/${editId.value}`,
+              payload,
+              {
+                headers: authHeader.value,
+                // audit_label: user clicked "Save" / "Save & Exit" while editing an existing study
+                params: { audit_label: "Update Existing Study" },
+              }
+            );
 
           // Keep local store consistent and preserve forms/template after save
           commitStudyDetailsPreservingForms({
@@ -694,6 +702,8 @@ export default {
           payload,
           {
             headers: authHeader.value,
+            // audit_label: user clicked "Save as Draft & Exit" (or "Save & Exit" in create flow)
+            params: { audit_label: "Save Draft of Study" },
           }
         );
 
@@ -965,7 +975,15 @@ export default {
           study_content: { study_data },
         };
 
-        const created = await axios.post("/forms/studies/", payload, { headers: authHeader.value });
+        const created = await axios.post(
+          "/forms/studies/",
+          payload,
+          {
+            headers: authHeader.value,
+            // audit_label: user imported a template JSON and created a new study from it
+            params: { audit_label: "Study Creation by Import Template" },
+          }
+        );
         const meta = created.data?.study_metadata || created.data?.metadata || {};
         const createdId = meta.id ?? created.data?.id;
         if (createdId == null) throw new Error("Study created but ID was not returned.");
