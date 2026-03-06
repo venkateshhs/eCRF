@@ -14,6 +14,7 @@ import StudySettings from "../components/StudySettings.vue";
 //import SharedFormComponent from '../components/SharedFormComponent.vue'
 //import StudyDataEntryComponent from '../components/DataEntryComponent.vue'
 import StudyView from "@/components/StudyView.vue";
+import LogicCalculationsRoute from "../components/LogicCalculationsRoute.vue";
 
 const routes = [
   { path: "/", redirect: "/login" },
@@ -42,7 +43,11 @@ const routes = [
         name: "CreateFormScratch",
         component: ScratchFormComponent,
       },
-
+      {
+        path: "create-form-scratch/logic",
+        name: "CreateFormScratchLogic",
+        component: LogicCalculationsRoute,
+      },
       // Add Data inside Dashboard layout
       {
         path: "studies/:id/add-data",

@@ -1,15 +1,15 @@
 <template>
   <div class="create-form-container">
     <!-- Header -->
-    <div class="header-container">
+    <div v-if="!showMatrix && !showLogic" class="header-container">
       <button @click="goBack" class="btn-back" title="Go Back">
-       Back
+        Back
       </button>
     </div>
 
-    <div class="scratch-form-content">
+    <div class="scratch-form-content" :class="{ 'scratch-form-content-full': showMatrix || showLogic }">
       <!-- ───────── Available Fields ───────── -->
-      <div v-if="!showMatrix" class="available-fields">
+      <div v-if="!showMatrix && !showLogic" class="available-fields">
         <h2>Available Fields</h2>
 
         <div class="tabs">
@@ -185,10 +185,10 @@
       </div>
 
       <!-- ───────── Form Area / Protocol Matrix ───────── -->
-      <div class="form-area">
+      <div class="form-area" :class="{ 'form-area-full': showMatrix || showLogic }">
         <div class="sections-container">
           <!-- Sections View -->
-          <div v-if="!showMatrix">
+          <div v-if="!showMatrix && !showLogic">
             <transition-group name="reorder" tag="div" class="sections-list">
               <div
                 v-for="(section, si) in currentForm.sections"
@@ -457,7 +457,7 @@
           </div>
 
           <!-- Protocol Matrix View -->
-          <div v-else>
+          <div v-else-if="showMatrix">
             <ProtocolMatrix
               :visits="visits"
               :groups="groups"
@@ -467,15 +467,25 @@
               @edit-template="editTemplate"
             />
           </div>
+          <div v-else-if="showLogic">
+            <LogicCalculationsRoute @back-to-builder="closeLogicAndCalculations" />
+        </div>
         </div>
 
         <!-- Form Actions -->
-        <div v-if="!showMatrix" class="form-actions">
+        <div v-if="!showMatrix && !showLogic" class="form-actions">
           <button @click.prevent="addNewSection" class="btn-option">
             + Add Section
           </button>
           <button @click.prevent="confirmClearForm" class="btn-option">
             Clear All
+          </button>
+          <button
+            @click.prevent="openLogicAndCalculations"
+            class="btn-option"
+            title="Configure conditional logic and calculations"
+          >
+            Logic & Calculations
           </button>
 
           <button
@@ -699,12 +709,13 @@ import FieldSlider from "@/components/fields/FieldSlider.vue";
 import FieldLinearScale from "@/components/fields/FieldLinearScale.vue";
 import FieldFileUpload from "@/components/fields/FieldFileUpload.vue";
 import { normalizeConstraints, coerceDefaultForType } from "@/utils/constraints";
-
+import LogicCalculationsRoute from "./LogicCalculationsRoute.vue";
 export default {
   name: "ScratchFormComponent",
   components: {
     ShaclComponents,
     ProtocolMatrix,
+    LogicCalculationsRoute,
     FieldConstraintsDialog,
     FormPreview,
     DateFormatPicker,
@@ -719,7 +730,7 @@ export default {
   // IMPORTANT:
   // When ProtocolMatrix is open, let ProtocolMatrix handle unsaved guard/dialog.
   // This prevents double dialogs (one from Scratch + one from ProtocolMatrix).
-  if (this.showMatrix) {
+  if (this.showMatrix || this.showLogic) {
     next();
     return;
   }
@@ -771,6 +782,7 @@ export default {
       currentModel: null,
       selectedProps: [],
       showMatrix: false,
+      showLogic: false,
       visits: [],
       groups: [],
       assignments: [],
@@ -990,6 +1002,46 @@ export default {
   },
 
   methods: {
+     openLogicAndCalculations() {
+      this.ensurePersistentIdsForLogic();
+
+      try {
+        localStorage.setItem("scratchForms", JSON.stringify(this.forms));
+      } catch (e) {
+        console.error("Failed to persist scratchForms before opening logic view", e);
+      }
+
+      this.showMatrix = false;
+      this.showLogic = true;
+    },
+
+    _uuidForLogic() {
+      if (typeof crypto !== "undefined" && crypto.randomUUID) return crypto.randomUUID();
+      return `id_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+    },
+
+    ensurePersistentIdsForLogic() {
+      this.ensureCurrentFormExists();
+
+      const form = this.forms[this.currentFormIndex];
+      if (!form) return;
+
+      // sections + fields get persisted _id
+      (form.sections || []).forEach(sec => {
+        if (!sec._id) sec._id = this._uuidForLogic();
+        if (!Array.isArray(sec.fields)) sec.fields = [];
+        sec.fields.forEach(f => {
+          if (!f._id) f._id = this._uuidForLogic();
+        });
+      });
+
+      // Ensure logic container exists
+      if (!form.logic) form.logic = { version: 1, rules: [] };
+      if (!Array.isArray(form.logic.rules)) form.logic.rules = [];
+
+      // Mark dirty because IDs/logic are structural metadata
+      if (!this.hydratingScratch) this.$store.commit("setStudyCreationDirty", true);
+    },
     openScratchUnsavedDialog(pendingAction) {
       this.unsavedPendingAction = typeof pendingAction === "function" ? pendingAction : null;
       this.showUnsavedDialog = true;
@@ -1126,6 +1178,7 @@ export default {
     },
 
     async persistScratchToBackend() {
+      this.ensurePersistentIdsForLogic();
       const token = this.$store.state.token;
       if (!token) {
         this.$router.push("/login");
@@ -1662,6 +1715,10 @@ export default {
     },
 
     goBack() {
+      if (this.showLogic) {
+        this.showLogic = false;
+        return;
+      }
       // If ProtocolMatrix is open, let ProtocolMatrix own the unsaved dialog logic
       if (this.showMatrix) {
         this.$router.back();
@@ -1807,8 +1864,12 @@ export default {
       }
     },
 
-    handleProtocolClick() { this.showMatrix = true; },
+    handleProtocolClick() { this.showLogic = false;this.showMatrix = true; },
     editTemplate() { this.showMatrix = false; },
+    closeLogicAndCalculations() {
+      this.showMatrix = false;
+      this.showLogic = false;
+    },
 
     onAssignmentUpdated({ mIdx, vIdx, gIdx, checked }) {
       this.assignments[mIdx][vIdx][gIdx] = checked;
@@ -2979,6 +3040,13 @@ input, textarea, select {
   overflow: hidden;
   text-overflow: ellipsis;    /* prevent wrap in narrow modal */
   line-height: 1.1;
+}
+.scratch-form-content-full {
+  margin-top: 0;
+}
+
+.form-area-full {
+  height: calc(100vh - 40px);
 }
 
 /* Override global input styling that makes checkboxes huge/fuzzy */

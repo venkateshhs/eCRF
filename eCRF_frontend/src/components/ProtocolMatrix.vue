@@ -1,6 +1,14 @@
 <template>
   <div class="protocol-matrix-container">
     <div class="screen-header">
+      <button
+        class="btn-back protocol-back-btn"
+        @click="$emit('edit-template')"
+        title="Back"
+      >
+        Back
+      </button>
+
       <h2 class="screen-title">Schedule of Assessments</h2>
       <button class="icon-btn header-info-btn" @click="showInfo = true" aria-label="What is Protocol Matrix?">
         <i :class="icons.info"></i>
@@ -1172,8 +1180,21 @@ export default {
 }
 
 /* Header */
-.screen-header { position: relative; text-align: center; padding: 4px 4px 0; }
-.screen-title { margin: 0 0 4px; font-weight: 800; font-size: 18px; color: #101828; }
+.screen-header {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 12px;
+  padding: 4px 4px 0;
+  min-height: 44px;
+}
+.screen-title {
+  margin: 0;
+  font-weight: 800;
+  font-size: 18px;
+  color: #101828;
+  text-align: center;
+}
 .icon-btn { background: transparent; cursor: pointer; border: none; padding: 0; }
 .header-info-btn { position: absolute; right: 6px; top: 50%; transform: translateY(-50%); font-size: 18px; color: #667085; }
 .header-info-btn:hover { color: #111827; }
@@ -1327,4 +1348,50 @@ export default {
   transform: rotate(45deg);
 }
 .bulk-toggle span { line-height: 1.2; }
+.screen-header {
+  position: relative;
+  text-align: center;
+  padding: 4px 4px 0;
+  min-height: 44px;
+}
+
+
+.protocol-back-btn {
+  justify-self: start;
+}
+
+.header-info-btn {
+  justify-self: end;
+  font-size: 18px;
+  color: #667085;
+}
+
+.header-info-btn:hover {
+  color: #111827;
+}
+
+.btn-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: #fff;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  padding: 10px 14px;
+  cursor: pointer;
+  color: $text-color;
+  font-size: 14px;
+  line-height: 1;
+  transition: background 0.15s ease, border-color 0.15s ease, transform 0.02s ease;
+}
+
+.btn-back:hover {
+  background: #f9fafb;
+  border-color: #d1d5db;
+}
+
+.btn-back:active {
+  transform: scale(0.98);
+}
+
 </style>
