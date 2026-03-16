@@ -463,12 +463,18 @@
               :groups="groups"
               :selectedModels="selectedModels"
               :assignments="assignments"
+              :forms="forms"
               @assignment-updated="onAssignmentUpdated"
               @edit-template="editTemplate"
             />
           </div>
           <div v-else-if="showLogic">
-            <LogicCalculationsRoute @back-to-builder="closeLogicAndCalculations" />
+          <LogicCalculationsRoute
+            :form="currentForm"
+            @back-to-builder="closeLogicAndCalculations"
+            @update-form-structure="applyLogicFormUpdate"
+            @update-logic="applyLogicPayload"
+          />
         </div>
         </div>
 
@@ -604,13 +610,16 @@
 
     <!-- Constraints Dialog -->
     <div v-if="showConstraintsDialog" class="modal-overlay">
-      <FieldConstraintsDialog
-        :currentFieldType="currentFieldType"
-        :constraintsForm="constraintsForm"
-        @updateConstraints="confirmConstraintsDialog"
-        @closeConstraintsDialog="cancelConstraintsDialog"
-        @showGenericDialog="openGenericDialog"
-      />
+    <FieldConstraintsDialog
+      :currentFieldType="currentFieldType"
+      :constraintsForm="constraintsForm"
+      :form="currentForm"
+      :currentFieldKey="currentEditingFieldKey"
+      :currentFieldLabel="currentEditingFieldLabel"
+      @updateConstraints="confirmConstraintsDialog"
+      @closeConstraintsDialog="cancelConstraintsDialog"
+      @showGenericDialog="openGenericDialog"
+    />
     </div>
 
     <!-- Preview Dialog -->
@@ -854,6 +863,19 @@ export default {
   },
 
   computed: {
+    currentEditingFieldKey() {
+      const { sectionIndex, fieldIndex } = this.currentFieldIndices || {};
+      const field = this.currentForm.sections?.[sectionIndex]?.fields?.[fieldIndex];
+      if (!field) return "";
+      return this.getFieldLogicKey(field, sectionIndex, fieldIndex);
+    },
+
+    currentEditingFieldLabel() {
+      const { sectionIndex, fieldIndex } = this.currentFieldIndices || {};
+      const field = this.currentForm.sections?.[sectionIndex]?.fields?.[fieldIndex];
+      if (!field) return "";
+      return field.label || field.name || "";
+    },
     icons() { return icons; },
     studyDetails() { return this.$store.state.studyDetails || {}; },
 
@@ -1002,6 +1024,116 @@ export default {
   },
 
   methods: {
+    getFieldLogicKey(field, sectionIndex, fieldIndex) {
+      if (!field || typeof field !== "object") return "";
+
+      // Prefer persistent ID if available
+      if (field._id) return String(field._id);
+
+      // Fallback to name
+      if (field.name) return String(field.name);
+
+      // Last fallback
+      return `section_${sectionIndex}_field_${fieldIndex}`;
+    },
+    applyLogicFormUpdate(updatedForm) {
+  this.ensureCurrentFormExists();
+  if (!updatedForm || typeof updatedForm !== "object") return;
+
+  console.log("[ScratchForm] applyLogicFormUpdate() BEFORE", {
+    currentFormIndex: this.currentFormIndex,
+    existingForm: JSON.parse(JSON.stringify(this.forms[this.currentFormIndex] || {})),
+    incomingUpdatedForm: JSON.parse(JSON.stringify(updatedForm || {}))
+  });
+
+  this.forms.splice(this.currentFormIndex, 1, JSON.parse(JSON.stringify(updatedForm)));
+
+  try {
+    localStorage.setItem("scratchForms", JSON.stringify(this.forms));
+  } catch (e) {
+    console.error("Failed to persist updated form from logic builder", e);
+  }
+
+  this.$store.commit("setStudyDetails", {
+    ...this.studyDetails,
+    forms: JSON.parse(JSON.stringify(this.forms || []))
+  });
+
+  console.log("[ScratchForm] applyLogicFormUpdate() AFTER", {
+    savedForm: JSON.parse(JSON.stringify(this.forms[this.currentFormIndex] || {})),
+    savedLogic: JSON.parse(JSON.stringify(this.forms[this.currentFormIndex]?.logic || {})),
+    storeForms: JSON.parse(JSON.stringify(this.$store.state.studyDetails?.forms || []))
+  });
+
+  if (!this.hydratingScratch) {
+    this.$store.commit("setStudyCreationDirty", true);
+  }
+},
+
+    applyLogicPayload(logicPayload) {
+  this.ensureCurrentFormExists();
+
+  console.log("[ScratchForm] applyLogicPayload() incoming", JSON.parse(JSON.stringify(logicPayload || {})));
+
+  if (!this.forms[this.currentFormIndex].logic || typeof this.forms[this.currentFormIndex].logic !== "object") {
+    this.forms[this.currentFormIndex].logic = { version: 1, calculations: [], conditions: [] };
+  }
+
+  this.forms[this.currentFormIndex].logic = {
+    version: 1,
+    calculations: Array.isArray(logicPayload?.calculations) ? logicPayload.calculations : [],
+    conditions: Array.isArray(logicPayload?.conditions) ? logicPayload.conditions : []
+  };
+
+  console.log("[ScratchForm] applyLogicPayload() saved on form", {
+    currentFormIndex: this.currentFormIndex,
+    logic: JSON.parse(JSON.stringify(this.forms[this.currentFormIndex].logic || {}))
+  });
+
+  try {
+    localStorage.setItem("scratchForms", JSON.stringify(this.forms));
+    console.log("[ScratchForm] localStorage scratchForms after applyLogicPayload", JSON.parse(localStorage.getItem("scratchForms") || "[]"));
+  } catch (e) {
+    console.error("Failed to persist logic payload", e);
+  }
+
+  this.$store.commit("setStudyDetails", {
+    ...this.studyDetails,
+    forms: JSON.parse(JSON.stringify(this.forms || []))
+  });
+
+  console.log("[ScratchForm] store.studyDetails.forms synced after applyLogicPayload", JSON.parse(JSON.stringify(this.$store.state.studyDetails?.forms || [])));
+
+  if (!this.hydratingScratch) {
+    this.$store.commit("setStudyCreationDirty", true);
+  }
+},
+     onLogicUpdated(nextLogic) {
+      this.ensureCurrentFormExists();
+
+      const safeLogic = {
+        version: 1,
+        calculations: Array.isArray(nextLogic?.calculations)
+          ? JSON.parse(JSON.stringify(nextLogic.calculations))
+          : [],
+        conditions: Array.isArray(nextLogic?.conditions)
+          ? JSON.parse(JSON.stringify(nextLogic.conditions))
+          : []
+      };
+
+      if (this.$set) this.$set(this.currentForm, "logic", safeLogic);
+      else this.currentForm.logic = safeLogic;
+
+      try {
+        localStorage.setItem("scratchForms", JSON.stringify(this.forms));
+      } catch (e) {
+        console.error("Failed to persist logic into scratchForms", e);
+      }
+
+      if (!this.hydratingScratch) {
+        this.$store.commit("setStudyCreationDirty", true);
+      }
+    },
      openLogicAndCalculations() {
       this.ensurePersistentIdsForLogic();
 
@@ -1032,12 +1164,18 @@ export default {
         if (!Array.isArray(sec.fields)) sec.fields = [];
         sec.fields.forEach(f => {
           if (!f._id) f._id = this._uuidForLogic();
+          if (!f.constraints || typeof f.constraints !== "object") {
+            f.constraints = {};
+          }
         });
       });
 
-      // Ensure logic container exists
-      if (!form.logic) form.logic = { version: 1, rules: [] };
-      if (!Array.isArray(form.logic.rules)) form.logic.rules = [];
+      if (!form.logic || typeof form.logic !== "object") {
+        form.logic = { version: 1, calculations: [], conditions: [] };
+      }
+      if (!Array.isArray(form.logic.calculations)) form.logic.calculations = [];
+      if (!Array.isArray(form.logic.conditions)) form.logic.conditions = [];
+      if (!form.logic.version) form.logic.version = 1;
 
       // Mark dirty because IDs/logic are structural metadata
       if (!this.hydratingScratch) this.$store.commit("setStudyCreationDirty", true);
@@ -1082,12 +1220,9 @@ export default {
         });
       }
     },
-    /* ============================================================
-       CORE FIX: ensure mutable forms[currentFormIndex].sections exists
-       ============================================================ */
     ensureCurrentFormExists() {
       if (!Array.isArray(this.forms)) {
-        this.forms = [{ sections: [] }];
+        this.forms = [{ sections: [], logic: { version: 1, calculations: [], conditions: [] } }];
       }
 
       if (!Number.isInteger(this.currentFormIndex) || this.currentFormIndex < 0) {
@@ -1095,26 +1230,64 @@ export default {
       }
 
       if (!this.forms.length) {
-        this.forms.push({ sections: [] });
+        this.forms.push({ sections: [], logic: { version: 1, calculations: [], conditions: [] } });
       }
 
       if (!this.forms[this.currentFormIndex]) {
-        // pad missing indexes if needed
         while (this.forms.length <= this.currentFormIndex) {
-          this.forms.push({ sections: [] });
+          this.forms.push({ sections: [], logic: { version: 1, calculations: [], conditions: [] } });
         }
       }
 
       const form = this.forms[this.currentFormIndex];
       if (!form || typeof form !== "object") {
-        this.$set
-          ? this.$set(this.forms, this.currentFormIndex, { sections: [] })
-          : (this.forms[this.currentFormIndex] = { sections: [] });
+        if (this.$set) {
+          this.$set(this.forms, this.currentFormIndex, {
+            sections: [],
+            logic: { version: 1, calculations: [], conditions: [] }
+          });
+        } else {
+          this.forms[this.currentFormIndex] = {
+            sections: [],
+            logic: { version: 1, calculations: [], conditions: [] }
+          };
+        }
       }
 
       if (!Array.isArray(this.forms[this.currentFormIndex].sections)) {
         if (this.$set) this.$set(this.forms[this.currentFormIndex], "sections", []);
         else this.forms[this.currentFormIndex].sections = [];
+      }
+
+      if (!this.forms[this.currentFormIndex].logic || typeof this.forms[this.currentFormIndex].logic !== "object") {
+        if (this.$set) {
+          this.$set(this.forms[this.currentFormIndex], "logic", {
+            version: 1,
+            calculations: [],
+            conditions: []
+          });
+        } else {
+          this.forms[this.currentFormIndex].logic = {
+            version: 1,
+            calculations: [],
+            conditions: []
+          };
+        }
+      }
+
+      if (!Array.isArray(this.forms[this.currentFormIndex].logic.calculations)) {
+        if (this.$set) this.$set(this.forms[this.currentFormIndex].logic, "calculations", []);
+        else this.forms[this.currentFormIndex].logic.calculations = [];
+      }
+
+      if (!Array.isArray(this.forms[this.currentFormIndex].logic.conditions)) {
+        if (this.$set) this.$set(this.forms[this.currentFormIndex].logic, "conditions", []);
+        else this.forms[this.currentFormIndex].logic.conditions = [];
+      }
+
+      if (!this.forms[this.currentFormIndex].logic.version) {
+        if (this.$set) this.$set(this.forms[this.currentFormIndex].logic, "version", 1);
+        else this.forms[this.currentFormIndex].logic.version = 1;
       }
 
       return this.forms[this.currentFormIndex];
@@ -1123,14 +1296,36 @@ export default {
     /* ============================================================
        SAVE & EXIT FIX: backend persistence so dashboard shows draft
        ============================================================ */
-    buildScratchStudyPayload() {
+     buildScratchStudyPayload() {
       const details = this.studyDetails || {};
       const studyNode = JSON.parse(JSON.stringify(details.study || {}));
       const meta = details.study_metadata || {};
 
-      const selectedModels = this.selectedModels.map(sec => ({
+      const normalizedForms = JSON.parse(JSON.stringify(this.forms || [])).map(form => ({
+        sections: Array.isArray(form.sections)
+          ? form.sections.map(sec => ({
+              ...sec,
+              fields: Array.isArray(sec.fields)
+                ? sec.fields.map(field => ({
+                    ...field,
+                    constraints: field.constraints || {}
+                  }))
+                : []
+            }))
+          : [],
+        logic: {
+          version: form.logic?.version || 1,
+          calculations: Array.isArray(form.logic?.calculations) ? form.logic.calculations : [],
+          conditions: Array.isArray(form.logic?.conditions) ? form.logic.conditions : []
+        }
+      }));
+
+      const selectedModels = (this.currentForm.sections || []).map(sec => ({
         title: sec.title,
-        fields: JSON.parse(JSON.stringify(sec.fields || []))
+        fields: JSON.parse(JSON.stringify(sec.fields || [])).map(field => ({
+          ...field,
+          constraints: field.constraints || {}
+        }))
       }));
 
       const studyName =
@@ -1154,7 +1349,11 @@ export default {
         description: studyDescription,
         study_description: studyDescription
       };
-
+      console.log("[ScratchForm] buildScratchStudyPayload()", {
+      normalizedForms: JSON.parse(JSON.stringify(normalizedForms || [])),
+      selectedModels: JSON.parse(JSON.stringify(selectedModels || [])),
+      currentForm: JSON.parse(JSON.stringify(this.currentForm || {}))
+    });
       return {
         study_metadata: {
           created_by: meta.created_by || this.currentUserId,
@@ -1171,7 +1370,12 @@ export default {
             subjects: JSON.parse(JSON.stringify(details.subjects || [])),
             assignments: JSON.parse(JSON.stringify(this.assignments || details.assignments || [])),
             skipSubjectCreationNow: !!details.skipSubjectCreationNow,
-            selectedModels
+
+            // old structure kept for compatibility
+            selectedModels,
+
+            // new canonical full builder structure
+            forms: normalizedForms
           }
         }
       };
@@ -1187,13 +1391,20 @@ export default {
 
       this.ensureCurrentFormExists();
 
-      const selectedFormsForStore = [{
-        sections: JSON.parse(JSON.stringify(this.currentForm.sections || [])).map(sec => ({
-          title: sec.title,
-          fields: sec.fields,
-          source: sec.source
+      const selectedFormsForStore = JSON.parse(JSON.stringify(this.forms || [])).map(form => ({
+      sections: (form.sections || []).map(sec => ({
+        ...sec,
+        fields: (sec.fields || []).map(field => ({
+          ...field,
+          constraints: field.constraints || {}
         }))
-      }];
+      })),
+      logic: {
+        version: form.logic?.version || 1,
+        calculations: Array.isArray(form.logic?.calculations) ? form.logic.calculations : [],
+        conditions: Array.isArray(form.logic?.conditions) ? form.logic.conditions : []
+      }
+    }));
 
       this.$store.commit("setStudyDetails", {
         ...this.studyDetails,
@@ -2154,7 +2365,7 @@ export default {
         ...f,
         name: `${f.name}_${Date.now()}`,
         options: f.options ? [...f.options] : [],
-        constraints: f.constraints || {},
+        constraints: JSON.parse(JSON.stringify(f.constraints || {})),
         value:
           f.type === "radio" && f.constraints?.allowMultiple ? [] :
           (f.type === "radio" || f.type === "select") ? "" :
@@ -2179,25 +2390,34 @@ export default {
       this.currentFieldIndices = { sectionIndex: si, fieldIndex: fi };
       this.currentFieldType = f.type === "slider" ? "slider" : f.type;
 
+      const existing = JSON.parse(JSON.stringify(f.constraints || {}));
+
       this.constraintsForm = {
-        ...(f.constraints || {}),
+        ...existing,
         type: this.currentFieldType,
-        options: (f.type === "select" || f.type === "radio") ? (f.options || []) : undefined,
+
+        // choice options for dialog
+        options: (f.type === "select" || f.type === "radio")
+          ? (Array.isArray(f.options) ? [...f.options] : [])
+          : existing.options,
+
+        // date defaults
         dateFormat: f.type === "date"
-          ? (f.constraints?.dateFormat || "dd.MM.yyyy")
-          : undefined,
+          ? (existing.dateFormat || "dd.MM.yyyy")
+          : existing.dateFormat,
+
+        // slider defaults
         ...(f.type === "slider" ? {
-          mode: f.constraints?.mode === "linear" ? "linear" : "slider",
-          min: Number.isFinite(f.constraints?.min) ? f.constraints.min : 1,
-          max: Number.isFinite(f.constraints?.max) ? f.constraints.max : 100,
-          step: Number.isFinite(f.constraints?.step) ? f.constraints.step : 1,
-          percent: !!f.constraints?.percent
+          mode: existing.mode === "linear" ? "linear" : "slider",
+          min: Number.isFinite(existing.min) ? existing.min : 1,
+          max: Number.isFinite(existing.max) ? existing.max : 100,
+          step: Number.isFinite(existing.step) ? existing.step : 1,
+          percent: !!existing.percent
         } : {})
       };
 
       this.showConstraintsDialog = true;
     },
-
     confirmConstraintsDialog(c) {
       const { sectionIndex, fieldIndex } = this.currentFieldIndices;
       const f = this.currentForm.sections[sectionIndex]?.fields?.[fieldIndex];
@@ -2207,9 +2427,16 @@ export default {
       }
 
       const originalType = f.type;
+      const prevConstraints = JSON.parse(JSON.stringify(f.constraints || {}));
+
+      // helper: keep any unknown / future advanced settings
+      const mergeConstraints = (normalized) => ({
+        ...prevConstraints,
+        ...normalized
+      });
 
       if (originalType === "file") {
-        const cleaned = {
+        const cleaned = mergeConstraints({
           helpText: c.helpText || "",
           required: !!c.required,
           readonly: !!c.readonly,
@@ -2217,8 +2444,15 @@ export default {
           maxSizeMB: (Number.isFinite(c.maxSizeMB) && c.maxSizeMB > 0) ? Number(c.maxSizeMB) : undefined,
           storagePreference: (c.storagePreference === "url") ? "url" : "local",
           modalities: Array.isArray(c.modalities) ? c.modalities.filter(Boolean).map(String) : [],
-          allowMultipleFiles: c.allowMultipleFiles !== false
-        };
+          allowMultipleFiles: c.allowMultipleFiles !== false,
+          visibilityLogic: c.visibilityLogic || prevConstraints.visibilityLogic || {
+            enabled: false,
+            match: "all",
+            action: "show",
+            targetFieldKeys: [],
+            rules: []
+          }
+        });
 
         if (!cleaned.modalities.length) {
           const fallback = (String(f.label || "").trim()) || f.name;
@@ -2234,8 +2468,8 @@ export default {
         const norm = normalizeConstraints(originalType, c);
 
         if ((f.type === "select" || f.type === "radio") && Array.isArray(c.options)) {
-          const cleaned = c.options.map(o => String(o || "").trim()).filter(Boolean);
-          f.options = cleaned.length ? cleaned : ["Option 1"];
+          const cleanedOptions = c.options.map(o => String(o || "").trim()).filter(Boolean);
+          f.options = cleanedOptions.length ? cleanedOptions : ["Option 1"];
         }
 
         if (f.type === "radio") {
@@ -2284,7 +2518,16 @@ export default {
           norm.dateFormat = fmt;
         }
 
-        f.constraints = { ...norm };
+        f.constraints = mergeConstraints({
+          ...norm,
+          visibilityLogic: c.visibilityLogic || prevConstraints.visibilityLogic || {
+            enabled: false,
+            match: "all",
+            action: "show",
+            targetFieldKeys: [],
+            rules: []
+          }
+        });
 
         if (
           (f.value === "" || f.value === undefined || f.value === null) &&
@@ -2304,15 +2547,24 @@ export default {
         if (max <= min) max = min + 1;
         if (max - min + 1 > 10) max = min + 9;
 
-        f.constraints = {
+        f.constraints = mergeConstraints({
           mode: "linear",
           required: !!c.required,
           readonly: !!c.readonly,
           helpText: c.helpText || "",
-          min, max,
+          min,
+          max,
           leftLabel: c.leftLabel || "",
-          rightLabel: c.rightLabel || ""
-        };
+          rightLabel: c.rightLabel || "",
+          visibilityLogic: c.visibilityLogic || prevConstraints.visibilityLogic || {
+            enabled: false,
+            match: "all",
+            action: "show",
+            targetFieldKeys: [],
+            rules: []
+          }
+        });
+
         f.value = null;
         this.showConstraintsDialog = false;
         return;
@@ -2323,15 +2575,24 @@ export default {
       if (max <= min) max = min + 1;
       let step = Number.isFinite(+c.step) && +c.step > 0 ? +c.step : 1;
 
-      f.constraints = {
+      f.constraints = mergeConstraints({
         mode: "slider",
         required: !!c.required,
         readonly: !!c.readonly,
         helpText: c.helpText || "",
         percent: !!c.percent,
-        min, max, step,
-        marks: Array.isArray(c.marks) ? c.marks : []
-      };
+        min,
+        max,
+        step,
+        marks: Array.isArray(c.marks) ? c.marks : [],
+        visibilityLogic: c.visibilityLogic || prevConstraints.visibilityLogic || {
+          enabled: false,
+          match: "all",
+          action: "show",
+          targetFieldKeys: [],
+          rules: []
+        }
+      });
 
       const v = Number(f.value);
       f.value = Number.isFinite(v) && v >= min && v <= max ? v : null;
