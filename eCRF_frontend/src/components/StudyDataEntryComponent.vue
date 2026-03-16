@@ -1,22 +1,22 @@
 <template>
   <div class="study-data-container" v-if="study">
     <!-- Back Buttons (hidden for shared links AND while Merge panel is open) -->
-     <div class="back-buttons-container" v-if="!isShared">
+    <div class="back-buttons-container" v-if="!isShared">
        <!-- Merge mode back button (same styling/position) -->
-       <button v-if="isMergeMode" @click="closeMergeStudy" class="btn-back">
+      <button v-if="isMergeMode" @click="closeMergeStudy" class="btn-back">
         Back to Selection
-       </button>
+      </button>
 
        <!-- Normal behavior -->
-       <template v-else>
-         <button v-if="showSelection" @click="goToDashboard" class="btn-back">
+      <template v-else>
+        <button v-if="showSelection" @click="goToDashboard" class="btn-back">
           Back to Dashboard
-         </button>
-         <button v-else @click="backToSelection" class="btn-back">
+        </button>
+        <button v-else @click="backToSelection" class="btn-back">
           Back to Selection
-         </button>
-       </template>
-     </div>
+        </button>
+      </template>
+    </div>
 
     <!-- Header -->
     <div class="study-header-container">
@@ -135,18 +135,20 @@
 
         <!-- Only assigned sections are shown -->
         <div v-if="assignedModelIndices.length">
-          <div
-            v-for="mIdx in assignedModelIndices"
-            :key="'sec-'+mIdx"
-            class="section-block"
-          >
+          <template v-for="mIdx in assignedModelIndices" :key="'sec-wrap-'+mIdx">
+              <div
+                v-if="hasVisibleFieldsInSection(mIdx)"
+                :key="'sec-'+mIdx"
+                class="section-block"
+              >
             <h3>{{ selectedModels[mIdx].title }}</h3>
 
-            <div
-              v-for="(field, fIdx) in selectedModels[mIdx].fields"
-              :key="'f-'+mIdx+'-'+fIdx"
-              class="form-field"
-            >
+            <template v-for="(field, fIdx) in selectedModels[mIdx].fields" :key="'f-wrap-'+mIdx+'-'+fIdx">
+              <div
+                v-if="isFieldVisible(mIdx, fIdx)"
+                :key="'f-'+mIdx+'-'+fIdx"
+                class="form-field"
+              >
               <label :for="fieldId(mIdx, fIdx)" class="field-label">
                 <span>{{ field.label || field.name || field.title }}</span>
                 <span v-if="field.constraints?.required" class="required">*</span>
@@ -168,12 +170,12 @@
                 v-model="entryData[currentSubjectIndex][currentVisitIndex][currentGroupIndex][mIdx][fIdx]"
                 :placeholder="field.placeholder"
                 :required="!!field.constraints?.required"
-                :readonly="!!field.constraints?.readonly || !canEdit"
+                :readonly="isReadonlyField(field, mIdx, fIdx)"
                 :minlength="field.constraints?.minLength"
                 :maxlength="field.constraints?.maxLength"
                 :pattern="field.constraints?.pattern"
                 @blur="onFieldBlur(mIdx, fIdx)"
-                @input="clearError(mIdx, fIdx)"
+                @input="() => { clearError(mIdx, fIdx); onRuntimeFieldChanged(mIdx, fIdx); }"
               />
 
               <!-- TEXTAREA -->
@@ -183,13 +185,13 @@
                 v-model="entryData[currentSubjectIndex][currentVisitIndex][currentGroupIndex][mIdx][fIdx]"
                 :placeholder="field.placeholder"
                 :required="!!field.constraints?.required"
-                :readonly="!!field.constraints?.readonly || !canEdit"
+                :readonly="isReadonlyField(field, mIdx, fIdx)"
                 :minlength="field.constraints?.minLength"
                 :maxlength="field.constraints?.maxLength"
                 :pattern="field.constraints?.pattern"
                 rows="4"
                 @blur="onFieldBlur(mIdx, fIdx)"
-                @input="clearError(mIdx, fIdx)"
+                @input="() => { clearError(mIdx, fIdx); onRuntimeFieldChanged(mIdx, fIdx); }"
               ></textarea>
 
               <!-- NUMBER -->
@@ -200,23 +202,23 @@
                 v-model.number="entryData[currentSubjectIndex][currentVisitIndex][currentGroupIndex][mIdx][fIdx]"
                 :placeholder="field.placeholder"
                 :required="!!field.constraints?.required"
-                :readonly="!!field.constraints?.readonly || !canEdit"
+                :readonly="isReadonlyField(field, mIdx, fIdx)"
                 :min="field.constraints?.min"
                 :max="field.constraints?.max"
                 :step="field.constraints?.step"
-                @blur="validateField(mIdx, fIdx)"
-                @input="clearError(mIdx, fIdx)"
+                @blur="() => { validateField(mIdx, fIdx); onRuntimeFieldChanged(mIdx, fIdx); }"
+                @input="() => { clearError(mIdx, fIdx); onRuntimeFieldChanged(mIdx, fIdx); }"
               />
 
               <!-- CHECKBOX -->
               <FieldCheckbox
-                  v-else-if="field.type === 'checkbox'"
-                  :id="fieldId(mIdx, fIdx)"
-                  v-model="entryData[currentSubjectIndex][currentVisitIndex][currentGroupIndex][mIdx][fIdx]"
-                  v-bind="selectedModels[mIdx].fields[fIdx].constraints"
-                  :disabled="!canEdit"
-                  @update:modelValue="() => { clearError(mIdx, fIdx); validateField(mIdx, fIdx); }"
-                />
+                v-else-if="field.type === 'checkbox'"
+                :id="fieldId(mIdx, fIdx)"
+                v-model="entryData[currentSubjectIndex][currentVisitIndex][currentGroupIndex][mIdx][fIdx]"
+                v-bind="selectedModels[mIdx].fields[fIdx].constraints"
+                :disabled="isReadonlyField(field, mIdx, fIdx)"
+                @update:modelValue="() => { clearError(mIdx, fIdx); validateField(mIdx, fIdx); onRuntimeFieldChanged(mIdx, fIdx); }"
+              />
 
               <!-- RADIO -->
               <FieldRadioGroup
@@ -227,9 +229,9 @@
                 v-model="entryData[currentSubjectIndex][currentVisitIndex][currentGroupIndex][mIdx][fIdx]"
                 :default-value="field.constraints?.defaultValue"
                 v-bind="selectedModels[mIdx].fields[fIdx].constraints"
-                :disabled="!canEdit"
-                @change="validateField(mIdx, fIdx)"
-                @update:modelValue="() => { clearError(mIdx, fIdx); validateField(mIdx, fIdx); }"
+                :disabled="isReadonlyField(field, mIdx, fIdx)"
+                @change="() => { validateField(mIdx, fIdx); onRuntimeFieldChanged(mIdx, fIdx); }"
+                @update:modelValue="() => { clearError(mIdx, fIdx); validateField(mIdx, fIdx); onRuntimeFieldChanged(mIdx, fIdx); }"
               />
 
               <!-- DATE -->
@@ -241,9 +243,9 @@
                 :placeholder="field.placeholder || (field.constraints?.dateFormat || 'dd.MM.yyyy')"
                 :min-date="field.constraints?.minDate || null"
                 :max-date="field.constraints?.maxDate || null"
-                :readonly="!!field.constraints?.readonly || !canEdit"
-                @change="validateField(mIdx, fIdx)"
-                @blur="validateField(mIdx, fIdx)"
+                :readonly="isReadonlyField(field, mIdx, fIdx)"
+                @change="() => { validateField(mIdx, fIdx); onRuntimeFieldChanged(mIdx, fIdx); }"
+                @blur="() => { validateField(mIdx, fIdx); onRuntimeFieldChanged(mIdx, fIdx); }"
               />
 
               <!-- TIME -->
@@ -253,9 +255,9 @@
                 v-model="entryData[currentSubjectIndex][currentVisitIndex][currentGroupIndex][mIdx][fIdx]"
                 :placeholder="field.placeholder || (field.constraints?.timeFormat || 'HH:mm')"
                 v-bind="selectedModels[mIdx].fields[fIdx].constraints"
-                :readonly="!!field.constraints?.readonly || !canEdit"
-                @change="validateField(mIdx, fIdx)"
-                @blur="validateField(mIdx, fIdx)"
+                :readonly="isReadonlyField(field, mIdx, fIdx)"
+                @change="() => { validateField(mIdx, fIdx); onRuntimeFieldChanged(mIdx, fIdx); }"
+                @blur="() => { validateField(mIdx, fIdx); onRuntimeFieldChanged(mIdx, fIdx); }"
               />
 
               <!-- SELECT -->
@@ -265,21 +267,21 @@
                 v-model="entryData[currentSubjectIndex][currentVisitIndex][currentGroupIndex][mIdx][fIdx]"
                 :options="field.options || []"
                 :multiple="!!field.constraints?.allowMultiple"
-                :readonly="!!field.constraints?.readonly || !canEdit"
+                :readonly="isReadonlyField(field, mIdx, fIdx)"
                 :default-value="field.constraints?.defaultValue"
                 :placeholder="'Select…'"
-                @update:modelValue="() => validateField(mIdx, fIdx)"
+                @update:modelValue="() => { validateField(mIdx, fIdx); onRuntimeFieldChanged(mIdx, fIdx); }"
               />
 
-              <!-- SLIDER (mode=slider) -->
+              <!-- SLIDER -->
               <FieldSlider
                 v-else-if="field.type === 'slider' && (field.constraints?.mode || 'slider') === 'slider'"
                 :id="fieldId(mIdx, fIdx)"
                 v-model="entryData[currentSubjectIndex][currentVisitIndex][currentGroupIndex][mIdx][fIdx]"
                 v-bind="getSliderProps(field)"
-                :disabled="!canEdit"
-                @update:modelValue="() => { clearError(mIdx, fIdx); validateField(mIdx, fIdx); }"
-                @change="validateField(mIdx, fIdx)"
+                :disabled="isReadonlyField(field, mIdx, fIdx)"
+                @update:modelValue="() => { clearError(mIdx, fIdx); validateField(mIdx, fIdx); onRuntimeFieldChanged(mIdx, fIdx); }"
+                @change="() => { validateField(mIdx, fIdx); onRuntimeFieldChanged(mIdx, fIdx); }"
               />
 
               <!-- LINEAR SCALE -->
@@ -288,9 +290,9 @@
                 :id="fieldId(mIdx, fIdx)"
                 v-model="entryData[currentSubjectIndex][currentVisitIndex][currentGroupIndex][mIdx][fIdx]"
                 v-bind="getLinearProps(field)"
-                :disabled="!canEdit"
-                @update:modelValue="() => { clearError(mIdx, fIdx); validateField(mIdx, fIdx); }"
-                @change="validateField(mIdx, fIdx)"
+                :disabled="isReadonlyField(field, mIdx, fIdx)"
+                @update:modelValue="() => { clearError(mIdx, fIdx); validateField(mIdx, fIdx); onRuntimeFieldChanged(mIdx, fIdx); }"
+                @change="() => { validateField(mIdx, fIdx); onRuntimeFieldChanged(mIdx, fIdx); }"
               />
 
               <!-- FILE -->
@@ -299,7 +301,7 @@
                 :id="fieldId(mIdx, fIdx)"
                 :value="entryData[currentSubjectIndex][currentVisitIndex][currentGroupIndex][mIdx][fIdx]"
                 :constraints="field.constraints || {}"
-                :readonly="!!field.constraints?.readonly || !canEdit"
+                :readonly="isReadonlyField(field, mIdx, fIdx)"
                 :required="!!field.constraints?.required"
                 stage="runtime"
                 @input="(meta) => setEntryValue(mIdx, fIdx, meta)"
@@ -314,12 +316,11 @@
                 v-model="entryData[currentSubjectIndex][currentVisitIndex][currentGroupIndex][mIdx][fIdx]"
                 :placeholder="field.placeholder"
                 :required="!!field.constraints?.required"
-                :readonly="!!field.constraints?.readonly || !canEdit"
+                :readonly="isReadonlyField(field, mIdx, fIdx)"
                 @blur="onFieldBlur(mIdx, fIdx)"
-                @input="clearError(mIdx, fIdx)"
+                @input="() => { clearError(mIdx, fIdx); onRuntimeFieldChanged(mIdx, fIdx); }"
               />
 
-              <!-- ERROR -->
               <div v-if="fieldErrors(mIdx, fIdx)" class="error-message">
                 {{ fieldErrors(mIdx, fIdx) }}
                 <span
@@ -331,8 +332,14 @@
               <div v-else-if="isFieldSkipped(mIdx,fIdx)" class="error-message">
                 <span class="skip-pill" title="Required validation skipped for this field">Skipped</span>
               </div>
-            </div>
+
+              <div v-if="fieldCalcWarning(mIdx, fIdx)" class="calc-warning-message">
+                {{ fieldCalcWarning(mIdx, fIdx) }}
+              </div>
+              </div>
+             </template>
           </div>
+          </template>
 
           <!-- Actions -->
           <div class="form-actions">
@@ -603,6 +610,15 @@ import AddSubjectsDialog from "@/components/AddSubjectsDialog.vue";
 import { createAjv, validateFieldValue } from "@/utils/jsonschemaValidation";
 
 import MergeStudy from "@/components/MergeStudy.vue";
+import {
+  getCalculationRulesFromStudy,
+  getCalculationFormulaForField,
+  buildFieldLookup,
+  isCalculatedRuntimeField as isCalculatedRuntimeFieldUtil,
+  computeCalculation,
+  sectionHasVisibleFields,
+  evaluateFieldVisibility,
+} from "@/utils/formLogicRuntime";
 
 export default {
   name: "StudyDataEntryComponent",
@@ -647,6 +663,9 @@ export default {
       entryData: [],
       skipFlags: [],
       validationErrors: {},
+
+      // calc warnings
+      calcWarnings: {},
 
       icons,
       showShareDialog: false,
@@ -720,17 +739,9 @@ export default {
     canSeeGroupColumn() {
       if (!this.study?.metadata) return false;
 
-      // creator
-      const isCreator =
-        this.study.metadata.created_by === this.$store.state.user?.id;
-
-      // shared link with add permission
-      const hasAddPermission =
-        this.isShared && this.sharedPermission === "add";
-
-
-      const isAdmin =
-        this.$store.state.user?.role === "Administrator";
+      const isCreator = this.study.metadata.created_by === this.$store.state.user?.id;
+      const hasAddPermission = this.isShared && this.sharedPermission === "add";
+      const isAdmin = this.$store.state.user?.role === "Administrator";
 
       return isCreator || hasAddPermission || isAdmin;
     },
@@ -820,12 +831,8 @@ export default {
     },
 
     assignedModelIndices() {
-      const v = Number.isInteger(this.currentVisitIndex)
-        ? this.currentVisitIndex
-        : 0;
-      const g = Number.isInteger(this.currentGroupIndex)
-        ? this.currentGroupIndex
-        : 0;
+      const v = Number.isInteger(this.currentVisitIndex) ? this.currentVisitIndex : 0;
+      const g = Number.isInteger(this.currentGroupIndex) ? this.currentGroupIndex : 0;
       if (v == null || g == null) return [];
       return this.selectedModels
         .map((_, mIdx) => mIdx)
@@ -847,6 +854,10 @@ export default {
         if (!/ is required\.$/.test(msg)) return true;
       }
       return false;
+    },
+
+    calculationRules() {
+      return getCalculationRulesFromStudy(this.study);
     },
   },
 
@@ -924,9 +935,199 @@ export default {
   },
 
   methods: {
-    // --- Merge Study controls ---
+    getCurrentCellData() {
+      const s = this.currentSubjectIndex;
+      const v = this.currentVisitIndex;
+      const g = this.currentGroupIndex;
 
-    // --- Merge Study controls ---
+      if (s == null || v == null || g == null) return [];
+      this.ensureSlot(s, v, g);
+      return this.entryData?.[s]?.[v]?.[g] || [];
+    },
+
+    isFieldVisible(mIdx, fIdx) {
+      const cellData = this.getCurrentCellData();
+      return evaluateFieldVisibility(this.study, this.selectedModels, cellData, mIdx, fIdx);
+    },
+
+    hasVisibleFieldsInSection(mIdx) {
+      const cellData = this.getCurrentCellData();
+      return sectionHasVisibleFields(this.study, this.selectedModels, cellData, mIdx);
+    },
+    fieldCalcWarning(mIdx, fIdx) {
+      const runtimeKey = this.currentCalcKey(mIdx, fIdx);
+      const runtimeWarning = this.calcWarnings?.[runtimeKey];
+      if (runtimeWarning) return runtimeWarning;
+
+      const field = this.selectedModels?.[mIdx]?.fields?.[fIdx];
+      if (!field) return "";
+
+      return getCalculationFormulaForField(this.study, this.selectedModels, field) || "";
+    },
+    /* ============================================================
+       CALC RUNTIME HELPERS
+       ============================================================ */
+    calcKey(s, v, g, m, f) {
+      return `${s}-${v}-${g}-${m}-${f}`;
+    },
+    currentCalcKey(mIdx, fIdx) {
+      return this.calcKey(
+        this.currentSubjectIndex,
+        this.currentVisitIndex,
+        this.currentGroupIndex,
+        mIdx,
+        fIdx
+      );
+    },
+    setCalcWarningFor(mIdx, fIdx, msg) {
+      const k = this.currentCalcKey(mIdx, fIdx);
+      const next = { ...this.calcWarnings };
+      if (msg) next[k] = msg;
+      else delete next[k];
+      this.calcWarnings = next;
+    },
+    clearCalcWarningFor(mIdx, fIdx) {
+      this.setCalcWarningFor(mIdx, fIdx, "");
+    },
+
+    isCalculatedRuntimeField(mIdx, fIdx) {
+      const field = this.selectedModels?.[mIdx]?.fields?.[fIdx];
+      return isCalculatedRuntimeFieldUtil(this.study, field);
+    },
+
+    isReadonlyField(field, mIdx, fIdx) {
+      return !!field?.constraints?.readonly || !this.canEdit || this.isCalculatedRuntimeField(mIdx, fIdx);
+    },
+
+    getFieldLookup() {
+      return buildFieldLookup(this.selectedModels);
+    },
+
+    getFieldMetaByRuleFieldId(ruleFieldId) {
+      if (!ruleFieldId) return null;
+      const lookup = this.getFieldLookup();
+      return lookup.get(String(ruleFieldId)) || null;
+    },
+
+    getCellValueByFieldId(s, v, g, ruleFieldId) {
+      const meta = this.getFieldMetaByRuleFieldId(ruleFieldId);
+      if (!meta) return undefined;
+      const { mIdx, fIdx } = meta;
+      return this.entryData?.[s]?.[v]?.[g]?.[mIdx]?.[fIdx];
+    },
+
+    setCellValueByFieldId(s, v, g, ruleFieldId, value) {
+      const meta = this.getFieldMetaByRuleFieldId(ruleFieldId);
+      if (!meta) return false;
+      const { mIdx, fIdx } = meta;
+      this.setDeepValue(s, v, g, mIdx, fIdx, value);
+      return true;
+    },
+
+    clearCalcWarningByRuleTarget(s, v, g, targetId) {
+      const meta = this.getFieldMetaByRuleFieldId(targetId);
+      if (!meta) return;
+      const { mIdx, fIdx } = meta;
+      const k = this.calcKey(s, v, g, mIdx, fIdx);
+      const next = { ...this.calcWarnings };
+      delete next[k];
+      this.calcWarnings = next;
+    },
+
+    setCalcWarningByRuleTarget(s, v, g, targetId, msg) {
+      const meta = this.getFieldMetaByRuleFieldId(targetId);
+      if (!meta) return;
+      const { mIdx, fIdx } = meta;
+      const k = this.calcKey(s, v, g, mIdx, fIdx);
+      const next = { ...this.calcWarnings };
+      if (msg) next[k] = msg;
+      else delete next[k];
+      this.calcWarnings = next;
+    },
+
+    runCalculationsForCell(s, v, g, changedMIdx = null, changedFIdx = null) {
+      const rules = this.calculationRules || [];
+      if (!rules.length) return;
+
+      const changedField = changedMIdx != null && changedFIdx != null
+        ? this.selectedModels?.[changedMIdx]?.fields?.[changedFIdx]
+        : null;
+
+      const changedKeys = changedField
+        ? new Set(
+            [
+              changedField?._id,
+              changedField?.id,
+              changedField?.field_id,
+              changedField?.uid,
+              changedField?.key,
+              changedField?.name,
+              changedField?.label,
+            ]
+              .filter(Boolean)
+              .map(String)
+          )
+        : null;
+
+      rules.forEach((rule) => {
+        if (!rule?.target || !Array.isArray(rule?.sources) || !rule.sources.length) return;
+
+        if (changedKeys) {
+          const touchesChanged = rule.sources.some((src) => changedKeys.has(String(src)));
+          if (!touchesChanged) return;
+        }
+
+        const sourceValues = rule.sources.map((srcId) => this.getCellValueByFieldId(s, v, g, srcId));
+        const result = computeCalculation(rule, sourceValues);
+
+        if (!result.ok) {
+          this.setCellValueByFieldId(s, v, g, rule.target, null);
+          this.setCalcWarningByRuleTarget(s, v, g, rule.target, result.warning || "Calculation could not be applied.");
+          return;
+        }
+
+        const targetMeta = this.getFieldMetaByRuleFieldId(rule.target);
+        if (!targetMeta) return;
+
+        const { mIdx, fIdx } = targetMeta;
+        this.setDeepValue(s, v, g, mIdx, fIdx, result.value);
+        this.clearError(mIdx, fIdx);
+        this.setCalcWarningByRuleTarget(s, v, g, rule.target, "");
+
+        const fieldDef = this.selectedModels?.[mIdx]?.fields?.[fIdx];
+        if (fieldDef) {
+          this.validateField(mIdx, fIdx);
+        }
+      });
+    },
+
+    runAllCalculationsForCurrentCell() {
+      const s = this.currentSubjectIndex;
+      const v = this.currentVisitIndex;
+      const g = this.currentGroupIndex;
+      if (s == null || v == null || g == null) return;
+      this.ensureSlot(s, v, g);
+      this.runCalculationsForCell(s, v, g, null, null);
+    },
+
+    onRuntimeFieldChanged(mIdx, fIdx) {
+      const s = this.currentSubjectIndex;
+      const v = this.currentVisitIndex;
+      const g = this.currentGroupIndex;
+      if (s == null || v == null || g == null) return;
+      this.ensureSlot(s, v, g);
+
+      // user changed something manually -> source errors may go away
+      this.clearError(mIdx, fIdx);
+
+      this.$nextTick(() => {
+        this.runCalculationsForCell(s, v, g, mIdx, fIdx);
+      });
+    },
+
+    /* ============================================================
+       MERGE CONTROLS
+       ============================================================ */
     openMergeStudy() {
       if (this.isShared) return;
       const id = this.studyId || Number(this.$route.params.id);
@@ -1028,7 +1229,7 @@ export default {
         const resp = await axios.get(
           `/forms/studies/${studyId}/versions`,
           {
-            headers: { Authorization: `Bearer ${this.token}` },
+          headers: { Authorization: `Bearer ${this.token}` },
           }
         );
         this.studyVersions = Array.isArray(resp.data)
@@ -1130,8 +1331,8 @@ export default {
         const resp = await axios.get(
           `/forms/studies/${studyId}/template`,
           {
-            headers: { Authorization: `Bearer ${this.token}` },
-            params: { version: this.selectedVersion },
+          headers: { Authorization: `Bearer ${this.token}` },
+          params: { version: this.selectedVersion },
           }
         );
         const rawSchema = resp?.data?.schema || {};
@@ -1151,18 +1352,9 @@ export default {
         this.applyVersionView();
         const nS = this.numberOfSubjects;
         const nV = this.visitList.length;
-        if (
-          this.currentSubjectIndex == null ||
-          this.currentSubjectIndex >= nS
-        )
-          this.currentSubjectIndex = Math.min(0, nS - 1);
-        if (
-          this.currentVisitIndex == null ||
-          this.currentVisitIndex >= nV
-        )
-          this.currentVisitIndex = Math.min(0, nV - 1);
-        this.selectedVisitIndex =
-          this.visitList.length > this.VISIT_THRESHOLD ? 0 : -1;
+        if (this.currentSubjectIndex == null || this.currentSubjectIndex >= nS) this.currentSubjectIndex = Math.min(0, nS - 1);
+        if (this.currentVisitIndex == null || this.currentVisitIndex >= nV) this.currentVisitIndex = Math.min(0, nV - 1);
+        this.selectedVisitIndex = this.visitList.length > this.VISIT_THRESHOLD ? 0 : -1;
       });
     },
 
@@ -1225,14 +1417,15 @@ export default {
     },
     fieldDictKey(fieldObj, fallbackIndex) {
       return (
-            fieldObj?.name ||               //  "checkbox_3_1772010932126"
-            fieldObj?.id ||
-            fieldObj?.field_id ||
-            fieldObj?.uid ||
-            fieldObj?.key ||
-            fieldObj?.label ||
-            fieldObj?.title ||
-            `f${fallbackIndex}`
+        fieldObj?.id ||
+        fieldObj?._id ||
+        fieldObj?.name ||
+        fieldObj?.field_id ||
+        fieldObj?.uid ||
+        fieldObj?.key ||
+        fieldObj?.label ||
+        fieldObj?.title ||
+        `f${fallbackIndex}`
       );
     },
     arrayToDict(sectionFieldArray) {
@@ -1278,6 +1471,7 @@ export default {
           // Try multiple candidate keys
           const candidates = [
             f?.id,
+            f?._id,
             f?.field_id,
             f?.uid,
             f?.key,
@@ -1348,6 +1542,7 @@ export default {
         this.skipFlags[s] ??= [];
         this.skipFlags[s][v] ??= [];
         this.skipFlags[s][v][g] = cached.skipFlags;
+        this.runCalculationsForCell(s, v, g, null, null);
         return;
       }
 
@@ -1359,6 +1554,7 @@ export default {
           skipFlags: this.skipFlags[s][v][g],
           id: null,
         });
+        this.runCalculationsForCell(s, v, g, null, null);
         return;
       }
 
@@ -1393,6 +1589,8 @@ export default {
         skipFlags: this.skipFlags[s][v][g],
         id: best.id,
       });
+
+      this.runCalculationsForCell(s, v, g, null, null);
     },
 
     setDeepValue(s, v, g, m, f, val) {
@@ -1421,6 +1619,7 @@ export default {
       this.setDeepValue(s, v, g, mIdx, fIdx, val);
       this.clearError(mIdx, fIdx);
       this.validateField(mIdx, fIdx);
+      this.onRuntimeFieldChanged(mIdx, fIdx);
       this.hydrateCache.delete(`${s}|${v}|${g}|${this.selectedVersion}`);
     },
 
@@ -1652,13 +1851,14 @@ export default {
         }
       }
       this.validateField(mIdx, fIdx);
+      this.onRuntimeFieldChanged(mIdx, fIdx);
     },
     applyTransformsForSection() {
       this.assignedModelIndices.forEach((mIdx) => {
         this.selectedModels[mIdx].fields.forEach(
           (def, fIdx) => {
-            if (!def) return;
-            const cons = def.constraints || {};
+          if (!def) return;
+          const cons = def.constraints || {};
             if (
               def.type === "text" ||
               def.type === "textarea"
@@ -1667,19 +1867,20 @@ export default {
                 this.entryData[this.currentSubjectIndex][
                   this.currentVisitIndex
                 ][this.currentGroupIndex][mIdx][fIdx];
-              const t = this.applyTransform(cons.transform, cur);
-              if (t !== cur)
-                this.setDeepValue(
-                  this.currentSubjectIndex,
-                  this.currentVisitIndex,
-                  this.currentGroupIndex,
-                  mIdx,
-                  fIdx,
-                  t
-                );
+            const t = this.applyTransform(cons.transform, cur);
+            if (t !== cur) {
+              this.setDeepValue(
+                this.currentSubjectIndex,
+                this.currentVisitIndex,
+                this.currentGroupIndex,
+                mIdx,
+                fIdx,
+                t
+              );
+              this.onRuntimeFieldChanged(mIdx, fIdx);
             }
           }
-        );
+        });
       });
     },
 
@@ -1739,11 +1940,8 @@ export default {
         this.currentSubjectIndex = payload.subject_index ?? 0;
         this.currentVisitIndex = payload.visit_index ?? 0;
         this.currentGroupIndex = payload.group_index ?? 0;
-        this.ensureSlot(
-          this.currentSubjectIndex,
-          this.currentVisitIndex,
-          this.currentGroupIndex
-        );
+        this.ensureSlot(this.currentSubjectIndex, this.currentVisitIndex, this.currentGroupIndex);
+        this.runAllCalculationsForCurrentCell();
         this.showSelection = false;
         this.validationErrors = {};
       } catch (e) {
@@ -1816,6 +2014,11 @@ export default {
         const section = this.selectedModels[mIdx];
         section.fields.forEach((f, fIdx) => {
           const cons = f?.constraints || {};
+          if (this.isCalculatedRuntimeField(mIdx, fIdx)) {
+            this.clearError(mIdx, fIdx);
+            this.clearCalcWarningFor(mIdx, fIdx);
+            return;
+          }
           if (cons.readonly) {
             this.clearError(mIdx, fIdx);
             return;
@@ -1826,8 +2029,10 @@ export default {
           this.setDeepValue(s, v, g, mIdx, fIdx, next);
           this.setDeepSkip(s, v, g, mIdx, fIdx, false);
           this.clearError(mIdx, fIdx);
+          this.clearCalcWarningFor(mIdx, fIdx);
         });
       });
+      this.runAllCalculationsForCurrentCell();
       this.hydrateCache.delete(`${s}|${v}|${g}|${this.selectedVersion}`);
     },
 
@@ -1855,6 +2060,7 @@ export default {
       );
 
       this.validationErrors = {};
+      this.calcWarnings = {};
     },
 
     prepareAssignmentsLookup() {
@@ -1873,7 +2079,7 @@ export default {
     prepareSubjectGroupIndexMap() {
       const subjects =
         this.study?.content?.study_data?.subjects || [];
-        this.subjectToGroupIdx = subjects.map((s) => {
+      this.subjectToGroupIdx = subjects.map((s) => {
         const raw = (s.group || "");
         const name = String(raw).trim();
         if (!name) return -1;
@@ -2036,13 +2242,11 @@ export default {
 
       this.showSelection = false;
       this.validationErrors = {};
+      this.calcWarnings = {};
 
       this.visitLoading = true;
-      this.hydrateCell(
-        this.currentSubjectIndex,
-        this.currentVisitIndex,
-        this.currentGroupIndex
-      );
+      this.hydrateCell(this.currentSubjectIndex, this.currentVisitIndex, this.currentGroupIndex);
+      this.runAllCalculationsForCurrentCell();
       this.visitLoading = false;
     },
 
@@ -2054,6 +2258,7 @@ export default {
       this.currentVisitIndex = null;
       this.currentGroupIndex = 0;
       this.validationErrors = {};
+      this.calcWarnings = {};
     },
     toggleDetails() {
       this.showDetails = !this.showDetails;
@@ -2181,22 +2386,10 @@ export default {
           }
           return true;
         } else {
-          const min = Number.isFinite(+cons.min)
-            ? Math.round(+cons.min)
-            : 1;
-          const max = Number.isFinite(+cons.max)
-            ? Math.round(+cons.max)
-            : 5;
-          if (
-            n < min ||
-            n > max ||
-            Math.round(n) !== n
-          ) {
-            this.setError(
-              mIdx,
-              fIdx,
-              `${label} must be an integer between ${min} and ${max}.`
-            );
+          const min = Number.isFinite(+cons.min) ? Math.round(+cons.min) : 1;
+          const max = Number.isFinite(+cons.max) ? Math.round(+cons.max) : 5;
+          if (n < min || n > max || Math.round(n) !== n) {
+            this.setError(mIdx, fIdx, `${label} must be an integer between ${min} and ${max}.`);
             return false;
           }
           return true;
@@ -2204,25 +2397,15 @@ export default {
       }
 
       if (def.type !== "file") {
-        const { valid, message } = validateFieldValue(
-          this.ajv,
-          def,
-          val
-        );
+        const { valid, message } = validateFieldValue(this.ajv, def, val);
         if (!valid) {
-          this.setError(
-            mIdx,
-            fIdx,
-            message || `${label} is invalid.`
-          );
+          this.setError(mIdx, fIdx, message || `${label} is invalid.`);
           return false;
         }
       }
 
       if (def.type === "date" && val) {
-        const cons =
-          (this.selectedModels[mIdx].fields[fIdx] || {})
-            .constraints || {};
+        const cons = (this.selectedModels[mIdx].fields[fIdx] || {}).constraints || {};
         const fmt = cons.dateFormat || "dd.MM.yyyy";
         const parse = (s) => {
           const map = {
@@ -2277,22 +2460,14 @@ export default {
           if (cons.minDate) {
             const md = parse(cons.minDate);
             if (md && d < md) {
-              this.setError(
-                mIdx,
-                fIdx,
-                `${def.label || def.name || "This field"} must be ≥ ${cons.minDate}.`
-              );
+              this.setError(mIdx, fIdx, `${def.label || def.name || "This field"} must be ≥ ${cons.minDate}.`);
               return false;
             }
           }
           if (cons.maxDate) {
             const xd = parse(cons.maxDate);
             if (xd && d > xd) {
-              this.setError(
-                mIdx,
-                fIdx,
-                `${def.label || def.name || "This field"} must be ≤ ${cons.maxDate}.`
-              );
+              this.setError(mIdx, fIdx, `${def.label || def.name || "This field"} must be ≤ ${cons.maxDate}.`);
               return false;
             }
           }
@@ -2300,12 +2475,9 @@ export default {
       }
 
       if (def.type === "time" && val) {
-        const cons =
-          (this.selectedModels[mIdx].fields[fIdx] || {})
-            .constraints || {};
+        const cons = (this.selectedModels[mIdx].fields[fIdx] || {}).constraints || {};
         const toSec = (s) => {
-          const mm =
-            /^(\d{2}):(\d{2})(?::(\d{2}))?$/.exec(String(s));
+          const mm = /^(\d{2}):(\d{2})(?::(\d{2}))?$/.exec(String(s));
           if (!mm) return null;
           const h = +mm[1],
             mi = +mm[2],
@@ -2317,22 +2489,14 @@ export default {
           if (cons.minTime) {
             const m = toSec(cons.minTime);
             if (m != null && secs < m) {
-              this.setError(
-                mIdx,
-                fIdx,
-                `${def.label || def.name || "This field"} must be ≥ ${cons.minTime}.`
-              );
+              this.setError(mIdx, fIdx, `${def.label || def.name || "This field"} must be ≥ ${cons.minTime}.`);
               return false;
             }
           }
           if (cons.maxTime) {
             const x = toSec(cons.maxTime);
             if (x != null && secs > x) {
-              this.setError(
-                mIdx,
-                fIdx,
-                `${def.label || def.name || "This field"} must be ≤ ${cons.maxTime}.`
-              );
+              this.setError(mIdx, fIdx, `${def.label || def.name || "This field"} must be ≤ ${cons.maxTime}.`);
               return false;
             }
           }
@@ -2343,21 +2507,17 @@ export default {
 
     validateCurrentSection() {
       this.assignedModelIndices.forEach((mIdx) => {
-        this.selectedModels[mIdx].fields.forEach(
-          (_, fIdx) => {
-            this.clearError(mIdx, fIdx);
-          }
-        );
+        this.selectedModels[mIdx].fields.forEach((_, fIdx) => {
+          this.clearError(mIdx, fIdx);
+        });
       });
 
       let ok = true;
       this.assignedModelIndices.forEach((mIdx) => {
-        this.selectedModels[mIdx].fields.forEach(
-          (_, fIdx) => {
-            const r = this.validateField(mIdx, fIdx);
-            ok = ok && r;
-          }
-        );
+        this.selectedModels[mIdx].fields.forEach((_, fIdx) => {
+          const r = this.validateField(mIdx, fIdx);
+          ok = ok && r;
+        });
       });
       return ok;
     },
@@ -2373,47 +2533,26 @@ export default {
         (section.fields || []).forEach((f, fIdx) => {
           const c = f?.constraints || {};
           if (!c.required) return;
-          if (this.skipFlags[s]?.[v]?.[g]?.[mIdx]?.[fIdx])
-            return;
+          if (this.skipFlags[s]?.[v]?.[g]?.[mIdx]?.[fIdx]) return;
           const val = this.entryData[s][v][g][mIdx][fIdx];
           const empty =
             f.type === "checkbox"
               ? val !== true
               : f.type === "file"
               ? c.allowMultipleFiles
-                ? !(
-                    Array.isArray(val) &&
-                    val.length > 0
-                  )
-                : !val ||
-                  (val.source === "url"
-                    ? !(
-                        val.url &&
-                        String(val.url).trim()
-                      )
-                    : !(
-                        val.name &&
-                        Number.isFinite(
-                          Number(val.size)
-                        )
-                      ))
+                ? !(Array.isArray(val) && val.length > 0)
+                : !val || (val.source === "url" ? !(val.url && String(val.url).trim()) : !(val.name && Number.isFinite(Number(val.size))))
               : Array.isArray(val)
               ? val.length === 0
-              : val == null ||
-                (typeof val === "string" &&
-                  val.trim() === "");
+              : val == null || (typeof val === "string" && val.trim() === "");
           if (empty) {
             items.push({
               key: this.errorKey(mIdx, fIdx),
               id: this.fieldId(mIdx, fIdx),
               sectionIndex: mIdx,
               fieldIndex: fIdx,
-              sectionTitle:
-                section.title || `Section ${mIdx + 1}`,
-              fieldLabel:
-                f.label ||
-                f.name ||
-                `Field ${fIdx + 1}`,
+              sectionTitle: section.title || `Section ${mIdx + 1}`,
+              fieldLabel: f.label || f.name || `Field ${fIdx + 1}`,
             });
           }
         });
@@ -2430,11 +2569,7 @@ export default {
 
       for (const mIdx of this.assignedModelIndices) {
         const section = this.selectedModels[mIdx];
-        for (
-          let fIdx = 0;
-          fIdx < (section.fields || []).length;
-          fIdx++
-        ) {
+        for (let fIdx = 0; fIdx < (section.fields || []).length; fIdx++) {
           const def = section.fields[fIdx] || {};
           if (def.type !== "file") continue;
 
@@ -2444,22 +2579,10 @@ export default {
           const val = this.entryData[s][v][g][mIdx][fIdx];
           if (!val && !allowMulti) continue;
 
-          const modalities = Array.isArray(
-            def?.constraints?.modalities
-          )
-            ? def.constraints.modalities
-            : [];
-          const modalitiesJson = JSON.stringify(
-            modalities || []
-          );
+          const modalities = Array.isArray(def?.constraints?.modalities) ? def.constraints.modalities : [];
+          const modalitiesJson = JSON.stringify(modalities || []);
 
-          const pendingArr = Array.isArray(
-            this.pendingFiles[key]
-          )
-            ? this.pendingFiles[key]
-            : this.pendingFiles[key]
-            ? [this.pendingFiles[key]]
-            : [];
+          const pendingArr = Array.isArray(this.pendingFiles[key]) ? this.pendingFiles[key] : this.pendingFiles[key] ? [this.pendingFiles[key]] : [];
           const matchFile = (meta) =>
             pendingArr.find(
               (f) =>
@@ -2467,14 +2590,10 @@ export default {
                 meta &&
                 f.name === meta.name &&
                 Number(f.size) === Number(meta.size) &&
-                (f.lastModified
-                  ? f.lastModified === meta.lastModified
-                  : true)
+                (f.lastModified ? f.lastModified === meta.lastModified : true)
             );
 
-          const base = this.isShared
-            ? `/forms/shared/${this.shareToken}`
-            : `/forms/studies/${studyId}`;
+          const base = this.isShared ? `/forms/shared/${this.shareToken}` : `/forms/studies/${studyId}`;
 
           if (allowMulti) {
             const items = Array.isArray(val) ? [...val] : [];
@@ -2487,14 +2606,8 @@ export default {
                 if (!file) continue;
                 const fd = new FormData();
                 fd.append("uploaded_file", file);
-                fd.append(
-                  "description",
-                  def.label || def.name || ""
-                );
-                fd.append(
-                  "modalities_json",
-                  modalitiesJson
-                );
+                fd.append("description", def.label || def.name || "");
+                fd.append("modalities_json", modalitiesJson);
                 if (!this.isShared) {
                   fd.append("storage_option", "local");
                   fd.append("subject_index", String(s));
@@ -2505,48 +2618,30 @@ export default {
                   ? { "Content-Type": "multipart/form-data" }
                   : {
                       Authorization: `Bearer ${this.token}`,
-                      "Content-Type":
-                        "multipart/form-data",
+                      "Content-Type": "multipart/form-data",
                     };
-                const resp = await axios.post(
-                  `${base}/files`,
-                  fd,
-                  { headers, params: { audit_label: "Upload File (Local)" } }
-                );
+                const resp = await axios.post(`${base}/files`, fd, {
+                  headers,
+                  params: { audit_label: "Upload File (Local)" },
+                });
                 const saved = resp?.data || {};
                 items[i] = {
                   ...it,
                   dbId: saved.id,
                   file_path: saved.file_path,
-                  storage_option:
-                    saved.storage_option ||
-                    (this.isShared ? "bids" : "local"),
+                  storage_option: saved.storage_option || (this.isShared ? "bids" : "local"),
                   file_name: saved.file_name || it.name,
                 };
-              } else if (
-                it.source === "url" &&
-                it.url
-              ) {
+              } else if (it.source === "url" && it.url) {
                 const fd = new FormData();
                 fd.append("url", it.url);
-                fd.append(
-                  "description",
-                  def.label || def.name || ""
-                );
-                fd.append(
-                  "modalities_json",
-                  modalitiesJson
-                );
-                const headers = this.isShared
-                  ? {}
-                  : {
-                      Authorization: `Bearer ${this.token}`,
-                    };
-                const resp = await axios.post(
-                  `${base}/files/url`,
-                  fd,
-                  { headers, params: { audit_label: "Upload - File (URL)" } }
-                );
+                fd.append("description", def.label || def.name || "");
+                fd.append("modalities_json", modalitiesJson);
+                const headers = this.isShared ? {} : { Authorization: `Bearer ${this.token}` };
+                const resp = await axios.post(`${base}/files/url`, fd, {
+                  headers,
+                  params: { audit_label: "Upload - File (URL)" },
+                });
                 const saved = resp?.data || {};
                 items[i] = {
                   ...it,
@@ -2557,33 +2652,17 @@ export default {
                 };
               }
             }
-            this.setDeepValue(
-              s,
-              v,
-              g,
-              mIdx,
-              fIdx,
-              items
-            );
+            this.setDeepValue(s, v, g, mIdx, fIdx, items);
             delete this.pendingFiles[key];
           } else {
             if (!val) continue;
 
-            if (
-              val.source === "local" &&
-              pendingArr[0] instanceof File
-            ) {
+            if (val.source === "local" && pendingArr[0] instanceof File) {
               const file = pendingArr[0];
               const fd = new FormData();
               fd.append("uploaded_file", file);
-              fd.append(
-                "description",
-                def.label || def.name || ""
-              );
-              fd.append(
-                "modalities_json",
-                modalitiesJson
-              );
+              fd.append("description", def.label || def.name || "");
+              fd.append("modalities_json", modalitiesJson);
               if (!this.isShared) {
                 fd.append("storage_option", "local");
                 fd.append("subject_index", String(s));
@@ -2594,70 +2673,41 @@ export default {
                 ? { "Content-Type": "multipart/form-data" }
                 : {
                     Authorization: `Bearer ${this.token}`,
-                    "Content-Type":
-                      "multipart/form-data",
+                    "Content-Type": "multipart/form-data",
                   };
-              const resp = await axios.post(
-                `${base}/files`,
-                fd,
-                { headers, params: { audit_label: "Upload - File (Local)" } }
-              );
+              const resp = await axios.post(`${base}/files`, fd, {
+                headers,
+                params: { audit_label: "Upload - File (Local)" },
+              });
               const saved = resp?.data || {};
-              this.setDeepValue(
-                s,
-                v,
-                g,
-                mIdx,
-                fIdx,
-                {
-                  ...val,
-                  dbId: saved.id,
-                  file_path: saved.file_path,
-                  storage_option:
-                    saved.storage_option ||
-                    (this.isShared ? "bids" : "local"),
-                  file_name: saved.file_name || val.name,
-                }
-              );
+              this.setDeepValue(s, v, g, mIdx, fIdx, {
+                ...val,
+                dbId: saved.id,
+                file_path: saved.file_path,
+                storage_option: saved.storage_option || (this.isShared ? "bids" : "local"),
+                file_name: saved.file_name || val.name,
+              });
               delete this.pendingFiles[key];
             }
 
             if (val.source === "url" && val.url) {
               const fd = new FormData();
               fd.append("url", val.url);
-              fd.append(
-                "description",
-                def.label || def.name || ""
-              );
-              fd.append(
-                "modalities_json",
-                modalitiesJson
-              );
-              const headers = this.isShared
-                ? {}
-                : {
-                    Authorization: `Bearer ${this.token}`,
-                  };
-              const resp = await axios.post(
-                `${base}/files/url`,
-                fd,
-                { headers, params: { audit_label: "Upload - File (URL)" } }
-              );
+              fd.append("description", def.label || def.name || "");
+              fd.append("modalities_json", modalitiesJson);
+              const headers = this.isShared ? {} : { Authorization: `Bearer ${this.token}` };
+              const resp = await axios.post(`${base}/files/url`, fd, {
+                headers,
+                params: { audit_label: "Upload - File (URL)" },
+              });
               const saved = resp?.data || {};
-              this.setDeepValue(
-                s,
-                v,
-                g,
-                mIdx,
-                fIdx,
-                {
-                  ...val,
-                  dbId: saved.id,
-                  file_path: saved.file_path,
-                  storage_option: "url",
-                  file_name: saved.file_name || "",
-                }
-              );
+              this.setDeepValue(s, v, g, mIdx, fIdx, {
+                ...val,
+                dbId: saved.id,
+                file_path: saved.file_path,
+                storage_option: "url",
+                file_name: saved.file_name || "",
+              });
             }
           }
         }
@@ -2666,46 +2716,36 @@ export default {
 
     async submitData() {
       if (!this.canEdit) {
-        this.showDialogMessage(
-          "This shared link is view-only."
-        );
+        this.showDialogMessage("This shared link is view-only.");
         return;
       }
 
       this.applyTransformsForSection();
+      this.runAllCalculationsForCurrentCell();
 
       const ok = this.validateCurrentSection();
-      const blocking = Object.entries(
-        this.validationErrors
-      ).filter(([k, msg]) => {
+      const blocking = Object.entries(this.validationErrors).filter(([k, msg]) => {
         if (!msg) return false;
         const idx = this.parseKey(k);
         if (!idx) return true;
         const { s, v, g, m, f } = idx;
-        const isSkipped = !!(
-          this.skipFlags[s]?.[v]?.[g]?.[m]?.[f]
-        );
+        const isSkipped = !!(this.skipFlags[s]?.[v]?.[g]?.[m]?.[f]);
         if (isSkipped) return false;
         return !/ is required\.$/.test(msg);
       });
 
       if (!ok && blocking.length) {
-        this.showDialogMessage(
-          "Please fix validation errors before saving."
-        );
+        this.showDialogMessage("Please fix validation errors before saving.");
         return;
       }
 
       const requiredFailures = this.computeRequiredFailures();
       if (requiredFailures.length) {
         this.skipCandidates = requiredFailures;
-        this.skipSelections = requiredFailures.reduce(
-          (acc, it) => {
-            acc[it.key] = false;
-            return acc;
-          },
-          {}
-        );
+        this.skipSelections = requiredFailures.reduce((acc, it) => {
+          acc[it.key] = false;
+          return acc;
+        }, {});
         this.showSkipDialog = true;
         return;
       }
@@ -2714,9 +2754,7 @@ export default {
         await this.uploadPendingFilesForCurrentSection();
       } catch (e) {
         console.error("File upload/register failed:", e);
-        this.showDialogMessage(
-          "File upload failed. Please try again."
-        );
+        this.showDialogMessage("File upload failed. Please try again.");
         return;
       }
 
@@ -2724,18 +2762,13 @@ export default {
         v = this.currentVisitIndex,
         g = this.currentGroupIndex;
       this.ensureSlot(s, v, g);
-      const dictData = this.arrayToDict(
-        this.entryData[s][v][g]
-      );
+      const dictData = this.arrayToDict(this.entryData[s][v][g]);
 
       const rawSkipFlags = this.skipFlags[s][v][g];
-      const flagsPayload = this.isShared
-        ? this.flagsArrayToDict(rawSkipFlags)
-        : rawSkipFlags;
+      const flagsPayload = this.isShared ? this.flagsArrayToDict(rawSkipFlags) : rawSkipFlags;
 
       const hasAnySkip = !!(
-        Array.isArray(rawSkipFlags) &&
-        rawSkipFlags.some((row) => Array.isArray(row) && row.some((x) => !!x))
+        Array.isArray(rawSkipFlags) && rawSkipFlags.some((row) => Array.isArray(row) && row.some((x) => !!x))
       );
 
       const payload = {
@@ -2750,11 +2783,9 @@ export default {
       try {
         if (this.isShared) {
           const auditLabel = hasAnySkip ? "Shared link data Entry (Skipped Required)" : "Shared link data Entry";
-          const resp = await axios.post(
-            `/forms/shared/${this.shareToken}/data`,
-            payload,
-            { params: { audit_label: auditLabel } }
-          );
+          const resp = await axios.post(`/forms/shared/${this.shareToken}/data`, payload, {
+            params: { audit_label: auditLabel },
+          });
 
           const saved = {
             id: resp?.data?.id,
@@ -2763,26 +2794,15 @@ export default {
             visit_index: v,
             group_index: g,
             data: dictData,
-            skipped_required_flags:
-              resp?.data?.skipped_required_flags ??
-              rawSkipFlags,
-            form_version:
-              resp?.data?.form_version ??
-              this.selectedVersion,
-            created_at:
-              resp?.data?.created_at ??
-              new Date().toISOString(),
+            skipped_required_flags: resp?.data?.skipped_required_flags ?? rawSkipFlags,
+            form_version: resp?.data?.form_version ?? this.selectedVersion,
+            created_at: resp?.data?.created_at ?? new Date().toISOString(),
           };
-          (this.existingEntries =
-            this.existingEntries || []).push(saved);
+          (this.existingEntries = this.existingEntries || []).push(saved);
 
-          this.showDialogMessage(
-            "Data saved successfully."
-          );
+          this.showDialogMessage("Data saved successfully.");
           this.rebuildEntriesIndex();
-          this.hydrateCache.delete(
-            `${s}|${v}|${g}|${this.selectedVersion}`
-          );
+          this.hydrateCache.delete(`${s}|${v}|${g}|${this.selectedVersion}`);
           this.applyVersionView();
           this.updateStatusCacheFor(s, v, g);
           return;
@@ -2800,19 +2820,12 @@ export default {
             payload,
             { ...headers, params: { audit_label: auditLabel } }
           );
-          this.showDialogMessage(
-            "Data updated successfully."
-          );
-          const idx = this.existingEntries.findIndex(
-            (x) => x.id === existingId
-          );
-          if (idx >= 0)
-            this.existingEntries.splice(idx, 1, resp.data);
+          this.showDialogMessage("Data updated successfully.");
+          const idx = this.existingEntries.findIndex((x) => x.id === existingId);
+          if (idx >= 0) this.existingEntries.splice(idx, 1, resp.data);
         } else {
-          const params = this.safeVersionParams(
-            this.selectedVersion
-          );
-          const auditLabel = hasAnySkip ? "New Data Entry (Skipped Required)" : (params ? "New Data Entry (Versioned)" : "New Data Entry");
+          const params = this.safeVersionParams(this.selectedVersion);
+          const auditLabel = hasAnySkip ? "New Data Entry (Skipped Required)" : params ? "New Data Entry (Versioned)" : "New Data Entry";
           const resp = await axios.post(
             `/forms/studies/${this.study.metadata.id}/data`,
             payload,
@@ -2827,34 +2840,21 @@ export default {
             visit_index: v,
             group_index: g,
             data: dictData,
-            skipped_required_flags:
-              resp?.data?.skipped_required_flags ??
-              rawSkipFlags,
-            form_version:
-              resp?.data?.form_version ??
-              this.selectedVersion,
-            created_at:
-              resp?.data?.created_at ??
-              new Date().toISOString(),
+            skipped_required_flags: resp?.data?.skipped_required_flags ?? rawSkipFlags,
+            form_version: resp?.data?.form_version ?? this.selectedVersion,
+            created_at: resp?.data?.created_at ?? new Date().toISOString(),
           };
-          (this.existingEntries =
-            this.existingEntries || []).push(saved);
-          this.showDialogMessage(
-            "Data saved successfully."
-          );
+          (this.existingEntries = this.existingEntries || []).push(saved);
+          this.showDialogMessage("Data saved successfully.");
         }
 
         this.rebuildEntriesIndex();
-        this.hydrateCache.delete(
-          `${s}|${v}|${g}|${this.selectedVersion}`
-        );
+        this.hydrateCache.delete(`${s}|${v}|${g}|${this.selectedVersion}`);
         this.applyVersionView();
         this.updateStatusCacheFor(s, v, g);
       } catch (err) {
         console.error(err);
-        this.showDialogMessage(
-          "Failed to save data. Check console for details."
-        );
+        this.showDialogMessage("Failed to save data. Check console for details.");
       }
     },
 
@@ -2867,13 +2867,7 @@ export default {
       }
 
       const flags = e.skipped_required_flags;
-      const hasSkip = !!(
-        Array.isArray(flags) &&
-        flags.some(
-          (row) =>
-            Array.isArray(row) && row.some((x) => !!x)
-        )
-      );
+      const hasSkip = !!(Array.isArray(flags) && flags.some((row) => Array.isArray(row) && row.some((x) => !!x)));
       if (hasSkip) {
         this.statusMap.set(key, "skipped");
         return;
@@ -2899,16 +2893,12 @@ export default {
         for (const mIdx of assigned) {
           const row = e.data[mIdx] || [];
           total += row.length;
-          filled += row.filter(
-            (vv) => vv != null && vv !== ""
-          ).length;
+          filled += row.filter((vv) => vv != null && vv !== "").length;
         }
       }
 
-      if (total === 0 || filled === 0)
-        this.statusMap.set(key, "none");
-      else if (filled === total)
-        this.statusMap.set(key, "complete");
+      if (total === 0 || filled === 0) this.statusMap.set(key, "none");
+      else if (filled === total) this.statusMap.set(key, "complete");
       else this.statusMap.set(key, "partial");
     },
 
@@ -2918,14 +2908,7 @@ export default {
         g = this.currentGroupIndex;
       this.skipCandidates.forEach((it) => {
         const on = !!this.skipSelections[it.key];
-        this.setDeepSkip(
-          s,
-          v,
-          g,
-          it.sectionIndex,
-          it.fieldIndex,
-          on
-        );
+        this.setDeepSkip(s, v, g, it.sectionIndex, it.fieldIndex, on);
         if (on) this.clearError(it.sectionIndex, it.fieldIndex);
       });
       this.showSkipDialog = false;
@@ -2953,8 +2936,7 @@ export default {
       this.showShareDialog = true;
     },
     async createShareLink() {
-      const { subjectIndex, visitIndex, groupIndex } =
-        this.shareParams;
+      const { subjectIndex, visitIndex, groupIndex } = this.shareParams;
       const payload = {
         study_id: this.study.metadata.id,
         subject_index: subjectIndex,
@@ -2965,31 +2947,22 @@ export default {
         expires_in_days: this.shareConfig.expiresInDays,
       };
       try {
-        const resp = await axios.post(
-          "/forms/share-link/",
-          payload,
-          {
-            headers: { Authorization: `Bearer ${this.token}` },
-            params: { audit_label: "Create - Sharable Link" },
-          }
-        );
+        const resp = await axios.post("/forms/share-link/", payload, {
+          headers: { Authorization: `Bearer ${this.token}` },
+          params: { audit_label: "Create - Sharable Link" },
+        });
         this.generatedLink = resp.data.link;
         this.copyStatus = "";
       } catch (err) {
         this.generatedLink = "";
         this.copyStatus = "";
-        if (err.response?.status === 403)
-          this.permissionError = true;
+        if (err.response?.status === 403) this.permissionError = true;
       }
     },
 
-    // --- Add Subjects flow ---
-
     openSubjectDialog() {
       if (this.isShared) {
-        this.showDialogMessage(
-          "Subjects can only be added from the main study, not from shared links."
-        );
+        this.showDialogMessage("Subjects can only be added from the main study, not from shared links.");
         return;
       }
 
@@ -3028,9 +3001,7 @@ export default {
         return { prefix: "S", startIndex: 1, width: 3 };
       }
 
-      const last = String(
-        subjects[subjects.length - 1].id || ""
-      ).trim();
+      const last = String(subjects[subjects.length - 1].id || "").trim();
       const match = /^(\D*?)(\d+)$/.exec(last);
 
       if (!match) {
@@ -3058,24 +3029,16 @@ export default {
       const existing = this.sd.subjects || [];
       const existingIds = new Set(
         existing
-          .map((s) =>
-            String(
-              s.id || s.subject_id || ""
-            ).trim()
-          )
+          .map((s) => String(s.id || s.subject_id || "").trim())
           .filter(Boolean)
       );
 
-      const { prefix, startIndex, width } =
-        this.inferSubjectIdPattern();
+      const { prefix, startIndex, width } = this.inferSubjectIdPattern();
       const drafts = [];
 
       let num = startIndex;
       while (drafts.length < count) {
-        const id = `${prefix}${String(num).padStart(
-          width,
-          "0"
-        )}`;
+        const id = `${prefix}${String(num).padStart(width, "0")}`;
         if (!existingIds.has(id)) {
           drafts.push({
             id,
@@ -3091,66 +3054,50 @@ export default {
 
     defaultGroupForIndex(index) {
       if (!this.groupList.length) return null;
-      const g = this.groupList[
-        index % this.groupList.length
-      ];
+      const g = this.groupList[index % this.groupList.length];
       return g && g.name ? g.name : null;
     },
 
     applyAssignmentMethod() {
-      if (!this.subjectDrafts.length || !this.groupList.length)
-        return;
+      if (!this.subjectDrafts.length || !this.groupList.length) return;
 
-      const method = String(
-        this.assignmentMethodDraft || ""
-      ).toLowerCase();
+      const method = String(this.assignmentMethodDraft || "").toLowerCase();
 
       if (method === "random") {
-        this.subjectDrafts = this.subjectDrafts.map(
-          (s) => {
-            const idx = Math.floor(
-              Math.random() * this.groupList.length
-            );
-            const g = this.groupList[idx];
-            return {
-              ...s,
-              group: g && g.name ? g.name : null,
-            };
-          }
-        );
-      } else if (method === "manual") {
-        this.subjectDrafts = this.subjectDrafts.map(
-          (s, idx) => {
-            if (s.group) return s;
-            return {
-              ...s,
-              group: this.defaultGroupForIndex(idx),
-            };
-          }
-        );
-      } else if (method === "skip") {
-        this.subjectDrafts = this.subjectDrafts.map(
-          (s, idx) => ({
+        this.subjectDrafts = this.subjectDrafts.map((s) => {
+          const idx = Math.floor(Math.random() * this.groupList.length);
+          const g = this.groupList[idx];
+          return {
             ...s,
-            group:
-              s.group || this.defaultGroupForIndex(idx),
-          })
-        );
+            group: g && g.name ? g.name : null,
+          };
+        });
+      } else if (method === "manual") {
+        this.subjectDrafts = this.subjectDrafts.map((s, idx) => {
+          if (s.group) return s;
+          return {
+            ...s,
+            group: this.defaultGroupForIndex(idx),
+          };
+        });
+      } else if (method === "skip") {
+        this.subjectDrafts = this.subjectDrafts.map((s, idx) => ({
+          ...s,
+          group: s.group || this.defaultGroupForIndex(idx),
+        }));
       }
     },
 
     async saveNewSubjects() {
       if (this.isShared) {
-        this.subjectDialogError =
-          "Subjects cannot be added from a shared link.";
+        this.subjectDialogError = "Subjects cannot be added from a shared link.";
         return;
       }
 
       this.subjectDialogError = "";
 
       if (!this.subjectDrafts.length) {
-        this.subjectDialogError =
-          "Please configure at least one subject.";
+        this.subjectDialogError = "Please configure at least one subject.";
         return;
       }
 
@@ -3161,13 +3108,11 @@ export default {
 
       for (const s of cleanedDrafts) {
         if (!s.id) {
-          this.subjectDialogError =
-            "Each subject must have an ID.";
+          this.subjectDialogError = "Each subject must have an ID.";
           return;
         }
         if (!s.group) {
-          this.subjectDialogError =
-            "Each subject must be assigned to a group.";
+          this.subjectDialogError = "Each subject must be assigned to a group.";
           return;
         }
       }
@@ -3175,8 +3120,7 @@ export default {
       const seen = new Set();
       for (const s of cleanedDrafts) {
         if (seen.has(s.id)) {
-          this.subjectDialogError =
-            "Duplicate subject IDs in the new subjects.";
+          this.subjectDialogError = "Duplicate subject IDs in the new subjects.";
           return;
         }
         seen.add(s.id);
@@ -3185,11 +3129,7 @@ export default {
       const existing = this.sd.subjects || [];
       const existingIds = new Set(
         existing
-          .map((s) =>
-            String(
-              s.id || s.subject_id || ""
-            ).trim()
-          )
+          .map((s) => String(s.id || s.subject_id || "").trim())
           .filter(Boolean)
       );
       for (const s of cleanedDrafts) {
@@ -3201,11 +3141,7 @@ export default {
 
       const merged = [...existing, ...cleanedDrafts];
 
-      const currentStudyData =
-        (this.study &&
-          this.study.content &&
-          this.study.content.study_data) ||
-        {};
+      const currentStudyData = (this.study && this.study.content && this.study.content.study_data) || {};
       const updatedStudyData = {
         ...currentStudyData,
         subjects: merged,
@@ -3221,20 +3157,14 @@ export default {
 
       this.savingSubjects = true;
       try {
-        await axios.put(
-          `/forms/studies/${this.study.metadata.id}`,
-          payload,
-          { headers: { Authorization: `Bearer ${this.token}` }, params: { audit_label: "New Subjects (Add)" } }
-        );
+        await axios.put(`/forms/studies/${this.study.metadata.id}`, payload, {
+          headers: { Authorization: `Bearer ${this.token}` },
+          params: { audit_label: "New Subjects (Add)" },
+        });
 
-        if (
-          this.study &&
-          this.study.content &&
-          this.study.content.study_data
-        ) {
+        if (this.study && this.study.content && this.study.content.study_data) {
           this.study.content.study_data.subjects = merged;
-          this.study.content.study_data.subjectCount =
-            merged.length;
+          this.study.content.study_data.subjectCount = merged.length;
         }
 
         this.initializeEntryData();
@@ -3246,13 +3176,10 @@ export default {
         this.subjectCountDraft = 1;
         this.assignmentMethodDraft = "Random";
 
-        this.showDialogMessage(
-          "Subjects added successfully."
-        );
+        this.showDialogMessage("Subjects added successfully.");
       } catch (e) {
         console.error("Failed to add subjects", e);
-        this.subjectDialogError =
-          "Failed to save subjects. Please try again.";
+        this.subjectDialogError = "Failed to save subjects. Please try again.";
       } finally {
         this.savingSubjects = false;
       }
@@ -3332,34 +3259,31 @@ export default {
       let updatedSubjects;
 
       if (scope === "all") {
-      const drafts = Array.isArray(this.groupAssignDrafts) ? this.groupAssignDrafts : [];
+        const drafts = Array.isArray(this.groupAssignDrafts) ? this.groupAssignDrafts : [];
 
-      if (!drafts.length) {
-        this.groupAssignError = "No unassigned subjects found.";
-        return;
-      }
-
-      for (const d of drafts) {
-        const g = String(d.group || "").trim();
-        if (!g) {
-          this.groupAssignError = "Each listed subject must be assigned to a group.";
+        if (!drafts.length) {
+          this.groupAssignError = "No unassigned subjects found.";
           return;
         }
-      }
 
-      const map = new Map(drafts.map((d) => [Number(d.index), String(d.group || "").trim()]));
+        for (const d of drafts) {
+          const g = String(d.group || "").trim();
+          if (!g) {
+            this.groupAssignError = "Each listed subject must be assigned to a group.";
+            return;
+          }
+        }
 
-      updatedSubjects = subjects.map((s, idx) => {
-        const cur = String(s.group || "").trim();
-        if (cur) return s; // already assigned stays untouched
-        const chosen = map.get(idx);
-        return chosen ? { ...s, group: chosen } : s;
-      });
-    } else {
-        // Assign ONLY this subject
-        updatedSubjects = subjects.map((s, idx) =>
-          idx === sIdx ? { ...s, group: groupName } : s
-        );
+        const map = new Map(drafts.map((d) => [Number(d.index), String(d.group || "").trim()]));
+
+        updatedSubjects = subjects.map((s, idx) => {
+          const cur = String(s.group || "").trim();
+          if (cur) return s;
+          const chosen = map.get(idx);
+          return chosen ? { ...s, group: chosen } : s;
+        });
+      } else {
+        updatedSubjects = subjects.map((s, idx) => (idx === sIdx ? { ...s, group: groupName } : s));
       }
 
       const updatedStudyData = {
@@ -3377,20 +3301,16 @@ export default {
       this.groupAssignError = "";
 
       try {
-        await axios.put(
-          `/forms/studies/${this.study.metadata.id}`,
-          payload,
-          { headers: { Authorization: `Bearer ${this.token}` }, params: { audit_label: scope === "all" ? "Update - Subject Groups (All)" : "Update - Subject Group" } }
-        );
+        await axios.put(`/forms/studies/${this.study.metadata.id}`, payload, {
+          headers: { Authorization: `Bearer ${this.token}` },
+          params: { audit_label: scope === "all" ? "Update - Subject Groups (All)" : "Update - Subject Group" },
+        });
 
-        // Update local
         this.study.content.study_data.subjects = updatedSubjects;
         this.study.content.study_data.subjectCount = updatedSubjects.length;
 
-        // Rebuild map
         this.prepareSubjectGroupIndexMap();
 
-        // Continue into entry for the originally clicked subject only
         const g = this.subjectToGroupIdx[sIdx];
         if (g == null || g < 0) {
           this.groupAssignError = "Group assignment failed. Please try again.";
@@ -3406,7 +3326,9 @@ export default {
 
         this.showSelection = false;
         this.validationErrors = {};
+        this.calcWarnings = {};
         this.hydrateCell(this.currentSubjectIndex, this.currentVisitIndex, this.currentGroupIndex);
+        this.runAllCalculationsForCurrentCell();
 
         this.showGroupAssignDialog = false;
       } catch (e) {
@@ -3419,7 +3341,6 @@ export default {
   },
 };
 </script>
-
 <style scoped>
 .study-data-container {
   max-width: none;
@@ -4002,5 +3923,14 @@ select:focus {
   border: 1px solid #e5e7eb;
   border-radius: 10px;
   background: #ffffff;
+}
+.calc-warning-message {
+  color: #92400e;
+  font-size: 12px;
+  margin-top: 4px;
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+  border-radius: 6px;
+  padding: 6px 8px;
 }
 </style>
