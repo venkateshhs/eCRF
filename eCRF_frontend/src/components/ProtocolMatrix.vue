@@ -431,6 +431,191 @@ export default {
     const totalVisits = computed(() => props.visits.length);
     const totalGroups = computed(() => props.groups.length);
 
+    /* ============================================================
+       FIELD / LOGIC HELPERS
+       ============================================================ */
+    function getFieldStableKey(field, mIdx, fIdx) {
+      return String(
+        field?._id ||
+        field?.id ||
+        field?.field_id ||
+        field?.uid ||
+        field?.name ||
+        `m${mIdx}_f${fIdx}`
+      );
+    }
+
+    function buildFieldRegistry() {
+      const registry = new Map();
+
+      (props.selectedModels || []).forEach((model, mIdx) => {
+        (model?.fields || []).forEach((field, fIdx) => {
+          const key = getFieldStableKey(field, mIdx, fIdx);
+          registry.set(key, {
+            key,
+            mIdx,
+            fIdx,
+            modelTitle: model?.title || `Section ${mIdx + 1}`,
+            fieldLabel: field?.label || field?.name || `Field ${fIdx + 1}`,
+            fieldType: field?.type || "text",
+            field
+          });
+        });
+      });
+
+      return registry;
+    }
+
+    function relationKeyForVisitGroup(vIdx, gIdx, relationType, participantKeys) {
+      const joined = [...participantKeys].sort().join("|");
+      return `${relationType}|v${vIdx}|g${gIdx}|${joined}`;
+    }
+
+    function visitGroupLabel(vIdx, gIdx) {
+      const visitName = props.visits?.[vIdx]?.name || `Visit ${vIdx + 1}`;
+      const groupName = props.groups?.[gIdx]?.name || `Group ${gIdx + 1}`;
+      return `Visit "${visitName}" / Group "${groupName}"`;
+    }
+
+    function fieldRefLabel(meta) {
+      if (!meta) return "Unknown field";
+      return `${meta.modelTitle}.${meta.fieldLabel}`;
+    }
+
+    function assignedStateForModels(modelIndices, vIdx, gIdx) {
+      return modelIndices.map((mIdx) => ({
+        mIdx,
+        assigned: !!props.assignments?.[mIdx]?.[vIdx]?.[gIdx]
+      }));
+    }
+
+    function collectVisibilityConsistencyErrors(registry, seen) {
+      const errors = [];
+
+      (props.selectedModels || []).forEach((model, targetMIdx) => {
+        (model?.fields || []).forEach((field, fIdx) => {
+          const visibilityLogic = field?.constraints?.visibilityLogic;
+          const rules = Array.isArray(visibilityLogic?.rules) ? visibilityLogic.rules : [];
+          if (!rules.length) return;
+
+          const targetMeta = registry.get(getFieldStableKey(field, targetMIdx, fIdx));
+
+          rules.forEach((rule, rIdx) => {
+            const sourceKey = String(rule?.sourceFieldKey || "");
+            if (!sourceKey) return;
+
+            const sourceMeta = registry.get(sourceKey);
+            if (!sourceMeta) {
+              errors.push(
+                `Visibility rule error in ${fieldRefLabel(targetMeta)}: source field with id "${sourceKey}" was not found.`
+              );
+              return;
+            }
+
+            for (let vIdx = 0; vIdx < totalVisits.value; vIdx++) {
+              for (let gIdx = 0; gIdx < totalGroups.value; gIdx++) {
+                const states = assignedStateForModels([targetMIdx, sourceMeta.mIdx], vIdx, gIdx);
+                const assignedCount = states.filter(x => x.assigned).length;
+
+                if (assignedCount > 0 && assignedCount < states.length) {
+                  const dedupeKey = relationKeyForVisitGroup(
+                    vIdx,
+                    gIdx,
+                    `visibility:${targetMeta.key}:${sourceMeta.key}:${rIdx}`,
+                    [targetMeta.key, sourceMeta.key]
+                  );
+                  if (seen.has(dedupeKey)) continue;
+                  seen.add(dedupeKey);
+
+                  errors.push(
+                    `${visitGroupLabel(vIdx, gIdx)}: ${fieldRefLabel(targetMeta)} has visibility logic depending on ${fieldRefLabel(sourceMeta)}, but both sections are not assigned together.`
+                  );
+                }
+              }
+            }
+          });
+        });
+      });
+
+      return errors;
+    }
+
+    function collectCalculationConsistencyErrors(registry, seen) {
+      const errors = [];
+      const form = Array.isArray(props.forms) && props.forms.length ? props.forms[0] : null;
+      const calculations = Array.isArray(form?.logic?.calculations) ? form.logic.calculations : [];
+
+      calculations.forEach((rule, ruleIdx) => {
+        const targetKey = String(rule?.target || "");
+        const sourceKeys = Array.isArray(rule?.sources) ? rule.sources.map(String).filter(Boolean) : [];
+
+        if (!targetKey || !sourceKeys.length) return;
+
+        const targetMeta = registry.get(targetKey);
+        if (!targetMeta) {
+          errors.push(`Calculation rule error: target field with id "${targetKey}" was not found.`);
+          return;
+        }
+
+        const sourceMetas = [];
+        let missingSource = false;
+
+        sourceKeys.forEach((srcKey) => {
+          const meta = registry.get(srcKey);
+          if (!meta) {
+            errors.push(
+              `Calculation rule error for ${fieldRefLabel(targetMeta)}: source field with id "${srcKey}" was not found.`
+            );
+            missingSource = true;
+            return;
+          }
+          sourceMetas.push(meta);
+        });
+
+        if (missingSource) return;
+
+        const participantMetas = [targetMeta, ...sourceMetas];
+        const participantModelIndices = Array.from(new Set(participantMetas.map(x => x.mIdx)));
+        const participantKeys = participantMetas.map(x => x.key);
+
+        for (let vIdx = 0; vIdx < totalVisits.value; vIdx++) {
+          for (let gIdx = 0; gIdx < totalGroups.value; gIdx++) {
+            const states = assignedStateForModels(participantModelIndices, vIdx, gIdx);
+            const assignedCount = states.filter(x => x.assigned).length;
+
+            if (assignedCount > 0 && assignedCount < states.length) {
+              const dedupeKey = relationKeyForVisitGroup(
+                vIdx,
+                gIdx,
+                `calculation:${ruleIdx}:${targetMeta.key}`,
+                participantKeys
+              );
+              if (seen.has(dedupeKey)) continue;
+              seen.add(dedupeKey);
+
+              const sourceLabelText = sourceMetas.map(fieldRefLabel).join(", ");
+              errors.push(
+                `${visitGroupLabel(vIdx, gIdx)}: calculation target ${fieldRefLabel(targetMeta)} depends on ${sourceLabelText}, but all related sections are not assigned together.`
+              );
+            }
+          }
+        }
+      });
+
+      return errors;
+    }
+
+    function validateInterSectionLogicConsistency() {
+      const errors = [];
+      const seen = new Set();
+      const registry = buildFieldRegistry();
+
+      errors.push(...collectVisibilityConsistencyErrors(registry, seen));
+      errors.push(...collectCalculationConsistencyErrors(registry, seen));
+
+      return errors;
+    }
+
     // ---------- DIRTY SNAPSHOT HELPERS ----------
     function buildDirtySnapshot() {
       const sd = store.state.studyDetails || {};
@@ -722,6 +907,21 @@ export default {
     async function saveStudy(mode = "publish") {
       const isDraftMode = mode === "draft";
 
+      const logicErrors = validateInterSectionLogicConsistency();
+      if (logicErrors.length) {
+        const maxShown = 12;
+        const lines = logicErrors.slice(0, maxShown).map((msg, idx) => `${idx + 1}. ${msg}`);
+        const more =
+          logicErrors.length > maxShown
+            ? `\n\n…and ${logicErrors.length - maxShown} more inconsistency(s).`
+            : "";
+
+        showDialogMessage(
+          `Logical inconsistencies found in the Protocol Matrix:\n\n${lines.join("\n")}${more}\n\nPlease fix these assignments before saving.`
+        );
+        return;
+      }
+
       // Publish path only: empty-visit warning
       if (!isDraftMode) {
         const empties = computeEmptyVisits();
@@ -780,6 +980,22 @@ export default {
     }
 
     async function confirmAndSave() {
+      const logicErrors = validateInterSectionLogicConsistency();
+      if (logicErrors.length) {
+        const maxShown = 12;
+        const lines = logicErrors.slice(0, maxShown).map((msg, idx) => `${idx + 1}. ${msg}`);
+        const more =
+          logicErrors.length > maxShown
+            ? `\n\n…and ${logicErrors.length - maxShown} more inconsistency(s).`
+            : "";
+
+        showConfirmChanges.value = false;
+        showDialogMessage(
+          `Logical inconsistencies found in the Protocol Matrix:\n\n${lines.join("\n")}${more}\n\nPlease fix these assignments before saving.`
+        );
+        return;
+      }
+
       showConfirmChanges.value = false;
       await saveStudyImpl({ mode: "publish" });
     }
@@ -796,6 +1012,21 @@ export default {
     async function saveAnyway() {
       isSavingInProgress.value = true;
       try {
+        const logicErrors = validateInterSectionLogicConsistency();
+        if (logicErrors.length) {
+          const maxShown = 12;
+          const lines = logicErrors.slice(0, maxShown).map((msg, idx) => `${idx + 1}. ${msg}`);
+          const more =
+            logicErrors.length > maxShown
+              ? `\n\n…and ${logicErrors.length - maxShown} more inconsistency(s).`
+              : "";
+
+          showDialogMessage(
+            `Logical inconsistencies found in the Protocol Matrix:\n\n${lines.join("\n")}${more}\n\nPlease fix these assignments before saving.`
+          );
+          return;
+        }
+
         await saveStudyImpl({ mode: "publish" });
       } finally {
         isSavingInProgress.value = false;
@@ -843,51 +1074,48 @@ export default {
             last_completed_step: 6,
           };
       const normalizedForms = JSON.parse(JSON.stringify(props.forms || [])).map(form => ({
-      sections: Array.isArray(form.sections)
-        ? form.sections.map(sec => ({
-            ...sec,
-            fields: Array.isArray(sec.fields)
-              ? sec.fields.map(field => ({
-                  ...field,
-                  constraints: field.constraints || {}
-                }))
-              : []
-          }))
-        : [],
-      logic: {
-        version: form.logic?.version || 1,
-        calculations: Array.isArray(form.logic?.calculations) ? form.logic.calculations : [],
-        conditions: Array.isArray(form.logic?.conditions) ? form.logic.conditions : []
-      }
-    }));
+        sections: Array.isArray(form.sections)
+          ? form.sections.map(sec => ({
+              ...sec,
+              fields: Array.isArray(sec.fields)
+                ? sec.fields.map(field => ({
+                    ...field,
+                    constraints: field.constraints || {}
+                  }))
+                : []
+            }))
+          : [],
+        logic: {
+          version: form.logic?.version || 1,
+          calculations: Array.isArray(form.logic?.calculations) ? form.logic.calculations : [],
+          conditions: Array.isArray(form.logic?.conditions) ? form.logic.conditions : []
+        }
+      }));
 
-    console.log("[ProtocolMatrix] normalizedForms before saveStudyImpl", JSON.parse(JSON.stringify(normalizedForms || [])));
-    console.log("[ProtocolMatrix] props.selectedModels before saveStudyImpl", JSON.parse(JSON.stringify(props.selectedModels || [])));
-    console.log("[ProtocolMatrix] props.assignments before saveStudyImpl", JSON.parse(JSON.stringify(props.assignments || [])));
-  const studyData = {
-  study: {
-    ...(studyDetails.study || {}),
-    title: studyDetails.study?.title ?? metadata.study_name ?? "",
-    description: studyDetails.study?.description ?? metadata.study_description ?? "",
-  },
-  groups: props.groups,
-  visits: props.visits,
-  subjects: Array.isArray(studyDetails.subjects) ? studyDetails.subjects : [],
-  selectedModels: JSON.parse(JSON.stringify(props.selectedModels || [])).map(sec => ({
-    ...sec,
-    fields: Array.isArray(sec.fields)
-      ? sec.fields.map(field => ({
-          ...field,
-          constraints: field.constraints || {}
-        }))
-      : []
-  })),
-  forms: normalizedForms,
-  assignments: props.assignments,
-  subjectCount: studyDetails.subjectCount ?? 0,
-  assignmentMethod: studyDetails.assignmentMethod ?? "random",
-  skipSubjectCreationNow: !!studyDetails.skipSubjectCreationNow,
-};
+      const studyData = {
+        study: {
+          ...(studyDetails.study || {}),
+          title: studyDetails.study?.title ?? metadata.study_name ?? "",
+          description: studyDetails.study?.description ?? metadata.study_description ?? "",
+        },
+        groups: props.groups,
+        visits: props.visits,
+        subjects: Array.isArray(studyDetails.subjects) ? studyDetails.subjects : [],
+        selectedModels: JSON.parse(JSON.stringify(props.selectedModels || [])).map(sec => ({
+          ...sec,
+          fields: Array.isArray(sec.fields)
+            ? sec.fields.map(field => ({
+                ...field,
+                constraints: field.constraints || {}
+              }))
+            : []
+        })),
+        forms: normalizedForms,
+        assignments: props.assignments,
+        subjectCount: studyDetails.subjectCount ?? 0,
+        assignmentMethod: studyDetails.assignmentMethod ?? "random",
+        skipSubjectCreationNow: !!studyDetails.skipSubjectCreationNow,
+      };
 
       const payload = { study_metadata: metadata, study_content: { study_data: studyData } };
 
@@ -908,13 +1136,6 @@ export default {
           url = `/forms/studies/`;
         }
       }
-
-      // Debug logs (you asked for visibility)
-      console.log("[ProtocolMatrix saveStudyImpl] mode=", mode);
-      console.log("[ProtocolMatrix saveStudyImpl] studyId=", studyId);
-      console.log("[ProtocolMatrix saveStudyImpl] URL=", url, "method=", method);
-      console.log("[ProtocolMatrix saveStudyImpl] existingMeta.status=", existingMeta.status);
-      console.log("[ProtocolMatrix saveStudyImpl] payload.study_metadata=", payload.study_metadata);
 
       try {
         // audit_label rules:
@@ -941,11 +1162,6 @@ export default {
         };
 
         const response = await axios[method](url, payload, axiosConfig);
-
-        console.log(
-          "[ProtocolMatrix saveStudyImpl] response metadata=",
-          response.data?.metadata || response.data?.study_metadata
-        );
 
         const updatedMetadata = response.data?.study_metadata || response.data?.metadata || metadata;
         const updatedStudyData = response.data?.content?.study_data || studyData;
@@ -1041,6 +1257,21 @@ export default {
       unsavedBusy.value = true;
 
       try {
+        const logicErrors = validateInterSectionLogicConsistency();
+        if (logicErrors.length) {
+          const maxShown = 12;
+          const lines = logicErrors.slice(0, maxShown).map((msg, idx) => `${idx + 1}. ${msg}`);
+          const more =
+            logicErrors.length > maxShown
+              ? `\n\n…and ${logicErrors.length - maxShown} more inconsistency(s).`
+              : "";
+
+          showDialogMessage(
+            `Logical inconsistencies found in the Protocol Matrix:\n\n${lines.join("\n")}${more}\n\nPlease fix these assignments before saving.`
+          );
+          return;
+        }
+
         const ok = await saveStudyImpl({ mode: "draft" });
         if (!ok) return;
 
@@ -1387,7 +1618,6 @@ export default {
   min-height: 44px;
 }
 
-
 .protocol-back-btn {
   justify-self: start;
 }
@@ -1425,5 +1655,4 @@ export default {
 .btn-back:active {
   transform: scale(0.98);
 }
-
 </style>
