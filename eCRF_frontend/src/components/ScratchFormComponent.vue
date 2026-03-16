@@ -1024,6 +1024,10 @@ export default {
   },
 
   methods: {
+    uuidForLogic() {
+      if (typeof crypto !== "undefined" && crypto.randomUUID) return crypto.randomUUID();
+      return `id_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+    },
     getFieldLogicKey(field, sectionIndex, fieldIndex) {
       if (!field || typeof field !== "object") return "";
 
@@ -1147,10 +1151,7 @@ export default {
       this.showLogic = true;
     },
 
-    _uuidForLogic() {
-      if (typeof crypto !== "undefined" && crypto.randomUUID) return crypto.randomUUID();
-      return `id_${Date.now()}_${Math.random().toString(16).slice(2)}`;
-    },
+
 
     ensurePersistentIdsForLogic() {
       this.ensureCurrentFormExists();
@@ -1160,10 +1161,11 @@ export default {
 
       // sections + fields get persisted _id
       (form.sections || []).forEach(sec => {
-        if (!sec._id) sec._id = this._uuidForLogic();
+        if (!sec._id) sec._id = this.uuidForLogic();
         if (!Array.isArray(sec.fields)) sec.fields = [];
+
         sec.fields.forEach(f => {
-          if (!f._id) f._id = this._uuidForLogic();
+          if (!f._id) f._id = this.uuidForLogic();
           if (!f.constraints || typeof f.constraints !== "object") {
             f.constraints = {};
           }
@@ -1913,8 +1915,9 @@ export default {
       const sec = {
         title: section.title,
         fields: (section.fields || []).map(f => ({
-          ...f,
-          constraints: f.constraints || {}
+          ...JSON.parse(JSON.stringify(f)),
+          _id: f._id || this.uuidForLogic(),
+          constraints: JSON.parse(JSON.stringify(f.constraints || {}))
         })),
         collapsed: false,
         source: "shacl"
@@ -2134,7 +2137,11 @@ export default {
           const nm = String(f?.name || "");
           if (nm && existingNames.has(nm)) return;
           existingNames.add(nm);
-          targetSec.fields.push({ ...f });
+          targetSec.fields.push({
+          ...JSON.parse(JSON.stringify(f)),
+          _id: f._id || this.uuidForLogic(),
+          constraints: JSON.parse(JSON.stringify(f.constraints || {}))
+        });
           added += 1;
         });
 
@@ -2151,11 +2158,15 @@ export default {
 
       const insertAt = Math.min(this.activeSection + 1, this.currentForm.sections.length);
       const sec = {
-        title: this.currentModel.title,
-        fields: chosen,
-        collapsed: false,
-        source: "template"
-      };
+          title: this.currentModel.title,
+          fields: chosen.map(f => ({
+            ...JSON.parse(JSON.stringify(f)),
+            _id: f._id || this.uuidForLogic(),
+            constraints: JSON.parse(JSON.stringify(f.constraints || {}))
+          })),
+          collapsed: false,
+          source: "template"
+        };
 
       this.forms[this.currentFormIndex].sections.splice(insertAt, 0, sec);
       this.activeSection = insertAt;
@@ -2246,16 +2257,17 @@ export default {
       if (sec.collapsed) this.toggleSection(this.activeSection);
 
       const base = {
-        name: `${(field.name || field.type)}_${Date.now()}`,
-        label: field.label,
-        type: field.type,
-        options: (field.type === "select" || field.type === "radio")
-          ? (Array.isArray(field.options) && field.options.length ? [...field.options] : ["Option 1"])
-          : (field.options || []),
-        placeholder: field.description || field.placeholder || "",
-        value: field.type === "checkbox" ? false : "",
-        constraints: field.constraints || {}
-      };
+      _id: this.uuidForLogic(),
+      name: `${(field.name || field.type)}_${Date.now()}`,
+      label: field.label,
+      type: field.type,
+      options: (field.type === "select" || field.type === "radio")
+        ? (Array.isArray(field.options) && field.options.length ? [...field.options] : ["Option 1"])
+        : (field.options || []),
+      placeholder: field.description || field.placeholder || "",
+      value: field.type === "checkbox" ? false : "",
+      constraints: JSON.parse(JSON.stringify(field.constraints || {}))
+    };
 
       if (base.type === "slider") {
         base.value = null;
@@ -2362,10 +2374,9 @@ export default {
       if (!f) return;
 
       const clone = {
-        ...f,
+        ...JSON.parse(JSON.stringify(f)),
+        _id: this.uuidForLogic(),
         name: `${f.name}_${Date.now()}`,
-        options: f.options ? [...f.options] : [],
-        constraints: JSON.parse(JSON.stringify(f.constraints || {})),
         value:
           f.type === "radio" && f.constraints?.allowMultiple ? [] :
           (f.type === "radio" || f.type === "select") ? "" :
