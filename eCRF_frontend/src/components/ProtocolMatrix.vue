@@ -210,7 +210,78 @@
     </div>
 
     <!-- 4. Custom Dialog for Notifications (errors/general) -->
-    <CustomDialog :message="dialogMessage" :isVisible="showDialog" @close="closeDialog" />
+    <CustomDialog
+      v-if="!showLogicalIssuesDialog"
+      :message="dialogMessage"
+      :isVisible="showDialog"
+      @close="closeDialog"
+    />
+
+    <!-- 4a. Logical inconsistencies dialog -->
+    <div v-if="showLogicalIssuesDialog" class="modal-overlay">
+      <div class="modal validation-modal logical-issues-modal">
+        <h3 class="validation-title">
+          <i :class="icons.infoCircle" class="li-icon"></i> Check visit/group assignments
+        </h3>
+
+        <p class="validation-text">
+          Some field dependencies are incomplete in the selected visit/group combinations.
+          Please assign the dependent sections together before saving.
+        </p>
+
+        <div class="logical-issues-scroll">
+          <div
+            v-for="(group, idx) in logicalIssuesGrouped"
+            :key="`logic-group-${idx}`"
+            class="logic-group-card"
+          >
+            <div class="logic-group-header">
+              <span class="logic-group-chip">
+                Visit: {{ group.visitName }}
+              </span>
+              <span class="logic-group-chip">
+                Group: {{ group.groupName }}
+              </span>
+            </div>
+
+            <div class="logic-dependency-list">
+              <div
+                v-for="(issue, issueIdx) in group.issues"
+                :key="`logic-issue-${idx}-${issueIdx}`"
+                class="logic-dependency-item"
+              >
+                <div class="logic-arrow-row">
+                  <div class="logic-node logic-node-current">
+                    <div class="logic-node-section">{{ issue.targetSection }}</div>
+                    <div class="logic-node-field">{{ issue.targetField }}</div>
+                  </div>
+
+                  <div class="logic-arrow-wrap">
+                    <span class="logic-arrow-text">depends on</span>
+                    <span class="logic-arrow-line">→</span>
+                  </div>
+
+                  <div class="logic-node logic-node-source">
+                    <div class="logic-node-section">{{ issue.sourceSection }}</div>
+                    <div class="logic-node-field">{{ issue.sourceField }}</div>
+                  </div>
+                </div>
+
+                <div class="logic-dependency-note">
+                  These two sections are not assigned together in this visit/group.
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="modal-actions">
+          <button class="btn-primary" @click="closeLogicalIssuesDialog">
+            <i :class="icons.check" class="mr-6"></i> OK
+          </button>
+        </div>
+      </div>
+    </div>
 
     <!-- 4a. Success dialog with View Saved Study CTA -->
     <div v-if="showSaveSuccessDialog" class="modal-overlay">
@@ -385,6 +456,8 @@ export default {
     const showInfo = ref(false);
     const showDialog = ref(false);
     const dialogMessage = ref("");
+    const showLogicalIssuesDialog = ref(false);
+    const logicalIssuesGrouped = ref([]);
 
     // Success dialog state (with CTA)
     const showSaveSuccessDialog = ref(false);
@@ -951,6 +1024,16 @@ export default {
     }
 
     function showDialogMessage(message) {
+      const parsed = parseLogicalIssuesMessage(message);
+
+      if (parsed.length) {
+        logicalIssuesGrouped.value = parsed;
+        showLogicalIssuesDialog.value = true;
+        showDialog.value = false;
+        dialogMessage.value = "";
+        return;
+      }
+
       dialogMessage.value = message;
       showDialog.value = true;
     }
@@ -958,6 +1041,71 @@ export default {
     function closeDialog() {
       showDialog.value = false;
       dialogMessage.value = "";
+    }
+    function closeLogicalIssuesDialog() {
+      showLogicalIssuesDialog.value = false;
+      logicalIssuesGrouped.value = [];
+    }
+
+    function parseFieldPath(path) {
+      const raw = String(path || "").trim();
+      if (!raw) {
+        return {
+          section: "Section",
+          field: "Field"
+        };
+      }
+
+      const firstDot = raw.indexOf(".");
+      if (firstDot === -1) {
+        return {
+          section: raw,
+          field: raw
+        };
+      }
+
+      return {
+        section: raw.slice(0, firstDot).trim() || "Section",
+        field: raw.slice(firstDot + 1).trim() || "Field"
+      };
+    }
+
+    function parseLogicalIssuesMessage(message) {
+      const text = String(message || "").trim();
+      if (!text.startsWith("Logical inconsistencies found")) return [];
+
+      const matches = [...text.matchAll(
+        /Visit\s+"([^"]+)"\s*\/\s*Group\s+"([^"]+)":\s*(.+?)\s+has visibility logic depending on\s+(.+?),\s+but both sections are not assigned together\./g
+      )];
+
+      if (!matches.length) return [];
+
+      const groupedMap = new Map();
+
+      matches.forEach((m) => {
+        const visitName = m[1];
+        const groupName = m[2];
+        const target = parseFieldPath(m[3]);
+        const source = parseFieldPath(m[4]);
+
+        const key = `${visitName}__${groupName}`;
+        if (!groupedMap.has(key)) {
+          groupedMap.set(key, {
+            visitName,
+            groupName,
+            issues: []
+          });
+        }
+
+        groupedMap.get(key).issues.push({
+          targetSection: target.section,
+          targetField: target.field,
+          sourceSection: source.section,
+          sourceField: source.field
+        });
+      });
+
+      return Array.from(groupedMap.values());
     }
 
     function openSaveSuccessDialog(message) {
@@ -1424,6 +1572,10 @@ export default {
       saveStudy,
       goToSaved,
 
+      showLogicalIssuesDialog,
+      logicalIssuesGrouped,
+      closeLogicalIssuesDialog,
+
     };
   },
 };
@@ -1654,5 +1806,137 @@ export default {
 
 .btn-back:active {
   transform: scale(0.98);
+}
+.logical-issues-modal {
+  max-width: 980px;
+}
+
+.logical-issues-scroll {
+  max-height: 58vh;
+  overflow-y: auto;
+  overflow-x: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin-top: 12px;
+  padding-right: 4px;
+}
+
+.logic-group-card {
+  border: 1px solid $border-color;
+  border-radius: 12px;
+  background: #f8fafc;
+  padding: 14px;
+}
+
+.logic-group-header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.logic-group-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: #eef2ff;
+  border: 1px solid #dbe4ff;
+  color: #3538cd;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.logic-dependency-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.logic-dependency-item {
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  background: #ffffff;
+  padding: 12px;
+}
+
+.logic-arrow-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  gap: 12px;
+  align-items: center;
+}
+
+.logic-arrow-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.logic-arrow-text {
+  font-size: 11px;
+  color: #667085;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.logic-arrow-line {
+  font-size: 18px;
+  color: #475467;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.logic-node {
+  border-radius: 10px;
+  padding: 10px 12px;
+  border: 1px solid $border-color;
+  min-width: 0;
+}
+
+.logic-node-current {
+  background: #eff6ff;
+  border-color: #bfdbfe;
+}
+
+.logic-node-source {
+  background: #f9fafb;
+  border-color: #d0d5dd;
+}
+
+.logic-node-section {
+  font-size: 12px;
+  font-weight: 700;
+  color: #344054;
+  word-break: break-word;
+}
+
+.logic-node-field {
+  margin-top: 2px;
+  font-size: 14px;
+  font-weight: 600;
+  color: #101828;
+  word-break: break-word;
+}
+
+.logic-dependency-note {
+  margin-top: 8px;
+  font-size: 12px;
+  color: #667085;
+  line-height: 1.4;
+}
+
+@media (max-width: 760px) {
+  .logic-arrow-row {
+    grid-template-columns: 1fr;
+  }
+
+  .logic-arrow-wrap {
+    flex-direction: row;
+    justify-content: flex-start;
+  }
 }
 </style>
