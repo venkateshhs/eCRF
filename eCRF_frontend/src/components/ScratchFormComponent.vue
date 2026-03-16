@@ -26,6 +26,7 @@
             @click="activeTab = 'obi'"
           >Ontology (OBI)</button>
           <button
+            v-if="false"
             :class="{ active: activeTab === 'shacl' }"
             @click="activeTab = 'shacl'"
           >SHACL Components</button>
@@ -179,7 +180,7 @@
         </div>
 
         <!-- SHACL -->
-        <div v-else-if="activeTab === 'shacl'">
+        <div v-else-if="false && activeTab === 'shacl'">
           <ShaclComponents :shaclComponents="shaclComponents" @takeover="onShaclTakeover" />
         </div>
       </div>
