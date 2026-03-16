@@ -2,12 +2,12 @@
   <div class="study-data-container" v-if="study">
     <!-- Back Buttons (hidden for shared links AND while Merge panel is open) -->
     <div class="back-buttons-container" v-if="!isShared">
-       <!-- Merge mode back button (same styling/position) -->
+      <!-- Merge mode back button (same styling/position) -->
       <button v-if="isMergeMode" @click="closeMergeStudy" class="btn-back">
         Back to Selection
       </button>
 
-       <!-- Normal behavior -->
+      <!-- Normal behavior -->
       <template v-else>
         <button v-if="showSelection" @click="goToDashboard" class="btn-back">
           Back to Dashboard
@@ -135,210 +135,210 @@
 
         <!-- Only assigned sections are shown -->
         <div v-if="assignedModelIndices.length">
-          <template v-for="mIdx in assignedModelIndices" :key="'sec-wrap-'+mIdx">
-              <div
-                v-if="hasVisibleFieldsInSection(mIdx)"
-                :key="'sec-'+mIdx"
-                class="section-block"
-              >
-            <h3>{{ selectedModels[mIdx].title }}</h3>
+          <template v-for="mIdx in assignedModelIndices" :key="'sec-wrap-' + mIdx">
+            <div
+              v-if="hasVisibleFieldsInSection(mIdx)"
+              :key="'sec-' + mIdx"
+              class="section-block"
+            >
+              <h3>{{ selectedModels[mIdx].title }}</h3>
 
-            <template v-for="(field, fIdx) in selectedModels[mIdx].fields" :key="'f-wrap-'+mIdx+'-'+fIdx">
-              <div
-                v-if="isFieldVisible(mIdx, fIdx)"
-                :key="'f-'+mIdx+'-'+fIdx"
-                class="form-field"
-              >
-              <label :for="fieldId(mIdx, fIdx)" class="field-label">
-                <span>{{ field.label || field.name || field.title }}</span>
-                <span v-if="field.constraints?.required" class="required">*</span>
-                <em v-if="field.constraints?.helpText" class="help-inline">
-                  {{ field.constraints.helpText }}
-                </em>
-                <i
-                  v-if="hasConstraints(field)"
-                  class="fas fa-question-circle helper-icon"
-                  @click="openConstraintDialog(field)"
-                ></i>
-              </label>
+              <template v-for="(field, fIdx) in selectedModels[mIdx].fields" :key="'f-wrap-' + mIdx + '-' + fIdx">
+                <div
+                  v-if="isFieldVisible(mIdx, fIdx)"
+                  :key="'f-' + mIdx + '-' + fIdx"
+                  class="form-field"
+                >
+                  <label :for="fieldId(mIdx, fIdx)" class="field-label">
+                    <span>{{ field.label || field.name || field.title }}</span>
+                    <span v-if="field.constraints?.required" class="required">*</span>
+                    <em v-if="field.constraints?.helpText" class="help-inline">
+                      {{ field.constraints.helpText }}
+                    </em>
+                    <i
+                      v-if="hasConstraints(field)"
+                      class="fas fa-question-circle helper-icon"
+                      @click="openConstraintDialog(field)"
+                    ></i>
+                  </label>
 
-              <!-- TEXT -->
-              <input
-                v-if="field.type === 'text'"
-                :id="fieldId(mIdx, fIdx)"
-                type="text"
-                v-model="entryData[currentSubjectIndex][currentVisitIndex][currentGroupIndex][mIdx][fIdx]"
-                :placeholder="field.placeholder"
-                :required="!!field.constraints?.required"
-                :readonly="isReadonlyField(field, mIdx, fIdx)"
-                :minlength="field.constraints?.minLength"
-                :maxlength="field.constraints?.maxLength"
-                :pattern="field.constraints?.pattern"
-                @blur="onFieldBlur(mIdx, fIdx)"
-                @input="() => { clearError(mIdx, fIdx); onRuntimeFieldChanged(mIdx, fIdx); }"
-              />
+                  <!-- TEXT -->
+                  <input
+                    v-if="field.type === 'text'"
+                    :id="fieldId(mIdx, fIdx)"
+                    type="text"
+                    v-model="entryData[currentSubjectIndex][currentVisitIndex][currentGroupIndex][mIdx][fIdx]"
+                    :placeholder="field.placeholder"
+                    :required="!!field.constraints?.required"
+                    :readonly="isReadonlyField(field, mIdx, fIdx)"
+                    :minlength="field.constraints?.minLength"
+                    :maxlength="field.constraints?.maxLength"
+                    :pattern="field.constraints?.pattern"
+                    @blur="onFieldBlur(mIdx, fIdx)"
+                    @input="() => { clearError(mIdx, fIdx); onRuntimeFieldChanged(mIdx, fIdx); }"
+                  />
 
-              <!-- TEXTAREA -->
-              <textarea
-                v-else-if="field.type === 'textarea'"
-                :id="fieldId(mIdx, fIdx)"
-                v-model="entryData[currentSubjectIndex][currentVisitIndex][currentGroupIndex][mIdx][fIdx]"
-                :placeholder="field.placeholder"
-                :required="!!field.constraints?.required"
-                :readonly="isReadonlyField(field, mIdx, fIdx)"
-                :minlength="field.constraints?.minLength"
-                :maxlength="field.constraints?.maxLength"
-                :pattern="field.constraints?.pattern"
-                rows="4"
-                @blur="onFieldBlur(mIdx, fIdx)"
-                @input="() => { clearError(mIdx, fIdx); onRuntimeFieldChanged(mIdx, fIdx); }"
-              ></textarea>
+                  <!-- TEXTAREA -->
+                  <textarea
+                    v-else-if="field.type === 'textarea'"
+                    :id="fieldId(mIdx, fIdx)"
+                    v-model="entryData[currentSubjectIndex][currentVisitIndex][currentGroupIndex][mIdx][fIdx]"
+                    :placeholder="field.placeholder"
+                    :required="!!field.constraints?.required"
+                    :readonly="isReadonlyField(field, mIdx, fIdx)"
+                    :minlength="field.constraints?.minLength"
+                    :maxlength="field.constraints?.maxLength"
+                    :pattern="field.constraints?.pattern"
+                    rows="4"
+                    @blur="onFieldBlur(mIdx, fIdx)"
+                    @input="() => { clearError(mIdx, fIdx); onRuntimeFieldChanged(mIdx, fIdx); }"
+                  ></textarea>
 
-              <!-- NUMBER -->
-              <input
-                v-else-if="field.type === 'number'"
-                :id="fieldId(mIdx, fIdx)"
-                type="number"
-                v-model.number="entryData[currentSubjectIndex][currentVisitIndex][currentGroupIndex][mIdx][fIdx]"
-                :placeholder="field.placeholder"
-                :required="!!field.constraints?.required"
-                :readonly="isReadonlyField(field, mIdx, fIdx)"
-                :min="field.constraints?.min"
-                :max="field.constraints?.max"
-                :step="field.constraints?.step"
-                @blur="() => { validateField(mIdx, fIdx); onRuntimeFieldChanged(mIdx, fIdx); }"
-                @input="() => { clearError(mIdx, fIdx); onRuntimeFieldChanged(mIdx, fIdx); }"
-              />
+                  <!-- NUMBER -->
+                  <input
+                    v-else-if="field.type === 'number'"
+                    :id="fieldId(mIdx, fIdx)"
+                    type="number"
+                    v-model.number="entryData[currentSubjectIndex][currentVisitIndex][currentGroupIndex][mIdx][fIdx]"
+                    :placeholder="field.placeholder"
+                    :required="!!field.constraints?.required"
+                    :readonly="isReadonlyField(field, mIdx, fIdx)"
+                    :min="field.constraints?.min"
+                    :max="field.constraints?.max"
+                    :step="field.constraints?.step"
+                    @blur="() => { validateField(mIdx, fIdx); onRuntimeFieldChanged(mIdx, fIdx); }"
+                    @input="() => { clearError(mIdx, fIdx); onRuntimeFieldChanged(mIdx, fIdx); }"
+                  />
 
-              <!-- CHECKBOX -->
-              <FieldCheckbox
-                v-else-if="field.type === 'checkbox'"
-                :id="fieldId(mIdx, fIdx)"
-                v-model="entryData[currentSubjectIndex][currentVisitIndex][currentGroupIndex][mIdx][fIdx]"
-                v-bind="selectedModels[mIdx].fields[fIdx].constraints"
-                :disabled="isReadonlyField(field, mIdx, fIdx)"
-                @update:modelValue="() => { clearError(mIdx, fIdx); validateField(mIdx, fIdx); onRuntimeFieldChanged(mIdx, fIdx); }"
-              />
+                  <!-- CHECKBOX -->
+                  <FieldCheckbox
+                    v-else-if="field.type === 'checkbox'"
+                    :id="fieldId(mIdx, fIdx)"
+                    v-model="entryData[currentSubjectIndex][currentVisitIndex][currentGroupIndex][mIdx][fIdx]"
+                    v-bind="selectedModels[mIdx].fields[fIdx].constraints"
+                    :disabled="isReadonlyField(field, mIdx, fIdx)"
+                    @update:modelValue="() => { clearError(mIdx, fIdx); validateField(mIdx, fIdx); onRuntimeFieldChanged(mIdx, fIdx); }"
+                  />
 
-              <!-- RADIO -->
-              <FieldRadioGroup
-                v-else-if="field.type === 'radio'"
-                :id="fieldId(mIdx, fIdx)"
-                :name="fieldId(mIdx, fIdx)"
-                :options="field.options || []"
-                v-model="entryData[currentSubjectIndex][currentVisitIndex][currentGroupIndex][mIdx][fIdx]"
-                :default-value="field.constraints?.defaultValue"
-                v-bind="selectedModels[mIdx].fields[fIdx].constraints"
-                :disabled="isReadonlyField(field, mIdx, fIdx)"
-                @change="() => { validateField(mIdx, fIdx); onRuntimeFieldChanged(mIdx, fIdx); }"
-                @update:modelValue="() => { clearError(mIdx, fIdx); validateField(mIdx, fIdx); onRuntimeFieldChanged(mIdx, fIdx); }"
-              />
+                  <!-- RADIO -->
+                  <FieldRadioGroup
+                    v-else-if="field.type === 'radio'"
+                    :id="fieldId(mIdx, fIdx)"
+                    :name="fieldId(mIdx, fIdx)"
+                    :options="field.options || []"
+                    v-model="entryData[currentSubjectIndex][currentVisitIndex][currentGroupIndex][mIdx][fIdx]"
+                    :default-value="field.constraints?.defaultValue"
+                    v-bind="selectedModels[mIdx].fields[fIdx].constraints"
+                    :disabled="isReadonlyField(field, mIdx, fIdx)"
+                    @change="() => { validateField(mIdx, fIdx); onRuntimeFieldChanged(mIdx, fIdx); }"
+                    @update:modelValue="() => { clearError(mIdx, fIdx); validateField(mIdx, fIdx); onRuntimeFieldChanged(mIdx, fIdx); }"
+                  />
 
-              <!-- DATE -->
-              <DateFormatPicker
-                v-else-if="field.type === 'date'"
-                :id="fieldId(mIdx, fIdx)"
-                v-model="entryData[currentSubjectIndex][currentVisitIndex][currentGroupIndex][mIdx][fIdx]"
-                :format="field.constraints?.dateFormat || 'dd.MM.yyyy'"
-                :placeholder="field.placeholder || (field.constraints?.dateFormat || 'dd.MM.yyyy')"
-                :min-date="field.constraints?.minDate || null"
-                :max-date="field.constraints?.maxDate || null"
-                :readonly="isReadonlyField(field, mIdx, fIdx)"
-                @change="() => { validateField(mIdx, fIdx); onRuntimeFieldChanged(mIdx, fIdx); }"
-                @blur="() => { validateField(mIdx, fIdx); onRuntimeFieldChanged(mIdx, fIdx); }"
-              />
+                  <!-- DATE -->
+                  <DateFormatPicker
+                    v-else-if="field.type === 'date'"
+                    :id="fieldId(mIdx, fIdx)"
+                    v-model="entryData[currentSubjectIndex][currentVisitIndex][currentGroupIndex][mIdx][fIdx]"
+                    :format="field.constraints?.dateFormat || 'dd.MM.yyyy'"
+                    :placeholder="field.placeholder || (field.constraints?.dateFormat || 'dd.MM.yyyy')"
+                    :min-date="field.constraints?.minDate || null"
+                    :max-date="field.constraints?.maxDate || null"
+                    :readonly="isReadonlyField(field, mIdx, fIdx)"
+                    @change="() => { validateField(mIdx, fIdx); onRuntimeFieldChanged(mIdx, fIdx); }"
+                    @blur="() => { validateField(mIdx, fIdx); onRuntimeFieldChanged(mIdx, fIdx); }"
+                  />
 
-              <!-- TIME -->
-              <FieldTime
-                v-else-if="field.type === 'time'"
-                :id="fieldId(mIdx, fIdx)"
-                v-model="entryData[currentSubjectIndex][currentVisitIndex][currentGroupIndex][mIdx][fIdx]"
-                :placeholder="field.placeholder || (field.constraints?.timeFormat || 'HH:mm')"
-                v-bind="selectedModels[mIdx].fields[fIdx].constraints"
-                :readonly="isReadonlyField(field, mIdx, fIdx)"
-                @change="() => { validateField(mIdx, fIdx); onRuntimeFieldChanged(mIdx, fIdx); }"
-                @blur="() => { validateField(mIdx, fIdx); onRuntimeFieldChanged(mIdx, fIdx); }"
-              />
+                  <!-- TIME -->
+                  <FieldTime
+                    v-else-if="field.type === 'time'"
+                    :id="fieldId(mIdx, fIdx)"
+                    v-model="entryData[currentSubjectIndex][currentVisitIndex][currentGroupIndex][mIdx][fIdx]"
+                    :placeholder="field.placeholder || (field.constraints?.timeFormat || 'HH:mm')"
+                    v-bind="selectedModels[mIdx].fields[fIdx].constraints"
+                    :readonly="isReadonlyField(field, mIdx, fIdx)"
+                    @change="() => { validateField(mIdx, fIdx); onRuntimeFieldChanged(mIdx, fIdx); }"
+                    @blur="() => { validateField(mIdx, fIdx); onRuntimeFieldChanged(mIdx, fIdx); }"
+                  />
 
-              <!-- SELECT -->
-              <FieldSelect
-                v-else-if="field.type === 'select'"
-                :id="fieldId(mIdx, fIdx)"
-                v-model="entryData[currentSubjectIndex][currentVisitIndex][currentGroupIndex][mIdx][fIdx]"
-                :options="field.options || []"
-                :multiple="!!field.constraints?.allowMultiple"
-                :readonly="isReadonlyField(field, mIdx, fIdx)"
-                :default-value="field.constraints?.defaultValue"
-                :placeholder="'Select…'"
-                @update:modelValue="() => { validateField(mIdx, fIdx); onRuntimeFieldChanged(mIdx, fIdx); }"
-              />
+                  <!-- SELECT -->
+                  <FieldSelect
+                    v-else-if="field.type === 'select'"
+                    :id="fieldId(mIdx, fIdx)"
+                    v-model="entryData[currentSubjectIndex][currentVisitIndex][currentGroupIndex][mIdx][fIdx]"
+                    :options="field.options || []"
+                    :multiple="!!field.constraints?.allowMultiple"
+                    :readonly="isReadonlyField(field, mIdx, fIdx)"
+                    :default-value="field.constraints?.defaultValue"
+                    :placeholder="'Select…'"
+                    @update:modelValue="() => { validateField(mIdx, fIdx); onRuntimeFieldChanged(mIdx, fIdx); }"
+                  />
 
-              <!-- SLIDER -->
-              <FieldSlider
-                v-else-if="field.type === 'slider' && (field.constraints?.mode || 'slider') === 'slider'"
-                :id="fieldId(mIdx, fIdx)"
-                v-model="entryData[currentSubjectIndex][currentVisitIndex][currentGroupIndex][mIdx][fIdx]"
-                v-bind="getSliderProps(field)"
-                :disabled="isReadonlyField(field, mIdx, fIdx)"
-                @update:modelValue="() => { clearError(mIdx, fIdx); validateField(mIdx, fIdx); onRuntimeFieldChanged(mIdx, fIdx); }"
-                @change="() => { validateField(mIdx, fIdx); onRuntimeFieldChanged(mIdx, fIdx); }"
-              />
+                  <!-- SLIDER -->
+                  <FieldSlider
+                    v-else-if="field.type === 'slider' && (field.constraints?.mode || 'slider') === 'slider'"
+                    :id="fieldId(mIdx, fIdx)"
+                    v-model="entryData[currentSubjectIndex][currentVisitIndex][currentGroupIndex][mIdx][fIdx]"
+                    v-bind="getSliderProps(field)"
+                    :disabled="isReadonlyField(field, mIdx, fIdx)"
+                    @update:modelValue="() => { clearError(mIdx, fIdx); validateField(mIdx, fIdx); onRuntimeFieldChanged(mIdx, fIdx); }"
+                    @change="() => { validateField(mIdx, fIdx); onRuntimeFieldChanged(mIdx, fIdx); }"
+                  />
 
-              <!-- LINEAR SCALE -->
-              <FieldLinearScale
-                v-else-if="field.type === 'slider' && field.constraints?.mode === 'linear'"
-                :id="fieldId(mIdx, fIdx)"
-                v-model="entryData[currentSubjectIndex][currentVisitIndex][currentGroupIndex][mIdx][fIdx]"
-                v-bind="getLinearProps(field)"
-                :disabled="isReadonlyField(field, mIdx, fIdx)"
-                @update:modelValue="() => { clearError(mIdx, fIdx); validateField(mIdx, fIdx); onRuntimeFieldChanged(mIdx, fIdx); }"
-                @change="() => { validateField(mIdx, fIdx); onRuntimeFieldChanged(mIdx, fIdx); }"
-              />
+                  <!-- LINEAR SCALE -->
+                  <FieldLinearScale
+                    v-else-if="field.type === 'slider' && field.constraints?.mode === 'linear'"
+                    :id="fieldId(mIdx, fIdx)"
+                    v-model="entryData[currentSubjectIndex][currentVisitIndex][currentGroupIndex][mIdx][fIdx]"
+                    v-bind="getLinearProps(field)"
+                    :disabled="isReadonlyField(field, mIdx, fIdx)"
+                    @update:modelValue="() => { clearError(mIdx, fIdx); validateField(mIdx, fIdx); onRuntimeFieldChanged(mIdx, fIdx); }"
+                    @change="() => { validateField(mIdx, fIdx); onRuntimeFieldChanged(mIdx, fIdx); }"
+                  />
 
-              <!-- FILE -->
-              <FieldFileUpload
-                v-else-if="field.type === 'file'"
-                :id="fieldId(mIdx, fIdx)"
-                :value="entryData[currentSubjectIndex][currentVisitIndex][currentGroupIndex][mIdx][fIdx]"
-                :constraints="field.constraints || {}"
-                :readonly="isReadonlyField(field, mIdx, fIdx)"
-                :required="!!field.constraints?.required"
-                stage="runtime"
-                @input="(meta) => setEntryValue(mIdx, fIdx, meta)"
-                @file-selected="(file) => onRawFileSelected(mIdx, fIdx, file)"
-              />
+                  <!-- FILE -->
+                  <FieldFileUpload
+                    v-else-if="field.type === 'file'"
+                    :id="fieldId(mIdx, fIdx)"
+                    :value="entryData[currentSubjectIndex][currentVisitIndex][currentGroupIndex][mIdx][fIdx]"
+                    :constraints="field.constraints || {}"
+                    :readonly="isReadonlyField(field, mIdx, fIdx)"
+                    :required="!!field.constraints?.required"
+                    stage="runtime"
+                    @input="(meta) => setEntryValue(mIdx, fIdx, meta)"
+                    @file-selected="(file) => onRawFileSelected(mIdx, fIdx, file)"
+                  />
 
-              <!-- FALLBACK -->
-              <input
-                v-else
-                :id="fieldId(mIdx, fIdx)"
-                type="text"
-                v-model="entryData[currentSubjectIndex][currentVisitIndex][currentGroupIndex][mIdx][fIdx]"
-                :placeholder="field.placeholder"
-                :required="!!field.constraints?.required"
-                :readonly="isReadonlyField(field, mIdx, fIdx)"
-                @blur="onFieldBlur(mIdx, fIdx)"
-                @input="() => { clearError(mIdx, fIdx); onRuntimeFieldChanged(mIdx, fIdx); }"
-              />
+                  <!-- FALLBACK -->
+                  <input
+                    v-else
+                    :id="fieldId(mIdx, fIdx)"
+                    type="text"
+                    v-model="entryData[currentSubjectIndex][currentVisitIndex][currentGroupIndex][mIdx][fIdx]"
+                    :placeholder="field.placeholder"
+                    :required="!!field.constraints?.required"
+                    :readonly="isReadonlyField(field, mIdx, fIdx)"
+                    @blur="onFieldBlur(mIdx, fIdx)"
+                    @input="() => { clearError(mIdx, fIdx); onRuntimeFieldChanged(mIdx, fIdx); }"
+                  />
 
-              <div v-if="fieldErrors(mIdx, fIdx)" class="error-message">
-                {{ fieldErrors(mIdx, fIdx) }}
-                <span
-                  v-if="isFieldSkipped(mIdx,fIdx)"
-                  class="skip-pill"
-                  title="Required validation skipped for this field"
-                >Skipped</span>
-              </div>
-              <div v-else-if="isFieldSkipped(mIdx,fIdx)" class="error-message">
-                <span class="skip-pill" title="Required validation skipped for this field">Skipped</span>
-              </div>
+                  <div v-if="fieldErrors(mIdx, fIdx)" class="error-message">
+                    {{ fieldErrors(mIdx, fIdx) }}
+                    <span
+                      v-if="isFieldSkipped(mIdx, fIdx)"
+                      class="skip-pill"
+                      title="Required validation skipped for this field"
+                    >Skipped</span>
+                  </div>
+                  <div v-else-if="isFieldSkipped(mIdx, fIdx)" class="error-message">
+                    <span class="skip-pill" title="Required validation skipped for this field">Skipped</span>
+                  </div>
 
-              <div v-if="fieldCalcWarning(mIdx, fIdx)" class="calc-warning-message">
-                {{ fieldCalcWarning(mIdx, fIdx) }}
-              </div>
-              </div>
-             </template>
-          </div>
+                  <div v-if="fieldCalcWarning(mIdx, fIdx)" class="calc-warning-message">
+                    {{ fieldCalcWarning(mIdx, fIdx) }}
+                  </div>
+                </div>
+              </template>
+            </div>
           </template>
 
           <!-- Actions -->
@@ -363,105 +363,40 @@
       </div>
     </div>
 
-    <!-- dialogs (unchanged except share hidden on shared) -->
-    <div v-if="showShareDialog && !isShared" class="dialog-overlay">
-      <div class="dialog">
-        <h3>Generate Share Link</h3>
-        <p>
-          Sharing for Subject
-          {{ shareParams.subjectIndex != null ? sd.subjects?.[shareParams.subjectIndex]?.id : 'N/A' }},
-          Visit {{ visitList[shareParams.visitIndex]?.name }}
-        </p>
-        <label>
-          Permission:
-          <select v-model="shareConfig.permission">
-            <option value="view">View Only</option>
-            <option value="add">Allow Add</option>
-          </select>
-        </label>
-        <label>
-          Max Uses:
-          <input type="number" v-model.number="shareConfig.maxUses" min="1" />
-        </label>
-        <label>
-          Expires in (days):
-          <input type="number" v-model.number="shareConfig.expiresInDays" min="1" />
-        </label>
-        <div class="dialog-actions">
-          <button @click="createShareLink">Generate</button>
-          <button @click="showShareDialog = false">Cancel</button>
-        </div>
+    <StudyShareDialog
+      v-if="showShareDialog && !isShared"
+      :visible="showShareDialog"
+      :subject-label="shareParams.subjectIndex != null ? sd.subjects?.[shareParams.subjectIndex]?.id : 'N/A'"
+      :visit-label="visitList[shareParams.visitIndex]?.name || 'N/A'"
+      :available-sections="shareDialogSections"
+      :permission="shareConfig.permission"
+      :max-uses="shareConfig.maxUses"
+      :expires-in-days="shareConfig.expiresInDays"
+      :generated-link="generatedLink"
+      :copy-status="copyStatus"
+      @close="showShareDialog = false"
+      @copy="copyGeneratedLink"
+      @generate="onShareDialogGenerate"
+    />
 
-        <!-- Copy link UI (only after successful generation) -->
-        <div v-if="generatedLink" class="share-result">
-          <span class="share-result-text">Link generated.</span>
-          <button type="button" class="btn-copy-link" @click="copyGeneratedLink">
-            Copy link
-          </button>
-        </div>
-        <div v-if="generatedLink" class="generated-link-preview" :title="generatedLink">
-          {{ generatedLink }}
-        </div>
-        <div v-if="copyStatus" class="copy-status">
-          {{ copyStatus }}
-        </div>
-      </div>
-    </div>
+    <PermissionDeniedDialog
+      :visible="permissionError"
+      @close="permissionError = false"
+    />
 
-    <div v-if="permissionError" class="dialog-overlay">
-      <div class="dialog">
-        <h3>Permission Denied</h3>
-        <p>You do not have permission to create a share link. Please contact your administrator.</p>
-        <div class="dialog-actions">
-          <button @click="permissionError = false">Close</button>
-        </div>
-      </div>
-    </div>
+    <StudyConstraintDialog
+      :visible="showConstraintDialog"
+      :title="constraintDialogFieldName"
+      :items="constraintDialogItems"
+      @close="closeConstraintDialog"
+    />
 
-    <!-- Constraint dialog -->
-    <div v-if="showConstraintDialog" class="mini-overlay" @click.self="closeConstraintDialog">
-      <div class="mini-dialog" role="dialog" aria-modal="true">
-        <div class="mini-head">
-          <h4 class="mini-title">{{ constraintDialogFieldName }}</h4>
-          <button class="mini-close" @click="closeConstraintDialog" aria-label="Close">✕</button>
-        </div>
-        <ul class="mini-list">
-          <li v-for="(line, idx) in constraintDialogItems" :key="idx">{{ line }}</li>
-        </ul>
-      </div>
-    </div>
-
-    <!-- Legend dialog (field-level) -->
-    <div v-if="showLegendDialog" class="mini-overlay" @click.self="closeLegendDialog">
-      <div class="mini-dialog" role="dialog" aria-modal="true">
-        <div class="mini-head">
-          <h4 class="mini-title">Legend</h4>
-          <button class="mini-close" @click="closeLegendDialog" aria-label="Close">✕</button>
-        </div>
-        <ul class="mini-list">
-          <li><span class="legend-swatch swatch-none"></span> None — no data saved yet.</li>
-          <li><span class="legend-swatch swatch-partial"></span> Partial — some fields filled.</li>
-          <li><span class="legend-swatch swatch-complete"></span> Complete — all assigned fields filled.</li>
-          <li><span class="legend-swatch swatch-skipped"></span> Skipped — one or more required fields were skipped.</li>
-        </ul>
-      </div>
-    </div>
-
-    <!-- Legend dialog (selection status) -->
-    <div v-if="showStatusLegend" class="mini-overlay" @click.self="closeStatusLegend">
-      <div class="mini-dialog" role="dialog" aria-modal="true">
-        <div class="mini-head">
-          <h4 class="mini-title">Selection Status</h4>
-          <button class="mini-close" @click="closeStatusLegend" aria-label="Close">✕</button>
-        </div>
-        <ul class="mini-list legend-explain">
-          <li><span class="legend-swatch swatch-none"></span> None — no data saved yet.</li>
-          <li><span class="legend-swatch swatch-partial"></span> Partial — some fields filled.</li>
-          <li><span class="legend-swatch swatch-complete"></span> Complete — all assigned fields filled.</li>
-          <li><span class="legend-swatch swatch-skipped"></span> Skipped — one or more required fields were skipped.</li>
-        </ul>
-      </div>
-    </div>
+    <StudyLegendDialogs
+      :showLegendDialog="showLegendDialog"
+      :showStatusLegend="showStatusLegend"
+      @close-legend="closeLegendDialog"
+      @close-status-legend="closeStatusLegend"
+    />
 
     <!-- Add Subjects dialog (moved to its own component) -->
     <AddSubjectsDialog
@@ -478,113 +413,33 @@
       @close="closeSubjectDialog"
       @save="saveNewSubjects"
     />
-    <div v-if="showGroupAssignDialog" class="dialog-overlay">
-      <div class="dialog">
-        <h3>Group assignment required</h3>
-        <p>This subject has no group. Choose how you want to assign a group.</p>
 
-        <label>
-          Assignment:
-          <select v-model="groupAssignScope">
-            <option value="one">Assign group to this subject only</option>
-            <option value="all">Assign group to all unassigned subjects</option>
-          </select>
-        </label>
-
-        <!-- Single-subject assignment -->
-        <label v-if="groupAssignScope === 'one'">
-          Group:
-          <select v-model="groupAssignSelectedGroup">
-            <option v-for="g in groupList" :key="g.name" :value="g.name">
-              {{ g.name }}
-            </option>
-          </select>
-        </label>
-
-        <!-- Multi-subject assignment: per-subject selection (NOT blanket assignment) -->
-        <div v-else>
-          <p style="margin: 0 0 10px 0;">
-            Assign a group for each unassigned subject:
-          </p>
-
-          <div style="max-height: 260px; overflow: auto; border: 1px solid #e5e7eb; border-radius: 6px; padding: 8px;">
-            <div
-              v-for="row in groupAssignDrafts"
-              :key="row.index"
-              style="display:flex; align-items:center; justify-content:space-between; gap:10px; padding:6px 0; border-bottom:1px solid #f3f4f6;"
-            >
-              <div style="min-width:0;">
-                <strong>{{ row.id || ('Subject ' + (row.index + 1)) }}</strong>
-              </div>
-
-              <div style="flex: 0 0 180px;">
-                <select v-model="row.group" style="width:100%;">
-                  <option v-for="g in groupList" :key="g.name" :value="g.name">
-                    {{ g.name }}
-                  </option>
-                </select>
-              </div>
-            </div>
-
-            <div v-if="!groupAssignDrafts || !groupAssignDrafts.length" style="font-size: 12px; color: #6b7280; padding: 8px 0;">
-              No unassigned subjects found.
-            </div>
-          </div>
-        </div>
-
-        <p v-if="groupAssignError" style="color:#dc2626; font-size:12px; margin-top:6px;">
-          {{ groupAssignError }}
-        </p>
-
-        <div class="dialog-actions">
-          <button @click="saveGroupAssignment" :disabled="savingGroupAssign">
-            {{ savingGroupAssign ? "Saving..." : "Save" }}
-          </button>
-          <button @click="closeGroupAssignDialog" :disabled="savingGroupAssign">
-            Cancel
-          </button>
-        </div>
-      </div>
-    </div>
+    <GroupAssignDialog
+      :visible="showGroupAssignDialog"
+      :groupAssignScope="groupAssignScope"
+      :groupAssignSelectedGroup="groupAssignSelectedGroup"
+      :groupAssignError="groupAssignError"
+      :savingGroupAssign="savingGroupAssign"
+      :groupAssignDrafts="groupAssignDrafts"
+      :groupList="groupList"
+      @close="closeGroupAssignDialog"
+      @save="saveGroupAssignment"
+      @update:groupAssignScope="groupAssignScope = $event"
+      @update:groupAssignSelectedGroup="groupAssignSelectedGroup = $event"
+      @update:groupAssignDrafts="groupAssignDrafts = $event"
+    />
 
     <CustomDialog :message="dialogMessage" :isVisible="showDialog" @close="closeDialog" />
 
-    <!-- Skip required dialog -->
-    <div v-if="showSkipDialog" class="dialog-overlay">
-      <div class="dialog dialog-wide">
-        <h3>Fix validation before saving</h3>
-        <p>
-          The fields below are required but empty. You can fill them now or choose to
-          <em>Skip for now</em> to save the rest.
-        </p>
-
-        <div class="skip-list">
-          <div class="skip-row" v-for="item in skipCandidates" :key="item.key">
-            <div class="skip-left">
-              <div class="skip-title">
-                <strong>{{ item.sectionTitle }}</strong> / {{ item.fieldLabel }}
-              </div>
-            </div>
-            <div class="skip-right">
-              <label class="skip-chk">
-                <input type="checkbox" v-model="skipSelections[item.key]" />
-                Skip for now
-              </label>
-              <button class="btn-jump" @click="jumpToField(item)">Go to field</button>
-            </div>
-          </div>
-        </div>
-
-        <div class="dialog-actions">
-          <button @click="confirmSkipSelection" class="btn-primary" :disabled="!canEdit">
-            Skip selected & Save
-          </button>
-          <button @click="cancelSkipSelection" class="btn-option">
-            Cancel
-          </button>
-        </div>
-      </div>
-    </div>
+    <SkipRequiredDialog
+      :visible="showSkipDialog"
+      :skipCandidates="skipCandidates"
+      :skipSelections="skipSelections"
+      :canEdit="canEdit"
+      @confirm="confirmSkipSelectionFromDialog"
+      @cancel="cancelSkipSelection"
+      @jump="jumpToField"
+    />
   </div>
 
   <div v-else class="loading">
@@ -610,6 +465,12 @@ import AddSubjectsDialog from "@/components/AddSubjectsDialog.vue";
 import { createAjv, validateFieldValue } from "@/utils/jsonschemaValidation";
 
 import MergeStudy from "@/components/MergeStudy.vue";
+import StudyShareDialog from "@/components/dataentry/StudyShareDialog.vue";
+import PermissionDeniedDialog from "@/components/dataentry/PermissionDeniedDialog.vue";
+import StudyConstraintDialog from "@/components/dataentry/StudyConstraintDialog.vue";
+import StudyLegendDialogs from "@/components/dataentry/StudyLegendDialogs.vue";
+import GroupAssignDialog from "@/components/dataentry/GroupAssignDialog.vue";
+import SkipRequiredDialog from "@/components/dataentry/SkipRequiredDialog.vue";
 import {
   getCalculationRulesFromStudy,
   getCalculationFormulaForField,
@@ -635,6 +496,12 @@ export default {
     SelectionMatrixView,
     AddSubjectsDialog,
     MergeStudy,
+    StudyShareDialog,
+    PermissionDeniedDialog,
+    StudyConstraintDialog,
+    StudyLegendDialogs,
+    GroupAssignDialog,
+    SkipRequiredDialog,
   },
   data() {
     return {
@@ -670,7 +537,7 @@ export default {
       icons,
       showShareDialog: false,
       shareParams: { subjectIndex: null, visitIndex: null, groupIndex: null },
-      shareConfig: { permission: "view", maxUses: 1, expiresInDays: 7 },
+      shareConfig: { permission: "view", maxUses: 1, expiresInDays: 7, allowed_section_ids: [] },
       generatedLink: "",
       copyStatus: "",
       permissionError: false,
@@ -727,6 +594,50 @@ export default {
   },
 
   computed: {
+    shareDialogSections() {
+      const v = Number(this.shareParams?.visitIndex);
+      const g = Number(this.shareParams?.groupIndex);
+
+      if (!Number.isInteger(v) || v < 0) return [];
+      if (!Number.isInteger(g) || g < 0) return [];
+
+      const selectedModels = Array.isArray(this.selectedModels) ? this.selectedModels : [];
+      const assignments = Array.isArray(this.assignments) ? this.assignments : [];
+
+      return selectedModels
+        .map((section, mIdx) => {
+          const assigned = !!assignments?.[mIdx]?.[v]?.[g];
+          if (!assigned) return null;
+
+          return {
+              id:
+                section?._id ||
+                section?.id ||
+                section?.uuid ||
+                section?.title ||
+                `section-${mIdx}`,
+              title: section?.title || `Section ${mIdx + 1}`,
+              modelIndex: mIdx,
+            };
+        })
+        .filter(Boolean);
+    },
+
+    shareableSectionsForCurrentCell() {
+      const v = this.shareParams?.visitIndex;
+      const g = this.shareParams?.groupIndex;
+
+      if (v == null || g == null) return [];
+
+      return (this.selectedModels || [])
+        .map((sec, mIdx) => ({ sec, mIdx }))
+        .filter(({ mIdx }) => !!this.assignments?.[mIdx]?.[v]?.[g])
+        .map(({ sec }) => ({
+          id: String(sec?._id || sec?.id || "").trim(),
+          title: sec?.title || "Untitled Section"
+        }))
+        .filter(s => s.id);
+    },
     unassignedSubjectIndices() {
       const subjects = this.sd.subjects || [];
       const out = [];
@@ -859,7 +770,17 @@ export default {
     calculationRules() {
       return getCalculationRulesFromStudy(this.study);
     },
-  },
+
+    shareDialogSubjectLabel() {
+      const idx = this.shareParams?.subjectIndex;
+      return idx != null ? (this.sd.subjects?.[idx]?.id || "N/A") : "N/A";
+    },
+
+    shareDialogVisitLabel() {
+      const idx = this.shareParams?.visitIndex;
+      return this.visitList?.[idx]?.name || "";
+    },
+},
 
   async created() {
     this.ajv = createAjv();
@@ -935,6 +856,16 @@ export default {
   },
 
   methods: {
+    onShareDialogGenerate(cfg) {
+      this.shareConfig = {
+        permission: cfg.permission,
+        maxUses: cfg.maxUses,
+        expiresInDays: cfg.expiresInDays,
+        allowed_section_ids: cfg.allowed_section_ids || []
+      };
+
+      this.createShareLink();
+    },
     getCurrentCellData() {
       const s = this.currentSubjectIndex;
       const v = this.currentVisitIndex;
@@ -1229,7 +1160,7 @@ export default {
         const resp = await axios.get(
           `/forms/studies/${studyId}/versions`,
           {
-          headers: { Authorization: `Bearer ${this.token}` },
+            headers: { Authorization: `Bearer ${this.token}` },
           }
         );
         this.studyVersions = Array.isArray(resp.data)
@@ -1331,8 +1262,8 @@ export default {
         const resp = await axios.get(
           `/forms/studies/${studyId}/template`,
           {
-          headers: { Authorization: `Bearer ${this.token}` },
-          params: { version: this.selectedVersion },
+            headers: { Authorization: `Bearer ${this.token}` },
+            params: { version: this.selectedVersion },
           }
         );
         const rawSchema = resp?.data?.schema || {};
@@ -1857,8 +1788,8 @@ export default {
       this.assignedModelIndices.forEach((mIdx) => {
         this.selectedModels[mIdx].fields.forEach(
           (def, fIdx) => {
-          if (!def) return;
-          const cons = def.constraints || {};
+            if (!def) return;
+            const cons = def.constraints || {};
             if (
               def.type === "text" ||
               def.type === "textarea"
@@ -1867,20 +1798,20 @@ export default {
                 this.entryData[this.currentSubjectIndex][
                   this.currentVisitIndex
                 ][this.currentGroupIndex][mIdx][fIdx];
-            const t = this.applyTransform(cons.transform, cur);
-            if (t !== cur) {
-              this.setDeepValue(
-                this.currentSubjectIndex,
-                this.currentVisitIndex,
-                this.currentGroupIndex,
-                mIdx,
-                fIdx,
-                t
-              );
-              this.onRuntimeFieldChanged(mIdx, fIdx);
+              const t = this.applyTransform(cons.transform, cur);
+              if (t !== cur) {
+                this.setDeepValue(
+                  this.currentSubjectIndex,
+                  this.currentVisitIndex,
+                  this.currentGroupIndex,
+                  mIdx,
+                  fIdx,
+                  t
+                );
+                this.onRuntimeFieldChanged(mIdx, fIdx);
+              }
             }
-          }
-        });
+          });
       });
     },
 
@@ -2914,6 +2845,12 @@ export default {
       this.showSkipDialog = false;
       this.submitData();
     },
+
+    confirmSkipSelectionFromDialog(nextSelections) {
+      this.skipSelections = { ...(nextSelections || {}) };
+      this.confirmSkipSelection();
+    },
+
     cancelSkipSelection() {
       this.showSkipDialog = false;
     },
@@ -2931,6 +2868,23 @@ export default {
         visitIndex: vIdx,
         groupIndex: gIdx,
       };
+
+      const available = (this.selectedModels || [])
+        .map((sec, mIdx) => ({ sec, mIdx }))
+        .filter(({ mIdx }) => !!this.assignments?.[mIdx]?.[vIdx]?.[gIdx])
+        .map(({ sec }) => ({
+          id: String(sec?._id || sec?.id || "").trim(),
+          title: sec?.title || "Untitled Section"
+        }))
+        .filter(s => s.id);
+
+      this.shareConfig = {
+        permission: "view",
+        maxUses: 1,
+        expiresInDays: 7,
+        allowed_section_ids: available.map(x => x.id)
+      };
+
       this.generatedLink = "";
       this.copyStatus = "";
       this.showShareDialog = true;
@@ -2945,6 +2899,7 @@ export default {
         permission: this.shareConfig.permission,
         max_uses: this.shareConfig.maxUses,
         expires_in_days: this.shareConfig.expiresInDays,
+        allowed_section_ids: this.shareConfig.allowed_section_ids || []
       };
       try {
         const resp = await axios.post("/forms/share-link/", payload, {
@@ -2953,6 +2908,7 @@ export default {
         });
         this.generatedLink = resp.data.link;
         this.copyStatus = "";
+        this.showShareDialog = true;
       } catch (err) {
         this.generatedLink = "";
         this.copyStatus = "";
@@ -3355,7 +3311,7 @@ export default {
 .back-buttons-container {
   margin-bottom: 16px;
 }
- .btn-back {
+.btn-back {
   display: inline-flex;
   align-items: center;
   gap: 8px;
@@ -3383,7 +3339,7 @@ export default {
 
 .btn-back i {
   font-size: 14px;
- }
+}
 
 /* Header */
 .study-header-container {
@@ -3661,248 +3617,6 @@ select:focus {
   padding: 50px;
   font-size: 16px;
   color: #6b7280;
-}
-.dialog-overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.5);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 1000;
-}
-.dialog {
-  background: #ffffff;
-  padding: 1.5rem;
-  border-radius: 8px;
-  width: 320px;
-  max-width: 90%;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-}
-.dialog h3 {
-  margin: 0 0 1rem 0;
-  font-size: 1.25rem;
-  font-weight: 600;
-  color: #1f2937;
-}
-.dialog label {
-  display: block;
-  margin-bottom: 0.75rem;
-  font-size: 0.9rem;
-  color: #374151;
-}
-.dialog label select,
-.dialog label input {
-  width: 100%;
-  margin-top: 0.25rem;
-  padding: 0.5rem;
-  border: 1px solid #d1d5db;
-  border-radius: 6px;
-  font-size: 0.9rem;
-}
-.dialog-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 0.5rem;
-  margin-top: 1rem;
-}
-.dialog-actions button {
-  padding: 0.5rem 1rem;
-  border: none;
-  border-radius: 6px;
-  cursor: pointer;
-  font-size: 0.9rem;
-}
-.dialog-actions button:first-child,
-.dialog-actions button:last-child {
-  background: #e5e7eb;
-  color: #1f2937;
-}
-
-/* Share result + copy button layout */
-.share-result {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  margin-top: 12px;
-}
-.share-result-text {
-  font-size: 13px;
-  color: #374151;
-}
-.btn-copy-link {
-  background: #2563eb;
-  color: #ffffff;
-  border: none;
-  padding: 8px 12px;
-  border-radius: 6px;
-  font-size: 13px;
-  cursor: pointer;
-  transition: background 0.2s;
-  white-space: nowrap;
-}
-.btn-copy-link:hover {
-  background: #1d4ed8;
-}
-.generated-link-preview {
-  margin-top: 8px;
-  font-size: 12px;
-  color: #6b7280;
-  background: #f9fafb;
-  border: 1px solid #e5e7eb;
-  border-radius: 6px;
-  padding: 8px;
-  word-break: break-all;
-}
-.copy-status {
-  margin-top: 6px;
-  font-size: 12px;
-  color: #374151;
-}
-
-/* Mini dialog (constraints / legends) */
-.mini-overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(17, 24, 39, 0.35);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 1200;
-}
-.mini-dialog {
-  width: 360px;
-  max-width: 92%;
-  background: #fff;
-  border-radius: 10px;
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25);
-  padding: 12px 12px 10px;
-}
-.mini-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 6px;
-}
-.mini-title {
-  margin: 0;
-  font-size: 16px;
-  font-weight: 600;
-  color: #111827;
-}
-.mini-close {
-  background: transparent;
-  border: none;
-  font-size: 16px;
-  line-height: 1;
-  cursor: pointer;
-  color: #6b7280;
-}
-.mini-close:hover {
-  color: #111827;
-}
-.mini-list {
-  margin: 0;
-  padding-left: 18px;
-  color: #374151;
-  font-size: 14px;
-}
-.mini-list li {
-  margin: 4px 0;
-}
-
-/* Legend swatches */
-.legend-swatch {
-  width: 12px;
-  height: 12px;
-  border-radius: 3px;
-  border: 1px solid rgba(0, 0, 0, 0.12);
-  display: inline-block;
-  margin-right: 8px;
-  vertical-align: -1px;
-}
-.swatch-none {
-  background: #e5e7eb;
-}
-.swatch-partial {
-  background: #fbbf24;
-}
-.swatch-complete {
-  background: #16a34a;
-}
-.swatch-skipped {
-  background: #ef4444;
-}
-.legend-explain li {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-/* Skip dialog */
-.dialog-wide {
-  width: 680px;
-  max-width: 95%;
-}
-.skip-list {
-  max-height: 360px;
-  overflow: auto;
-  border: 1px dashed #e5e7eb;
-  padding: 8px;
-  border-radius: 8px;
-  margin: 10px 0;
-}
-.skip-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 8px;
-  border-bottom: 1px solid #f3f4f6;
-  gap: 12px;
-}
-.skip-row:last-child {
-  border-bottom: none;
-}
-.skip-left {
-  min-width: 0;
-}
-.skip-title {
-  font-size: 14px;
-  color: #111827;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.skip-right {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.skip-chk {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-}
-.btn-jump {
-  background: #e5e7eb;
-  color: #111827;
-  border: none;
-  padding: 6px 10px;
-  border-radius: 6px;
-  cursor: pointer;
-}
-.btn-jump:hover {
-  background: #d1d5db;
-}
-.btn-primary {
-  background: #2563eb;
-  color: #fff;
-  border: none;
-}
-.btn-option {
-  background: #e5e7eb;
-  color: #111827;
 }
 
 /* Tiny pill near error */

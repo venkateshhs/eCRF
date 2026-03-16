@@ -888,6 +888,7 @@ export default {
 
     selectedModels() {
       return (this.currentForm.sections || []).map(sec => ({
+        _id: sec._id,
         title: sec.title,
         fields: sec.fields
       }));
@@ -1324,12 +1325,14 @@ export default {
       }));
 
       const selectedModels = (this.currentForm.sections || []).map(sec => ({
-        title: sec.title,
-        fields: JSON.parse(JSON.stringify(sec.fields || [])).map(field => ({
-          ...field,
-          constraints: field.constraints || {}
-        }))
-      }));
+          _id: sec._id || this.uuidForLogic(),
+          title: sec.title,
+          fields: JSON.parse(JSON.stringify(sec.fields || [])).map(field => ({
+            ...field,
+            _id: field._id || this.uuidForLogic(),
+            constraints: field.constraints || {}
+          }))
+        }));
 
       const studyName =
         studyNode.title ||
@@ -1914,6 +1917,7 @@ export default {
       this.ensureCurrentFormExists();
       const insertAt = Math.min(this.activeSection + 1, this.currentForm.sections.length);
       const sec = {
+        _id: this.uuidForLogic(),
         title: section.title,
         fields: (section.fields || []).map(f => ({
           ...JSON.parse(JSON.stringify(f)),
@@ -2159,6 +2163,7 @@ export default {
 
       const insertAt = Math.min(this.activeSection + 1, this.currentForm.sections.length);
       const sec = {
+          _id: this.uuidForLogic(),
           title: this.currentModel.title,
           fields: chosen.map(f => ({
             ...JSON.parse(JSON.stringify(f)),
@@ -2177,10 +2182,10 @@ export default {
     },
 
     addNewSection() {
-      // FIX: guard before mutation
       this.ensureCurrentFormExists();
 
       const sec = {
+        _id: this.uuidForLogic(),
         title: `Section ${this.currentForm.sections.length + 1}`,
         fields: [],
         collapsed: false,
@@ -2200,9 +2205,11 @@ export default {
       if (!current) return;
 
       const sec = {
+        _id: this.uuidForLogic(),
         title: `${current.title} (Copy)`,
         fields: (current.fields || []).map(field => ({
           ...field,
+          _id: this.uuidForLogic(),
           name: `${field.name}_${Date.now()}`,
           constraints: field.constraints || {}
         })),
@@ -2653,8 +2660,10 @@ export default {
           if (Array.isArray(pd.sections)) {
             pd.sections = pd.sections.map(sec => ({
               ...sec,
+              _id: sec._id || this.uuidForLogic(),
               fields: (sec.fields || []).map(field => ({
                 ...field,
+                _id: field._id || this.uuidForLogic(),
                 constraints: field.constraints || {}
               }))
             }));

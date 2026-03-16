@@ -127,7 +127,7 @@ class SharedFormAccess(Base):
     used_count = Column(Integer, default=0)
     expires_at = Column(DateTime, nullable=False)
     created_at = Column(DateTime, default=local_now)
-
+    allowed_section_ids = Column(JSON, nullable=True)
     study = relationship("StudyMetadata", back_populates="shared_links")
 
 class StudyTemplateVersion(Base):

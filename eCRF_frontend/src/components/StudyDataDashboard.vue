@@ -386,7 +386,17 @@ export default {
     normalizeKey(k){ return String(k || '').trim().toLowerCase(); },
     sectionDictKey(sectionObj) { return sectionObj?.title ?? ''; },
     fieldDictKey(fieldObj, fallbackIndex) {
-      return fieldObj?.name ?? fieldObj?.key ?? fieldObj?.id ?? fieldObj?.label ?? fieldObj?.title ?? `f${fallbackIndex}`;
+      return (
+        fieldObj?._id ??
+        fieldObj?.id ??
+        fieldObj?.field_id ??
+        fieldObj?.uid ??
+        fieldObj?.key ??
+        fieldObj?.name ??
+        fieldObj?.label ??
+        fieldObj?.title ??
+        `f${fallbackIndex}`
+      );
     },
     dictRead(dataDict, sIdx, fIdx) {
       if (!dataDict || typeof dataDict !== 'object' || Array.isArray(dataDict)) return undefined;
@@ -395,7 +405,6 @@ export default {
       const fld = sec?.fields?.[fIdx];
 
       const sKey = this.sectionDictKey(sec);
-      const fKey = this.fieldDictKey(fld, fIdx);
 
       let secObj = dataDict[sKey];
       if (!secObj) {
@@ -405,10 +414,26 @@ export default {
       }
       if (!secObj || typeof secObj !== 'object') return undefined;
 
-      if (Object.prototype.hasOwnProperty.call(secObj, fKey)) return secObj[fKey];
+      const candidates = [
+        fld?._id,
+        fld?.id,
+        fld?.field_id,
+        fld?.uid,
+        fld?.key,
+        fld?.name,
+        fld?.label,
+        fld?.title,
+        `f${fIdx}`,
+      ].filter(Boolean);
 
-      const wantedField = this.normalizeKey(fKey);
-      const hitField = Object.keys(secObj).find(k => this.normalizeKey(k) === wantedField);
+      for (const candidate of candidates) {
+        if (Object.prototype.hasOwnProperty.call(secObj, candidate)) {
+          return secObj[candidate];
+        }
+      }
+
+      const normalizedCandidates = candidates.map(c => this.normalizeKey(c));
+      const hitField = Object.keys(secObj).find(k => normalizedCandidates.includes(this.normalizeKey(k)));
       if (hitField) return secObj[hitField];
 
       return undefined;

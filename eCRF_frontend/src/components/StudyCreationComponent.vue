@@ -461,6 +461,44 @@ export default {
       }
     }
 
+    function uuidForImport() {
+      if (typeof crypto !== "undefined" && crypto.randomUUID) return crypto.randomUUID();
+      return `id_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+    }
+
+    function ensureIdsInSelectedModels(selectedModels) {
+      if (!Array.isArray(selectedModels)) return [];
+
+      return selectedModels.map((sec, sIdx) => ({
+        ..._deepClone(sec),
+        _id: sec?._id || sec?.id || uuidForImport(),
+        title: sec?.title || `Section ${sIdx + 1}`,
+        fields: Array.isArray(sec?.fields)
+          ? sec.fields.map((field, fIdx) => ({
+              ..._deepClone(field),
+              _id: field?._id || field?.id || uuidForImport(),
+              name: field?.name || `field_${sIdx}_${fIdx}`,
+              constraints: field?.constraints || {},
+            }))
+          : [],
+      }));
+    }
+
+    function selectedModelsToForms(selectedModels) {
+      const normalized = ensureIdsInSelectedModels(selectedModels);
+      return [
+        {
+          sections: normalized.map((sec) => ({
+            _id: sec._id,
+            title: sec.title,
+            fields: _deepClone(sec.fields || []),
+            collapsed: !!sec.collapsed,
+            source: sec.source || "template",
+          })),
+        },
+      ];
+    }
+
     function buildSnapshot() {
       return _deepClone({
         step: step.value,
@@ -515,10 +553,18 @@ export default {
         .map((f) => ({
           ...f,
           sections: Array.isArray(f.sections)
-            ? f.sections.map((sec) => ({
+            ? f.sections.map((sec, sIdx) => ({
                 ...sec,
+                _id: sec?._id || sec?.id || uuidForImport(),
                 title: sec?.title ?? "Untitled Section",
-                fields: Array.isArray(sec?.fields) ? sec.fields : [],
+                fields: Array.isArray(sec?.fields)
+                  ? sec.fields.map((field, fIdx) => ({
+                      ...field,
+                      _id: field?._id || field?.id || uuidForImport(),
+                      name: field?.name || `field_${sIdx}_${fIdx}`,
+                      constraints: field?.constraints || {},
+                    }))
+                  : [],
                 source: sec?.source || "template",
               }))
             : [],
@@ -528,9 +574,17 @@ export default {
     function deriveSelectedModelsFromForms(formsArr) {
       const first = Array.isArray(formsArr) && formsArr.length ? formsArr[0] : null;
       const sections = Array.isArray(first?.sections) ? first.sections : [];
-      return sections.map((sec) => ({
-        title: sec.title,
-        fields: _deepClone(sec.fields || []),
+      return sections.map((sec, sIdx) => ({
+        _id: sec?._id || sec?.id || uuidForImport(),
+        title: sec?.title || `Section ${sIdx + 1}`,
+        fields: Array.isArray(sec?.fields)
+          ? sec.fields.map((field, fIdx) => ({
+              ..._deepClone(field),
+              _id: field?._id || field?.id || uuidForImport(),
+              name: field?.name || `field_${sIdx}_${fIdx}`,
+              constraints: field?.constraints || {},
+            }))
+          : [],
       }));
     }
 
@@ -546,15 +600,7 @@ export default {
       // 3) Fallback to store.selectedModels (convert to forms shape)
       let selectedModelDerived = [];
       if (Array.isArray(details.selectedModels) && details.selectedModels.length) {
-        selectedModelDerived = [
-          {
-            sections: details.selectedModels.map((m) => ({
-              title: m.title,
-              fields: Array.isArray(m.fields) ? _deepClone(m.fields) : [],
-              source: "template",
-            })),
-          },
-        ];
+        selectedModelDerived = selectedModelsToForms(details.selectedModels);
       }
 
       const selectedModelDerivedNorm = normalizeFormsArray(selectedModelDerived);
@@ -847,15 +893,7 @@ export default {
 
     function setScratchFormsFromSelectedModels(selectedModels) {
       if (!Array.isArray(selectedModels)) return;
-      const scratchForms = [
-        {
-          sections: selectedModels.map((model) => ({
-            title: model.title,
-            fields: model.fields,
-            source: "template",
-          })),
-        },
-      ];
+      const scratchForms = selectedModelsToForms(selectedModels);
       localStorage.setItem("scratchForms", JSON.stringify(scratchForms));
     }
 
@@ -888,6 +926,9 @@ export default {
         assignmentsLocal = buildAssignmentsIfMissing(sd);
       }
 
+      const normalizedSelectedModels = ensureIdsInSelectedModels(sd.selectedModels || []);
+      const normalizedForms = selectedModelsToForms(normalizedSelectedModels);
+
       const studyInfo = {
         id: meta.id ?? id,
         name: meta.study_name,
@@ -910,21 +951,11 @@ export default {
         subjects: sd.subjects || [],
         assignments: assignmentsLocal,
         skipSubjectCreationNow: !!sd.skipSubjectCreationNow,
-        selectedModels: Array.isArray(sd.selectedModels) ? _deepClone(sd.selectedModels) : [],
-        forms: sd.selectedModels
-          ? [
-              {
-                sections: sd.selectedModels.map((model) => ({
-                  title: model.title,
-                  fields: model.fields,
-                  source: "template",
-                })),
-              },
-            ]
-          : [],
+        selectedModels: _deepClone(normalizedSelectedModels),
+        forms: _deepClone(normalizedForms),
       });
 
-      if (sd.selectedModels) setScratchFormsFromSelectedModels(sd.selectedModels);
+      setScratchFormsFromSelectedModels(normalizedSelectedModels);
     }
 
     async function importStudyTemplateFile(file) {
@@ -955,6 +986,8 @@ export default {
         };
 
         const original = _deepClone(sd);
+        const normalizedSelectedModels = ensureIdsInSelectedModels(original.selectedModels || []);
+
         const studyNode = {
           ...(original.study || {}),
           title: studyName,
@@ -967,7 +1000,11 @@ export default {
         const study_data = {
           ...original,
           study: studyNode,
-          assignments: buildAssignmentsIfMissing(original),
+          selectedModels: normalizedSelectedModels,
+          assignments: buildAssignmentsIfMissing({
+            ...original,
+            selectedModels: normalizedSelectedModels,
+          }),
         };
 
         const payload = {

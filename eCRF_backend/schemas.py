@@ -182,6 +182,7 @@ class ShareLinkCreate(BaseModel):
     permission: Literal["view", "add"] = "view"
     max_uses: int = Field(1, gt=0)
     expires_in_days: int = Field(7, gt=0)
+    allowed_section_ids: Optional[List[str]] = []
 
 
 class SharedFormAccessOut(BaseModel):
@@ -190,6 +191,7 @@ class SharedFormAccessOut(BaseModel):
     visit_index: int
     group_index: int
     permission: str
+    allowed_section_ids: Optional[List[str]] = []
     study: Any
 
     class Config:
