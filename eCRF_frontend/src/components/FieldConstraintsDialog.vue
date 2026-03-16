@@ -5,484 +5,746 @@
       <span class="type-chip">{{ currentTypeLabel }}</span>
     </div>
 
-    <!-- COMMON -->
-    <section class="group">
-      <div class="row" v-if="isSlider">
-        <label>Control type</label>
-        <div class="choice-row">
+    <!-- TABS -->
+    <div class="dialog-tabs">
+      <button
+        type="button"
+        class="dialog-tab"
+        :class="{ active: activeTab === 'basic' }"
+        @click="activeTab = 'basic'"
+      >
+        Basic
+      </button>
+      <button
+        type="button"
+        class="dialog-tab"
+        :class="{ active: activeTab === 'advanced' }"
+        @click="activeTab = 'advanced'"
+      >
+        Advanced
+      </button>
+    </div>
+
+    <!-- ========================= BASIC TAB ========================= -->
+    <template v-if="activeTab === 'basic'">
+      <section class="group">
+        <div class="row" v-if="isSlider">
+          <label>Control type</label>
+          <div class="choice-row">
+            <label class="chk">
+              <input type="radio" value="slider" v-model="local.mode" />
+              Slider
+            </label>
+            <label class="chk">
+              <input type="radio" value="linear" v-model="local.mode" />
+              Likert scale
+            </label>
+          </div>
+        </div>
+
+        <div class="row">
           <label class="chk">
-            <input type="radio" value="slider" v-model="local.mode" />
-            Slider
+            <input type="checkbox" v-model="local.required" />
+            Required
           </label>
           <label class="chk">
-            <input type="radio" value="linear" v-model="local.mode" />
-            Likert scale
+            <input type="checkbox" v-model="local.readonly" />
+            Readonly
           </label>
         </div>
-      </div>
 
-      <div class="row">
-        <label class="chk">
-          <input type="checkbox" v-model="local.required" />
-          Required
-        </label>
-        <label class="chk">
-          <input type="checkbox" v-model="local.readonly" />
-          Readonly
-        </label>
-      </div>
+        <div class="row" v-if="!isCheckbox && !(isSlider && local.mode==='slider') && !isFile">
+          <label>Placeholder</label>
+          <input type="text" v-model="local.placeholder" placeholder="Shown when empty" />
+        </div>
 
-      <div class="row" v-if="!isCheckbox && !(isSlider && local.mode==='slider') && !isFile">
-        <label>Placeholder</label>
-        <input type="text" v-model="local.placeholder" placeholder="Shown when empty" />
-      </div>
+        <div class="row">
+          <label>Help text</label>
+          <input type="text" v-model="local.helpText" placeholder="Shown below the control" />
+        </div>
 
-      <div class="row">
-        <label>Help text</label>
-        <input type="text" v-model="local.helpText" placeholder="Shown below the control" />
-      </div>
+        <div class="row" v-if="isTime">
+          <label>Hour format</label>
+          <select v-model="local.hourCycle">
+            <option value="24">24-hour</option>
+            <option value="12">12-hour (AM/PM)</option>
+          </select>
+        </div>
 
-      <div class="row" v-if="isTime">
-        <label>Hour format</label>
-        <select v-model="local.hourCycle">
-          <option value="24">24-hour</option>
-          <option value="12">12-hour (AM/PM)</option>
-        </select>
-      </div>
+        <div class="row" v-if="!isDate && !(isSlider && local.mode==='slider') && !isFile">
+          <label>Default value</label>
 
-      <div class="row" v-if="!isDate && !(isSlider && local.mode==='slider') && !isFile">
-        <label>Default value</label>
+          <select v-if="isChoice && !local.allowMultiple" v-model="local.defaultValue">
+            <option value="">(none)</option>
+            <option v-for="(opt, i) in localOptions" :key="i" :value="opt">{{ opt }}</option>
+          </select>
 
-        <select v-if="isChoice && !local.allowMultiple" v-model="local.defaultValue">
-          <option value="">(none)</option>
-          <option v-for="(opt, i) in localOptions" :key="i" :value="opt">{{ opt }}</option>
-        </select>
-
-        <div v-else-if="isRadio && local.allowMultiple" class="chips">
-          <div class="chip-input-row">
-            <input
-              type="text"
-              v-model="chipInput"
-              placeholder="Type option and press Enter"
-              @keydown.enter.prevent="addChip"
-              list="radio-options"
-            />
-            <datalist id="radio-options">
-              <option v-for="(opt, i) in localOptions" :key="i" :value="opt" />
-            </datalist>
+          <div v-else-if="isRadio && local.allowMultiple" class="chips">
+            <div class="chip-input-row">
+              <input
+                type="text"
+                v-model="chipInput"
+                placeholder="Type option and press Enter"
+                @keydown.enter.prevent="addChip"
+                list="radio-options"
+              />
+              <datalist id="radio-options">
+                <option v-for="(opt, i) in localOptions" :key="i" :value="opt" />
+              </datalist>
+            </div>
+            <div class="chip-group">
+              <span
+                v-for="(val, i) in (Array.isArray(local.defaultValue) ? local.defaultValue : [])"
+                :key="i"
+                class="chip"
+              >
+                {{ val }}
+                <button class="chip-x" @click.prevent="removeChip(i)">×</button>
+              </span>
+            </div>
           </div>
-          <div class="chip-group">
-            <span
-              v-for="(val, i) in (Array.isArray(local.defaultValue) ? local.defaultValue : [])"
-              :key="i"
-              class="chip"
-            >
-              {{ val }}
-              <button class="chip-x" @click.prevent="removeChip(i)">×</button>
-            </span>
+
+          <input
+            v-else-if="isTextLike"
+            type="text"
+            v-model="local.defaultValue"
+            placeholder="Default value"
+          />
+
+          <input
+            v-else-if="isNumber"
+            type="number"
+            v-model.number="local.defaultValue"
+            placeholder="Default number"
+          />
+
+          <FieldTime
+            v-else-if="isTime"
+            v-model="local.defaultValue"
+            :hourCycle="local.hourCycle || '24'"
+            :readonly="false"
+            :disabled="false"
+          />
+
+          <label class="chk" v-else-if="isCheckbox">
+            <input type="checkbox" v-model="local.defaultValue" />
+            Checked by default
+          </label>
+
+          <input
+            v-else
+            type="text"
+            v-model="local.defaultValue"
+            placeholder="Default value"
+          />
+
+          <small v-if="defaultError && !isDate" class="err">{{ defaultError }}</small>
+        </div>
+      </section>
+
+      <section class="group" v-if="isTextLike">
+        <div class="row two">
+          <div>
+            <label>Min length</label>
+            <input type="number" v-model.number="local.minLength" min="0" />
           </div>
-          <small class="note">Press Enter to add; duplicates are ignored.</small>
+          <div>
+            <label>Max length</label>
+            <input type="number" v-model.number="local.maxLength" min="0" />
+          </div>
         </div>
-
-        <input
-          v-else-if="isTextLike"
-          type="text"
-          v-model="local.defaultValue"
-          placeholder="Default value"
-        />
-
-        <input
-          v-else-if="isNumber"
-          type="number"
-          v-model.number="local.defaultValue"
-          placeholder="Default number"
-        />
-
-        <FieldTime
-          v-else-if="isTime"
-          v-model="local.defaultValue"
-          :hourCycle="local.hourCycle || '24'"
-          :readonly="false"
-          :disabled="false"
-        />
-
-        <label class="chk" v-else-if="isCheckbox">
-          <input type="checkbox" v-model="local.defaultValue" />
-          Checked by default
-        </label>
-
-        <input
-          v-else
-          type="text"
-          v-model="local.defaultValue"
-          placeholder="Default value"
-        />
-
-        <small v-if="defaultError && !isDate" class="err">{{ defaultError }}</small>
-      </div>
-    </section>
-
-    <!-- TEXT / TEXTAREA -->
-    <section class="group" v-if="isTextLike">
-      <div class="row two">
-        <div>
-          <label>Min length</label>
-          <input type="number" v-model.number="local.minLength" min="0" />
+        <div class="row">
+          <label>Regex pattern</label>
+          <input type="text" v-model="local.pattern" placeholder="e.g. ^[A-Za-z]+$" />
         </div>
-        <div>
-          <label>Max length</label>
-          <input type="number" v-model.number="local.maxLength" min="0" />
+        <div class="row">
+          <label>Transform</label>
+          <select v-model="local.transform">
+            <option value="none">None</option>
+            <option value="uppercase">Uppercase</option>
+            <option value="lowercase">Lowercase</option>
+            <option value="capitalize">Capitalize</option>
+          </select>
         </div>
-      </div>
-      <div class="row">
-        <label>Regex pattern</label>
-        <input type="text" v-model="local.pattern" placeholder="e.g. ^[A-Za-z]+$" />
-      </div>
-      <div class="row">
-        <label>Transform</label>
-        <select v-model="local.transform">
-          <option value="none">None</option>
-          <option value="uppercase">Uppercase</option>
-          <option value="lowercase">Lowercase</option>
-          <option value="capitalize">Capitalize</option>
-        </select>
-      </div>
-    </section>
+      </section>
 
     <!-- NUMBER -->
-    <section class="group" v-if="isNumber">
-      <div class="row two">
-        <div>
-          <label>Min value</label>
+      <section class="group" v-if="isNumber">
+        <div class="row two">
+          <div>
+            <label>Min value</label>
           <!-- FIX: allow empty -> undefined (avoid v-model.number forcing 0) -->
-          <input type="number" :value="num(local.min)" @input="setNum('min', $event)" />
-        </div>
-        <div>
-          <label>Max value</label>
+            <input type="number" :value="num(local.min)" @input="setNum('min', $event)" />
+          </div>
+          <div>
+            <label>Max value</label>
           <!-- FIX: allow empty -> undefined (avoid v-model.number forcing 0) -->
-          <input type="number" :value="num(local.max)" @input="setNum('max', $event)" />
+            <input type="number" :value="num(local.max)" @input="setNum('max', $event)" />
+          </div>
         </div>
-      </div>
 
-      <div class="row">
-        <label>Step</label>
+        <div class="row">
+          <label>Step</label>
         <!-- FIX: allow empty -> undefined -->
-        <input
-          type="number"
-          :value="num(local.step)"
-          @input="setNum('step', $event)"
-          placeholder="Leave empty if not applicable"
-        />
-      </div>
-
-      <div class="row">
-        <label class="chk">
-          <input type="checkbox" v-model="local.integerOnly" />
-          Integer only
-        </label>
-      </div>
-
-      <div class="row two">
-        <div>
-          <label>Min digits (integer part)</label>
-          <input type="number" v-model.number="local.minDigits" min="0" />
+          <input
+            type="number"
+            :value="num(local.step)"
+            @input="setNum('step', $event)"
+            placeholder="Leave empty if not applicable"
+          />
         </div>
-        <div>
-          <label>Max digits (integer part)</label>
-          <input type="number" v-model.number="local.maxDigits" min="0" />
+
+        <div class="row">
+          <label class="chk">
+            <input type="checkbox" v-model="local.integerOnly" />
+            Integer only
+          </label>
         </div>
-      </div>
+
+        <div class="row two">
+          <div>
+            <label>Min digits (integer part)</label>
+            <input type="number" v-model.number="local.minDigits" min="0" />
+          </div>
+          <div>
+            <label>Max digits (integer part)</label>
+            <input type="number" v-model.number="local.maxDigits" min="0" />
+          </div>
+        </div>
       <div class="row note">
         <span>
           Digit limits apply to the integer part. In preview we enforce these when <b>Integer only</b> is checked.
           For values that need leading zeros, consider a <b>Text</b> field with a pattern.
         </span>
       </div>
-    </section>
+      </section>
 
     <!-- TIME -->
-    <section class="group" v-if="isTime">
-      <div class="row two">
-        <div>
-          <label>Min time</label>
-          <FieldTime
-            v-model="local.minTime"
-            :hourCycle="local.hourCycle || '24'"
-            :readonly="false"
-            :disabled="false"
-            :placeholder="(local.hourCycle==='12' ? 'hh:mm AM/PM' : 'HH:mm')"
-          />
+      <section class="group" v-if="isTime">
+        <div class="row two">
+          <div>
+            <label>Min time</label>
+            <FieldTime
+              v-model="local.minTime"
+              :hourCycle="local.hourCycle || '24'"
+              :readonly="false"
+              :disabled="false"
+              :placeholder="(local.hourCycle==='12' ? 'hh:mm AM/PM' : 'HH:mm')"
+            />
+          </div>
+          <div>
+            <label>Max time</label>
+            <FieldTime
+              v-model="local.maxTime"
+              :hourCycle="local.hourCycle || '24'"
+              :readonly="false"
+              :disabled="false"
+              :placeholder="(local.hourCycle==='12' ? 'hh:mm AM/PM' : 'HH:mm')"
+            />
+          </div>
         </div>
-        <div>
-          <label>Max time</label>
-          <FieldTime
-            v-model="local.maxTime"
-            :hourCycle="local.hourCycle || '24'"
-            :readonly="false"
-            :disabled="false"
-            :placeholder="(local.hourCycle==='12' ? 'hh:mm AM/PM' : 'HH:mm')"
-          />
-        </div>
-      </div>
-    </section>
+      </section>
 
     <!-- DATE -->
-    <section class="group" v-if="isDate">
-      <div class="row">
-        <label>Date format</label>
-        <select v-model="local.dateFormat">
-          <option v-for="fmt in DATE_FORMATS" :key="fmt" :value="fmt">{{ fmt }}</option>
-        </select>
-      </div>
+      <section class="group" v-if="isDate">
+        <div class="row">
+          <label>Date format</label>
+          <select v-model="local.dateFormat">
+            <option v-for="fmt in DATE_FORMATS" :key="fmt" :value="fmt">{{ fmt }}</option>
+          </select>
+        </div>
 
-      <div class="row two">
-        <div>
-          <label>Min date</label>
+        <div class="row two">
+          <div>
+            <label>Min date</label>
+            <DateFormatPicker
+              v-model="local.minDate"
+              :format="local.dateFormat"
+              :placeholder="local.dateFormat"
+            />
+          </div>
+          <div>
+            <label>Max date</label>
+            <DateFormatPicker
+              v-model="local.maxDate"
+              :format="local.dateFormat"
+              :placeholder="local.dateFormat"
+            />
+          </div>
+        </div>
+
+        <div class="row">
+          <label>Default date</label>
           <DateFormatPicker
-            v-model="local.minDate"
+            v-model="local.defaultValue"
             :format="local.dateFormat"
             :placeholder="local.dateFormat"
+            :min-date="local.minDate || null"
+            :max-date="local.maxDate || null"
           />
+          <small v-if="defaultError && isDate" class="err">{{ defaultError }}</small>
         </div>
-        <div>
-          <label>Max date</label>
-          <DateFormatPicker
-            v-model="local.maxDate"
-            :format="local.dateFormat"
-            :placeholder="local.dateFormat"
-          />
-        </div>
-      </div>
-
-      <div class="row">
-        <label>Default date</label>
-        <DateFormatPicker
-          v-model="local.defaultValue"
-          :format="local.dateFormat"
-          :placeholder="local.dateFormat"
-          :min-date="local.minDate || null"
-          :max-date="local.maxDate || null"
-        />
-        <small v-if="defaultError && isDate" class="err">{{ defaultError }}</small>
-      </div>
-    </section>
+      </section>
 
     <!-- FILE -->
-    <section class="group" v-if="isFile">
-      <div class="row">
-        <label>Allowed formats</label>
-        <input
-          type="text"
-          v-model="allowedFormatsText"
-          placeholder="Examples: .pdf, .csv, .tsv, image/*, application/zip"
-        />
+      <section class="group" v-if="isFile">
+        <div class="row">
+          <label>Allowed formats</label>
+          <input
+            type="text"
+            v-model="allowedFormatsText"
+            placeholder="Examples: .pdf, .csv, .tsv, image/*, application/zip"
+          />
         <small class="note">
           Comma-separated list. Client validates on upload; re-validate server-side if needed.
         </small>
-      </div>
-
-      <div class="row two">
-        <div>
-          <label>Max size (MB)</label>
-          <input type="number" min="1" step="1" v-model.number="local.maxSizeMB" />
         </div>
-        <div>
-          <label>Storage behavior</label>
-          <select v-model="local.storagePreference">
-            <option value="local">Local storage (upload)</option>
-            <option value="url">Link via URL</option>
-          </select>
+
+        <div class="row two">
+          <div>
+            <label>Max size (MB)</label>
+            <input type="number" min="1" step="1" v-model.number="local.maxSizeMB" />
+          </div>
+          <div>
+            <label>Storage behavior</label>
+            <select v-model="local.storagePreference">
+              <option value="local">Local storage (upload)</option>
+              <option value="url">Link via URL</option>
+            </select>
           <small class="note">This decides which input appears in the form.</small>
-        </div>
-      </div>
-      <div class="row">
-        <label class="chk">
-          <input type="checkbox" v-model="local.allowMultipleFiles" />
-          Allow multiple files
-        </label>
-      </div>
-
-      <div class="row">
-        <label>Modalities (BIDS)</label>
-        <div class="chips">
-          <div class="chip-group">
-            <label
-              v-for="mod in allModalities"
-              :key="mod"
-              class="chip selectable"
-            >
-              <input type="checkbox" :value="mod" v-model="local.modalities" />
-              {{ mod }}
-              <button
-                v-if="!builtInSet.has(mod)"
-                class="chip-x"
-                @click.prevent="removeCustomModByName(mod)"
-                title="Remove custom modality"
-              >×</button>
-            </label>
           </div>
-
-          <div class="chip-input-row add-mod-row">
-            <input
-              type="text"
-              v-model="customMod"
-              placeholder="Custom modality (Enter or +)"
-              @keydown.enter.prevent="addCustomMod"
-            />
-            <button type="button" class="btn-option add-mod-btn" @click="addCustomMod">+</button>
-          </div>
-
-          <small class="note">Used to help organize and name files in BIDS folders.</small>
         </div>
-      </div>
-    </section>
-
-    <!-- SLIDER mode -->
-    <section class="group" v-if="isSlider && local.mode==='slider'">
-      <div class="row two">
-        <div>
-          <label>Min</label>
-          <!-- FIX: allow empty -> undefined (avoid v-model.number forcing 0) -->
-          <input type="number" :value="num(local.min)" @input="setNum('min', $event)" :disabled="local.percent" />
-        </div>
-        <div>
-          <label>Max</label>
-          <!-- FIX: allow empty -> undefined (avoid v-model.number forcing 0) -->
-          <input type="number" :value="num(local.max)" @input="setNum('max', $event)" :disabled="local.percent" />
-        </div>
-      </div>
-
-      <div class="row two">
-        <div>
-          <label>Step</label>
-          <!-- FIX: allow empty -> undefined -->
-          <input
-            type="number"
-            min="0.000001"
-            step="0.000001"
-            :value="num(local.step)"
-            @input="setNum('step', $event)"
-          />
-        </div>
-        <div>
+        <div class="row">
           <label class="chk">
-            <input type="checkbox" v-model="local.percent" />
-            Show as percentage (1–100)
+            <input type="checkbox" v-model="local.allowMultipleFiles" />
+            Allow multiple files
           </label>
         </div>
-      </div>
+
+        <div class="row">
+          <label>Modalities (BIDS)</label>
+          <div class="chips">
+            <div class="chip-group">
+              <label
+                v-for="mod in allModalities"
+                :key="mod"
+                class="chip selectable"
+              >
+                <input type="checkbox" :value="mod" v-model="local.modalities" />
+                {{ mod }}
+                <button
+                  v-if="!builtInSet.has(mod)"
+                  class="chip-x"
+                  @click.prevent="removeCustomModByName(mod)"
+                  title="Remove custom modality"
+                >×</button>
+              </label>
+            </div>
+
+            <div class="chip-input-row add-mod-row">
+              <input
+                type="text"
+                v-model="customMod"
+                placeholder="Custom modality (Enter or +)"
+                @keydown.enter.prevent="addCustomMod"
+              />
+              <button type="button" class="btn-option add-mod-btn" @click="addCustomMod">+</button>
+            </div>
+
+          <small class="note">Used to help organize and name files in BIDS folders.</small>
+          </div>
+        </div>
+      </section>
+
+    <!-- SLIDER mode -->
+      <section class="group" v-if="isSlider && local.mode==='slider'">
+        <div class="row two">
+          <div>
+            <label>Min</label>
+          <!-- FIX: allow empty -> undefined (avoid v-model.number forcing 0) -->
+            <input type="number" :value="num(local.min)" @input="setNum('min', $event)" :disabled="local.percent" />
+          </div>
+          <div>
+            <label>Max</label>
+          <!-- FIX: allow empty -> undefined (avoid v-model.number forcing 0) -->
+            <input type="number" :value="num(local.max)" @input="setNum('max', $event)" :disabled="local.percent" />
+          </div>
+        </div>
+
+        <div class="row two">
+          <div>
+            <label>Step</label>
+          <!-- FIX: allow empty -> undefined -->
+            <input
+              type="number"
+              min="0.000001"
+              step="0.000001"
+              :value="num(local.step)"
+              @input="setNum('step', $event)"
+            />
+          </div>
+          <div>
+            <label class="chk">
+              <input type="checkbox" v-model="local.percent" />
+              Show as percentage (1–100)
+            </label>
+          </div>
+        </div>
 
       <div class="row note">
         <span>No default selection for sliders. Clicking the track jumps to the nearest step.</span>
       </div>
 
-      <div class="row">
-        <label>Step labels</label>
-        <div class="options-scroll">
-          <div class="opt-row">
-            <span class="opt-index">#</span>
-            <input
-              type="number"
-              v-model.number="markEditValue"
-              :min="useMin"
-              :max="useMax"
-              :step="useStep"
-              placeholder="Step value"
-            />
-          </div>
-          <div class="opt-row">
-            <span class="opt-index">↳</span>
-            <input
-              type="text"
-              v-model="markEditLabel"
-              placeholder="Label"
-              @keydown.enter.prevent="addOrUpdateMark('slider')"
-            />
-            <button class="icon-btn" title="Add/Update" @click.prevent="addOrUpdateMark('slider')">✓</button>
-          </div>
+        <div class="row">
+          <label>Step labels</label>
+          <div class="options-scroll">
+            <div class="opt-row">
+              <span class="opt-index">#</span>
+              <input
+                type="number"
+                v-model.number="markEditValue"
+                :min="useMin"
+                :max="useMax"
+                :step="useStep"
+                placeholder="Step value"
+              />
+            </div>
+            <div class="opt-row">
+              <span class="opt-index">↳</span>
+              <input
+                type="text"
+                v-model="markEditLabel"
+                placeholder="Label"
+                @keydown.enter.prevent="addOrUpdateMark('slider')"
+              />
+              <button class="icon-btn" title="Add/Update" @click.prevent="addOrUpdateMark('slider')">✓</button>
+            </div>
 
-          <div class="opt-row" v-for="(m, i) in marksSorted" :key="'s'+i">
-            <span class="opt-index">{{ m.value }}</span>
-            <input type="text" :value="m.label" disabled />
-            <button class="icon-btn" title="Delete" @click.prevent="removeMark(m.value)">✕</button>
+            <div class="opt-row" v-for="(m, i) in marksSorted" :key="'s'+i">
+              <span class="opt-index">{{ m.value }}</span>
+              <input type="text" :value="m.label" disabled />
+              <button class="icon-btn" title="Delete" @click.prevent="removeMark(m.value)">✕</button>
+            </div>
           </div>
-        </div>
         <small class="note">We only store labels you add; no snap behavior.</small>
-      </div>
-    </section>
+        </div>
+      </section>
 
     <!-- LINEAR mode -->
-    <section class="group" v-if="isSlider && local.mode==='linear'">
-      <div class="row two">
-        <div>
-          <label>Min</label>
+      <section class="group" v-if="isSlider && local.mode==='linear'">
+        <div class="row two">
+          <div>
+            <label>Min</label>
           <!-- FIX: allow empty -> undefined -->
-          <input type="number" :value="num(local.min)" @input="setNum('min', $event)" />
-        </div>
-        <div>
-          <label>Max</label>
+            <input type="number" :value="num(local.min)" @input="setNum('min', $event)" />
+          </div>
+          <div>
+            <label>Max</label>
           <!-- FIX: allow empty -> undefined -->
-          <input type="number" :value="num(local.max)" @input="setNum('max', $event)" />
+            <input type="number" :value="num(local.max)" @input="setNum('max', $event)" />
+          </div>
         </div>
-      </div>
-      <div class="row two">
-        <div>
-          <label>Left label</label>
-          <input type="text" v-model="local.leftLabel" placeholder="e.g., Not happy" />
+        <div class="row two">
+          <div>
+            <label>Left label</label>
+            <input type="text" v-model="local.leftLabel" placeholder="e.g., Not happy" />
+          </div>
+          <div>
+            <label>Right label</label>
+            <input type="text" v-model="local.rightLabel" placeholder="e.g., Very happy" />
+          </div>
         </div>
-        <div>
-          <label>Right label</label>
-          <input type="text" v-model="local.rightLabel" placeholder="e.g., Very happy" />
-        </div>
-      </div>
       <div class="row note" v-if="linearCount > LINEAR_MAX">
         <span class="err">Too many points ({{ linearCount }}). Limit is {{ LINEAR_MAX }} to avoid clutter.</span>
       </div>
       <div class="row note">
         <span>Likert scale shows only endpoints (left/right). No step labels.</span>
       </div>
-    </section>
+      </section>
 
     <!-- RADIO / SELECT -->
-    <section class="group" v-if="isChoice">
-      <div class="row">
-        <label class="chk" v-if="isRadio">
-          <input type="checkbox" v-model="local.allowMultiple" />
-          Allow multiple selections
-        </label>
-      </div>
-
-      <div class="row two">
-        <div>
-          <label>Number of options</label>
-          <input type="number" min="1" v-model.number="optionsCount" @input="syncOptionsCount" />
+      <section class="group" v-if="isChoice">
+        <div class="row">
+          <label class="chk" v-if="isRadio">
+            <input type="checkbox" v-model="local.allowMultiple" />
+            Allow multiple selections
+          </label>
         </div>
-        <div>
-          <label>Quick add</label>
-          <div class="quick">
-            <button type="button" class="btn-option" @click="addOption()">+ Add</button>
-            <button type="button" class="btn-option" @click="removeLastOption()" :disabled="localOptions.length<=1">− Remove</button>
+
+        <div class="row two">
+          <div>
+            <label>Number of options</label>
+            <input type="number" min="1" v-model.number="optionsCount" @input="syncOptionsCount" />
+          </div>
+          <div>
+            <label>Quick add</label>
+            <div class="quick">
+              <button type="button" class="btn-option" @click="addOption()">+ Add</button>
+              <button type="button" class="btn-option" @click="removeLastOption()" :disabled="localOptions.length<=1">− Remove</button>
+            </div>
           </div>
         </div>
-      </div>
 
-      <div class="options-scroll">
-        <div class="opt-row" v-for="(opt, idx) in localOptions" :key="idx">
-          <span class="opt-index">{{ idx + 1 }}.</span>
-          <input type="text" v-model="localOptions[idx]" placeholder="Option label" />
-          <button class="icon-btn" title="Delete" @click.prevent="deleteOption(idx)" :disabled="localOptions.length<=1">✕</button>
+        <div class="options-scroll">
+          <div class="opt-row" v-for="(opt, idx) in localOptions" :key="idx">
+            <span class="opt-index">{{ idx + 1 }}.</span>
+            <input type="text" v-model="localOptions[idx]" placeholder="Option label" />
+            <button class="icon-btn" title="Delete" @click.prevent="deleteOption(idx)" :disabled="localOptions.length<=1">✕</button>
+          </div>
         </div>
-      </div>
       <div class="row note" v-if="isSelect">
         <span>Dropdowns are single-select in this builder.</span>
       </div>
-    </section>
+      </section>
 
-    <section class="group" v-if="isCheckbox">
-      <div class="row note">
-        <span>Checkbox has no placeholder. Use help text for guidance.</span>
-      </div>
-    </section>
+      <section class="group" v-if="isCheckbox">
+        <div class="row note">
+          <span>Checkbox has no placeholder. Use help text for guidance.</span>
+        </div>
+      </section>
+    </template>
+
+    <!-- ========================= ADVANCED TAB ========================= -->
+    <template v-else>
+      <section class="group">
+        <div class="row two">
+          <div>
+            <label>When conditions match</label>
+            <select v-model="local.visibilityLogic.action">
+              <option value="show">Show this field</option>
+              <option value="hide">Hide this field</option>
+            </select>
+          </div>
+          <div>
+            <label>Condition mode</label>
+            <select v-model="local.visibilityLogic.match">
+              <option value="all">All conditions must match (AND)</option>
+              <option value="any">Any one condition may match (OR)</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="row note">
+          <span>Configure this field’s visibility based on other fields.</span>
+        </div>
+
+        <div class="logic-rules">
+          <div
+            class="logic-rule-card"
+            v-for="(rule, idx) in local.visibilityLogic.rules"
+            :key="rule.id"
+          >
+            <div class="logic-rule-top">
+              <strong>Condition {{ idx + 1 }}</strong>
+              <div class="logic-rule-top-actions">
+                <button class="btn-mini" @click.prevent="clearLogicRule(rule)">Clear</button>
+                <button class="icon-btn" @click.prevent="removeLogicRule(idx)">✕</button>
+              </div>
+            </div>
+
+            <div class="row">
+              <label>Source field</label>
+              <select v-model="rule.sourceFieldKey" @change="onSourceFieldChanged(rule)">
+                <option value="">Select source field…</option>
+                <option
+                  v-for="f in availableSourceFields"
+                  :key="f.key"
+                  :value="f.key"
+                >
+                  {{ f.pathLabel }}
+                </option>
+              </select>
+            </div>
+
+            <div class="row" v-if="rule.sourceFieldKey">
+              <label>Operator</label>
+              <select v-model="rule.operator" @change="onOperatorChanged(rule)">
+                <option
+                  v-for="op in availableOperatorsForRule(rule)"
+                  :key="op.value"
+                  :value="op.value"
+                >
+                  {{ op.label }}
+                </option>
+              </select>
+            </div>
+
+            <template v-if="needsNoValue(rule.operator)">
+              <div class="row note">
+                <span>No compare value needed for this operator.</span>
+              </div>
+            </template>
+
+            <template v-else-if="rule.operator === 'between'">
+              <div class="row two">
+                <div>
+                  <label>From</label>
+
+                  <input
+                    v-if="ruleSourceType(rule) === 'number' || ruleSourceType(rule) === 'slider'"
+                    type="number"
+                    v-model.number="rule.value"
+                  />
+
+                  <FieldTime
+                    v-else-if="ruleSourceType(rule) === 'time'"
+                    v-model="rule.value"
+                    :hourCycle="sourceHourCycle(rule)"
+                    :readonly="false"
+                    :disabled="false"
+                  />
+
+                  <DateFormatPicker
+                    v-else-if="ruleSourceType(rule) === 'date'"
+                    v-model="rule.value"
+                    :format="sourceDateFormat(rule)"
+                    :placeholder="sourceDateFormat(rule)"
+                  />
+
+                  <input
+                    v-else
+                    type="text"
+                    v-model="rule.value"
+                  />
+                </div>
+
+                <div>
+                  <label>To</label>
+
+                  <input
+                    v-if="ruleSourceType(rule) === 'number' || ruleSourceType(rule) === 'slider'"
+                    type="number"
+                    v-model.number="rule.valueTo"
+                  />
+
+                  <FieldTime
+                    v-else-if="ruleSourceType(rule) === 'time'"
+                    v-model="rule.valueTo"
+                    :hourCycle="sourceHourCycle(rule)"
+                    :readonly="false"
+                    :disabled="false"
+                  />
+
+                  <DateFormatPicker
+                    v-else-if="ruleSourceType(rule) === 'date'"
+                    v-model="rule.valueTo"
+                    :format="sourceDateFormat(rule)"
+                    :placeholder="sourceDateFormat(rule)"
+                  />
+
+                  <input
+                    v-else
+                    type="text"
+                    v-model="rule.valueTo"
+                  />
+                </div>
+              </div>
+            </template>
+
+            <template v-else-if="ruleSourceIsChoiceSingle(rule)">
+              <div class="row">
+                <label>Compare value</label>
+                <select v-model="rule.value">
+                  <option value="">Select…</option>
+                  <option
+                    v-for="opt in sourceOptions(rule)"
+                    :key="opt"
+                    :value="opt"
+                  >
+                    {{ opt }}
+                  </option>
+                </select>
+                <small class="note">Options from selected source field.</small>
+              </div>
+            </template>
+
+            <template v-else-if="ruleSourceIsChoiceMulti(rule)">
+              <div class="row">
+                <label>Compare value(s)</label>
+                <div class="chips">
+                  <div class="chip-input-row">
+                    <input
+                      type="text"
+                      v-model="rule._chipInput"
+                      placeholder="Type option and press Enter"
+                      @keydown.enter.prevent="addRuleChip(rule)"
+                      :list="`logic-options-${rule.id}`"
+                    />
+                    <datalist :id="`logic-options-${rule.id}`">
+                      <option v-for="opt in sourceOptions(rule)" :key="opt" :value="opt" />
+                    </datalist>
+                  </div>
+                  <div class="chip-group">
+                    <span
+                      v-for="(val, i) in (Array.isArray(rule.value) ? rule.value : [])"
+                      :key="i"
+                      class="chip"
+                    >
+                      {{ val }}
+                      <button class="chip-x" @click.prevent="removeRuleChip(rule, i)">×</button>
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </template>
+
+            <template v-else-if="ruleSourceType(rule) === 'checkbox'">
+              <div class="row">
+                <label>Compare value</label>
+                <select v-model="rule.value">
+                  <option :value="true">Checked</option>
+                  <option :value="false">Unchecked</option>
+                </select>
+              </div>
+            </template>
+
+            <template v-else>
+              <div class="row">
+                <label>Compare value</label>
+
+                <input
+                  v-if="ruleSourceType(rule) === 'number' || ruleSourceType(rule) === 'slider'"
+                  type="number"
+                  v-model.number="rule.value"
+                />
+
+                <FieldTime
+                  v-else-if="ruleSourceType(rule) === 'time'"
+                  v-model="rule.value"
+                  :hourCycle="sourceHourCycle(rule)"
+                  :readonly="false"
+                  :disabled="false"
+                />
+
+                <DateFormatPicker
+                  v-else-if="ruleSourceType(rule) === 'date'"
+                  v-model="rule.value"
+                  :format="sourceDateFormat(rule)"
+                  :placeholder="sourceDateFormat(rule)"
+                />
+
+                <input
+                  v-else
+                  type="text"
+                  v-model="rule.value"
+                  placeholder="Enter compare value"
+                />
+              </div>
+            </template>
+
+            <div class="row note">
+              <span>{{ logicSummary(rule) }}</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="row">
+          <button type="button" class="btn-option" @click="addLogicRule">
+            + Add condition
+          </button>
+        </div>
+      </section>
+    </template>
 
     <div class="modal-actions">
       <button class="btn-primary" @click="save" :disabled="isSaveDisabled">Save</button>
@@ -517,17 +779,12 @@ export default {
   components: { DateFormatPicker, FieldTime },
   props: {
     currentFieldType: { type: String, default: "text" },
-    constraintsForm:  { type: Object, default: () => ({}) }
+    constraintsForm: { type: Object, default: () => ({}) },
+    form: { type: Object, default: () => ({ sections: [] }) },
+    currentFieldKey: { type: String, default: "" },
+    currentFieldLabel: { type: String, default: "" }
   },
-  created() {
-    // snapshot the state as it was when the dialog opened
-    this._initialSnapshot = {
-      local: JSON.parse(JSON.stringify(this.local)),
-      localOptions: JSON.parse(JSON.stringify(this.localOptions)),
-      optionsCount: this.optionsCount,
-      allowedFormatsText: this.allowedFormatsText
-    };
-  },
+
   data() {
     const base = this.constraintsForm || {};
     const type = (this.currentFieldType || "text").toLowerCase();
@@ -542,14 +799,15 @@ export default {
     const allowedFormats = Array.isArray(base.allowedFormats)
       ? base.allowedFormats.map(String).map(s => s.trim()).filter(Boolean)
       : [];
-    const allowedFormatsText = allowedFormats.join(", ");
 
     return {
+      activeTab: "basic",
       DATE_FORMATS,
       LINEAR_MAX: 10,
       BIDS_MODALITIES,
       customMod: "",
-      allowedFormatsText,
+      allowedFormatsText: allowedFormats.join(", "),
+
       local: {
         // shared
         required: !!base.required,
@@ -606,12 +864,14 @@ export default {
         allowedFormats,
         maxSizeMB: (isFinite(base.maxSizeMB) && Number(base.maxSizeMB) > 0)
           ? Number(base.maxSizeMB)
-          : undefined,                         // undefined => no size limit
+          : undefined,
         storagePreference: (base.storagePreference === "url") ? "url" : "local",
         allowMultipleFiles: base.allowMultipleFiles === undefined ? true : !!base.allowMultipleFiles,
         modalities: Array.isArray(base.modalities)
           ? base.modalities.filter(Boolean).map(String)
-          : []
+          : [],
+
+        visibilityLogic: this.normalizeVisibilityLogic(base.visibilityLogic)
       },
 
       localOptions: initialOptions.length ? initialOptions : ["Option 1"],
@@ -625,15 +885,15 @@ export default {
   computed: {
     type() { return (this.currentFieldType || "text").toLowerCase(); },
     isTextLike() { return this.type === "text" || this.type === "textarea"; },
-    isNumber()   { return this.type === "number"; },
-    isTime()     { return this.type === "time"; },
-    isDate()     { return this.type === "date"; },
+    isNumber() { return this.type === "number"; },
+    isTime() { return this.type === "time"; },
+    isDate() { return this.type === "date"; },
     isCheckbox() { return this.type === "checkbox"; },
-    isRadio()    { return this.type === "radio"; },
-    isSelect()   { return this.type === "select"; },
-    isChoice()   { return this.isRadio || this.isSelect; },
-    isSlider()   { return this.type === "slider"; },
-    isFile()     { return this.type === "file"; },
+    isRadio() { return this.type === "radio"; },
+    isSelect() { return this.type === "select"; },
+    isChoice() { return this.isRadio || this.isSelect; },
+    isSlider() { return this.type === "slider"; },
+    isFile() { return this.type === "file"; },
     currentTypeLabel() {
       return this.type.charAt(0).toUpperCase() + this.type.slice(1);
     },
@@ -651,7 +911,7 @@ export default {
     marksSorted() {
       return [...(this.local.marks || [])]
         .sort((a, b) => a.value - b.value)
-        .filter((m, idx, arr) => idx === 0 || m.value !== arr[idx-1].value);
+        .filter((m, idx, arr) => idx === 0 || m.value !== arr[idx - 1].value);
     },
 
     defaultError() {
@@ -676,8 +936,9 @@ export default {
         const ok = dv !== "" && dv !== null && dv !== undefined && !Number.isNaN(Number(dv));
         return ok ? "" : "Default value is required when the field is both Required and Readonly.";
       }
-      return (dv !== "" && dv !== null && dv !== undefined) ? "" :
-        "Default value is required when the field is both Required and Readonly.";
+      return (dv !== "" && dv !== null && dv !== undefined)
+        ? ""
+        : "Default value is required when the field is both Required and Readonly.";
     },
 
     isSaveDisabled() {
@@ -696,9 +957,46 @@ export default {
     allModalities() {
       const extras = (this.local.modalities || []).filter(m => !!m && !this.builtInSet.has(m));
       return [...BIDS_MODALITIES, ...Array.from(new Set(extras))];
-    }
+    },
+
+    availableSourceFields() {
+      const currentKey = String(this.currentFieldKey || "");
+      const out = [];
+
+      (this.form?.sections || []).forEach((section, si) => {
+        (section.fields || []).forEach((field, fi) => {
+          const key = field._id || field.name || `section_${si}_field_${fi}`;
+          if (String(key) === currentKey) return;
+
+          const constraints = field.constraints || {};
+
+          out.push({
+            key: String(key),
+            label: field.label || field.name || `Field ${fi + 1}`,
+            sectionTitle: section.title || `Section ${si + 1}`,
+            pathLabel: `${section.title || `Section ${si + 1}`}.${field.label || field.name || `Field ${fi + 1}`}`,
+            type: field.type || "text",
+            options: Array.isArray(field.options) ? [...field.options] : [],
+            allowMultiple: !!constraints.allowMultiple,
+            dateFormat: constraints.dateFormat || "dd.MM.yyyy",
+            hourCycle: constraints.hourCycle || "24"
+          });
+        });
+      });
+
+      return out;
+    },
   },
+
   watch: {
+    availableFields: {
+      immediate: true,
+      deep: true,
+      handler(v) {
+        console.log("[FieldConstraintsDialog] availableFields received:", JSON.parse(JSON.stringify(v || [])));
+      }
+    },
+
     constraintsForm: {
       deep: true,
       handler(nv) {
@@ -758,7 +1056,8 @@ export default {
           allowMultipleFiles: base.allowMultipleFiles === undefined ? true : !!base.allowMultipleFiles,
           modalities: Array.isArray(base.modalities)
             ? base.modalities.filter(Boolean).map(String)
-            : []
+            : [],
+          visibilityLogic: this.normalizeVisibilityLogic(base.visibilityLogic)
         };
 
         if (Array.isArray(base.options)) {
@@ -855,12 +1154,12 @@ export default {
       this.markEditLabel = "";
       this.markEditValue = null;
     },
+
     removeMark(v) {
       const i = (this.local.marks || []).findIndex(m => m.value === v);
       if (i >= 0) this.local.marks.splice(i, 1);
     },
 
-    // Radio multi default chips
     addChip() {
       const v = (this.chipInput || "").trim();
       if (!v) return;
@@ -869,12 +1168,12 @@ export default {
       if (!this.local.defaultValue.includes(v)) this.local.defaultValue.push(v);
       this.chipInput = "";
     },
+
     removeChip(i) {
       if (!Array.isArray(this.local.defaultValue)) return;
       this.local.defaultValue.splice(i, 1);
     },
 
-    // Choice options
     syncOptionsCount() {
       const count = Math.max(1, Number(this.optionsCount || 1));
       if (count > this.localOptions.length) {
@@ -887,60 +1186,88 @@ export default {
       }
       this.optionsCount = this.localOptions.length;
     },
+
     addOption() {
       this.localOptions.push(`Option ${this.localOptions.length + 1}`);
       this.optionsCount = this.localOptions.length;
     },
+
     removeLastOption() {
       if (this.localOptions.length > 1) {
         const removed = this.localOptions.pop();
         if (Array.isArray(this.local.defaultValue)) {
-          this.local.defaultValue = this.local.defaultValue.filter((v) => v !== removed);
+          this.local.defaultValue = this.local.defaultValue.filter(v => v !== removed);
         } else if (this.local.defaultValue === removed) {
           this.local.defaultValue = "";
         }
         this.optionsCount = this.localOptions.length;
       }
     },
+
     deleteOption(idx) {
       if (this.localOptions.length <= 1) return;
       const removed = this.localOptions.splice(idx, 1)[0];
       if (Array.isArray(this.local.defaultValue)) {
-        this.local.defaultValue = this.local.defaultValue.filter((v) => v !== removed);
+        this.local.defaultValue = this.local.defaultValue.filter(v => v !== removed);
       } else if (this.local.defaultValue === removed) {
         this.local.defaultValue = "";
       }
       this.optionsCount = this.localOptions.length;
     },
 
-    // Custom modalities
     addCustomMod() {
       const v = (this.customMod || "").trim();
       if (!v) return;
       const exists = (this.local.modalities || []).some(m => (m || "").toLowerCase() === v.toLowerCase());
       if (!exists) {
         if (!Array.isArray(this.local.modalities)) this.local.modalities = [];
-        this.local.modalities.push(v); // add as CHECKED
+        this.local.modalities.push(v);
       }
       this.customMod = "";
     },
+
     removeCustomModByName(name) {
       this.local.modalities = (this.local.modalities || []).filter(m => m !== name);
     },
 
-    // File formats
-    parseAllowedFormats(text) {
-      return String(text || "")
-        .split(",")
-        .map(s => s.trim())
+    cleanedVisibilityLogic() {
+      const src = this.local.visibilityLogic || {};
+      const cleanedRules = (Array.isArray(src.rules) ? src.rules : [])
+        .map(rule => {
+          const r = {
+            sourceFieldKey: String(rule.sourceFieldKey || ""),
+            operator: String(rule.operator || "eq")
+          };
+
+          if (!r.sourceFieldKey) return null;
+
+          if (this.needsNoValue(r.operator)) return r;
+
+          if (r.operator === "between") {
+            r.value = rule.value;
+            r.valueTo = rule.valueTo;
+            return r;
+          }
+
+          r.value = rule.value;
+          return r;
+        })
         .filter(Boolean);
+
+      return {
+        action: src.action === "hide" ? "hide" : "show",
+        match: src.match === "any" ? "any" : "all",
+        rules: cleanedRules
+      };
     },
 
-    // Save
     save() {
       if (this.isSaveDisabled) return;
 
-      // FILE: emit cleaned constraints with allowMultipleFiles defaulting to true and no implied limits
+      const visibilityLogic = this.cleanedVisibilityLogic();
+
+      console.log("[FieldConstraintsDialog] save() visibilityLogic:", JSON.parse(JSON.stringify(visibilityLogic)));
+
       if (this.isFile) {
         const parsedFormats = String(this.allowedFormatsText || "")
           .split(",")
@@ -951,23 +1278,25 @@ export default {
           required: !!this.local.required,
           readonly: !!this.local.readonly,
           helpText: this.local.helpText || "",
-          allowedFormats: parsedFormats,                     // [] => any type
+          allowedFormats: parsedFormats,
           maxSizeMB: (Number.isFinite(this.local.maxSizeMB) && this.local.maxSizeMB > 0)
             ? Number(this.local.maxSizeMB)
-            : undefined,                                     // undefined => no size limit
+            : undefined,
           storagePreference: (this.local.storagePreference === "url") ? "url" : "local",
-          allowMultipleFiles: this.local.allowMultipleFiles !== false,  // default true
+          allowMultipleFiles: this.local.allowMultipleFiles !== false,
           modalities: Array.isArray(this.local.modalities)
             ? Array.from(new Set(this.local.modalities.filter(Boolean).map(String)))
-            : []
+            : [],
+          visibilityLogic
         };
+        console.log("[FieldConstraintsDialog] emitted constraints:", JSON.parse(JSON.stringify(cleaned)));
         this.$emit("updateConstraints", cleaned);
         return;
       }
 
-
       if (!this.isSlider) {
         const cleaned = normalizeConstraints(this.type, { ...this.local });
+
         if (this.isChoice) {
           const opts = this.localOptions.map(o => String(o || "").trim()).filter(Boolean);
           const finalOpts = opts.length ? Array.from(new Set(opts)) : ["Option 1"];
@@ -981,12 +1310,15 @@ export default {
           cleaned.options = finalOpts;
           if (this.isSelect) delete cleaned.allowMultiple;
         }
+
         cleaned.defaultValue = coerceDefaultForType(
           this.isRadio && this.local.allowMultiple ? "radio" : this.type,
           cleaned.defaultValue
         );
         cleaned.hourCycle = this.local.hourCycle || "24";
+        cleaned.visibilityLogic = visibilityLogic;
 
+        console.log("[FieldConstraintsDialog] emitted constraints:", JSON.parse(JSON.stringify(cleaned)));
         this.$emit("updateConstraints", cleaned);
         return;
       }
@@ -1015,8 +1347,10 @@ export default {
           helpText: this.local.helpText || "",
           percent: !!this.local.percent,
           min, max, step,
-          marks
+          marks,
+          visibilityLogic
         };
+        console.log("[FieldConstraintsDialog] emitted constraints:", JSON.parse(JSON.stringify(cleaned)));
         this.$emit("updateConstraints", cleaned);
         return;
       }
@@ -1024,9 +1358,7 @@ export default {
       const LIM = this.LINEAR_MAX;
       let linMin = this.useMin;
       let linMax = this.useMax;
-      if (linMax - linMin + 1 > LIM) {
-        linMax = linMin + (LIM - 1);
-      }
+      if (linMax - linMin + 1 > LIM) linMax = linMin + (LIM - 1);
       if (linMax < linMin) linMax = linMin + 1;
 
       const cleaned = {
@@ -1037,8 +1369,10 @@ export default {
         min: linMin,
         max: linMax,
         leftLabel: this.local.leftLabel || "",
-        rightLabel: this.local.rightLabel || ""
+        rightLabel: this.local.rightLabel || "",
+        visibilityLogic
       };
+      console.log("[FieldConstraintsDialog] emitted constraints:", JSON.parse(JSON.stringify(cleaned)));
       this.$emit("updateConstraints", cleaned);
     },
 
@@ -1109,7 +1443,13 @@ export default {
         this.local.defaultValue = this.local.allowMultiple ? [] : "";
       }
 
-      // clear transient editor inputs
+      this.local.visibilityLogic = {
+        action: "show",
+        match: "all",
+        rules: [this.makeLogicRule()]
+      };
+
+      this.activeTab = "basic";
       this.chipInput = "";
       this.markEditValue = null;
       this.markEditLabel = "";
@@ -1119,24 +1459,58 @@ export default {
 };
 </script>
 
-
-
 <style scoped>
-.constraints-edit-modal{width:480px;background:#fff;padding:16px 16px 12px;border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,0.18);max-height:80vh;overflow-y:auto;box-sizing:border-box}
+.constraints-edit-modal{
+  width:560px;
+  background:#fff;
+  padding:16px 16px 12px;
+  border-radius:8px;
+  box-shadow:0 8px 24px rgba(0,0,0,0.18);
+  max-height:80vh;
+  overflow-y:auto;
+  box-sizing:border-box
+}
 .head{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}
 .type-chip{background:#eef2ff;color:#3730a3;border:1px solid #c7d2fe;padding:2px 8px;border-radius:999px;font-size:12px}
+
+.dialog-tabs{
+  display:flex;
+  gap:8px;
+  margin-bottom:12px;
+}
+.dialog-tab{
+  padding:8px 12px;
+  border:1px solid #d1d5db;
+  border-radius:8px;
+  background:#f9fafb;
+  cursor:pointer;
+  font-size:13px;
+}
+.dialog-tab.active{
+  background:#2563eb;
+  color:#fff;
+  border-color:#2563eb;
+}
+
 .group{border:1px solid #e5e7eb;border-radius:8px;padding:12px;margin-top:10px}
 .row{display:flex;flex-direction:column;gap:6px;margin-bottom:10px}
 .row.two{display:grid;gap:10px;grid-template-columns:1fr 1fr}
 .choice-row{display:flex;gap:16px}
 label{font-size:12px;color:#374151}
-input[type="text"],input[type="number"],input[type="time"],select{width:100%;padding:8px;border:1px solid #d1d5db;border-radius:6px;font-size:14px;box-sizing:border-box}
+input[type="text"],input[type="number"],input[type="time"],select{
+  width:100%;
+  padding:8px;
+  border:1px solid #d1d5db;
+  border-radius:6px;
+  font-size:14px;
+  box-sizing:border-box
+}
 .chk{display:inline-flex;align-items:center;gap:8px}
 .note{color:#6b7280;font-size:12px}
 .options-scroll{max-height:220px;overflow:auto;border:1px dashed #e5e7eb;border-radius:8px;padding:8px}
 .opt-row{display:grid;grid-template-columns:24px 1fr 32px;gap:8px;align-items:center;margin-bottom:8px}
 .opt-index{text-align:right;color:#6b7280;font-size:12px}
-.icon-btn{border:1px solid #e5e7eb;border-radius:6px;background:#f9fafb;cursor:pointer;padding:4px 0}
+.icon-btn{border:1px solid #e5e7eb;border-radius:6px;background:#f9fafb;cursor:pointer;padding:4px 8px}
 .quick{display:flex;gap:6px}
 .chips{display:flex;flex-direction:column;gap:6px}
 .chip-input-row input{width:100%}
@@ -1151,5 +1525,38 @@ input[type="text"],input[type="number"],input[type="time"],select{width:100%;pad
 .btn-primary:hover:not(:disabled){background:#1d4ed8}
 .btn-primary:disabled{background:#93c5fd;cursor:not-allowed;opacity:.7}
 .btn-option{background:#e5e7eb;color:#111827;border:none;padding:8px 14px;border-radius:6px;cursor:pointer}
+.btn-mini{
+  background:#eef2ff;
+  color:#1f2937;
+  border:1px solid #c7d2fe;
+  padding:4px 8px;
+  border-radius:6px;
+  cursor:pointer;
+  font-size:12px;
+}
 .err{color:#dc2626;font-size:12px;margin-top:4px}
+
+.logic-rules{
+  display:flex;
+  flex-direction:column;
+  gap:10px;
+  margin-top:10px;
+}
+.logic-rule-card{
+  border:1px solid #e5e7eb;
+  border-radius:8px;
+  padding:10px;
+  background:#fafafa;
+}
+.logic-rule-top{
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  margin-bottom:8px;
+}
+.logic-rule-top-actions{
+  display:flex;
+  align-items:center;
+  gap:6px;
+}
 </style>

@@ -14,7 +14,7 @@
           Choose source fields, select an operation, and store the result in an existing field
           or create a new read-only calculated field.
         </p>
-    </div>
+      </div>
 
       <div class="topbar-actions">
         <button class="btn-secondary" @click="resetBuilder">Reset</button>
@@ -300,10 +300,21 @@
  * - result target can be:
  *    1) existing field
  *    2) newly created read-only calculated field
+ *
+ * IMPORTANT:
+ * - never mutates the incoming form prop
+ * - maintains an internal working copy
+ * - emits both updated form structure and logic payload back to parent
  */
 export default {
   name: "LogicCalculationsRoute",
-  emits: ["back-to-builder"],
+  props: {
+    form: {
+      type: Object,
+      required: true
+    }
+  },
+  emits: ["back-to-builder", "update-logic", "update-form-structure"],
 
   data() {
     return {
@@ -348,8 +359,12 @@ export default {
   },
 
   computed: {
+    currentForm() {
+      return this.forms[this.formIndex] || { sections: [], logic: { version: 1, calculations: [], conditions: [] } };
+    },
+
     sectionOptions() {
-      const form = this.forms[this.formIndex] || { sections: [] };
+      const form = this.currentForm;
       return (form.sections || []).map((sec, idx) => ({
         id: sec._id || `section_${idx}`,
         title: sec.title || `Section ${idx + 1}`
@@ -479,6 +494,29 @@ export default {
     }
   },
 
+  watch: {
+    form: {
+      deep: true,
+      handler(newForm) {
+        if (!newForm || typeof newForm !== "object") return;
+
+        console.log("[Logic] prop form changed", JSON.parse(JSON.stringify(newForm)));
+
+        const next = JSON.parse(JSON.stringify(newForm));
+        if (!next.logic || typeof next.logic !== "object") {
+          next.logic = { version: 1, calculations: [], conditions: [] };
+        }
+        if (!Array.isArray(next.logic.calculations)) next.logic.calculations = [];
+        if (!Array.isArray(next.logic.conditions)) next.logic.conditions = [];
+
+        this.forms[this.formIndex] = next;
+        this.ensurePersistentIds();
+        this.buildFieldIndex();
+        this.loadCalcRules();
+      }
+    }
+  },
+
   mounted() {
     const idx = parseInt(this.$route?.query?.formIndex ?? "0", 10);
     this.formIndex = Number.isFinite(idx) && idx >= 0 ? idx : 0;
@@ -491,6 +529,14 @@ export default {
 
   methods: {
     goBack() {
+      this.persistRules();
+
+      console.log("[Logic] goBack() after persistRules", {
+        fullForm: JSON.parse(JSON.stringify(this.currentForm || {})),
+        logic: JSON.parse(JSON.stringify(this.currentForm?.logic || {}))
+      });
+
+      this.emitCurrentFormToParent("goBack");
       this.$emit("back-to-builder");
     },
 
@@ -505,12 +551,52 @@ export default {
       if (!this.forms.length) this.forms = [{ sections: [] }];
       while (this.forms.length <= this.formIndex) this.forms.push({ sections: [] });
 
-      if (!this.forms[this.formIndex]) this.forms[this.formIndex] = { sections: [] };
-      if (!Array.isArray(this.forms[this.formIndex].sections)) this.forms[this.formIndex].sections = [];
+      if (this.form && typeof this.form === "object") {
+        this.forms[this.formIndex] = JSON.parse(JSON.stringify(this.form));
+      } else if (!this.forms[this.formIndex]) {
+        this.forms[this.formIndex] = { sections: [] };
+      }
+
+      if (!Array.isArray(this.forms[this.formIndex].sections)) {
+        this.forms[this.formIndex].sections = [];
+      }
+
+      if (!this.forms[this.formIndex].logic || typeof this.forms[this.formIndex].logic !== "object") {
+        this.forms[this.formIndex].logic = { version: 1, calculations: [], conditions: [] };
+      }
+      if (!Array.isArray(this.forms[this.formIndex].logic.calculations)) {
+        this.forms[this.formIndex].logic.calculations = [];
+      }
+      if (!Array.isArray(this.forms[this.formIndex].logic.conditions)) {
+        this.forms[this.formIndex].logic.conditions = [];
+      }
+
+      console.log("[Logic] loadFormsFromStorage()", {
+        formIndex: this.formIndex,
+        propForm: JSON.parse(JSON.stringify(this.form || {})),
+        workingForm: JSON.parse(JSON.stringify(this.forms[this.formIndex] || {}))
+      });
     },
 
     saveFormsToStorage() {
       localStorage.setItem("scratchForms", JSON.stringify(this.forms));
+    },
+
+    emitCurrentFormToParent(reason = "unknown") {
+      const currentForm = JSON.parse(JSON.stringify(this.currentForm || {}));
+      const currentLogic = JSON.parse(JSON.stringify(currentForm.logic || {
+        version: 1,
+        calculations: [],
+        conditions: []
+      }));
+
+      console.log(`[Logic] emitCurrentFormToParent() reason=${reason}`, {
+        currentForm,
+        currentLogic
+      });
+
+      this.$emit("update-form-structure", currentForm);
+      this.$emit("update-logic", currentLogic);
     },
 
     uuid() {
@@ -519,23 +605,35 @@ export default {
     },
 
     ensurePersistentIds() {
-      const form = this.forms[this.formIndex];
+      const form = this.currentForm;
+
       (form.sections || []).forEach(sec => {
         if (!sec._id) sec._id = this.uuid();
         if (!Array.isArray(sec.fields)) sec.fields = [];
         sec.fields.forEach(f => {
           if (!f._id) f._id = this.uuid();
+          if (!f.constraints || typeof f.constraints !== "object") {
+            f.constraints = {};
+          }
         });
       });
+
+      if (!form.logic) form.logic = { version: 1, calculations: [], conditions: [] };
+      if (!Array.isArray(form.logic.calculations)) form.logic.calculations = [];
+      if (!Array.isArray(form.logic.conditions)) form.logic.conditions = [];
+      if (!form.logic.version) form.logic.version = 1;
+
+      this.forms[this.formIndex] = form;
       this.saveFormsToStorage();
     },
 
     buildFieldIndex() {
-      const form = this.forms[this.formIndex];
+      const form = this.currentForm;
       const out = [];
 
       (form.sections || []).forEach((sec, si) => {
         const sectionTitle = sec.title || `Section ${si + 1}`;
+
         (sec.fields || []).forEach((f, fi) => {
           const id = f._id || f.id || `sec${si}_fld${fi}_${String(f.name || "")}`;
 
@@ -552,6 +650,8 @@ export default {
       });
 
       this.allFields = out.filter(f => f.type !== "button");
+
+      console.log("[Logic] buildFieldIndex()", JSON.parse(JSON.stringify(this.allFields)));
     },
 
     prettyTypeLabel(t) {
@@ -588,7 +688,7 @@ export default {
       });
 
       const sectionOrder = [];
-      (this.forms?.[this.formIndex]?.sections || []).forEach(sec => {
+      (this.currentForm?.sections || []).forEach(sec => {
         const st = String(sec?.title || "");
         if (st) sectionOrder.push(st);
       });
@@ -621,22 +721,37 @@ export default {
     },
 
     loadCalcRules() {
-      const form = this.forms[this.formIndex];
-      if (!form.logic) form.logic = { version: 1, rules: [] };
-      if (!Array.isArray(form.logic.rules)) form.logic.rules = [];
+      const form = this.currentForm;
+      if (!form.logic) form.logic = { version: 1, calculations: [], conditions: [] };
+      if (!Array.isArray(form.logic.calculations)) form.logic.calculations = [];
 
-      this.calcRules = form.logic.rules.filter(r => r && r.kind === "calc");
+      this.calcRules = JSON.parse(
+        JSON.stringify((form.logic.calculations || []).filter(r => r && r.kind === "calc"))
+      );
+
+      console.log("[Logic] loadCalcRules()", JSON.parse(JSON.stringify(this.calcRules)));
     },
 
     persistRules() {
-      const form = this.forms[this.formIndex];
-      if (!form.logic) form.logic = { version: 1, rules: [] };
-      if (!Array.isArray(form.logic.rules)) form.logic.rules = [];
+      const form = this.currentForm;
 
-      const others = form.logic.rules.filter(r => r && r.kind !== "calc");
-      form.logic.rules = [...others, ...this.calcRules];
+      if (!form.logic) form.logic = { version: 1, calculations: [], conditions: [] };
+      if (!Array.isArray(form.logic.calculations)) form.logic.calculations = [];
+      if (!Array.isArray(form.logic.conditions)) form.logic.conditions = [];
 
+      form.logic.calculations = JSON.parse(JSON.stringify(this.calcRules));
+      form.logic.version = 1;
+
+      this.forms[this.formIndex] = form;
       this.saveFormsToStorage();
+
+      console.log("[Logic] persistRules()", {
+        calcRules: JSON.parse(JSON.stringify(this.calcRules || [])),
+        logicOnForm: JSON.parse(JSON.stringify(form.logic || {})),
+        fullForm: JSON.parse(JSON.stringify(form || {}))
+      });
+
+      this.emitCurrentFormToParent("persistRules");
 
       if (this.$store) this.$store.commit("setStudyCreationDirty", true);
     },
@@ -699,13 +814,14 @@ export default {
     },
 
     createNewCalculatedField() {
-      const form = this.forms[this.formIndex];
+      const form = this.currentForm;
       const secIndex = (form.sections || []).findIndex(sec => sec._id === this.newTargetSectionId);
       if (secIndex < 0) return null;
 
       const section = form.sections[secIndex];
       const label = String(this.newTargetLabel || "").trim();
-      const safeBase = label.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "") || "calculated_result";
+      const safeBase =
+        label.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "") || "calculated_result";
       const fieldId = this.uuid();
 
       const newField = {
@@ -726,6 +842,14 @@ export default {
 
       if (!Array.isArray(section.fields)) section.fields = [];
       section.fields.push(newField);
+
+      this.forms[this.formIndex] = form;
+
+      console.log("[Logic] createNewCalculatedField()", {
+        secIndex,
+        newField,
+        formAfterCreate: JSON.parse(JSON.stringify(form))
+      });
 
       return {
         fieldId,
@@ -768,6 +892,12 @@ export default {
 
       this.persistRules();
 
+      console.log("[Logic] saveCalculation() completed", {
+        finalTargetFieldId,
+        calcRules: JSON.parse(JSON.stringify(this.calcRules || [])),
+        formAfterSave: JSON.parse(JSON.stringify(this.currentForm || {}))
+      });
+
       this.selectedSourceIds = [];
       this.fieldSearch = "";
       this.targetSearch = "";
@@ -791,8 +921,13 @@ export default {
       this.selectedSourceIds = Array.isArray(rule.sources) ? [...rule.sources] : [];
       this.operation = rule.op || "sum";
 
-      this.targetMode = "existing";
-      this.targetFieldId = rule.target || "";
+      if (rule.targetMode === "new") {
+        this.targetMode = "new";
+        this.targetFieldId = "";
+      } else {
+        this.targetMode = "existing";
+        this.targetFieldId = rule.target || "";
+      }
 
       this.newTargetSectionId = "";
       this.newTargetLabel = "";
@@ -830,6 +965,7 @@ export default {
   gap: 14px;
   margin-bottom: 16px;
 }
+
 .logic-back-btn {
   justify-self: start;
 }
@@ -857,8 +993,6 @@ export default {
 .btn-back:active {
   transform: scale(0.98);
 }
-
-
 
 .title-wrap {
   text-align: center;
