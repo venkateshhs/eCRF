@@ -119,11 +119,11 @@
         <button type="button" @click="backFromStep1" class="btn-option">Back</button>
 
         <button v-if="isEditing" type="button" class="btn-option" @click="saveThisStepAndBackToStudy">
-          Save
+          Save and Leave
         </button>
 
         <button type="button" @click="validateStudy()" class="btn-option">
-          {{ stepLabelById[2] }}
+          Next
         </button>
       </div>
     </div>
@@ -135,13 +135,13 @@
       <GroupForm :schema="groupSchema" v-model="groupData" />
 
       <div class="form-actions">
-        <button @click="step = 1" class="btn-option">{{ stepLabelById[1] }}</button>
+        <button @click="step = 1" class="btn-option">Back</button>
 
         <button v-if="isEditing" type="button" class="btn-option" @click="saveThisStepAndBackToStudy">
-          Save
+          Save and Leave
         </button>
 
-        <button @click="checkGroups()" class="btn-option">{{ stepLabelById[3] }}</button>
+        <button @click="checkGroups()" class="btn-option">Next</button>
       </div>
     </div>
 
@@ -166,14 +166,14 @@
       <SubjectForm v-model:subjectCount="subjectCount" v-model:assignmentMethod="assignmentMethod" @changed="onSubjectSetupChanged"/>
 
       <div class="form-actions">
-        <button @click="step = 2" class="btn-option">{{ stepLabelById[2] }}</button>
+        <button @click="step = 2" class="btn-option">Back</button>
 
         <button v-if="isEditing" type="button" class="btn-option" @click="saveThisStepAndBackToStudy">
-          Save
+          Save and Leave
         </button>
 
         <button @click="checkSubjectsSetup()" class="btn-option">
-          {{ nextLabelFromStep3 }}
+          Next
         </button>
       </div>
     </div>
@@ -185,13 +185,13 @@
       <SubjectAssignmentForm :subjects="subjectData" :groupData="groupData" v-model:subjects="subjectData" @changed="onSubjectSetupChanged"/>
 
       <div class="form-actions">
-        <button @click="step = 3" class="btn-option">{{ stepLabelById[3] }}</button>
+        <button @click="step = 3" class="btn-option">Back</button>
 
         <button v-if="isEditing" type="button" class="btn-option" @click="saveThisStepAndBackToStudy">
-          Save
+          Save and Leave
         </button>
 
-        <button @click="checkSubjectsAssigned()" class="btn-option">{{ stepLabelById[5] }}</button>
+        <button @click="checkSubjectsAssigned()" class="btn-option">Next</button>
       </div>
     </div>
 
@@ -202,13 +202,13 @@
       <VisitForm :schema="visitSchema" v-model="visitData" />
 
       <div class="form-actions">
-        <button @click="goBackFromVisits" class="btn-option">{{ prevLabelForVisits }}</button>
+        <button @click="goBackFromVisits" class="btn-option">Back</button>
 
         <button v-if="isEditing" type="button" class="btn-option" @click="saveThisStepAndBackToStudy">
-          Save
+          Save and Leave
         </button>
 
-        <button @click="goToFinish()" class="btn-option">{{ stepLabelById[6] }}</button>
+        <button @click="goToFinish()" class="btn-option">Forms</button>
       </div>
     </div>
   </div>
@@ -344,7 +344,7 @@ export default {
       3: "Subject Setup",
       4: "Group Assignment",
       5: "Visits",
-      6: "Finish",
+      6: "Forms",
     };
 
     // keep previous titles in create mode
@@ -354,7 +354,7 @@ export default {
       3: "Step 3: Subject Setup",
       4: "Step 4: Group Assignment",
       5: "Step 5: Visits",
-      6: "Step 6: Finish",
+      6: "Step 6: Forms",
     };
 
     const currentStepLabel = computed(() => stepLabelById[step.value] || "");
