@@ -364,6 +364,7 @@ export default {
     groups: { type: Array, required: true },
     selectedModels: { type: Array, required: true },
     assignments: { type: Array, required: true },
+    forms: { type: Array, required: false, default: () => [] }
   },
   emits: ["assignment-updated", "edit-template"],
   setup(props, { emit }) {
@@ -841,22 +842,52 @@ export default {
             status: targetStatus,
             last_completed_step: 6,
           };
+      const normalizedForms = JSON.parse(JSON.stringify(props.forms || [])).map(form => ({
+      sections: Array.isArray(form.sections)
+        ? form.sections.map(sec => ({
+            ...sec,
+            fields: Array.isArray(sec.fields)
+              ? sec.fields.map(field => ({
+                  ...field,
+                  constraints: field.constraints || {}
+                }))
+              : []
+          }))
+        : [],
+      logic: {
+        version: form.logic?.version || 1,
+        calculations: Array.isArray(form.logic?.calculations) ? form.logic.calculations : [],
+        conditions: Array.isArray(form.logic?.conditions) ? form.logic.conditions : []
+      }
+    }));
 
-      const studyData = {
-        study: {
-          ...(studyDetails.study || {}),
-          title: studyDetails.study?.title ?? metadata.study_name ?? "",
-          description: studyDetails.study?.description ?? metadata.study_description ?? "",
-        },
-        groups: props.groups,
-        visits: props.visits,
-        subjects: Array.isArray(studyDetails.subjects) ? studyDetails.subjects : [],
-        selectedModels: props.selectedModels,
-        assignments: props.assignments,
-        subjectCount: studyDetails.subjectCount ?? 0,
-        assignmentMethod: studyDetails.assignmentMethod ?? "random",
-        skipSubjectCreationNow: !!studyDetails.skipSubjectCreationNow,
-      };
+    console.log("[ProtocolMatrix] normalizedForms before saveStudyImpl", JSON.parse(JSON.stringify(normalizedForms || [])));
+    console.log("[ProtocolMatrix] props.selectedModels before saveStudyImpl", JSON.parse(JSON.stringify(props.selectedModels || [])));
+    console.log("[ProtocolMatrix] props.assignments before saveStudyImpl", JSON.parse(JSON.stringify(props.assignments || [])));
+  const studyData = {
+  study: {
+    ...(studyDetails.study || {}),
+    title: studyDetails.study?.title ?? metadata.study_name ?? "",
+    description: studyDetails.study?.description ?? metadata.study_description ?? "",
+  },
+  groups: props.groups,
+  visits: props.visits,
+  subjects: Array.isArray(studyDetails.subjects) ? studyDetails.subjects : [],
+  selectedModels: JSON.parse(JSON.stringify(props.selectedModels || [])).map(sec => ({
+    ...sec,
+    fields: Array.isArray(sec.fields)
+      ? sec.fields.map(field => ({
+          ...field,
+          constraints: field.constraints || {}
+        }))
+      : []
+  })),
+  forms: normalizedForms,
+  assignments: props.assignments,
+  subjectCount: studyDetails.subjectCount ?? 0,
+  assignmentMethod: studyDetails.assignmentMethod ?? "random",
+  skipSubjectCreationNow: !!studyDetails.skipSubjectCreationNow,
+};
 
       const payload = { study_metadata: metadata, study_content: { study_data: studyData } };
 
@@ -944,6 +975,7 @@ export default {
           subjects: updatedStudyData.subjects || [],
           assignments: updatedStudyData.assignments || [],
           selectedModels: updatedStudyData.selectedModels || [],
+          forms: updatedStudyData.forms || normalizedForms || [],
           skipSubjectCreationNow: !!updatedStudyData.skipSubjectCreationNow,
         });
 
