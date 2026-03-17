@@ -1,4 +1,4 @@
-# ecrf.spec — EXE named 'eCRF-bin' inside folder 'eCRF'; include backend via hiddenimports
+# ecrf.spec — EXE named 'case-e-bin' inside folder 'Case-E'; include backend via hiddenimports
 from pathlib import Path
 from PyInstaller.utils.hooks import collect_data_files, collect_submodules, copy_metadata
 from PyInstaller.building.build_main import Analysis, PYZ, EXE, COLLECT
@@ -11,6 +11,21 @@ except NameError:
     import os
     HERE = Path(os.getcwd()).resolve()
 
+# App icon
+ICON_FILE = None
+for rel_icon in [
+    "assets/case-e.ico",   # best for Windows
+    "assets/case-e.icns",  # best for macOS
+    "assets/case-e.png",   # fallback if Pillow is installed
+]:
+    p = (HERE / rel_icon).resolve()
+    if p.exists():
+        ICON_FILE = str(p)
+        print(f"++ Using app icon: {ICON_FILE}")
+        break
+
+if not ICON_FILE:
+    print("!! No app icon found; using default PyInstaller icon")
 # 1) Only tuple-style data in Analysis
 analysis_data = []
 
@@ -85,7 +100,7 @@ add_tree("eCRF_frontend/dist", "eCRF_frontend/dist")
 
 # Backend resources (include templates as server.py references them via ECRF_TEMPLATES_DIR)
 add_tree("eCRF_backend/templates", "eCRF_backend/templates")
-
+add_tree("assets", "assets")
 a = Analysis(
     ["server.py"],
     pathex=[str(HERE), str(HERE / "eCRF_backend")],   # include the backend on sys.path
@@ -110,8 +125,9 @@ exe = EXE(
     a.binaries,
     a.zipfiles,
     a.datas,
-    name="eCRF-bin",
+    name="case-e-bin",
     console=True,  # set False to hide the console window
+    icon=ICON_FILE,
 )
 
 dist = COLLECT(
@@ -123,14 +139,14 @@ dist = COLLECT(
     strip=False,
     upx=False,
     upx_exclude=[],
-    name="eCRF",           # final app folder under dist/
+    name="Case-E",           # final app folder under dist/
 )
 
 # Optional: remove top-level EXE if PyInstaller ever leaves one alongside the folder
 import os as _os
 from pathlib import Path as _Path
 
-exe_name = "eCRF-bin.exe" if _os.name == "nt" else "eCRF-bin"
+exe_name = "case-e-bin.exe" if _os.name == "nt" else "case-e-bin"
 top_level_exe = _Path(HERE, "dist", exe_name)
 
 try:
