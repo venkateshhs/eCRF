@@ -965,6 +965,7 @@ export default {
 
   async mounted() {
     document.addEventListener("click", this.onGlobalClick);
+    window.addEventListener("beforeunload", this.beforeUnloadHandler);
     this.hydratingScratch = true;
 
     if (this.studyDetails.study_metadata?.id) {
@@ -1023,6 +1024,7 @@ export default {
 
   beforeUnmount() {
     document.removeEventListener("click", this.onGlobalClick);
+    window.removeEventListener("beforeunload", this.beforeUnloadHandler);
   },
 
   methods: {
@@ -1183,6 +1185,15 @@ export default {
 
       // Mark dirty because IDs/logic are structural metadata
       if (!this.hydratingScratch) this.$store.commit("setStudyCreationDirty", true);
+    },
+    beforeUnloadHandler(e) {
+      const isDirty = !!this.$store.state.studyCreationDirty;
+
+      if (!isDirty) return;
+
+      console.log("[ScratchForm] You have unsaved changes. Preventing accidental window/tab close.");
+      e.preventDefault();
+      e.returnValue = "";
     },
     openScratchUnsavedDialog(pendingAction) {
       this.unsavedPendingAction = typeof pendingAction === "function" ? pendingAction : null;
