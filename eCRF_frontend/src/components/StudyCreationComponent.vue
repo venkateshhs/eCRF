@@ -1459,17 +1459,8 @@ export default {
       if (unsavedBusy.value) return;
       unsavedBusy.value = true;
       try {
-        const ok = validateStepOnly(step.value);
-        if (!ok) {
-          unsavedBusy.value = false;
-          return;
-        }
-
         const saved = await saveNow();
-        if (!saved) {
-          unsavedBusy.value = false;
-          return;
-        }
+        if (!saved) return;
 
         showDialog.value = false;
         dialogMode.value = "default";
