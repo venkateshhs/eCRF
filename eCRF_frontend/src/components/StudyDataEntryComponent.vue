@@ -2128,6 +2128,29 @@ applyImportedRowFromDialog(payload) {
       });
       return out;
     },
+        getValueFromSectionDict(secObj, field, fIdx) {
+      if (!secObj || typeof secObj !== "object") return undefined;
+
+      const candidates = [
+        field?.id,
+        field?._id,
+        field?.field_id,
+        field?.uid,
+        field?.key,
+        field?.name,
+        field?.label,
+        field?.title,
+        `f${fIdx}`,
+      ].filter(Boolean);
+
+      for (const k of candidates) {
+        if (Object.prototype.hasOwnProperty.call(secObj, k)) {
+          return secObj[k];
+        }
+      }
+
+      return undefined;
+    },
 
     dictToArray(dataDict) {
       return (this.selectedModels || []).map((sec) => {
@@ -2794,8 +2817,8 @@ applyImportedRowFromDialog(payload) {
       }
     },
 
-    buildStatusCache() {
-      this.statusMap = new Map();
+        buildStatusCache() {
+      const nextMap = new Map();
       const nS = this.numberOfSubjects;
       const nV = this.visitList.length;
 
@@ -2811,29 +2834,29 @@ applyImportedRowFromDialog(payload) {
 
       for (let s = 0; s < nS; s++) {
         const g = this.subjectToGroupIdx[s];
+
         if (g == null || g < 0) {
-          for (const v of vIndices) this.statusMap.set(`${s}|${v}`, "none");
+          for (const v of vIndices) nextMap.set(`${s}|${v}`, "none");
           continue;
         }
+
         for (const v of vIndices) {
           const e = this.getBestEntryFor(s, v, g);
           const key = `${s}|${v}`;
 
           if (!e) {
-            this.statusMap.set(key, "none");
+            nextMap.set(key, "none");
             continue;
           }
 
           const flags = e.skipped_required_flags;
           const hasSkip = !!(
             Array.isArray(flags) &&
-            flags.some(
-              (row) =>
-                Array.isArray(row) && row.some((x) => !!x)
-            )
+            flags.some((row) => Array.isArray(row) && row.some((x) => !!x))
           );
+
           if (hasSkip) {
-            this.statusMap.set(key, "skipped");
+            nextMap.set(key, "skipped");
             continue;
           }
 
@@ -2846,34 +2869,51 @@ applyImportedRowFromDialog(payload) {
               const sec = this.selectedModels[mIdx] || {};
               const sKey = this.sectionDictKey(sec);
               const secObj = e.data[sKey] || {};
+
               (sec.fields || []).forEach((f, fIdx) => {
-                const fKey = this.fieldDictKey(f, fIdx);
-                const val = secObj[fKey];
+                const val = this.getValueFromSectionDict
+                  ? this.getValueFromSectionDict(secObj, f, fIdx)
+                  : secObj[this.fieldDictKey(f, fIdx)];
+
                 total += 1;
-                if (val != null && val !== "") filled += 1;
+
+                if (Array.isArray(val)) {
+                  if (val.length > 0) filled += 1;
+                } else if (typeof val === "boolean") {
+                  if (val === true) filled += 1;
+                } else if (val != null && String(val).trim() !== "") {
+                  filled += 1;
+                }
               });
             }
           } else if (Array.isArray(e.data)) {
             for (const mIdx of assigned) {
               const row = e.data[mIdx] || [];
               total += row.length;
-              filled += row.filter(
-                (vv) => vv != null && vv !== ""
-              ).length;
+              filled += row.filter((vv) => {
+                if (Array.isArray(vv)) return vv.length > 0;
+                if (typeof vv === "boolean") return vv === true;
+                return vv != null && String(vv).trim() !== "";
+              }).length;
             }
           }
 
-          if (total === 0 || filled === 0)
-            this.statusMap.set(key, "none");
-          else if (filled === total)
-            this.statusMap.set(key, "complete");
-          else this.statusMap.set(key, "partial");
+          if (total === 0 || filled === 0) {
+            nextMap.set(key, "none");
+          } else if (filled === total) {
+            nextMap.set(key, "complete");
+          } else {
+            nextMap.set(key, "partial");
+          }
         }
       }
+
+      this.statusMap = nextMap;
     },
 
     statusClassFast(sIdx, vIdx) {
-      const s = this.statusMap.get(`${sIdx}|${vIdx}`) || "none";
+      const map = this.statusMap instanceof Map ? this.statusMap : new Map();
+      const s = map.get(`${sIdx}|${vIdx}`) || "none";
       return s === "skipped" ? "status-skipped" : `status-${s}`;
     },
 
@@ -2917,8 +2957,9 @@ applyImportedRowFromDialog(payload) {
       this.visitLoading = false;
     },
 
-    backToSelection() {
+        backToSelection() {
       if (this.isShared) return;
+      this.buildStatusCache();
       this.showSelection = true;
       this.showDetails = false;
       this.currentSubjectIndex = null;
@@ -3525,48 +3566,77 @@ applyImportedRowFromDialog(payload) {
       }
     },
 
-    updateStatusCacheFor(s, v, g) {
+        updateStatusCacheFor(s, v, g) {
       const e = this.getBestEntryFor(s, v, g);
       const key = `${s}|${v}`;
+
+      const nextMap = new Map(this.statusMap || []);
+
       if (!e) {
-        this.statusMap.set(key, "none");
+        nextMap.set(key, "none");
+        this.statusMap = nextMap;
         return;
       }
 
       const flags = e.skipped_required_flags;
-      const hasSkip = !!(Array.isArray(flags) && flags.some((row) => Array.isArray(row) && row.some((x) => !!x)));
+      const hasSkip = !!(
+        Array.isArray(flags) &&
+        flags.some((row) => Array.isArray(row) && row.some((x) => !!x))
+      );
+
       if (hasSkip) {
-        this.statusMap.set(key, "skipped");
+        nextMap.set(key, "skipped");
+        this.statusMap = nextMap;
         return;
       }
 
       const assigned = this.assignedLookup?.[v]?.[g] || [];
-      let total = 0,
-        filled = 0;
+      let total = 0;
+      let filled = 0;
 
       if (e.data && !Array.isArray(e.data) && typeof e.data === "object") {
         for (const mIdx of assigned) {
           const sec = this.selectedModels[mIdx] || {};
           const sKey = this.sectionDictKey(sec);
           const secObj = e.data[sKey] || {};
+
           (sec.fields || []).forEach((f, fIdx) => {
-            const fKey = this.fieldDictKey(f, fIdx);
-            const val = secObj[fKey];
+            const val = this.getValueFromSectionDict
+              ? this.getValueFromSectionDict(secObj, f, fIdx)
+              : secObj[this.fieldDictKey(f, fIdx)];
+
             total += 1;
-            if (val != null && val !== "") filled += 1;
+
+            if (Array.isArray(val)) {
+              if (val.length > 0) filled += 1;
+            } else if (typeof val === "boolean") {
+              if (val === true) filled += 1;
+            } else if (val != null && String(val).trim() !== "") {
+              filled += 1;
+            }
           });
         }
       } else if (Array.isArray(e.data)) {
         for (const mIdx of assigned) {
           const row = e.data[mIdx] || [];
           total += row.length;
-          filled += row.filter((vv) => vv != null && vv !== "").length;
+          filled += row.filter((vv) => {
+            if (Array.isArray(vv)) return vv.length > 0;
+            if (typeof vv === "boolean") return vv === true;
+            return vv != null && String(vv).trim() !== "";
+          }).length;
         }
       }
 
-      if (total === 0 || filled === 0) this.statusMap.set(key, "none");
-      else if (filled === total) this.statusMap.set(key, "complete");
-      else this.statusMap.set(key, "partial");
+      if (total === 0 || filled === 0) {
+        nextMap.set(key, "none");
+      } else if (filled === total) {
+        nextMap.set(key, "complete");
+      } else {
+        nextMap.set(key, "partial");
+      }
+
+      this.statusMap = nextMap;
     },
 
     confirmSkipSelection() {
