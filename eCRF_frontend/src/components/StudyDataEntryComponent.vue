@@ -85,6 +85,16 @@
     <!-- Selection (hidden in shared mode; shared preselects) -->
     <template v-if="showSelection && !isShared">
       <!-- Matrix view (hidden when Merge is open) -->
+          <div v-if="!isMergeMode" class="selection-import-bar">
+      <button
+        type="button"
+        class="import-btn"
+        @click="openImportDialogFromSelection"
+      >
+        <i :class="icons.upload || 'fas fa-file-import'"></i>
+        Import Data
+      </button>
+    </div>
       <SelectionMatrixView
         v-if="!isMergeMode"
         :matrixReady="matrixReady"
@@ -122,9 +132,22 @@
           <strong>Visit:</strong> {{ visitList[currentVisitIndex].name }}
           <span v-if="!isShared && selectedVersion" class="version-helper">Saving to Version {{ selectedVersion }}</span>
         </div>
-        <button type="button" class="legend-btn" @click="openLegendDialog" :title="'Legend / What does * mean?'">
-          <i :class="icons.help || 'fas fa-question-circle'"></i>
-        </button>
+        <div class="crumb-actions">
+          <button
+            v-if="canEdit"
+            type="button"
+            class="import-btn"
+            @click="openImportDialog"
+            title="Import data from CSV or Excel"
+          >
+            <i :class="icons.upload || 'fas fa-file-import'"></i>
+            Import Data
+          </button>
+
+          <button type="button" class="legend-btn" @click="openLegendDialog" :title="'Legend / What does * mean?'">
+            <i :class="icons.help || 'fas fa-question-circle'"></i>
+          </button>
+        </div>
       </div>
 
       <div class="entry-form-section">
@@ -440,6 +463,20 @@
       @cancel="cancelSkipSelection"
       @jump="jumpToField"
     />
+    <StudyDataImportDialog
+      v-if="showImportDialog"
+      :visible="showImportDialog"
+      :available-fields="importableFields"
+      :subjects="importDialogSubjects"
+      :visit-label="visitList[selectedVisitIndex === -1 ? 0 : selectedVisitIndex]?.name || ''"
+      :preview-rows="importPreviewRows"
+      :preview-summary="importPreviewSummary"
+      :analyzing="importAnalyzing"
+      :committing="importCommitting"
+      @close="closeImportDialog"
+      @analyze="buildImportPreview"
+      @commit="commitImportPreview"
+    />
   </div>
 
   <div v-else class="loading">
@@ -471,6 +508,7 @@ import StudyConstraintDialog from "@/components/dataentry/StudyConstraintDialog.
 import StudyLegendDialogs from "@/components/dataentry/StudyLegendDialogs.vue";
 import GroupAssignDialog from "@/components/dataentry/GroupAssignDialog.vue";
 import SkipRequiredDialog from "@/components/dataentry/SkipRequiredDialog.vue";
+import StudyDataImportDialog from "@/components/dataentry/StudyDataImportDialog.vue";
 import {
   getCalculationRulesFromStudy,
   getCalculationFormulaForField,
@@ -502,6 +540,7 @@ export default {
     StudyLegendDialogs,
     GroupAssignDialog,
     SkipRequiredDialog,
+    StudyDataImportDialog,
   },
   data() {
     return {
@@ -590,10 +629,60 @@ export default {
       groupAssignError: "",
       savingGroupAssign: false,
       groupAssignDrafts: [],
+      showImportDialog: false,
+      importPreviewRows: [],
+      importPreviewSummary: {
+      totalRows: 0,
+      readyRows: 0,
+      warningRows: 0,
+      errorRows: 0,
+    },
+      importPreviewPayload: null,
+      importAnalyzing: false,
+      importCommitting: false,
     };
   },
 
   computed: {
+    importDialogSubjects() {
+      const subjects = Array.isArray(this.sd?.subjects) ? this.sd.subjects : [];
+
+      return subjects.map((s, idx) => {
+        const subjectLabel = String(s?.id || s?.subject_id || `Subject ${idx + 1}`).trim();
+        const groupName = String(s?.group || "").trim();
+
+        return {
+          index: idx,
+          label: subjectLabel,
+          groupLabel: groupName || "Unassigned",
+        };
+      });
+    },
+    importableFields() {
+      const models = Array.isArray(this.selectedModels) ? this.selectedModels : [];
+      const assigned = Array.isArray(this.assignedModelIndices) ? this.assignedModelIndices : [];
+
+      const out = [];
+
+      assigned.forEach((mIdx) => {
+        const section = models[mIdx] || {};
+        const fields = Array.isArray(section.fields) ? section.fields : [];
+
+        fields.forEach((field, fIdx) => {
+          out.push({
+            key: `${mIdx}-${fIdx}`,
+            modelIndex: mIdx,
+            fieldIndex: fIdx,
+            sectionTitle: section.title || `Section ${mIdx + 1}`,
+            fieldLabel: field.label || field.name || field.title || `Field ${fIdx + 1}`,
+            fieldName: field.name || field.label || field.title || `Field ${fIdx + 1}`,
+            fieldType: field.type || "text",
+          });
+        });
+      });
+
+      return out;
+    },
     shareDialogSections() {
       const v = Number(this.shareParams?.visitIndex);
       const g = Number(this.shareParams?.groupIndex);
@@ -856,6 +945,653 @@ export default {
   },
 
   methods: {
+  async commitImportPreview() {
+  try {
+    this.importCommitting = true;
+
+    const validRows = (this.importPreviewRows || []).filter((r) => r.status === "Ready");
+    if (!validRows.length) {
+      this.showDialogMessage("No valid rows are available to commit.");
+      return;
+    }
+
+    let committed = 0;
+    let failed = 0;
+
+    for (const row of validRows) {
+      try {
+        const s = row.targetSubjectIndex;
+        const v = row.targetVisitIndex;
+        const g = row.targetGroupIndex;
+
+        if (s == null || v == null || g == null) {
+          failed += 1;
+          continue;
+        }
+
+        this.currentSubjectIndex = s;
+        this.currentVisitIndex = v;
+        this.currentGroupIndex = g;
+
+        this.ensureSlot(s, v, g);
+
+        row.importedFields.forEach((item) => {
+          const mIdx = Number(item.modelIndex);
+          const fIdx = Number(item.fieldIndex);
+          const field = this.selectedModels?.[mIdx]?.fields?.[fIdx];
+          if (!field) return;
+          if (this.isReadonlyField(field, mIdx, fIdx)) return;
+
+          const parsed = this.normalizeImportedValueForField(field, item.rawValue);
+          this.setDeepValue(s, v, g, mIdx, fIdx, parsed);
+          this.setDeepSkip(s, v, g, mIdx, fIdx, false);
+        });
+
+        this.runCalculationsForCell(s, v, g, null, null);
+
+        const dictData = this.arrayToDict(this.entryData[s][v][g]);
+        const rawSkipFlags = this.skipFlags[s][v][g];
+
+        const payload = {
+          study_id: this.study?.metadata?.id,
+          subject_index: s,
+          visit_index: v,
+          group_index: g,
+          data: dictData,
+          skipped_required_flags: rawSkipFlags,
+        };
+
+        const headers = {
+          headers: { Authorization: `Bearer ${this.token}` },
+        };
+
+        const existing = this.getBestEntryFor(s, v, g);
+
+        if (existing?.id) {
+          const resp = await axios.put(
+            `/forms/studies/${this.study.metadata.id}/data_entries/${existing.id}`,
+            payload,
+            { ...headers, params: { audit_label: "Bulk Import Update" } }
+          );
+          const idx = this.existingEntries.findIndex((x) => x.id === existing.id);
+          if (idx >= 0) this.existingEntries.splice(idx, 1, resp.data);
+        } else {
+          const params = this.safeVersionParams(this.selectedVersion);
+          const resp = await axios.post(
+            `/forms/studies/${this.study.metadata.id}/data`,
+            payload,
+            params
+              ? { ...headers, params: { ...params, audit_label: "Bulk Import Create" } }
+              : { ...headers, params: { audit_label: "Bulk Import Create" } }
+          );
+
+          const newId = resp?.data?.id;
+          this.entryIds[s][v][g] = newId;
+          this.existingEntries.push({
+            id: newId,
+            study_id: this.study.metadata.id,
+            subject_index: s,
+            visit_index: v,
+            group_index: g,
+            data: dictData,
+            skipped_required_flags: rawSkipFlags,
+            form_version: resp?.data?.form_version ?? this.selectedVersion,
+            created_at: resp?.data?.created_at ?? new Date().toISOString(),
+          });
+        }
+
+        this.hydrateCache.delete(`${s}|${v}|${g}|${this.selectedVersion}`);
+        this.updateStatusCacheFor(s, v, g);
+        committed += 1;
+      } catch (e) {
+        console.error("Bulk import row commit failed", row, e);
+        failed += 1;
+      }
+    }
+
+    this.rebuildEntriesIndex();
+    this.buildStatusCache();
+    this.closeImportDialog();
+
+    if (failed) {
+      this.showDialogMessage(`Bulk import finished. ${committed} row(s) committed, ${failed} row(s) failed during save.`);
+    } else {
+      this.showDialogMessage(`Bulk import finished successfully. ${committed} row(s) committed.`);
+    }
+  } catch (e) {
+    console.error("Bulk import commit failed", e);
+    this.showDialogMessage("Failed to commit bulk import.");
+  } finally {
+    this.importCommitting = false;
+  }
+},
+  simulateImportedRowValidation({
+  targetSubjectIndex,
+  targetVisitIndex,
+  targetGroupIndex,
+  importedFields,
+}) {
+  const issues = [];
+
+  const originalEntryData = this.entryData;
+  const originalSkipFlags = this.skipFlags;
+  const originalValidationErrors = this.validationErrors;
+  const originalCalcWarnings = this.calcWarnings;
+  const originalCurrentSubjectIndex = this.currentSubjectIndex;
+  const originalCurrentVisitIndex = this.currentVisitIndex;
+  const originalCurrentGroupIndex = this.currentGroupIndex;
+
+  try {
+    // lightweight deep clone only for simulation
+    this.entryData = JSON.parse(JSON.stringify(this.entryData || []));
+    this.skipFlags = JSON.parse(JSON.stringify(this.skipFlags || []));
+    this.validationErrors = {};
+    this.calcWarnings = {};
+
+    this.currentSubjectIndex = targetSubjectIndex;
+    this.currentVisitIndex = targetVisitIndex;
+    this.currentGroupIndex = targetGroupIndex;
+
+    this.ensureSlot(targetSubjectIndex, targetVisitIndex, targetGroupIndex);
+
+    importedFields.forEach((item) => {
+      const mIdx = Number(item.modelIndex);
+      const fIdx = Number(item.fieldIndex);
+
+      if (!this.assignments?.[mIdx]?.[targetVisitIndex]?.[targetGroupIndex]) {
+        issues.push(
+          `${item.sectionTitle} → ${item.fieldLabel}: section is not assigned for this visit/group.`
+        );
+        return;
+      }
+
+      const field = this.selectedModels?.[mIdx]?.fields?.[fIdx];
+      if (!field) {
+        issues.push(`${item.sectionTitle} → ${item.fieldLabel}: field not found in current template.`);
+        return;
+      }
+
+      if (this.isReadonlyField(field, mIdx, fIdx)) {
+        issues.push(`${item.sectionTitle} → ${item.fieldLabel}: field is read-only and cannot be imported.`);
+        return;
+      }
+
+      const normalized = this.normalizeImportedValueForField(field, item.rawValue);
+      this.setDeepValue(targetSubjectIndex, targetVisitIndex, targetGroupIndex, mIdx, fIdx, normalized);
+      this.setDeepSkip(targetSubjectIndex, targetVisitIndex, targetGroupIndex, mIdx, fIdx, false);
+    });
+
+    this.runCalculationsForCell(targetSubjectIndex, targetVisitIndex, targetGroupIndex, null, null);
+
+    const assigned = this.selectedModels
+      .map((_, mIdx) => mIdx)
+      .filter((mIdx) => !!this.assignments?.[mIdx]?.[targetVisitIndex]?.[targetGroupIndex]);
+
+    assigned.forEach((mIdx) => {
+      const section = this.selectedModels?.[mIdx];
+      (section?.fields || []).forEach((field, fIdx) => {
+        if (!this.hasVisibleFieldsInSection(mIdx)) return;
+        if (!this.isFieldVisible(mIdx, fIdx)) return;
+
+        const valid = this.validateField(mIdx, fIdx);
+        if (!valid) {
+          const msg = this.fieldErrors(mIdx, fIdx);
+          if (msg) {
+            issues.push(`${section?.title || `Section ${mIdx + 1}`} → ${field?.label || field?.name || `Field ${fIdx + 1}`}: ${msg}`);
+          }
+        }
+      });
+    });
+
+    return { issues };
+  } finally {
+    this.entryData = originalEntryData;
+    this.skipFlags = originalSkipFlags;
+    this.validationErrors = originalValidationErrors;
+    this.calcWarnings = originalCalcWarnings;
+    this.currentSubjectIndex = originalCurrentSubjectIndex;
+    this.currentVisitIndex = originalCurrentVisitIndex;
+    this.currentGroupIndex = originalCurrentGroupIndex;
+  }
+},
+async buildImportPreview(payload) {
+  try {
+    this.importAnalyzing = true;
+    this.importPreviewRows = [];
+    this.importPreviewSummary = {
+      totalRows: 0,
+      readyRows: 0,
+      warningRows: 0,
+      errorRows: 0,
+    };
+    this.importPreviewPayload = payload || null;
+
+    const rows = Array.isArray(payload?.dataRows) ? payload.dataRows : [];
+    const columns = Array.isArray(payload?.columns) ? payload.columns : [];
+    const mappings = payload?.mappings || {};
+    const metadataMapping = payload?.metadataMapping || {};
+    const mode = String(payload?.mode || "single");
+
+    const previewRows = [];
+
+    for (let rowIndex = 0; rowIndex < rows.length; rowIndex++) {
+      const row = rows[rowIndex] || [];
+      const issues = [];
+      let targetSubjectIndex = null;
+      let targetVisitIndex = null;
+      let targetGroupIndex = null;
+
+      const getMeta = (key) => {
+        const idx = metadataMapping?.[key];
+        if (idx == null || idx === "") return "";
+        return String(row[Number(idx)] ?? "").trim();
+      };
+
+      const subjectValue = getMeta("subject");
+      const visitValue = getMeta("visit");
+      const groupValue = getMeta("group");
+
+      // match subject
+      if (mode === "single") {
+        targetSubjectIndex = Number(payload?.selectedSubjectIndex);
+      } else {
+        const normalizedSubject = String(subjectValue || "").trim().toLowerCase();
+        targetSubjectIndex = (this.sd.subjects || []).findIndex((s) => {
+          const sid = String(s?.id || s?.subject_id || "").trim().toLowerCase();
+          return sid && sid === normalizedSubject;
+        });
+
+        if (targetSubjectIndex < 0) {
+          issues.push(`Subject "${subjectValue || "blank"}" was not found in this study.`);
+          targetSubjectIndex = null;
+        }
+      }
+
+      // visit
+      if (mode === "single") {
+        targetVisitIndex =
+          this.selectedVisitIndex === -1
+            ? 0
+            : Number.isInteger(this.selectedVisitIndex)
+            ? this.selectedVisitIndex
+            : 0;
+      } else {
+        const normalizedVisit = String(visitValue || "").trim().toLowerCase();
+        const matchedVisitIndex = this.visitList.findIndex((v) => {
+          return String(v?.name || "").trim().toLowerCase() === normalizedVisit;
+        });
+
+        if (matchedVisitIndex < 0) {
+          issues.push(`Visit "${visitValue || "blank"}" was not found in this study.`);
+          targetVisitIndex = null;
+        } else {
+          targetVisitIndex = matchedVisitIndex;
+        }
+      }
+
+      // group
+      if (targetSubjectIndex != null && targetSubjectIndex >= 0) {
+        targetGroupIndex = this.subjectToGroupIdx?.[targetSubjectIndex];
+        if (targetGroupIndex == null || targetGroupIndex < 0) {
+          issues.push(`Matched subject does not have a valid assigned group.`);
+          targetGroupIndex = null;
+        }
+      }
+
+      if (mode === "all" && targetGroupIndex != null && targetGroupIndex >= 0) {
+        const expectedGroup = String(this.groupList?.[targetGroupIndex]?.name || "").trim().toLowerCase();
+        const actualGroup = String(groupValue || "").trim().toLowerCase();
+
+        if (!actualGroup) {
+          issues.push(`Group value is missing in the spreadsheet row.`);
+        } else if (expectedGroup && actualGroup !== expectedGroup) {
+          issues.push(`Group "${groupValue}" does not match the subject group "${this.groupList?.[targetGroupIndex]?.name || ""}".`);
+        }
+      }
+
+      // mapped values
+      let mappedValueCount = 0;
+      const importedFields = [];
+
+      Object.keys(mappings || {}).forEach((colIndexStr) => {
+        const targetKey = mappings[colIndexStr];
+        if (!targetKey) return;
+
+        const colIndex = Number(colIndexStr);
+        const rawValue = row[colIndex];
+
+        if (rawValue == null || String(rawValue).trim() === "") return;
+
+        const targetField = this.importableFields.find((f) => f.key === targetKey);
+        if (!targetField) return;
+
+        importedFields.push({
+          columnIndex: colIndex,
+          rawValue,
+          modelIndex: targetField.modelIndex,
+          fieldIndex: targetField.fieldIndex,
+          sectionTitle: targetField.sectionTitle,
+          fieldLabel: targetField.fieldLabel,
+        });
+        mappedValueCount += 1;
+      });
+
+      if (!mappedValueCount) {
+        issues.push("No mapped spreadsheet values were found in this row.");
+      }
+
+      // run actual form pipeline only if metadata matched enough
+      if (
+        targetSubjectIndex != null &&
+        targetVisitIndex != null &&
+        targetGroupIndex != null &&
+        mappedValueCount > 0
+      ) {
+        const validationResult = this.simulateImportedRowValidation({
+          targetSubjectIndex,
+          targetVisitIndex,
+          targetGroupIndex,
+          importedFields,
+        });
+
+        if (validationResult?.issues?.length) {
+          issues.push(...validationResult.issues);
+        }
+      }
+
+      let status = "Ready";
+      if (issues.length) {
+        const hasHardError = issues.some((x) =>
+          /not found|does not match|required|invalid|must be|readonly|not assigned/i.test(String(x))
+        );
+        status = hasHardError ? "Error" : "Warning";
+      }
+
+      previewRows.push({
+        rowIndex,
+        subjectLabel:
+          targetSubjectIndex != null && targetSubjectIndex >= 0
+            ? String(this.sd.subjects?.[targetSubjectIndex]?.id || "")
+            : subjectValue || "",
+        visitLabel:
+          targetVisitIndex != null && targetVisitIndex >= 0
+            ? String(this.visitList?.[targetVisitIndex]?.name || "")
+            : visitValue || "",
+        groupLabel:
+          targetGroupIndex != null && targetGroupIndex >= 0
+            ? String(this.groupList?.[targetGroupIndex]?.name || "")
+            : groupValue || "",
+        mappedValueCount,
+        status,
+        issues,
+        targetSubjectIndex,
+        targetVisitIndex,
+        targetGroupIndex,
+        importedFields,
+      });
+    }
+
+    // duplicate target check for bulk
+    if (mode === "all") {
+      const keyMap = new Map();
+      previewRows.forEach((r) => {
+        if (
+          r.targetSubjectIndex != null &&
+          r.targetVisitIndex != null &&
+          r.targetGroupIndex != null
+        ) {
+          const key = `${r.targetSubjectIndex}|${r.targetVisitIndex}|${r.targetGroupIndex}`;
+          const arr = keyMap.get(key) || [];
+          arr.push(r.rowIndex);
+          keyMap.set(key, arr);
+        }
+      });
+
+      previewRows.forEach((r) => {
+        const key = `${r.targetSubjectIndex}|${r.targetVisitIndex}|${r.targetGroupIndex}`;
+        const arr = keyMap.get(key) || [];
+        if (arr.length > 1) {
+          r.issues.push(
+            `Multiple spreadsheet rows target the same Subject / Visit / Group (${arr.map((x) => `row ${x + 1}`).join(", ")}).`
+          );
+          r.status = "Error";
+        }
+      });
+    }
+
+    this.importPreviewRows = previewRows;
+    this.importPreviewSummary = {
+      totalRows: previewRows.length,
+      readyRows: previewRows.filter((r) => r.status === "Ready").length,
+      warningRows: previewRows.filter((r) => r.status === "Warning").length,
+      errorRows: previewRows.filter((r) => r.status === "Error").length,
+    };
+  } catch (e) {
+    console.error("Failed to build import preview", e);
+    this.showDialogMessage("Failed to build import preview.");
+  } finally {
+    this.importAnalyzing = false;
+  }
+},
+  closeImportDialog() {
+      this.showImportDialog = false;
+      this.importPreviewRows = [];
+      this.importPreviewSummary = {
+        totalRows: 0,
+        readyRows: 0,
+        warningRows: 0,
+        errorRows: 0,
+      };
+      this.importPreviewPayload = null;
+      this.importAnalyzing = false;
+      this.importCommitting = false;
+    },
+  openImportDialogFromSelection() {
+  if (this.isShared) return;
+
+  if (!this.visitList.length) {
+    this.showDialogMessage("No visits available for import.");
+    return;
+  }
+
+  if (this.selectedVisitIndex === -1) {
+    this.selectedVisitIndex = 0;
+  }
+
+  this.showImportDialog = true;
+},
+normalizeImportedValueForField(field, rawValue) {
+  const type = String(field?.type || "text").toLowerCase();
+  const c = field?.constraints || {};
+
+  if (rawValue == null) return this.defaultForField(field);
+  const text = String(rawValue).trim();
+
+  if (text === "") return this.defaultForField(field);
+
+  if (type === "number" || type === "slider") {
+    const n = Number(String(rawValue).replace(/,/g, "."));
+    return Number.isFinite(n) ? n : this.defaultForField(field);
+  }
+
+  if (type === "checkbox") {
+    const v = text.toLowerCase();
+    return ["true", "yes", "y", "1", "checked"].includes(v);
+  }
+
+  if (type === "select") {
+    if (c.allowMultiple) {
+      return text.split(",").map((x) => x.trim()).filter(Boolean);
+    }
+    return text;
+  }
+
+  if (type === "radio" || type === "date" || type === "time") {
+    return text;
+  }
+
+  if (type === "file") {
+    return this.defaultForField(field);
+  }
+
+  return text;
+},
+
+applyImportedRowFromDialog(payload) {
+  try {
+    if (payload?.mode !== "single") {
+      this.showDialogMessage("Only single-subject import is supported right now.");
+      return;
+    }
+
+    const targetSubjectIndex = Number(payload?.targetSubjectIndex);
+    if (!Number.isInteger(targetSubjectIndex) || targetSubjectIndex < 0) {
+      this.showDialogMessage("Invalid target subject selected.");
+      return;
+    }
+
+    const visitIdx =
+      this.selectedVisitIndex === -1
+        ? 0
+        : Number.isInteger(this.selectedVisitIndex)
+        ? this.selectedVisitIndex
+        : 0;
+
+    const targetGroupIdx = this.subjectToGroupIdx?.[targetSubjectIndex];
+
+    if (targetGroupIdx == null || targetGroupIdx < 0) {
+      this.showDialogMessage("Selected subject does not have a valid group assigned.");
+      return;
+    }
+
+    this.currentSubjectIndex = targetSubjectIndex;
+    this.currentVisitIndex = visitIdx;
+    this.currentGroupIndex = targetGroupIdx;
+
+    this.ensureSlot(this.currentSubjectIndex, this.currentVisitIndex, this.currentGroupIndex);
+
+    const items = Array.isArray(payload?.items) ? payload.items : [];
+    if (!items.length) {
+      this.showDialogMessage("No mapped values found to import.");
+      return;
+    }
+
+    items.forEach((item) => {
+      const mIdx = Number(item.modelIndex);
+      const fIdx = Number(item.fieldIndex);
+
+      if (!Number.isInteger(mIdx) || !Number.isInteger(fIdx)) return;
+
+      // only import if actually assigned for this subject's group and current visit
+      if (!this.assignments?.[mIdx]?.[visitIdx]?.[targetGroupIdx]) return;
+
+      const field = this.selectedModels?.[mIdx]?.fields?.[fIdx];
+      if (!field) return;
+      if (this.isReadonlyField(field, mIdx, fIdx)) return;
+
+      const parsed = this.normalizeImportedValueForField(field, item.rawValue);
+
+      this.setDeepValue(this.currentSubjectIndex, this.currentVisitIndex, this.currentGroupIndex, mIdx, fIdx, parsed);
+      this.setDeepSkip(this.currentSubjectIndex, this.currentVisitIndex, this.currentGroupIndex, mIdx, fIdx, false);
+      this.clearError(mIdx, fIdx);
+      this.clearCalcWarningFor(mIdx, fIdx);
+    });
+
+    this.showSelection = false;
+    this.validationErrors = {};
+    this.calcWarnings = {};
+
+    this.runAllCalculationsForCurrentCell();
+
+    this.assignedModelIndices.forEach((mIdx) => {
+      (this.selectedModels?.[mIdx]?.fields || []).forEach((field, fIdx) => {
+        if (this.isReadonlyField(field, mIdx, fIdx)) return;
+        this.validateField(mIdx, fIdx);
+      });
+    });
+
+    this.hydrateCache.delete(`${this.currentSubjectIndex}|${this.currentVisitIndex}|${this.currentGroupIndex}|${this.selectedVersion}`);
+    this.showImportDialog = false;
+
+    if (payload?.metadataReview?.hasMetadataMismatch) {
+      this.showDialogMessage("Data imported into the selected subject with metadata mismatch warning. Please review before saving.");
+    } else {
+      this.showDialogMessage("Data imported into the selected subject. Please review and click Save Data.");
+    }
+  } catch (e) {
+    console.error("Import apply failed", e);
+    this.showDialogMessage("Failed to import selected row.");
+  }
+},
+    openImportDialog() {
+      if (!this.canEdit) {
+        this.showDialogMessage("This shared link is view-only.");
+        return;
+      }
+
+      if (
+        this.currentSubjectIndex == null ||
+        this.currentVisitIndex == null ||
+        this.currentGroupIndex == null
+      ) {
+        this.showDialogMessage("Please open a subject/visit entry form first.");
+        return;
+      }
+
+      this.showImportDialog = true;
+    },
+
+
+    applyImportedRowToCurrentForm(payload) {
+      try {
+        const items = Array.isArray(payload?.items) ? payload.items : [];
+        if (!items.length) {
+          this.showDialogMessage("No mapped values found to import.");
+          return;
+        }
+
+        const s = this.currentSubjectIndex;
+        const v = this.currentVisitIndex;
+        const g = this.currentGroupIndex;
+
+        this.ensureSlot(s, v, g);
+
+        items.forEach((item) => {
+          const mIdx = Number(item.modelIndex);
+          const fIdx = Number(item.fieldIndex);
+
+          if (!Number.isInteger(mIdx) || !Number.isInteger(fIdx)) return;
+
+          const field = this.selectedModels?.[mIdx]?.fields?.[fIdx];
+          if (!field) return;
+
+          if (this.isReadonlyField(field, mIdx, fIdx)) return;
+
+          const parsed = this.normalizeImportedValueForField(field, item.rawValue);
+
+          this.setDeepValue(s, v, g, mIdx, fIdx, parsed);
+          this.setDeepSkip(s, v, g, mIdx, fIdx, false);
+          this.clearError(mIdx, fIdx);
+          this.clearCalcWarningFor(mIdx, fIdx);
+        });
+
+        this.runAllCalculationsForCurrentCell();
+
+        this.assignedModelIndices.forEach((mIdx) => {
+          (this.selectedModels?.[mIdx]?.fields || []).forEach((field, fIdx) => {
+            if (this.isReadonlyField(field, mIdx, fIdx)) return;
+            this.validateField(mIdx, fIdx);
+          });
+        });
+
+        this.hydrateCache.delete(`${s}|${v}|${g}|${this.selectedVersion}`);
+        this.showImportDialog = false;
+        this.showDialogMessage("Data imported into form. Please review and click Save Data.");
+      } catch (e) {
+        console.error("Import apply failed", e);
+        this.showDialogMessage("Failed to import selected row into the form.");
+      }
+    },
     onShareDialogGenerate(cfg) {
       this.shareConfig = {
         permission: cfg.permission,
@@ -3298,6 +4034,29 @@ export default {
 };
 </script>
 <style scoped>
+.selection-import-bar {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 12px;
+}
+
+.import-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: #2563eb;
+  color: #ffffff;
+  border: none;
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-size: 14px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.import-btn:hover {
+  background: #1d4ed8;
+}
 .study-data-container {
   max-width: none;
   margin: 24px auto;
@@ -3646,5 +4405,28 @@ select:focus {
   border: 1px solid #fde68a;
   border-radius: 6px;
   padding: 6px 8px;
+}
+.crumb-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.import-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: #2563eb;
+  color: #ffffff;
+  border: none;
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-size: 14px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.import-btn:hover {
+  background: #1d4ed8;
 }
 </style>

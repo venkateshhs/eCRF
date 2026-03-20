@@ -10,23 +10,37 @@ function normalizeKey(k) {
   return String(k || "").trim().toLowerCase();
 }
 
-function sectionDictKey(sectionObj) {
-  return sectionObj?.title ?? "";
-}
-
-function fieldDictKey(fieldObj, fallbackIndex) {
-  return (
-    fieldObj?.name ||
-    fieldObj?.key ||
-    fieldObj?.id ||
-    fieldObj?.label ||
-    fieldObj?.title ||
-    `f${fallbackIndex}`
-  );
-}
-
 function listKeys(obj) {
   return Object.keys(obj || {});
+}
+
+function sectionCandidateKeys(sectionObj, fallbackIndex) {
+  return [
+    sectionObj?._id,
+    sectionObj?.id,
+    sectionObj?.name,
+    sectionObj?.key,
+    sectionObj?.title,
+    `s${fallbackIndex}`,
+  ]
+    .filter((v) => v !== null && v !== undefined)
+    .map((v) => String(v).trim())
+    .filter(Boolean);
+}
+
+function fieldCandidateKeys(fieldObj, fallbackIndex) {
+  return [
+    fieldObj?._id,
+    fieldObj?.id,
+    fieldObj?.name,
+    fieldObj?.key,
+    fieldObj?.label,
+    fieldObj?.title,
+    `f${fallbackIndex}`,
+  ]
+    .filter((v) => v !== null && v !== undefined)
+    .map((v) => String(v).trim())
+    .filter(Boolean);
 }
 
 function dictRead(sections, dataDict, sIdx, fIdx, dbg) {
@@ -37,24 +51,38 @@ function dictRead(sections, dataDict, sIdx, fIdx, dbg) {
   const sec = sections[sIdx];
   const fld = sec?.fields?.[fIdx];
 
-  const sKey = sectionDictKey(sec);
-  const fKey = fieldDictKey(fld, fIdx);
+  const secCandidates = sectionCandidateKeys(sec, sIdx);
+  const fldCandidates = fieldCandidateKeys(fld, fIdx);
 
-  let secObj = dataDict[sKey];
+  let secObj;
+  let matchedSectionKey = null;
 
-  // Fallback section key (case/trim-insensitive)
+  // 1) exact section key match
+  for (const key of secCandidates) {
+    if (Object.prototype.hasOwnProperty.call(dataDict, key)) {
+      secObj = dataDict[key];
+      matchedSectionKey = key;
+      break;
+    }
+  }
+
+  // 2) normalized section key match
   if (!secObj) {
-    const wanted = normalizeKey(sKey);
-    const hitKey = Object.keys(dataDict).find(
-      (k) => normalizeKey(k) === wanted
-    );
-    if (hitKey) {
-      secObj = dataDict[hitKey];
-      if (dbg) {
-        dbg("Section key fallback used:", {
-          expected: sKey,
-          matched: hitKey,
-        });
+    for (const key of secCandidates) {
+      const wanted = normalizeKey(key);
+      const hitKey = Object.keys(dataDict).find(
+        (k) => normalizeKey(k) === wanted
+      );
+      if (hitKey) {
+        secObj = dataDict[hitKey];
+        matchedSectionKey = hitKey;
+        if (dbg) {
+          dbg("Section key fallback used:", {
+            expectedCandidates: secCandidates,
+            matched: hitKey,
+          });
+        }
+        break;
       }
     }
   }
@@ -63,42 +91,48 @@ function dictRead(sections, dataDict, sIdx, fIdx, dbg) {
     if (dbg) {
       dbg("dictRead: section not found", {
         sIdx,
-        sKey,
+        sectionCandidates: secCandidates,
         available: listKeys(dataDict),
       });
     }
     return undefined;
   }
 
-  if (Object.prototype.hasOwnProperty.call(secObj, fKey)) {
-    return secObj[fKey];
+  // 3) exact field key match
+  for (const key of fldCandidates) {
+    if (Object.prototype.hasOwnProperty.call(secObj, key)) {
+      return secObj[key];
+    }
   }
 
-  // Fallback field key (case/trim-insensitive)
-  const wantedField = normalizeKey(fKey);
-  const hitField = Object.keys(secObj).find(
-    (k) => normalizeKey(k) === wantedField
-  );
-  if (hitField) {
-    if (dbg) {
-      dbg("Field key fallback used:", {
-        sKey,
-        expectedField: fKey,
-        matchedField: hitField,
-      });
+  // 4) normalized field key match
+  for (const key of fldCandidates) {
+    const wanted = normalizeKey(key);
+    const hitField = Object.keys(secObj).find(
+      (k) => normalizeKey(k) === wanted
+    );
+    if (hitField) {
+      if (dbg) {
+        dbg("Field key fallback used:", {
+          sectionKey: matchedSectionKey,
+          expectedCandidates: fldCandidates,
+          matchedField: hitField,
+        });
+      }
+      return secObj[hitField];
     }
-    return secObj[hitField];
   }
 
   if (dbg) {
     dbg("dictRead: field not found", {
       sIdx,
       fIdx,
-      sKey,
-      fKey,
+      sectionKey: matchedSectionKey,
+      fieldCandidates: fldCandidates,
       availableFields: listKeys(secObj),
     });
   }
+
   return undefined;
 }
 
@@ -161,6 +195,7 @@ function formatFileCell(val) {
     const parts = s.split(/[\\/]/);
     return parts[parts.length - 1];
   };
+
   const fromObj = (o) =>
     o.file_name || o.name || baseName(o.url) || baseName(o.file_path) || "";
 
@@ -174,12 +209,15 @@ function formatFileCell(val) {
       .filter(Boolean);
     return names.join(", ");
   }
+
   if (val && typeof val === "object") {
     return fromObj(val);
   }
+
   if (typeof val === "string") {
     return baseName(val);
   }
+
   return "";
 }
 
@@ -197,6 +235,7 @@ function buildRowsForLatestVersion(studyData, entries, selectedVersion, dbg) {
 
   subjects.forEach((subject, subjIdx) => {
     const groupIdx = resolveGroup(studyData, subjIdx, dbg);
+
     visits.forEach((visit, vIdx) => {
       const row = {
         subjectId: subject.id,
@@ -209,6 +248,7 @@ function buildRowsForLatestVersion(studyData, entries, selectedVersion, dbg) {
 
         fields.forEach((field, fIdx) => {
           let value = "";
+
           if (assigned) {
             const entry = findBestEntry(
               entries,
@@ -217,9 +257,11 @@ function buildRowsForLatestVersion(studyData, entries, selectedVersion, dbg) {
               groupIdx,
               selectedVersion
             );
+
             if (entry && entry.data) {
               const d = entry.data;
               let raw;
+
               if (!Array.isArray(d)) {
                 raw = dictRead(sections, d, sIdx, fIdx, dbg);
                 if (raw == null) raw = "";
@@ -232,15 +274,21 @@ function buildRowsForLatestVersion(studyData, entries, selectedVersion, dbg) {
               }
 
               const type = (field.type || "").toLowerCase();
+
               if (type === "checkbox") {
                 value = raw === true ? "Yes" : raw === false ? "No" : "";
               } else if (type === "file") {
                 value = formatFileCell(raw);
+              } else if (Array.isArray(raw)) {
+                value = raw.join(", ");
+              } else if (raw && typeof raw === "object") {
+                value = JSON.stringify(raw);
               } else {
                 value = raw == null || raw === "" ? "" : raw;
               }
             }
           }
+
           row[`s${sIdx}_f${fIdx}`] = value;
         });
       });
@@ -261,7 +309,7 @@ function sanitizeName(name, fallback) {
 }
 
 function buildCsvFromRows(rows, sections, fieldsPerSection) {
-  const quote = (v) => `"${String(v).replace(/"/g, '""')}"`;
+  const quote = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
 
   const hdr1 = [
     "Subject ID",
@@ -270,6 +318,7 @@ function buildCsvFromRows(rows, sections, fieldsPerSection) {
       Array(fieldsPerSection[i]).fill(s.title || s.name || `Section ${i + 1}`)
     ),
   ];
+
   const hdr2 = [
     "",
     "",
@@ -286,12 +335,14 @@ function buildCsvFromRows(rows, sections, fieldsPerSection) {
 
   rows.forEach((row) => {
     const cells = [row.subjectId, row.visit];
+
     sections.forEach((section, sIdx) => {
       const fields = section.fields || [];
       fields.forEach((_, fIdx) => {
         cells.push(row[`s${sIdx}_f${fIdx}`]);
       });
     });
+
     lines.push(cells.map(quote).join(","));
   });
 
@@ -331,7 +382,7 @@ export async function downloadStudyBundle({ studyId, token }) {
       latestVersion = arr[arr.length - 1].version;
     }
   } catch (e) {
-    // Fallback: keep latestVersion = 1
+    // fallback: keep latestVersion = 1
   }
 
   // 3. Load template for latestVersion
@@ -355,8 +406,7 @@ export async function downloadStudyBundle({ studyId, token }) {
         : currentData.subjects || [],
     subjectCount: Number.isFinite(schema.subjectCount)
       ? schema.subjectCount
-      : currentData.subjectCount ??
-        (currentData.subjects?.length || 0),
+      : currentData.subjectCount ?? (currentData.subjects?.length || 0),
     visits:
       Array.isArray(schema.visits) && schema.visits.length
         ? schema.visits
@@ -390,9 +440,8 @@ export async function downloadStudyBundle({ studyId, token }) {
     entries = [];
   }
 
-  // 6. Build rows + CSV (same structure as StudyDataDashboard.exportCSV)
+  // 6. Build rows + CSV
   const dbg = () => {
-    // Optional: uncomment for debug logging
     // console.log("[StudyDownload]", ...arguments);
   };
 
@@ -405,14 +454,11 @@ export async function downloadStudyBundle({ studyId, token }) {
 
   const csvContent = buildCsvFromRows(rows, sections, fieldsPerSection);
 
-  // 7. Build template JSON (use raw schema from /template)
+  // 7. Build template JSON
   const templateJson = JSON.stringify(schema || {}, null, 2);
 
   // 8. Build ZIP folder
-  const studyNameSafe = sanitizeName(
-    metadata.study_name,
-    `study_${studyId}`
-  );
+  const studyNameSafe = sanitizeName(metadata.study_name, `study_${studyId}`);
   const zip = new JSZip();
   const folder = zip.folder(studyNameSafe);
 
