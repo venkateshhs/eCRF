@@ -6,7 +6,8 @@ import shutil
 import tempfile
 from typing import List, Optional, Dict, Any
 from urllib.parse import urlparse
-
+from .crud_dts import upsert_study_to_dts
+from .dts_settings import CASEE_DTS_MODE
 from fastapi import Request
 from fastapi import APIRouter, HTTPException, Depends, Query, UploadFile, File, Form, Body, status
 from pathlib import Path
@@ -42,6 +43,102 @@ TEMPLATE_DIR = Path(os.environ.get("ECRF_TEMPLATES_DIR", "")) if os.environ.get(
 ALLOWED_STUDY_STATUS = {"DRAFT", "PUBLISHED", "ARCHIVED"}
 _DEFAULT_GRANT_PERMS = {"view": True, "add_data": True, "edit_study": False}
 
+
+def _normalize_allowed_section_ids(section_ids: Optional[List[Any]]) -> List[str]:
+    if not section_ids:
+        return []
+    out: List[str] = []
+    seen = set()
+    for x in section_ids:
+        s = str(x or "").strip()
+        if not s or s in seen:
+            continue
+        seen.add(s)
+        out.append(s)
+    return out
+
+
+def _filter_shared_study_data_by_sections(study_data: Dict[str, Any], allowed_section_ids: Optional[List[str]]) -> Dict[str, Any]:
+    """
+    Filter selectedModels + assignments so the shared-link user only sees allowed sections.
+    If allowed_section_ids is empty, keep existing behavior (all sections visible).
+    """
+    raw = _deepcopy_json(study_data or {})
+    allowed_ids = set(_normalize_allowed_section_ids(allowed_section_ids))
+
+    if not allowed_ids:
+        return raw
+
+    selected_models = raw.get("selectedModels") or []
+    assignments = raw.get("assignments") or []
+
+    filtered_models = []
+    filtered_assignments = []
+
+    for m_idx, sec in enumerate(selected_models):
+        if not isinstance(sec, dict):
+            continue
+        sec_id = str(sec.get("_id") or sec.get("id") or "").strip()
+        if sec_id and sec_id in allowed_ids:
+            filtered_models.append(sec)
+            if isinstance(assignments, list) and m_idx < len(assignments):
+                filtered_assignments.append(assignments[m_idx])
+
+    raw["selectedModels"] = filtered_models
+    raw["assignments"] = filtered_assignments
+    return raw
+
+
+def _allowed_shared_section_title_map(study_data: Dict[str, Any], allowed_section_ids: Optional[List[str]]) -> Dict[str, str]:
+    """
+    Returns {section_title: section_id} for sections allowed in this shared link.
+    If no allowed_section_ids are stored, all sections are allowed.
+    """
+    selected_models = (study_data or {}).get("selectedModels") or []
+    allowed_ids = set(_normalize_allowed_section_ids(allowed_section_ids))
+
+    out: Dict[str, str] = {}
+    for sec in selected_models:
+        if not isinstance(sec, dict):
+            continue
+        sec_title = str(sec.get("title") or "").strip()
+        sec_id = str(sec.get("_id") or sec.get("id") or "").strip()
+        if not sec_title:
+            continue
+
+        if not allowed_ids:
+            out[sec_title] = sec_id
+        elif sec_id and sec_id in allowed_ids:
+            out[sec_title] = sec_id
+
+    return out
+
+
+def _validate_shared_payload_sections(
+    payload_data: Dict[str, Any],
+    study_data: Dict[str, Any],
+    allowed_section_ids: Optional[List[str]],
+) -> None:
+    """
+    Backend enforcement:
+    shared-link save payload may only contain allowed sections.
+    Payload structure is dict keyed by section title.
+    """
+    if not isinstance(payload_data, dict):
+        raise HTTPException(status_code=400, detail="Invalid payload data")
+
+    allowed_title_map = _allowed_shared_section_title_map(study_data or {}, allowed_section_ids)
+    allowed_titles = set(allowed_title_map.keys())
+
+    if not allowed_titles and payload_data:
+        raise HTTPException(status_code=403, detail="This shared link does not allow data entry for any section")
+
+    unexpected = [k for k in payload_data.keys() if str(k) not in allowed_titles]
+    if unexpected:
+        raise HTTPException(
+            status_code=403,
+            detail=f"Payload contains non-shared sections: {', '.join(sorted(map(str, unexpected)))}"
+        )
 
 def _norm_audit_label(label: Optional[str]) -> Optional[str]:
     """
@@ -275,6 +372,55 @@ def _display_name(u: models.User) -> str:
     last  = getattr(getattr(u, "profile", None), "last_name", "") or ""
     full  = (first + " " + last).strip()
     return full or u.username or u.email or f"User#{u.id}"
+def _latest_template_snapshot_info(db: Session, study_id: int) -> tuple[Optional[int], Optional[datetime]]:
+    row = (
+        db.query(models.StudyTemplateVersion)
+        .filter(models.StudyTemplateVersion.study_id == study_id)
+        .order_by(models.StudyTemplateVersion.version.desc())
+        .first()
+    )
+    if not row:
+        return None, None
+    return int(row.version), row.created_at
+
+
+def _sync_study_to_dts_safe(
+    db: Session,
+    metadata: models.StudyMetadata,
+    content: models.StudyContent,
+    context: str = "",
+) -> None:
+    """
+    Best-effort DTS sync for study aggregate.
+    Uses latest template version metadata if available.
+    Never raises in dual_write mode.
+    """
+    if CASEE_DTS_MODE not in {"dual_write", "read_dts_fallback_sql", "dts_only"}:
+        return
+
+    try:
+        current_template_version, template_snapshot_created_at = _latest_template_snapshot_info(db, metadata.id)
+        upsert_study_to_dts(
+            metadata,
+            content,
+            current_template_version=current_template_version,
+            template_snapshot_created_at=template_snapshot_created_at,
+        )
+        logger.info(
+            "DTS study sync successful study_id=%s context=%s version=%s",
+            metadata.id,
+            context,
+            current_template_version,
+        )
+    except Exception as e:
+        logger.error(
+            "DTS study sync failed study_id=%s context=%s err=%s",
+            getattr(metadata, "id", None),
+            context,
+            e,
+        )
+        if CASEE_DTS_MODE == "dts_only":
+            raise
 
 @router.get("/available-fields")
 async def get_available_fields():
@@ -416,6 +562,19 @@ def create_study(
         VersionManager.ensure_initial_version(db, metadata.id, incoming_snapshot)
     except Exception as ve:
         logger.error("Failed to init template version for study %s: %s", metadata.id, ve)
+
+    # DTS sync (best-effort in dual_write mode)
+    try:
+        _sync_study_to_dts_safe(
+            db=db,
+            metadata=metadata,
+            content=content,
+            context="create_study",
+        )
+    except Exception as de:
+        logger.error("DTS create_study failed for study_id=%s: %s", metadata.id, de)
+        if CASEE_DTS_MODE == "dts_only":
+            raise HTTPException(status_code=500, detail="DTS sync failed during study creation")
 
     return {"metadata": metadata, "content": content}
 
@@ -795,8 +954,38 @@ def update_study(
         try:
             draft_meta.status = "ARCHIVED"
             db.commit()
+            db.refresh(draft_meta)
         except Exception:
             db.rollback()
+
+        # 7) DTS sync: published canonical study
+        try:
+            _sync_study_to_dts_safe(
+                db=db,
+                metadata=pub_meta,
+                content=pub_content,
+                context="publish_edit_draft:published",
+            )
+        except Exception as de:
+            logger.error("DTS publish sync failed for published study_id=%s: %s", pub_meta.id, de)
+            if CASEE_DTS_MODE == "dts_only":
+                raise HTTPException(status_code=500, detail="DTS sync failed during draft publish")
+
+        # 8) DTS sync: archived draft row too (keeps DTS consistent with SQL workflow state)
+        try:
+            draft_content_latest = db.query(models.StudyContent).filter(
+                models.StudyContent.study_id == draft_meta.id).first()
+            if draft_content_latest:
+                _sync_study_to_dts_safe(
+                    db=db,
+                    metadata=draft_meta,
+                    content=draft_content_latest,
+                    context="publish_edit_draft:archived_draft",
+                )
+        except Exception as de:
+            logger.error("DTS archive-draft sync failed for study_id=%s: %s", draft_meta.id, de)
+            if CASEE_DTS_MODE == "dts_only":
+                raise HTTPException(status_code=500, detail="DTS sync failed while archiving draft")
 
         return {"metadata": pub_meta, "content": pub_content}
 
@@ -835,6 +1024,18 @@ def update_study(
 
     # If this is a draft update: do NOT touch BIDS/versioning (prevents clutter + avoids noisy versions)
     if _get_meta_status(metadata) == "DRAFT":
+        try:
+            _sync_study_to_dts_safe(
+                db=db,
+                metadata=metadata,
+                content=content,
+                context="update_study:draft",
+            )
+        except Exception as de:
+            logger.error("DTS draft update failed for study_id=%s: %s", metadata.id, de)
+            if CASEE_DTS_MODE == "dts_only":
+                raise HTTPException(status_code=500, detail="DTS sync failed during draft update")
+
         return {"metadata": metadata, "content": content}
 
     # ---- existing behavior for published updates stays as-is ----
@@ -919,9 +1120,9 @@ def update_study(
 
     new_v_row = (
         db.query(StudyTemplateVersion)
-          .filter(StudyTemplateVersion.study_id == study_id)
-          .order_by(StudyTemplateVersion.version.desc())
-          .first()
+        .filter(StudyTemplateVersion.study_id == study_id)
+        .order_by(StudyTemplateVersion.version.desc())
+        .first()
     )
     new_latest_v = int(new_v_row.version) if new_v_row else prev_latest_v
     if new_latest_v > prev_latest_v:
@@ -929,6 +1130,19 @@ def update_study(
             bump_bids_version(metadata.id, metadata.study_name, prev_latest_v, new_latest_v)
         except Exception as be:
             logger.error("BIDS version bump copy failed for study %s: %s", study_id, be)
+
+    # DTS sync after SQL/BIDS/versioning are complete
+    try:
+        _sync_study_to_dts_safe(
+            db=db,
+            metadata=metadata,
+            content=content,
+            context="update_study",
+        )
+    except Exception as de:
+        logger.error("DTS update_study failed for study_id=%s: %s", metadata.id, de)
+        if CASEE_DTS_MODE == "dts_only":
+            raise HTTPException(status_code=500, detail="DTS sync failed during study update")
 
     return {"metadata": metadata, "content": content}
 
@@ -1152,7 +1366,6 @@ def create_url_file(
 def generate_token():
     return secrets.token_urlsafe(32)
 
-
 @router.post("/share-link/", status_code=201)
 def create_share_link(
     payload: schemas.ShareLinkCreate,
@@ -1163,6 +1376,51 @@ def create_share_link(
 ):
     if current_user.profile.role not in ["Investigator", "Administrator", "Principal Investigator"]:
         raise HTTPException(status_code=403, detail="Not allowed")
+
+    study = db.query(models.StudyMetadata).filter(models.StudyMetadata.id == payload.study_id).first()
+    if not study:
+        raise HTTPException(status_code=404, detail="Study not found")
+
+    content = db.query(models.StudyContent).filter(models.StudyContent.study_id == payload.study_id).first()
+    study_data = (content.study_data or {}) if content else {}
+    selected_models = study_data.get("selectedModels") or []
+    assignments = study_data.get("assignments") or []
+
+    # Validate requested section ids
+    requested_allowed_ids = _normalize_allowed_section_ids(getattr(payload, "allowed_section_ids", []) or [])
+
+    # Build set of section ids that are actually assigned for this visit/group
+    assigned_section_ids = set()
+    v_idx = int(payload.visit_index)
+    g_idx = int(payload.group_index)
+
+    for m_idx, sec in enumerate(selected_models):
+        if not isinstance(sec, dict):
+            continue
+        if bool(assignments[m_idx][v_idx][g_idx]) if (
+            isinstance(assignments, list)
+            and m_idx < len(assignments)
+            and isinstance(assignments[m_idx], list)
+            and v_idx < len(assignments[m_idx])
+            and isinstance(assignments[m_idx][v_idx], list)
+            and g_idx < len(assignments[m_idx][v_idx])
+        ) else False:
+            sec_id = str(sec.get("_id") or sec.get("id") or "").strip()
+            if sec_id:
+                assigned_section_ids.add(sec_id)
+
+    # If frontend sent explicit list, enforce it is a subset of assigned sections.
+    # If frontend sends nothing, default to all assigned sections.
+    if requested_allowed_ids:
+        invalid_ids = [sid for sid in requested_allowed_ids if sid not in assigned_section_ids]
+        if invalid_ids:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Some selected sections are not assigned for this subject/visit/group: {', '.join(invalid_ids)}"
+            )
+        allowed_section_ids = requested_allowed_ids
+    else:
+        allowed_section_ids = sorted(assigned_section_ids)
 
     token = generate_token()
     expires_at = datetime.utcnow() + timedelta(days=payload.expires_in_days)
@@ -1176,6 +1434,7 @@ def create_share_link(
         permission=payload.permission,
         max_uses=payload.max_uses,
         expires_at=expires_at,
+        allowed_section_ids=allowed_section_ids,
     )
     db.add(access)
     db.commit()
@@ -1190,6 +1449,7 @@ def create_share_link(
                 "permission": payload.permission,
                 "max_uses": payload.max_uses,
                 "expires_in_days": payload.expires_in_days,
+                "allowed_section_ids": allowed_section_ids,
                 "ui_label": _norm_audit_label(audit_label),
                 "has_diff": False,
                 "diff_payload": None,
@@ -1214,7 +1474,7 @@ def create_share_link(
             frontend_base = f"{p.scheme}://{p.netloc}"
     if not frontend_base:
         scheme = request.headers.get("x-forwarded-proto", request.url.scheme)
-        host   = request.headers.get("x-forwarded-host", request.headers.get("host", request.url.netloc))
+        host = request.headers.get("x-forwarded-host", request.headers.get("host", request.url.netloc))
         frontend_base = f"{scheme}://{host}"
 
     link = f"{frontend_base}/shared/{token}"
@@ -1260,12 +1520,18 @@ def access_shared_form(
     if not content.study_data or not isinstance(content.study_data.get("assignments"), list):
         raise HTTPException(500, "Study assignments data is missing or invalid")
 
+    filtered_study_data = _filter_shared_study_data_by_sections(
+        content.study_data,
+        access.allowed_section_ids,
+    )
+
     return {
-        "study_id":      access.study_id,
+        "study_id": access.study_id,
         "subject_index": access.subject_index,
-        "visit_index":   access.visit_index,
-        "group_index":   access.group_index,
-        "permission":    access.permission,
+        "visit_index": access.visit_index,
+        "group_index": access.group_index,
+        "permission": access.permission,
+        "allowed_section_ids": access.allowed_section_ids or [],
         "study": {
             "metadata": {
                 "id": metadata.id,
@@ -1276,11 +1542,10 @@ def access_shared_form(
                 "updated_at": metadata.updated_at
             },
             "content": {
-                "study_data": content.study_data
+                "study_data": filtered_study_data
             }
         }
     }
-
 # -------------------- Data Entry --------------------
 def get_current_form_version(db: Session, study_id: int) -> int:
     return VersionManager.latest_writable_version(db, study_id)
@@ -1791,6 +2056,16 @@ def shared_upsert_data(
     except ValueError as ve:
         raise HTTPException(status_code=400, detail=str(ve))
 
+    content = db.query(models.StudyContent).filter(models.StudyContent.study_id == study_id).first()
+    selected_models = ((content.study_data or {}).get("selectedModels") if content and isinstance(content.study_data, dict) else []) or []
+
+    # Enforce allowed sections for shared link
+    _validate_shared_payload_sections(
+        payload_data=payload.data or {},
+        study_data=content.study_data if content else {},
+        allowed_section_ids=access.allowed_section_ids or [],
+    )
+
     # Idempotent within latest only: update if a row for this (s,v,g,latest) exists, else insert
     entry = (
         db.query(models.StudyEntryData)
@@ -1806,9 +2081,6 @@ def shared_upsert_data(
         except Exception:
             entry_diffs = []
 
-    content = db.query(models.StudyContent).filter(models.StudyContent.study_id == study_id).first()
-    selected_models = ((content.study_data or {}).get("selectedModels") if content and isinstance(content.study_data, dict) else []) or []
-
     if entry:
         entry.data = payload.data
         entry.skipped_required_flags = _flags_dict_to_list(payload.skipped_required_flags, selected_models)
@@ -1819,7 +2091,9 @@ def shared_upsert_data(
     else:
         entry = models.StudyEntryData(
             study_id=study_id,
-            subject_index=s, visit_index=v, group_index=g,
+            subject_index=s,
+            visit_index=v,
+            group_index=g,
             data=payload.data,
             skipped_required_flags=_flags_dict_to_list(payload.skipped_required_flags, selected_models),
             form_version=form_version
@@ -1835,13 +2109,20 @@ def shared_upsert_data(
     content = db.query(models.StudyContent).filter(models.StudyContent.study_id == study_id).first()
     if upsert_bids_dataset and study and content:
         try:
-            upsert_bids_dataset(study_id=study.id, study_name=study.study_name,
-                                study_description=study.study_description, study_data=content.study_data)
+            upsert_bids_dataset(
+                study_id=study.id,
+                study_name=study.study_name,
+                study_description=study.study_description,
+                study_data=content.study_data,
+            )
             db.query(models.StudyContent).filter(models.StudyContent.id == content.id).update({"study_data": content.study_data})
             db.commit()
+
             if write_entry_to_bids:
                 write_entry_to_bids(
-                    study_id=study.id, study_name=study.study_name, study_description=study.study_description,
+                    study_id=study.id,
+                    study_name=study.study_name,
+                    study_description=study.study_description,
                     study_data=content.study_data,
                     entry={
                         "id": entry.id,
@@ -1851,8 +2132,12 @@ def shared_upsert_data(
                         "form_version": entry.form_version,
                         "data": entry.data or {}
                     },
-                    actor="Shared link submit", db=db, actor_id=None, actor_name=None,
+                    actor="Shared link submit",
+                    db=db,
+                    actor_id=None,
+                    actor_name=None,
                 )
+
             try:
                 audit_change_both(
                     scope="study",
@@ -1864,6 +2149,7 @@ def shared_upsert_data(
                         "visit_index": entry.visit_index,
                         "group_index": entry.group_index,
                         "form_version": entry.form_version,
+                        "allowed_section_ids": access.allowed_section_ids or [],
                         "ui_label": _norm_audit_label(audit_label),
                         "has_diff": bool(entry_diffs),
                         "diff_payload": entry_diffs if entry_diffs else None,
@@ -1882,8 +2168,6 @@ def shared_upsert_data(
             logger.error("BIDS export (shared data) failed for study %s: %s", study_id, be)
 
     return entry
-
-
 # -------------------- Study Access Management --------------------
 
 @router.get("/studies/{study_id}/access", response_model=List[schemas.StudyAccessGrantOut])
@@ -2321,3 +2605,14 @@ def delete_study(
         pass
 
     return
+
+from .dts_client import DTSClient
+from .dts_settings import DTS_BASE_URL, DTS_COLLECTION
+from .dts_mapping import study_pid
+
+@router.get("/studies/{study_id}/dts-shadow")
+def read_study_dts_shadow(study_id: int):
+    client = DTSClient()
+    pid = study_pid(study_id)
+    record = client.get_record(DTS_COLLECTION, pid)
+    return record
