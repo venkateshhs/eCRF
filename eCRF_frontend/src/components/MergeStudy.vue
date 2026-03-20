@@ -23,7 +23,6 @@
     </div>
 
     <!-- Source selection -->
-        <!-- Source selection -->
     <div class="top-bar card-surface">
       <div class="source-switch">
         <label class="source-pill" :class="{ active: sourceType === 'bundle' }">
@@ -499,7 +498,7 @@
         </div>
       </section>
 
-            <!-- Step 3 -->
+      <!-- Step 3 -->
       <section
         v-if="subjectImportReady"
         class="card-surface subject-step"
@@ -553,6 +552,14 @@
               </tr>
             </tbody>
           </table>
+        </div>
+
+        <div
+          v-if="subjectImportReady && !subjectImportHasMatchedValues"
+          class="template-warning mt"
+        >
+          No uploaded columns could be matched to Case-e fields for the current subject / visit selection.
+          Please check the file headers or choose the correct row / layout.
         </div>
       </section>
 
@@ -616,7 +623,10 @@
     <!-- Footer -->
     <div
       class="global-commit"
-      v-if="(sourceType === 'bundle' && hasBundle) || (sourceType === 'subject-import' && subjectImportReady)"
+      v-if="
+        (sourceType === 'bundle' && hasBundle && importEntryCount > 0) ||
+        (sourceType === 'subject-import' && subjectImportHasMatchedValues)
+      "
       :class="{ embedded: isEmbedded && !isExpanded }"
     >
       <div class="gc-left" v-if="sourceType === 'bundle'">
@@ -788,6 +798,7 @@ export default {
     subjectImportHorizontalValues() {
       return this.subjectImport.matchedPairs || {};
     },
+
     resolvedStudyId() {
       const fromProp = this.studyId;
       const fromRoute = this.$route?.params?.id;
@@ -799,15 +810,19 @@ export default {
     importEntryCount() {
       return Object.keys(this.incomingEntries || {}).length;
     },
+
     autoMergePossible() {
       return this.conflicts.length === 0;
     },
+
     decidedConflictCount() {
       return this.conflicts.filter((c) => !!this.decisions[c.key]).length;
     },
+
     canMerge() {
       if (!this.hasBundle) return false;
       if (this.templateMismatch) return false;
+      if (this.importEntryCount <= 0) return false;
       if (this.scopeMode === "subset" && this.selectedSubjectIds.length === 0) return false;
       if (!this.autoMergePossible && this.decidedConflictCount < this.conflicts.length) return false;
       return !this.isMerging;
@@ -922,6 +937,10 @@ export default {
       return !!this.subjectImport.fileName;
     },
 
+    subjectImportHasMatchedValues() {
+      return this.subjectImportSummaryRows.length > 0;
+    },
+
     subjectImportMatchedPreviewRows() {
       return Object.keys(this.subjectImport.matchedPairs || {}).map((k) => ({
         key: k,
@@ -950,7 +969,7 @@ export default {
     },
 
     canSaveSubjectImport() {
-      return this.subjectImportSummaryRows.length > 0;
+      return this.subjectImportHasMatchedValues && !this.isSavingSubjectImport;
     },
 
     subjectImportExistingEntry() {
@@ -988,18 +1007,21 @@ export default {
     triggerSubjectImportFile() {
       this.$refs.fileInputSubject && this.$refs.fileInputSubject.click();
     },
+
     // ---------- Layout ----------
     toggleExpand() {
       this.isExpanded = !this.isExpanded;
       if (this.isExpanded) this.lockBodyScroll();
       else this.restoreBodyOverflow();
     },
+
     lockBodyScroll() {
       try {
         this._prevBodyOverflow = document.body.style.overflow || "";
         document.body.style.overflow = "hidden";
       } catch (e) {}
     },
+
     restoreBodyOverflow() {
       try {
         document.body.style.overflow = this._prevBodyOverflow || "";
@@ -1011,10 +1033,12 @@ export default {
       this.dialogMessage = msg;
       this.showDialog = true;
     },
+
     closeDialog() {
       this.showDialog = false;
       this.dialogMessage = "";
     },
+
     toggleImportDetails() {
       this.showImportDetails = !this.showImportDetails;
     },
@@ -1117,6 +1141,7 @@ export default {
         .toLowerCase()
         .replace(/[\W_]+/g, "");
     },
+
     humanizeCamel(s) {
       if (!s) return "";
       const w = String(s)
@@ -1125,14 +1150,17 @@ export default {
         .toLowerCase();
       return w.replace(/\b\w/g, (c) => c.toUpperCase());
     },
+
     prettyFromCanon(canon) {
       return this.humanizeCamel(canon);
     },
+
     displayLabelForField(sectionTitle, fieldName) {
       const idx = this.sectionIndex.get(sectionTitle);
       if (!idx) return fieldName;
       return idx.displayByCanon?.[this.canonKey(fieldName)] || fieldName;
     },
+
     displayFor(sectionTitle, canon) {
       const m = this.sectionIndex.get(sectionTitle);
       return (m?.displayByCanon?.[canon]) || this.prettyFromCanon(canon);
@@ -1141,6 +1169,7 @@ export default {
     hasValue(v) {
       return v !== null && v !== undefined && String(v).trim() !== "";
     },
+
     displayVal(v) {
       return this.hasValue(v) ? String(v) : "";
     },
@@ -1398,6 +1427,14 @@ export default {
         return;
       }
 
+      if (!Object.keys(incomingEntries || {}).length) {
+        this.parseInfo = {
+          ok: false,
+          message: "No valid study entries were found in the uploaded bundle. Nothing can be merged.",
+        };
+        return;
+      }
+
       this.incomingEntries = incomingEntries;
       this.bundleSubjectIds = subjectIds;
       this.bundleVisitNames = visitNames;
@@ -1411,87 +1448,176 @@ export default {
 
       this.computeConflicts();
     },
-
     buildIncomingEntriesFromRows(rows, schema, bundleVersion) {
-      const studyData = this.study?.content?.study_data || {};
-      const sections = Array.isArray(schema.selectedModels) ? schema.selectedModels : [];
-      const incomingEntries = {};
-      const subjectIdsSet = new Set();
-      const visitNamesSet = new Set();
-      const warnings = [];
+  const studyData = this.study?.content?.study_data || {};
+  const sections = Array.isArray(schema.selectedModels) ? schema.selectedModels : [];
+  const incomingEntries = {};
+  const subjectIdsSet = new Set();
+  const visitNamesSet = new Set();
+  const warnings = [];
 
-      const subjMap = {};
-      this.subjects.forEach((s, idx) => {
-        subjMap[String(s.id)] = idx;
+  const subjMap = {};
+  this.subjects.forEach((s, idx) => {
+    subjMap[String(s.id)] = idx;
+  });
+
+  const visitMap = {};
+  this.visits.forEach((v, idx) => {
+    visitMap[String(v.name).trim().toLowerCase()] = idx;
+  });
+
+  // Build current template field lookup so we only accept fields that actually exist in current Case-e study
+  const currentSections = this.study?.content?.study_data?.selectedModels || [];
+  const currentFieldMap = new Map();
+
+  currentSections.forEach((section) => {
+    const secTitle = section.title || section.name || "";
+    if (!secTitle) return;
+
+    const fieldCanonToName = new Map();
+    (section.fields || []).forEach((field, idx) => {
+      const fieldName =
+        field?.name ||
+        field?.key ||
+        field?.id ||
+        field?.label ||
+        field?.title ||
+        `f${idx}`;
+
+      const candidates = [
+        field?.name,
+        field?.key,
+        field?.id,
+        field?.label,
+        field?.title,
+        this.humanizeCamel(field?.name),
+        this.humanizeCamel(field?.label),
+      ]
+        .filter(Boolean)
+        .map((x) => this.canonKey(x));
+
+      candidates.forEach((canon) => {
+        fieldCanonToName.set(canon, fieldName);
       });
-      const visitMap = {};
-      this.visits.forEach((v, idx) => {
-        visitMap[String(v.name).trim().toLowerCase()] = idx;
-      });
+    });
 
-      for (let r = 2; r < rows.length; r++) {
-        const row = rows[r] || [];
-        const subjectId = String(row[0] || "").trim();
-        const visitName = String(row[1] || "").trim();
-        if (!subjectId || !visitName) continue;
+    currentFieldMap.set(secTitle, fieldCanonToName);
+  });
 
-        subjectIdsSet.add(subjectId);
-        visitNamesSet.add(visitName);
+  for (let r = 2; r < rows.length; r++) {
+    const row = rows[r] || [];
+    const subjectId = String(row[0] || "").trim();
+    const visitName = String(row[1] || "").trim();
 
-        const sIdx = subjMap[subjectId];
-        const vIdx = visitMap[visitName.trim().toLowerCase()];
+    if (!subjectId || !visitName) continue;
 
-        if (sIdx == null || sIdx < 0) {
-          if (!warnings.includes("unknown subject(s)")) warnings.push("unknown subject(s)");
-          continue;
-        }
-        if (vIdx == null || vIdx < 0) {
-          if (!warnings.includes("unknown visit(s)")) warnings.push("unknown visit(s)");
-          continue;
-        }
+    const sIdx = subjMap[subjectId];
+    const vIdx = visitMap[visitName.trim().toLowerCase()];
 
-        const groupIdx = this.resolveGroup(studyData, sIdx);
+    if (sIdx == null || sIdx < 0) {
+      if (!warnings.includes("unknown subject(s)")) warnings.push("unknown subject(s)");
+      continue;
+    }
 
-        const key = `${sIdx}|${vIdx}|${groupIdx}`;
-        if (!incomingEntries[key]) {
-          incomingEntries[key] = {
-            study_id: this.resolvedStudyId,
-            subject_index: sIdx,
-            visit_index: vIdx,
-            group_index: groupIdx,
-            form_version: bundleVersion,
-            data: {},
-          };
-        }
-        const entry = incomingEntries[key];
+    if (vIdx == null || vIdx < 0) {
+      if (!warnings.includes("unknown visit(s)")) warnings.push("unknown visit(s)");
+      continue;
+    }
 
-        let col = 2;
-        sections.forEach((section, sIndex) => {
-          const secTitle = section.title || section.name || `Section ${sIndex + 1}`;
-          const fields = section.fields || [];
-          if (!entry.data[secTitle]) entry.data[secTitle] = {};
-          fields.forEach((field, fIdx) => {
-            const val = row[col++] ?? "";
-            const name =
-              field.name ||
-              field.key ||
-              field.id ||
-              field.label ||
-              field.title ||
-              `f${fIdx}`;
-            const trimmed = String(val).trim();
-            if (trimmed !== "") entry.data[secTitle][name] = trimmed;
-          });
-        });
+    const groupIdx = this.resolveGroup(studyData, sIdx);
+
+    const rowData = {};
+    let matchedValueCount = 0;
+
+    let col = 2;
+    sections.forEach((section, sIndex) => {
+      const importedSectionTitle = section.title || section.name || `Section ${sIndex + 1}`;
+      const mappedSectionTitle = this.mapSectionTitle(importedSectionTitle);
+      const currentFieldsForSection = currentFieldMap.get(mappedSectionTitle);
+
+      const fields = section.fields || [];
+      if (!currentFieldsForSection) {
+        col += fields.length;
+        return;
       }
 
-      return {
-        incomingEntries,
-        subjectIds: Array.from(subjectIdsSet),
-        visitNames: Array.from(visitNamesSet),
-        warnings,
-      };
-    },
+      fields.forEach((field, fIdx) => {
+        const val = row[col++] ?? "";
+        const trimmed = String(val).trim();
+        if (trimmed === "") return;
+
+        const importedFieldKey =
+          field?.name ||
+          field?.key ||
+          field?.id ||
+          field?.label ||
+          field?.title ||
+          `f${fIdx}`;
+
+        const importedCandidates = [
+          field?.name,
+          field?.key,
+          field?.id,
+          field?.label,
+          field?.title,
+          this.humanizeCamel(field?.name),
+          this.humanizeCamel(field?.label),
+        ]
+          .filter(Boolean)
+          .map((x) => this.canonKey(x));
+
+        let matchedCurrentFieldName = null;
+        for (const canon of importedCandidates) {
+          const hit = currentFieldsForSection.get(canon);
+          if (hit) {
+            matchedCurrentFieldName = hit;
+            break;
+          }
+        }
+
+        if (!matchedCurrentFieldName) {
+          return;
+        }
+
+        if (!rowData[mappedSectionTitle]) rowData[mappedSectionTitle] = {};
+        rowData[mappedSectionTitle][matchedCurrentFieldName] = trimmed;
+        matchedValueCount += 1;
+      });
+    });
+
+    // Only keep row if at least one actual Case-e field matched
+    if (matchedValueCount > 0) {
+      subjectIdsSet.add(subjectId);
+      visitNamesSet.add(visitName);
+
+      const key = `${sIdx}|${vIdx}|${groupIdx}`;
+
+      if (!incomingEntries[key]) {
+        incomingEntries[key] = {
+          study_id: this.resolvedStudyId,
+          subject_index: sIdx,
+          visit_index: vIdx,
+          group_index: groupIdx,
+          form_version: bundleVersion,
+          data: {},
+        };
+      }
+
+      const entry = incomingEntries[key];
+      Object.keys(rowData).forEach((secTitle) => {
+        if (!entry.data[secTitle]) entry.data[secTitle] = {};
+        Object.assign(entry.data[secTitle], rowData[secTitle]);
+      });
+    }
+  }
+
+  return {
+    incomingEntries,
+    subjectIds: Array.from(subjectIdsSet),
+    visitNames: Array.from(visitNamesSet),
+    warnings,
+  };
+},
 
     computeConflicts() {
       const conflicts = [];
@@ -1583,6 +1709,7 @@ export default {
       this.selectedSubjectIds = [...this.bundleSubjectIds];
       this.computeConflicts();
     },
+
     clearSelectedSubjects() {
       this.selectedSubjectIds = [];
       this.computeConflicts();
@@ -1851,7 +1978,7 @@ export default {
       return { pairs, usedFallback, label, hasSubjectVisitCols: subjectIdx >= 0 && visitIdx >= 0 };
     },
 
-        matchPairsToCaseEFields(pairs) {
+    matchPairsToCaseEFields(pairs) {
       const normalizedImportData = {};
       const unmatchedHeaders = [];
       const fields = this.study?.content?.study_data?.selectedModels || [];
@@ -1914,7 +2041,6 @@ export default {
         }
 
         if (!matched) {
-          // Ignore subject / visit / group style metadata headers from unmatched list
           if (!isMetadataHeader(header)) {
             unmatchedHeaders.push(header);
           }
@@ -1932,6 +2058,13 @@ export default {
 
     rebuildSubjectImportPreview() {
       if (!this.subjectImport.rawAoA || !this.subjectImport.rawAoA.length) {
+        this.subjectImport.matchedPairs = {};
+        this.subjectImport.normalizedImportData = {};
+        this.subjectImport.unmatchedHeaders = [];
+        this.subjectImport.matchResultLabel = "—";
+        this.subjectImport.detectedLayoutLabel = "—";
+        this.subjectImportAssumptionWarning = false;
+        this.parseInfo = { ok: false, message: "" };
         return;
       }
 
@@ -1939,7 +2072,8 @@ export default {
 
       const layout = this.detectSubjectImportLayout(this.subjectImport.rawAoA);
       this.subjectImport.detectedLayout = layout;
-      this.subjectImport.detectedLayoutLabel = layout === "vertical" ? "Vertical key-value" : "Horizontal row";
+      this.subjectImport.detectedLayoutLabel =
+        layout === "vertical" ? "Vertical key-value" : "Horizontal row";
 
       let pairs = {};
       let usedFallback = false;
@@ -1967,14 +2101,27 @@ export default {
       this.subjectImport.normalizedImportData = normalizedImportData;
       this.subjectImport.unmatchedHeaders = unmatchedHeaders;
 
-      this.parseInfo = {
-        ok: Object.keys(normalizedImportData || {}).length > 0,
-        message: `Prepared subject import. Matched fields: ${this.subjectImportSummaryRows.length}. Unmatched headers: ${unmatchedHeaders.length}.`,
-      };
+      const matchedFieldCount = this.subjectImportSummaryRows.length;
+
+      if (matchedFieldCount === 0) {
+        this.parseInfo = {
+          ok: false,
+          message:
+            "No file headers could be matched to Case-e fields for the selected subject/visit. Nothing will be imported.",
+        };
+      } else {
+        this.parseInfo = {
+          ok: true,
+          message: `Prepared subject import. Matched fields: ${matchedFieldCount}. Unmatched headers: ${unmatchedHeaders.length}.`,
+        };
+      }
     },
 
-        async saveSubjectImport() {
-      if (!this.canSaveSubjectImport) return;
+    async saveSubjectImport() {
+      if (!this.canSaveSubjectImport) {
+        this.showDialogMessage("No matched Case-e fields were found in the uploaded file. Nothing to save.");
+        return;
+      }
 
       this.isSavingSubjectImport = true;
       try {
