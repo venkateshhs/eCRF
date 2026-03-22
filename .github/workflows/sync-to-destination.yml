@@ -5,6 +5,9 @@ on:
     branches:
       - main
 
+permissions:
+  contents: read
+
 jobs:
   sync:
     runs-on: ubuntu-latest
@@ -20,15 +23,17 @@ jobs:
           git config --global user.name "github-actions[bot]"
           git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-      - name: Push mirror to destination repo
+      - name: Push source main to destination main
         env:
           DEST_TOKEN: ${{ secrets.DEST_REPO_PAT }}
         run: |
-          if [ -z "$DEST_TOKEN" ]; then
+          set -euo pipefail
+
+          if [ -z "${DEST_TOKEN}" ]; then
             echo "DEST_REPO_PAT secret is missing"
             exit 1
           fi
 
           git remote add destination https://x-access-token:${DEST_TOKEN}@github.com/Biomarker-Development-at-INM7/eCRF.git
 
-          # Push current branch to destination main
+          git push destination main:main --force
