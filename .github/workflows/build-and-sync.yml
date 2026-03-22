@@ -63,13 +63,13 @@ jobs:
         shell: pwsh
         run: |
           # dist\eCRF contains the built app + dependencies
-          Compress-Archive -Path dist\eCRF\* -DestinationPath case-e-Windows.zip
+          Compress-Archive -Path dist\Case-E\* -DestinationPath case-e-Windows.zip
 
       - name: Package (macOS)
         if: runner.os == 'macOS'
         run: |
           # Pack the 'eCRF' folder under dist into a tar.gz at repo root
-          tar -C dist -czf case-e-macOS.tar.gz eCRF
+          tar -C dist -czf case-e-macOS.tar.gz Case-E
 
       - name: Upload artifact (Windows)
         if: runner.os == 'Windows'
