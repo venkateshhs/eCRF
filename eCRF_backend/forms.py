@@ -6,7 +6,7 @@ import shutil
 import tempfile
 from typing import List, Optional, Dict, Any
 from urllib.parse import urlparse
-from .crud_dts import upsert_study_to_dts
+
 from fastapi import Request
 from fastapi import APIRouter, HTTPException, Depends, Query, UploadFile, File, Form, Body, status
 from pathlib import Path
@@ -41,7 +41,7 @@ TEMPLATE_DIR = Path(os.environ.get("ECRF_TEMPLATES_DIR", "")) if os.environ.get(
 
 ALLOWED_STUDY_STATUS = {"DRAFT", "PUBLISHED", "ARCHIVED"}
 _DEFAULT_GRANT_PERMS = {"view": True, "add_data": True, "edit_study": False}
-CASEE_DTS_MODE == ""
+
 
 def _normalize_allowed_section_ids(section_ids: Optional[List[Any]]) -> List[str]:
     if not section_ids:
@@ -371,55 +371,6 @@ def _display_name(u: models.User) -> str:
     last  = getattr(getattr(u, "profile", None), "last_name", "") or ""
     full  = (first + " " + last).strip()
     return full or u.username or u.email or f"User#{u.id}"
-def _latest_template_snapshot_info(db: Session, study_id: int) -> tuple[Optional[int], Optional[datetime]]:
-    row = (
-        db.query(models.StudyTemplateVersion)
-        .filter(models.StudyTemplateVersion.study_id == study_id)
-        .order_by(models.StudyTemplateVersion.version.desc())
-        .first()
-    )
-    if not row:
-        return None, None
-    return int(row.version), row.created_at
-
-
-def _sync_study_to_dts_safe(
-    db: Session,
-    metadata: models.StudyMetadata,
-    content: models.StudyContent,
-    context: str = "",
-) -> None:
-    """
-    Best-effort DTS sync for study aggregate.
-    Uses latest template version metadata if available.
-    Never raises in dual_write mode.
-    """
-    if CASEE_DTS_MODE not in {"dual_write", "read_dts_fallback_sql", "dts_only"}:
-        return
-
-    try:
-        current_template_version, template_snapshot_created_at = _latest_template_snapshot_info(db, metadata.id)
-        upsert_study_to_dts(
-            metadata,
-            content,
-            current_template_version=current_template_version,
-            template_snapshot_created_at=template_snapshot_created_at,
-        )
-        logger.info(
-            "DTS study sync successful study_id=%s context=%s version=%s",
-            metadata.id,
-            context,
-            current_template_version,
-        )
-    except Exception as e:
-        logger.error(
-            "DTS study sync failed study_id=%s context=%s err=%s",
-            getattr(metadata, "id", None),
-            context,
-            e,
-        )
-        if CASEE_DTS_MODE == "dts_only":
-            raise
 
 @router.get("/available-fields")
 async def get_available_fields():
@@ -561,19 +512,6 @@ def create_study(
         VersionManager.ensure_initial_version(db, metadata.id, incoming_snapshot)
     except Exception as ve:
         logger.error("Failed to init template version for study %s: %s", metadata.id, ve)
-
-    # DTS sync (best-effort in dual_write mode)
-    try:
-        _sync_study_to_dts_safe(
-            db=db,
-            metadata=metadata,
-            content=content,
-            context="create_study",
-        )
-    except Exception as de:
-        logger.error("DTS create_study failed for study_id=%s: %s", metadata.id, de)
-        if CASEE_DTS_MODE == "dts_only":
-            raise HTTPException(status_code=500, detail="DTS sync failed during study creation")
 
     return {"metadata": metadata, "content": content}
 
@@ -953,38 +891,8 @@ def update_study(
         try:
             draft_meta.status = "ARCHIVED"
             db.commit()
-            db.refresh(draft_meta)
         except Exception:
             db.rollback()
-
-        # 7) DTS sync: published canonical study
-        try:
-            _sync_study_to_dts_safe(
-                db=db,
-                metadata=pub_meta,
-                content=pub_content,
-                context="publish_edit_draft:published",
-            )
-        except Exception as de:
-            logger.error("DTS publish sync failed for published study_id=%s: %s", pub_meta.id, de)
-            if CASEE_DTS_MODE == "dts_only":
-                raise HTTPException(status_code=500, detail="DTS sync failed during draft publish")
-
-        # 8) DTS sync: archived draft row too (keeps DTS consistent with SQL workflow state)
-        try:
-            draft_content_latest = db.query(models.StudyContent).filter(
-                models.StudyContent.study_id == draft_meta.id).first()
-            if draft_content_latest:
-                _sync_study_to_dts_safe(
-                    db=db,
-                    metadata=draft_meta,
-                    content=draft_content_latest,
-                    context="publish_edit_draft:archived_draft",
-                )
-        except Exception as de:
-            logger.error("DTS archive-draft sync failed for study_id=%s: %s", draft_meta.id, de)
-            if CASEE_DTS_MODE == "dts_only":
-                raise HTTPException(status_code=500, detail="DTS sync failed while archiving draft")
 
         return {"metadata": pub_meta, "content": pub_content}
 
@@ -1023,18 +931,6 @@ def update_study(
 
     # If this is a draft update: do NOT touch BIDS/versioning (prevents clutter + avoids noisy versions)
     if _get_meta_status(metadata) == "DRAFT":
-        try:
-            _sync_study_to_dts_safe(
-                db=db,
-                metadata=metadata,
-                content=content,
-                context="update_study:draft",
-            )
-        except Exception as de:
-            logger.error("DTS draft update failed for study_id=%s: %s", metadata.id, de)
-            if CASEE_DTS_MODE == "dts_only":
-                raise HTTPException(status_code=500, detail="DTS sync failed during draft update")
-
         return {"metadata": metadata, "content": content}
 
     # ---- existing behavior for published updates stays as-is ----
@@ -1119,9 +1015,9 @@ def update_study(
 
     new_v_row = (
         db.query(StudyTemplateVersion)
-        .filter(StudyTemplateVersion.study_id == study_id)
-        .order_by(StudyTemplateVersion.version.desc())
-        .first()
+          .filter(StudyTemplateVersion.study_id == study_id)
+          .order_by(StudyTemplateVersion.version.desc())
+          .first()
     )
     new_latest_v = int(new_v_row.version) if new_v_row else prev_latest_v
     if new_latest_v > prev_latest_v:
@@ -1129,19 +1025,6 @@ def update_study(
             bump_bids_version(metadata.id, metadata.study_name, prev_latest_v, new_latest_v)
         except Exception as be:
             logger.error("BIDS version bump copy failed for study %s: %s", study_id, be)
-
-    # DTS sync after SQL/BIDS/versioning are complete
-    try:
-        _sync_study_to_dts_safe(
-            db=db,
-            metadata=metadata,
-            content=content,
-            context="update_study",
-        )
-    except Exception as de:
-        logger.error("DTS update_study failed for study_id=%s: %s", metadata.id, de)
-        if CASEE_DTS_MODE == "dts_only":
-            raise HTTPException(status_code=500, detail="DTS sync failed during study update")
 
     return {"metadata": metadata, "content": content}
 
@@ -1473,7 +1356,7 @@ def create_share_link(
             frontend_base = f"{p.scheme}://{p.netloc}"
     if not frontend_base:
         scheme = request.headers.get("x-forwarded-proto", request.url.scheme)
-        host = request.headers.get("x-forwarded-host", request.headers.get("host", request.url.netloc))
+        host   = request.headers.get("x-forwarded-host", request.headers.get("host", request.url.netloc))
         frontend_base = f"{scheme}://{host}"
 
     link = f"{frontend_base}/shared/{token}"
@@ -1525,11 +1408,11 @@ def access_shared_form(
     )
 
     return {
-        "study_id": access.study_id,
+        "study_id":      access.study_id,
         "subject_index": access.subject_index,
-        "visit_index": access.visit_index,
-        "group_index": access.group_index,
-        "permission": access.permission,
+        "visit_index":   access.visit_index,
+        "group_index":   access.group_index,
+        "permission":    access.permission,
         "allowed_section_ids": access.allowed_section_ids or [],
         "study": {
             "metadata": {
@@ -2108,20 +1991,13 @@ def shared_upsert_data(
     content = db.query(models.StudyContent).filter(models.StudyContent.study_id == study_id).first()
     if upsert_bids_dataset and study and content:
         try:
-            upsert_bids_dataset(
-                study_id=study.id,
-                study_name=study.study_name,
-                study_description=study.study_description,
-                study_data=content.study_data,
-            )
+            upsert_bids_dataset(study_id=study.id, study_name=study.study_name,
+                                study_description=study.study_description, study_data=content.study_data)
             db.query(models.StudyContent).filter(models.StudyContent.id == content.id).update({"study_data": content.study_data})
             db.commit()
-
             if write_entry_to_bids:
                 write_entry_to_bids(
-                    study_id=study.id,
-                    study_name=study.study_name,
-                    study_description=study.study_description,
+                    study_id=study.id, study_name=study.study_name, study_description=study.study_description,
                     study_data=content.study_data,
                     entry={
                         "id": entry.id,
@@ -2131,12 +2007,8 @@ def shared_upsert_data(
                         "form_version": entry.form_version,
                         "data": entry.data or {}
                     },
-                    actor="Shared link submit",
-                    db=db,
-                    actor_id=None,
-                    actor_name=None,
+                    actor="Shared link submit", db=db, actor_id=None, actor_name=None,
                 )
-
             try:
                 audit_change_both(
                     scope="study",
@@ -2604,14 +2476,3 @@ def delete_study(
         pass
 
     return
-
-from .dts_client import DTSClient
-from .dts_settings import DTS_BASE_URL, DTS_COLLECTION
-from .dts_mapping import study_pid
-
-@router.get("/studies/{study_id}/dts-shadow")
-def read_study_dts_shadow(study_id: int):
-    client = DTSClient()
-    pid = study_pid(study_id)
-    record = client.get_record(DTS_COLLECTION, pid)
-    return record

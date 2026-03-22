@@ -7,8 +7,7 @@ from . import schemas, models
 from .models import User, AuditEvent
 from .logger import logger
 from zoneinfo import ZoneInfo
-from .dts_settings import CASEE_DTS_MODE
-from .crud_dts import get_study_from_dts
+
 
 _ALLOWED_STUDY_STATUS = {"DRAFT", "PUBLISHED", "ARCHIVED"}
 
@@ -92,13 +91,6 @@ def create_study(db: Session, metadata: schemas.StudyMetadataCreate, content: sc
 
 
 def get_study_full(db: Session, study_id: int):
-    if CASEE_DTS_MODE in {"read_dts_fallback_sql", "dts_only"}:
-        try:
-            return get_study_from_dts(study_id)
-        except Exception as e:
-            if CASEE_DTS_MODE == "dts_only":
-                raise
-            logger.warning("DTS read failed for study_id=%s, falling back to SQL: %s", study_id, e)
 
     metadata = db.query(models.StudyMetadata).filter(models.StudyMetadata.id == study_id).first()
     if not metadata:
