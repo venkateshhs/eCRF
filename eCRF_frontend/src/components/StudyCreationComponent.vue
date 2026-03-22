@@ -119,11 +119,11 @@
         <button type="button" @click="backFromStep1" class="btn-option">Back</button>
 
         <button v-if="isEditing" type="button" class="btn-option" @click="saveThisStepAndBackToStudy">
-          Save
+          Save and Leave
         </button>
 
         <button type="button" @click="validateStudy()" class="btn-option">
-          {{ stepLabelById[2] }}
+          Next
         </button>
       </div>
     </div>
@@ -135,13 +135,13 @@
       <GroupForm :schema="groupSchema" v-model="groupData" />
 
       <div class="form-actions">
-        <button @click="step = 1" class="btn-option">{{ stepLabelById[1] }}</button>
+        <button @click="step = 1" class="btn-option">Back</button>
 
         <button v-if="isEditing" type="button" class="btn-option" @click="saveThisStepAndBackToStudy">
-          Save
+          Save and Leave
         </button>
 
-        <button @click="checkGroups()" class="btn-option">{{ stepLabelById[3] }}</button>
+        <button @click="checkGroups()" class="btn-option">Next</button>
       </div>
     </div>
 
@@ -166,14 +166,14 @@
       <SubjectForm v-model:subjectCount="subjectCount" v-model:assignmentMethod="assignmentMethod" @changed="onSubjectSetupChanged"/>
 
       <div class="form-actions">
-        <button @click="step = 2" class="btn-option">{{ stepLabelById[2] }}</button>
+        <button @click="step = 2" class="btn-option">Back</button>
 
         <button v-if="isEditing" type="button" class="btn-option" @click="saveThisStepAndBackToStudy">
-          Save
+          Save and Leave
         </button>
 
         <button @click="checkSubjectsSetup()" class="btn-option">
-          {{ nextLabelFromStep3 }}
+          Next
         </button>
       </div>
     </div>
@@ -185,13 +185,13 @@
       <SubjectAssignmentForm :subjects="subjectData" :groupData="groupData" v-model:subjects="subjectData" @changed="onSubjectSetupChanged"/>
 
       <div class="form-actions">
-        <button @click="step = 3" class="btn-option">{{ stepLabelById[3] }}</button>
+        <button @click="step = 3" class="btn-option">Back</button>
 
         <button v-if="isEditing" type="button" class="btn-option" @click="saveThisStepAndBackToStudy">
-          Save
+          Save and Leave
         </button>
 
-        <button @click="checkSubjectsAssigned()" class="btn-option">{{ stepLabelById[5] }}</button>
+        <button @click="checkSubjectsAssigned()" class="btn-option">Next</button>
       </div>
     </div>
 
@@ -202,13 +202,13 @@
       <VisitForm :schema="visitSchema" v-model="visitData" />
 
       <div class="form-actions">
-        <button @click="goBackFromVisits" class="btn-option">{{ prevLabelForVisits }}</button>
+        <button @click="goBackFromVisits" class="btn-option">Back</button>
 
         <button v-if="isEditing" type="button" class="btn-option" @click="saveThisStepAndBackToStudy">
-          Save
+          Save and Leave
         </button>
 
-        <button @click="goToFinish()" class="btn-option">{{ stepLabelById[6] }}</button>
+        <button @click="goToFinish()" class="btn-option">Forms</button>
       </div>
     </div>
   </div>
@@ -344,7 +344,7 @@ export default {
       3: "Subject Setup",
       4: "Group Assignment",
       5: "Visits",
-      6: "Finish",
+      6: "Forms",
     };
 
     // keep previous titles in create mode
@@ -354,7 +354,7 @@ export default {
       3: "Step 3: Subject Setup",
       4: "Step 4: Group Assignment",
       5: "Step 5: Visits",
-      6: "Step 6: Finish",
+      6: "Step 6: Forms",
     };
 
     const currentStepLabel = computed(() => stepLabelById[step.value] || "");
@@ -461,6 +461,44 @@ export default {
       }
     }
 
+    function uuidForImport() {
+      if (typeof crypto !== "undefined" && crypto.randomUUID) return crypto.randomUUID();
+      return `id_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+    }
+
+    function ensureIdsInSelectedModels(selectedModels) {
+      if (!Array.isArray(selectedModels)) return [];
+
+      return selectedModels.map((sec, sIdx) => ({
+        ..._deepClone(sec),
+        _id: sec?._id || sec?.id || uuidForImport(),
+        title: sec?.title || `Section ${sIdx + 1}`,
+        fields: Array.isArray(sec?.fields)
+          ? sec.fields.map((field, fIdx) => ({
+              ..._deepClone(field),
+              _id: field?._id || field?.id || uuidForImport(),
+              name: field?.name || `field_${sIdx}_${fIdx}`,
+              constraints: field?.constraints || {},
+            }))
+          : [],
+      }));
+    }
+
+    function selectedModelsToForms(selectedModels) {
+      const normalized = ensureIdsInSelectedModels(selectedModels);
+      return [
+        {
+          sections: normalized.map((sec) => ({
+            _id: sec._id,
+            title: sec.title,
+            fields: _deepClone(sec.fields || []),
+            collapsed: !!sec.collapsed,
+            source: sec.source || "template",
+          })),
+        },
+      ];
+    }
+
     function buildSnapshot() {
       return _deepClone({
         step: step.value,
@@ -515,10 +553,18 @@ export default {
         .map((f) => ({
           ...f,
           sections: Array.isArray(f.sections)
-            ? f.sections.map((sec) => ({
+            ? f.sections.map((sec, sIdx) => ({
                 ...sec,
+                _id: sec?._id || sec?.id || uuidForImport(),
                 title: sec?.title ?? "Untitled Section",
-                fields: Array.isArray(sec?.fields) ? sec.fields : [],
+                fields: Array.isArray(sec?.fields)
+                  ? sec.fields.map((field, fIdx) => ({
+                      ...field,
+                      _id: field?._id || field?.id || uuidForImport(),
+                      name: field?.name || `field_${sIdx}_${fIdx}`,
+                      constraints: field?.constraints || {},
+                    }))
+                  : [],
                 source: sec?.source || "template",
               }))
             : [],
@@ -528,9 +574,17 @@ export default {
     function deriveSelectedModelsFromForms(formsArr) {
       const first = Array.isArray(formsArr) && formsArr.length ? formsArr[0] : null;
       const sections = Array.isArray(first?.sections) ? first.sections : [];
-      return sections.map((sec) => ({
-        title: sec.title,
-        fields: _deepClone(sec.fields || []),
+      return sections.map((sec, sIdx) => ({
+        _id: sec?._id || sec?.id || uuidForImport(),
+        title: sec?.title || `Section ${sIdx + 1}`,
+        fields: Array.isArray(sec?.fields)
+          ? sec.fields.map((field, fIdx) => ({
+              ..._deepClone(field),
+              _id: field?._id || field?.id || uuidForImport(),
+              name: field?.name || `field_${sIdx}_${fIdx}`,
+              constraints: field?.constraints || {},
+            }))
+          : [],
       }));
     }
 
@@ -546,15 +600,7 @@ export default {
       // 3) Fallback to store.selectedModels (convert to forms shape)
       let selectedModelDerived = [];
       if (Array.isArray(details.selectedModels) && details.selectedModels.length) {
-        selectedModelDerived = [
-          {
-            sections: details.selectedModels.map((m) => ({
-              title: m.title,
-              fields: Array.isArray(m.fields) ? _deepClone(m.fields) : [],
-              source: "template",
-            })),
-          },
-        ];
+        selectedModelDerived = selectedModelsToForms(details.selectedModels);
       }
 
       const selectedModelDerivedNorm = normalizeFormsArray(selectedModelDerived);
@@ -657,7 +703,15 @@ export default {
 
       try {
         if (isEditing.value) {
-          await axios.put(`/forms/studies/${editId.value}`, payload, { headers: authHeader.value });
+          await axios.put(
+              `/forms/studies/${editId.value}`,
+              payload,
+              {
+                headers: authHeader.value,
+                // audit_label: user clicked "Save" / "Save & Exit" while editing an existing study
+                params: { audit_label: "Update Existing Study" },
+              }
+            );
 
           // Keep local store consistent and preserve forms/template after save
           commitStudyDetailsPreservingForms({
@@ -694,6 +748,8 @@ export default {
           payload,
           {
             headers: authHeader.value,
+            // audit_label: user clicked "Save as Draft & Exit" (or "Save & Exit" in create flow)
+            params: { audit_label: "Save Draft of Study" },
           }
         );
 
@@ -837,15 +893,7 @@ export default {
 
     function setScratchFormsFromSelectedModels(selectedModels) {
       if (!Array.isArray(selectedModels)) return;
-      const scratchForms = [
-        {
-          sections: selectedModels.map((model) => ({
-            title: model.title,
-            fields: model.fields,
-            source: "template",
-          })),
-        },
-      ];
+      const scratchForms = selectedModelsToForms(selectedModels);
       localStorage.setItem("scratchForms", JSON.stringify(scratchForms));
     }
 
@@ -878,6 +926,9 @@ export default {
         assignmentsLocal = buildAssignmentsIfMissing(sd);
       }
 
+      const normalizedSelectedModels = ensureIdsInSelectedModels(sd.selectedModels || []);
+      const normalizedForms = selectedModelsToForms(normalizedSelectedModels);
+
       const studyInfo = {
         id: meta.id ?? id,
         name: meta.study_name,
@@ -900,21 +951,11 @@ export default {
         subjects: sd.subjects || [],
         assignments: assignmentsLocal,
         skipSubjectCreationNow: !!sd.skipSubjectCreationNow,
-        selectedModels: Array.isArray(sd.selectedModels) ? _deepClone(sd.selectedModels) : [],
-        forms: sd.selectedModels
-          ? [
-              {
-                sections: sd.selectedModels.map((model) => ({
-                  title: model.title,
-                  fields: model.fields,
-                  source: "template",
-                })),
-              },
-            ]
-          : [],
+        selectedModels: _deepClone(normalizedSelectedModels),
+        forms: _deepClone(normalizedForms),
       });
 
-      if (sd.selectedModels) setScratchFormsFromSelectedModels(sd.selectedModels);
+      setScratchFormsFromSelectedModels(normalizedSelectedModels);
     }
 
     async function importStudyTemplateFile(file) {
@@ -945,6 +986,8 @@ export default {
         };
 
         const original = _deepClone(sd);
+        const normalizedSelectedModels = ensureIdsInSelectedModels(original.selectedModels || []);
+
         const studyNode = {
           ...(original.study || {}),
           title: studyName,
@@ -957,7 +1000,11 @@ export default {
         const study_data = {
           ...original,
           study: studyNode,
-          assignments: buildAssignmentsIfMissing(original),
+          selectedModels: normalizedSelectedModels,
+          assignments: buildAssignmentsIfMissing({
+            ...original,
+            selectedModels: normalizedSelectedModels,
+          }),
         };
 
         const payload = {
@@ -965,7 +1012,15 @@ export default {
           study_content: { study_data },
         };
 
-        const created = await axios.post("/forms/studies/", payload, { headers: authHeader.value });
+        const created = await axios.post(
+          "/forms/studies/",
+          payload,
+          {
+            headers: authHeader.value,
+            // audit_label: user imported a template JSON and created a new study from it
+            params: { audit_label: "Study Creation by Import Template" },
+          }
+        );
         const meta = created.data?.study_metadata || created.data?.metadata || {};
         const createdId = meta.id ?? created.data?.id;
         if (createdId == null) throw new Error("Study created but ID was not returned.");
@@ -1404,17 +1459,8 @@ export default {
       if (unsavedBusy.value) return;
       unsavedBusy.value = true;
       try {
-        const ok = validateStepOnly(step.value);
-        if (!ok) {
-          unsavedBusy.value = false;
-          return;
-        }
-
         const saved = await saveNow();
-        if (!saved) {
-          unsavedBusy.value = false;
-          return;
-        }
+        if (!saved) return;
 
         showDialog.value = false;
         dialogMode.value = "default";

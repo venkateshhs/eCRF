@@ -97,6 +97,38 @@ const store = createStore({
     },
   },
   actions: {
+    // Restore auth from localStorage on hard refresh / app reload
+    async initAuth({ commit, state }) {
+      // if already restored in memory, do nothing
+      if (state.token && state.user) {
+        return true;
+      }
+
+      const token = localStorage.getItem("access_token");
+      if (!token) {
+        commit("clearAuth");
+        return false;
+      }
+
+      try {
+        // restore token first so UI can use store state consistently
+        commit("setToken", token);
+
+        const response = await axios.get(`${API_BASE_URL}/users/me`, {
+          headers: { Authorization: `Bearer ${token}` },
+          __skipActivityTracker: true,
+        });
+
+        commit("setUser", response.data);
+        return true;
+      } catch (error) {
+        console.error("initAuth failed:", error.response?.data || error.message);
+        commit("clearAuth");
+        localStorage.removeItem("access_token");
+        return false;
+      }
+    },
+
     // Login action
     async login({ commit }, payload) {
       console.log("Attempting login with payload:", payload);
@@ -104,17 +136,22 @@ const store = createStore({
         const response = await axios.post(`${API_BASE_URL}/users/login`, payload);
         console.log("Login successful, API response:", response.data);
         const { access_token } = response.data;
+
         commit("setToken", access_token);
         localStorage.setItem("access_token", access_token);
 
         const userResponse = await axios.get(`${API_BASE_URL}/users/me`, {
           headers: { Authorization: `Bearer ${access_token}` },
         });
+
         console.log("Fetched user data:", userResponse.data);
         commit("setUser", userResponse.data);
         return true;
       } catch (error) {
         console.error("Login failed, error from API:", error.response?.data || error.message);
+        commit("clearAuth");
+        localStorage.removeItem("access_token");
+
         if (error.response?.status === 403) {
           throw error;
         }
@@ -162,13 +199,19 @@ const store = createStore({
     },
 
     // Fetch logged-in user data
-    async fetchUserData({ commit }) {
-      const token = localStorage.getItem("access_token");
+    async fetchUserData({ commit, state }) {
+      const token = state.token || localStorage.getItem("access_token");
       if (!token) {
-        console.warn("No token found in localStorage. Cannot fetch user data.");
+        console.warn("No token found. Cannot fetch user data.");
         return false;
       }
+
       try {
+        // keep store token in sync if it only existed in localStorage
+        if (!state.token) {
+          commit("setToken", token);
+        }
+
         const response = await axios.get(`${API_BASE_URL}/users/me`, {
           headers: { Authorization: `Bearer ${token}` },
         });
@@ -177,6 +220,8 @@ const store = createStore({
         return true;
       } catch (error) {
         console.error("Failed to fetch user data:", error.response?.data || error.message);
+        commit("clearAuth");
+        localStorage.removeItem("access_token");
         return false;
       }
     },

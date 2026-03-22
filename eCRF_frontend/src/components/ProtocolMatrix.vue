@@ -1,6 +1,14 @@
 <template>
   <div class="protocol-matrix-container">
     <div class="screen-header">
+      <button
+        class="btn-back protocol-back-btn"
+        @click="$emit('edit-template')"
+        title="Back"
+      >
+        Back
+      </button>
+
       <h2 class="screen-title">Schedule of Assessments</h2>
       <button class="icon-btn header-info-btn" @click="showInfo = true" aria-label="What is Protocol Matrix?">
         <i :class="icons.info"></i>
@@ -202,7 +210,78 @@
     </div>
 
     <!-- 4. Custom Dialog for Notifications (errors/general) -->
-    <CustomDialog :message="dialogMessage" :isVisible="showDialog" @close="closeDialog" />
+    <CustomDialog
+      v-if="!showLogicalIssuesDialog"
+      :message="dialogMessage"
+      :isVisible="showDialog"
+      @close="closeDialog"
+    />
+
+    <!-- 4a. Logical inconsistencies dialog -->
+    <div v-if="showLogicalIssuesDialog" class="modal-overlay">
+      <div class="modal validation-modal logical-issues-modal">
+        <h3 class="validation-title">
+          <i :class="icons.infoCircle" class="li-icon"></i> Check visit/group assignments
+        </h3>
+
+        <p class="validation-text">
+          Some field dependencies are incomplete in the selected visit/group combinations.
+          Please assign the dependent sections together before saving.
+        </p>
+
+        <div class="logical-issues-scroll">
+          <div
+            v-for="(group, idx) in logicalIssuesGrouped"
+            :key="`logic-group-${idx}`"
+            class="logic-group-card"
+          >
+            <div class="logic-group-header">
+              <span class="logic-group-chip">
+                Visit: {{ group.visitName }}
+              </span>
+              <span class="logic-group-chip">
+                Group: {{ group.groupName }}
+              </span>
+            </div>
+
+            <div class="logic-dependency-list">
+              <div
+                v-for="(issue, issueIdx) in group.issues"
+                :key="`logic-issue-${idx}-${issueIdx}`"
+                class="logic-dependency-item"
+              >
+                <div class="logic-arrow-row">
+                  <div class="logic-node logic-node-current">
+                    <div class="logic-node-section">{{ issue.targetSection }}</div>
+                    <div class="logic-node-field">{{ issue.targetField }}</div>
+                  </div>
+
+                  <div class="logic-arrow-wrap">
+                    <span class="logic-arrow-text">depends on</span>
+                    <span class="logic-arrow-line">→</span>
+                  </div>
+
+                  <div class="logic-node logic-node-source">
+                    <div class="logic-node-section">{{ issue.sourceSection }}</div>
+                    <div class="logic-node-field">{{ issue.sourceField }}</div>
+                  </div>
+                </div>
+
+                <div class="logic-dependency-note">
+                  These two sections are not assigned together in this visit/group.
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="modal-actions">
+          <button class="btn-primary" @click="closeLogicalIssuesDialog">
+            <i :class="icons.check" class="mr-6"></i> OK
+          </button>
+        </div>
+      </div>
+    </div>
 
     <!-- 4a. Success dialog with View Saved Study CTA -->
     <div v-if="showSaveSuccessDialog" class="modal-overlay">
@@ -356,6 +435,7 @@ export default {
     groups: { type: Array, required: true },
     selectedModels: { type: Array, required: true },
     assignments: { type: Array, required: true },
+    forms: { type: Array, required: false, default: () => [] }
   },
   emits: ["assignment-updated", "edit-template"],
   setup(props, { emit }) {
@@ -376,6 +456,8 @@ export default {
     const showInfo = ref(false);
     const showDialog = ref(false);
     const dialogMessage = ref("");
+    const showLogicalIssuesDialog = ref(false);
+    const logicalIssuesGrouped = ref([]);
 
     // Success dialog state (with CTA)
     const showSaveSuccessDialog = ref(false);
@@ -421,6 +503,191 @@ export default {
     const totalModels = computed(() => props.selectedModels.length);
     const totalVisits = computed(() => props.visits.length);
     const totalGroups = computed(() => props.groups.length);
+
+    /* ============================================================
+       FIELD / LOGIC HELPERS
+       ============================================================ */
+    function getFieldStableKey(field, mIdx, fIdx) {
+      return String(
+        field?._id ||
+        field?.id ||
+        field?.field_id ||
+        field?.uid ||
+        field?.name ||
+        `m${mIdx}_f${fIdx}`
+      );
+    }
+
+    function buildFieldRegistry() {
+      const registry = new Map();
+
+      (props.selectedModels || []).forEach((model, mIdx) => {
+        (model?.fields || []).forEach((field, fIdx) => {
+          const key = getFieldStableKey(field, mIdx, fIdx);
+          registry.set(key, {
+            key,
+            mIdx,
+            fIdx,
+            modelTitle: model?.title || `Section ${mIdx + 1}`,
+            fieldLabel: field?.label || field?.name || `Field ${fIdx + 1}`,
+            fieldType: field?.type || "text",
+            field
+          });
+        });
+      });
+
+      return registry;
+    }
+
+    function relationKeyForVisitGroup(vIdx, gIdx, relationType, participantKeys) {
+      const joined = [...participantKeys].sort().join("|");
+      return `${relationType}|v${vIdx}|g${gIdx}|${joined}`;
+    }
+
+    function visitGroupLabel(vIdx, gIdx) {
+      const visitName = props.visits?.[vIdx]?.name || `Visit ${vIdx + 1}`;
+      const groupName = props.groups?.[gIdx]?.name || `Group ${gIdx + 1}`;
+      return `Visit "${visitName}" / Group "${groupName}"`;
+    }
+
+    function fieldRefLabel(meta) {
+      if (!meta) return "Unknown field";
+      return `${meta.modelTitle}.${meta.fieldLabel}`;
+    }
+
+    function assignedStateForModels(modelIndices, vIdx, gIdx) {
+      return modelIndices.map((mIdx) => ({
+        mIdx,
+        assigned: !!props.assignments?.[mIdx]?.[vIdx]?.[gIdx]
+      }));
+    }
+
+    function collectVisibilityConsistencyErrors(registry, seen) {
+      const errors = [];
+
+      (props.selectedModels || []).forEach((model, targetMIdx) => {
+        (model?.fields || []).forEach((field, fIdx) => {
+          const visibilityLogic = field?.constraints?.visibilityLogic;
+          const rules = Array.isArray(visibilityLogic?.rules) ? visibilityLogic.rules : [];
+          if (!rules.length) return;
+
+          const targetMeta = registry.get(getFieldStableKey(field, targetMIdx, fIdx));
+
+          rules.forEach((rule, rIdx) => {
+            const sourceKey = String(rule?.sourceFieldKey || "");
+            if (!sourceKey) return;
+
+            const sourceMeta = registry.get(sourceKey);
+            if (!sourceMeta) {
+              errors.push(
+                `Visibility rule error in ${fieldRefLabel(targetMeta)}: source field with id "${sourceKey}" was not found.`
+              );
+              return;
+            }
+
+            for (let vIdx = 0; vIdx < totalVisits.value; vIdx++) {
+              for (let gIdx = 0; gIdx < totalGroups.value; gIdx++) {
+                const states = assignedStateForModels([targetMIdx, sourceMeta.mIdx], vIdx, gIdx);
+                const assignedCount = states.filter(x => x.assigned).length;
+
+                if (assignedCount > 0 && assignedCount < states.length) {
+                  const dedupeKey = relationKeyForVisitGroup(
+                    vIdx,
+                    gIdx,
+                    `visibility:${targetMeta.key}:${sourceMeta.key}:${rIdx}`,
+                    [targetMeta.key, sourceMeta.key]
+                  );
+                  if (seen.has(dedupeKey)) continue;
+                  seen.add(dedupeKey);
+
+                  errors.push(
+                    `${visitGroupLabel(vIdx, gIdx)}: ${fieldRefLabel(targetMeta)} has visibility logic depending on ${fieldRefLabel(sourceMeta)}, but both sections are not assigned together.`
+                  );
+                }
+              }
+            }
+          });
+        });
+      });
+
+      return errors;
+    }
+
+    function collectCalculationConsistencyErrors(registry, seen) {
+      const errors = [];
+      const form = Array.isArray(props.forms) && props.forms.length ? props.forms[0] : null;
+      const calculations = Array.isArray(form?.logic?.calculations) ? form.logic.calculations : [];
+
+      calculations.forEach((rule, ruleIdx) => {
+        const targetKey = String(rule?.target || "");
+        const sourceKeys = Array.isArray(rule?.sources) ? rule.sources.map(String).filter(Boolean) : [];
+
+        if (!targetKey || !sourceKeys.length) return;
+
+        const targetMeta = registry.get(targetKey);
+        if (!targetMeta) {
+          errors.push(`Calculation rule error: target field with id "${targetKey}" was not found.`);
+          return;
+        }
+
+        const sourceMetas = [];
+        let missingSource = false;
+
+        sourceKeys.forEach((srcKey) => {
+          const meta = registry.get(srcKey);
+          if (!meta) {
+            errors.push(
+              `Calculation rule error for ${fieldRefLabel(targetMeta)}: source field with id "${srcKey}" was not found.`
+            );
+            missingSource = true;
+            return;
+          }
+          sourceMetas.push(meta);
+        });
+
+        if (missingSource) return;
+
+        const participantMetas = [targetMeta, ...sourceMetas];
+        const participantModelIndices = Array.from(new Set(participantMetas.map(x => x.mIdx)));
+        const participantKeys = participantMetas.map(x => x.key);
+
+        for (let vIdx = 0; vIdx < totalVisits.value; vIdx++) {
+          for (let gIdx = 0; gIdx < totalGroups.value; gIdx++) {
+            const states = assignedStateForModels(participantModelIndices, vIdx, gIdx);
+            const assignedCount = states.filter(x => x.assigned).length;
+
+            if (assignedCount > 0 && assignedCount < states.length) {
+              const dedupeKey = relationKeyForVisitGroup(
+                vIdx,
+                gIdx,
+                `calculation:${ruleIdx}:${targetMeta.key}`,
+                participantKeys
+              );
+              if (seen.has(dedupeKey)) continue;
+              seen.add(dedupeKey);
+
+              const sourceLabelText = sourceMetas.map(fieldRefLabel).join(", ");
+              errors.push(
+                `${visitGroupLabel(vIdx, gIdx)}: calculation target ${fieldRefLabel(targetMeta)} depends on ${sourceLabelText}, but all related sections are not assigned together.`
+              );
+            }
+          }
+        }
+      });
+
+      return errors;
+    }
+
+    function validateInterSectionLogicConsistency() {
+      const errors = [];
+      const seen = new Set();
+      const registry = buildFieldRegistry();
+
+      errors.push(...collectVisibilityConsistencyErrors(registry, seen));
+      errors.push(...collectCalculationConsistencyErrors(registry, seen));
+
+      return errors;
+    }
 
     // ---------- DIRTY SNAPSHOT HELPERS ----------
     function buildDirtySnapshot() {
@@ -713,6 +980,21 @@ export default {
     async function saveStudy(mode = "publish") {
       const isDraftMode = mode === "draft";
 
+      const logicErrors = validateInterSectionLogicConsistency();
+      if (logicErrors.length) {
+        const maxShown = 12;
+        const lines = logicErrors.slice(0, maxShown).map((msg, idx) => `${idx + 1}. ${msg}`);
+        const more =
+          logicErrors.length > maxShown
+            ? `\n\n…and ${logicErrors.length - maxShown} more inconsistency(s).`
+            : "";
+
+        showDialogMessage(
+          `Logical inconsistencies found in the Protocol Matrix:\n\n${lines.join("\n")}${more}\n\nPlease fix these assignments before saving.`
+        );
+        return;
+      }
+
       // Publish path only: empty-visit warning
       if (!isDraftMode) {
         const empties = computeEmptyVisits();
@@ -742,6 +1024,16 @@ export default {
     }
 
     function showDialogMessage(message) {
+      const parsed = parseLogicalIssuesMessage(message);
+
+      if (parsed.length) {
+        logicalIssuesGrouped.value = parsed;
+        showLogicalIssuesDialog.value = true;
+        showDialog.value = false;
+        dialogMessage.value = "";
+        return;
+      }
+
       dialogMessage.value = message;
       showDialog.value = true;
     }
@@ -749,6 +1041,71 @@ export default {
     function closeDialog() {
       showDialog.value = false;
       dialogMessage.value = "";
+    }
+    function closeLogicalIssuesDialog() {
+      showLogicalIssuesDialog.value = false;
+      logicalIssuesGrouped.value = [];
+    }
+
+    function parseFieldPath(path) {
+      const raw = String(path || "").trim();
+      if (!raw) {
+        return {
+          section: "Section",
+          field: "Field"
+        };
+      }
+
+      const firstDot = raw.indexOf(".");
+      if (firstDot === -1) {
+        return {
+          section: raw,
+          field: raw
+        };
+      }
+
+      return {
+        section: raw.slice(0, firstDot).trim() || "Section",
+        field: raw.slice(firstDot + 1).trim() || "Field"
+      };
+    }
+
+    function parseLogicalIssuesMessage(message) {
+      const text = String(message || "").trim();
+      if (!text.startsWith("Logical inconsistencies found")) return [];
+
+      const matches = [...text.matchAll(
+        /Visit\s+"([^"]+)"\s*\/\s*Group\s+"([^"]+)":\s*(.+?)\s+has visibility logic depending on\s+(.+?),\s+but both sections are not assigned together\./g
+      )];
+
+      if (!matches.length) return [];
+
+      const groupedMap = new Map();
+
+      matches.forEach((m) => {
+        const visitName = m[1];
+        const groupName = m[2];
+        const target = parseFieldPath(m[3]);
+        const source = parseFieldPath(m[4]);
+
+        const key = `${visitName}__${groupName}`;
+        if (!groupedMap.has(key)) {
+          groupedMap.set(key, {
+            visitName,
+            groupName,
+            issues: []
+          });
+        }
+
+        groupedMap.get(key).issues.push({
+          targetSection: target.section,
+          targetField: target.field,
+          sourceSection: source.section,
+          sourceField: source.field
+        });
+      });
+
+      return Array.from(groupedMap.values());
     }
 
     function openSaveSuccessDialog(message) {
@@ -771,6 +1128,22 @@ export default {
     }
 
     async function confirmAndSave() {
+      const logicErrors = validateInterSectionLogicConsistency();
+      if (logicErrors.length) {
+        const maxShown = 12;
+        const lines = logicErrors.slice(0, maxShown).map((msg, idx) => `${idx + 1}. ${msg}`);
+        const more =
+          logicErrors.length > maxShown
+            ? `\n\n…and ${logicErrors.length - maxShown} more inconsistency(s).`
+            : "";
+
+        showConfirmChanges.value = false;
+        showDialogMessage(
+          `Logical inconsistencies found in the Protocol Matrix:\n\n${lines.join("\n")}${more}\n\nPlease fix these assignments before saving.`
+        );
+        return;
+      }
+
       showConfirmChanges.value = false;
       await saveStudyImpl({ mode: "publish" });
     }
@@ -787,6 +1160,21 @@ export default {
     async function saveAnyway() {
       isSavingInProgress.value = true;
       try {
+        const logicErrors = validateInterSectionLogicConsistency();
+        if (logicErrors.length) {
+          const maxShown = 12;
+          const lines = logicErrors.slice(0, maxShown).map((msg, idx) => `${idx + 1}. ${msg}`);
+          const more =
+            logicErrors.length > maxShown
+              ? `\n\n…and ${logicErrors.length - maxShown} more inconsistency(s).`
+              : "";
+
+          showDialogMessage(
+            `Logical inconsistencies found in the Protocol Matrix:\n\n${lines.join("\n")}${more}\n\nPlease fix these assignments before saving.`
+          );
+          return;
+        }
+
         await saveStudyImpl({ mode: "publish" });
       } finally {
         isSavingInProgress.value = false;
@@ -833,6 +1221,24 @@ export default {
             status: targetStatus,
             last_completed_step: 6,
           };
+      const normalizedForms = JSON.parse(JSON.stringify(props.forms || [])).map(form => ({
+        sections: Array.isArray(form.sections)
+          ? form.sections.map(sec => ({
+              ...sec,
+              fields: Array.isArray(sec.fields)
+                ? sec.fields.map(field => ({
+                    ...field,
+                    constraints: field.constraints || {}
+                  }))
+                : []
+            }))
+          : [],
+        logic: {
+          version: form.logic?.version || 1,
+          calculations: Array.isArray(form.logic?.calculations) ? form.logic.calculations : [],
+          conditions: Array.isArray(form.logic?.conditions) ? form.logic.conditions : []
+        }
+      }));
 
       const studyData = {
         study: {
@@ -843,7 +1249,16 @@ export default {
         groups: props.groups,
         visits: props.visits,
         subjects: Array.isArray(studyDetails.subjects) ? studyDetails.subjects : [],
-        selectedModels: props.selectedModels,
+        selectedModels: JSON.parse(JSON.stringify(props.selectedModels || [])).map(sec => ({
+          ...sec,
+          fields: Array.isArray(sec.fields)
+            ? sec.fields.map(field => ({
+                ...field,
+                constraints: field.constraints || {}
+              }))
+            : []
+        })),
+        forms: normalizedForms,
         assignments: props.assignments,
         subjectCount: studyDetails.subjectCount ?? 0,
         assignmentMethod: studyDetails.assignmentMethod ?? "random",
@@ -870,21 +1285,31 @@ export default {
         }
       }
 
-      // Debug logs (you asked for visibility)
-      console.log("[ProtocolMatrix saveStudyImpl] mode=", mode);
-      console.log("[ProtocolMatrix saveStudyImpl] studyId=", studyId);
-      console.log("[ProtocolMatrix saveStudyImpl] URL=", url, "method=", method);
-      console.log("[ProtocolMatrix saveStudyImpl] existingMeta.status=", existingMeta.status);
-      console.log("[ProtocolMatrix saveStudyImpl] payload.study_metadata=", payload.study_metadata);
-
       try {
-        const headers = { headers: { Authorization: `Bearer ${store.state.token}` } };
-        const response = await axios[method](url, payload, headers);
+        // audit_label rules:
+        // - POST create draft/publish: study did not exist yet
+        // - PUT update draft/publish: study already exists (incl. DRAFT -> PUBLISHED transition)
+        // - Draft save from Unsaved dialog is distinct from Publish button
 
-        console.log(
-          "[ProtocolMatrix saveStudyImpl] response metadata=",
-          response.data?.metadata || response.data?.study_metadata
-        );
+        const baseHeaders = { Authorization: `Bearer ${store.state.token}` };
+
+        // Decide label by action + mode + create/update
+        const isCreate = !studyId;
+        const isDraftMode = mode === "draft";
+
+        const auditLabel =
+          isDraftMode && isCreate ? "Save & Exit - Create New Study Draft" :
+          isDraftMode && !isCreate ? "Save Draft & Exit - Update Draft" :
+          !isDraftMode && isCreate ? "Create New Study" :
+          "Publish Study";
+
+        const axiosConfig = {
+          headers: baseHeaders,
+          // audit_label is used by backend audit log as a human-readable action label
+          params: { audit_label: auditLabel }
+        };
+
+        const response = await axios[method](url, payload, axiosConfig);
 
         const updatedMetadata = response.data?.study_metadata || response.data?.metadata || metadata;
         const updatedStudyData = response.data?.content?.study_data || studyData;
@@ -914,6 +1339,7 @@ export default {
           subjects: updatedStudyData.subjects || [],
           assignments: updatedStudyData.assignments || [],
           selectedModels: updatedStudyData.selectedModels || [],
+          forms: updatedStudyData.forms || normalizedForms || [],
           skipSubjectCreationNow: !!updatedStudyData.skipSubjectCreationNow,
         });
 
@@ -979,6 +1405,21 @@ export default {
       unsavedBusy.value = true;
 
       try {
+        const logicErrors = validateInterSectionLogicConsistency();
+        if (logicErrors.length) {
+          const maxShown = 12;
+          const lines = logicErrors.slice(0, maxShown).map((msg, idx) => `${idx + 1}. ${msg}`);
+          const more =
+            logicErrors.length > maxShown
+              ? `\n\n…and ${logicErrors.length - maxShown} more inconsistency(s).`
+              : "";
+
+          showDialogMessage(
+            `Logical inconsistencies found in the Protocol Matrix:\n\n${lines.join("\n")}${more}\n\nPlease fix these assignments before saving.`
+          );
+          return;
+        }
+
         const ok = await saveStudyImpl({ mode: "draft" });
         if (!ok) return;
 
@@ -1131,6 +1572,10 @@ export default {
       saveStudy,
       goToSaved,
 
+      showLogicalIssuesDialog,
+      logicalIssuesGrouped,
+      closeLogicalIssuesDialog,
+
     };
   },
 };
@@ -1150,8 +1595,21 @@ export default {
 }
 
 /* Header */
-.screen-header { position: relative; text-align: center; padding: 4px 4px 0; }
-.screen-title { margin: 0 0 4px; font-weight: 800; font-size: 18px; color: #101828; }
+.screen-header {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 12px;
+  padding: 4px 4px 0;
+  min-height: 44px;
+}
+.screen-title {
+  margin: 0;
+  font-weight: 800;
+  font-size: 18px;
+  color: #101828;
+  text-align: center;
+}
 .icon-btn { background: transparent; cursor: pointer; border: none; padding: 0; }
 .header-info-btn { position: absolute; right: 6px; top: 50%; transform: translateY(-50%); font-size: 18px; color: #667085; }
 .header-info-btn:hover { color: #111827; }
@@ -1305,4 +1763,180 @@ export default {
   transform: rotate(45deg);
 }
 .bulk-toggle span { line-height: 1.2; }
+.screen-header {
+  position: relative;
+  text-align: center;
+  padding: 4px 4px 0;
+  min-height: 44px;
+}
+
+.protocol-back-btn {
+  justify-self: start;
+}
+
+.header-info-btn {
+  justify-self: end;
+  font-size: 18px;
+  color: #667085;
+}
+
+.header-info-btn:hover {
+  color: #111827;
+}
+
+.btn-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: #fff;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  padding: 10px 14px;
+  cursor: pointer;
+  color: $text-color;
+  font-size: 14px;
+  line-height: 1;
+  transition: background 0.15s ease, border-color 0.15s ease, transform 0.02s ease;
+}
+
+.btn-back:hover {
+  background: #f9fafb;
+  border-color: #d1d5db;
+}
+
+.btn-back:active {
+  transform: scale(0.98);
+}
+.logical-issues-modal {
+  max-width: 980px;
+}
+
+.logical-issues-scroll {
+  max-height: 58vh;
+  overflow-y: auto;
+  overflow-x: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin-top: 12px;
+  padding-right: 4px;
+}
+
+.logic-group-card {
+  border: 1px solid $border-color;
+  border-radius: 12px;
+  background: #f8fafc;
+  padding: 14px;
+}
+
+.logic-group-header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.logic-group-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: #eef2ff;
+  border: 1px solid #dbe4ff;
+  color: #3538cd;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.logic-dependency-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.logic-dependency-item {
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  background: #ffffff;
+  padding: 12px;
+}
+
+.logic-arrow-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  gap: 12px;
+  align-items: center;
+}
+
+.logic-arrow-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.logic-arrow-text {
+  font-size: 11px;
+  color: #667085;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.logic-arrow-line {
+  font-size: 18px;
+  color: #475467;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.logic-node {
+  border-radius: 10px;
+  padding: 10px 12px;
+  border: 1px solid $border-color;
+  min-width: 0;
+}
+
+.logic-node-current {
+  background: #eff6ff;
+  border-color: #bfdbfe;
+}
+
+.logic-node-source {
+  background: #f9fafb;
+  border-color: #d0d5dd;
+}
+
+.logic-node-section {
+  font-size: 12px;
+  font-weight: 700;
+  color: #344054;
+  word-break: break-word;
+}
+
+.logic-node-field {
+  margin-top: 2px;
+  font-size: 14px;
+  font-weight: 600;
+  color: #101828;
+  word-break: break-word;
+}
+
+.logic-dependency-note {
+  margin-top: 8px;
+  font-size: 12px;
+  color: #667085;
+  line-height: 1.4;
+}
+
+@media (max-width: 760px) {
+  .logic-arrow-row {
+    grid-template-columns: 1fr;
+  }
+
+  .logic-arrow-wrap {
+    flex-direction: row;
+    justify-content: flex-start;
+  }
+}
 </style>

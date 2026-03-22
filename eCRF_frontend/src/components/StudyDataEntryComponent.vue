@@ -1,22 +1,22 @@
 <template>
   <div class="study-data-container" v-if="study">
     <!-- Back Buttons (hidden for shared links AND while Merge panel is open) -->
-     <div class="back-buttons-container" v-if="!isShared">
-       <!-- Merge mode back button (same styling/position) -->
-       <button v-if="isMergeMode" @click="closeMergeStudy" class="btn-back">
+    <div class="back-buttons-container" v-if="!isShared">
+      <!-- Merge mode back button (same styling/position) -->
+      <button v-if="isMergeMode" @click="closeMergeStudy" class="btn-back">
         Back to Selection
-       </button>
+      </button>
 
-       <!-- Normal behavior -->
-       <template v-else>
-         <button v-if="showSelection" @click="goToDashboard" class="btn-back">
+      <!-- Normal behavior -->
+      <template v-else>
+        <button v-if="showSelection" @click="goToDashboard" class="btn-back">
           Back to Dashboard
-         </button>
-         <button v-else @click="backToSelection" class="btn-back">
+        </button>
+        <button v-else @click="backToSelection" class="btn-back">
           Back to Selection
-         </button>
-       </template>
-     </div>
+        </button>
+      </template>
+    </div>
 
     <!-- Header -->
     <div class="study-header-container">
@@ -85,6 +85,16 @@
     <!-- Selection (hidden in shared mode; shared preselects) -->
     <template v-if="showSelection && !isShared">
       <!-- Matrix view (hidden when Merge is open) -->
+          <div v-if="!isMergeMode" class="selection-import-bar">
+      <button
+        type="button"
+        class="import-btn"
+        @click="openImportDialogFromSelection"
+      >
+        <i :class="icons.upload || 'fas fa-file-import'"></i>
+        Import Data
+      </button>
+    </div>
       <SelectionMatrixView
         v-if="!isMergeMode"
         :matrixReady="matrixReady"
@@ -122,9 +132,22 @@
           <strong>Visit:</strong> {{ visitList[currentVisitIndex].name }}
           <span v-if="!isShared && selectedVersion" class="version-helper">Saving to Version {{ selectedVersion }}</span>
         </div>
-        <button type="button" class="legend-btn" @click="openLegendDialog" :title="'Legend / What does * mean?'">
-          <i :class="icons.help || 'fas fa-question-circle'"></i>
-        </button>
+        <div class="crumb-actions">
+          <button
+            v-if="canEdit"
+            type="button"
+            class="import-btn"
+            @click="openImportDialog"
+            title="Import data from CSV or Excel"
+          >
+            <i :class="icons.upload || 'fas fa-file-import'"></i>
+            Import Data
+          </button>
+
+          <button type="button" class="legend-btn" @click="openLegendDialog" :title="'Legend / What does * mean?'">
+            <i :class="icons.help || 'fas fa-question-circle'"></i>
+          </button>
+        </div>
       </div>
 
       <div class="entry-form-section">
@@ -135,204 +158,211 @@
 
         <!-- Only assigned sections are shown -->
         <div v-if="assignedModelIndices.length">
-          <div
-            v-for="mIdx in assignedModelIndices"
-            :key="'sec-'+mIdx"
-            class="section-block"
-          >
-            <h3>{{ selectedModels[mIdx].title }}</h3>
-
+          <template v-for="mIdx in assignedModelIndices" :key="'sec-wrap-' + mIdx">
             <div
-              v-for="(field, fIdx) in selectedModels[mIdx].fields"
-              :key="'f-'+mIdx+'-'+fIdx"
-              class="form-field"
+              v-if="hasVisibleFieldsInSection(mIdx)"
+              :key="'sec-' + mIdx"
+              class="section-block"
             >
-              <label :for="fieldId(mIdx, fIdx)" class="field-label">
-                <span>{{ field.label || field.name || field.title }}</span>
-                <span v-if="field.constraints?.required" class="required">*</span>
-                <em v-if="field.constraints?.helpText" class="help-inline">
-                  {{ field.constraints.helpText }}
-                </em>
-                <i
-                  v-if="hasConstraints(field)"
-                  class="fas fa-question-circle helper-icon"
-                  @click="openConstraintDialog(field)"
-                ></i>
-              </label>
+              <h3>{{ selectedModels[mIdx].title }}</h3>
 
-              <!-- TEXT -->
-              <input
-                v-if="field.type === 'text'"
-                :id="fieldId(mIdx, fIdx)"
-                type="text"
-                v-model="entryData[currentSubjectIndex][currentVisitIndex][currentGroupIndex][mIdx][fIdx]"
-                :placeholder="field.placeholder"
-                :required="!!field.constraints?.required"
-                :readonly="!!field.constraints?.readonly || !canEdit"
-                :minlength="field.constraints?.minLength"
-                :maxlength="field.constraints?.maxLength"
-                :pattern="field.constraints?.pattern"
-                @blur="onFieldBlur(mIdx, fIdx)"
-                @input="clearError(mIdx, fIdx)"
-              />
+              <template v-for="(field, fIdx) in selectedModels[mIdx].fields" :key="'f-wrap-' + mIdx + '-' + fIdx">
+                <div
+                  v-if="isFieldVisible(mIdx, fIdx)"
+                  :key="'f-' + mIdx + '-' + fIdx"
+                  class="form-field"
+                >
+                  <label :for="fieldId(mIdx, fIdx)" class="field-label">
+                    <span>{{ field.label || field.name || field.title }}</span>
+                    <span v-if="field.constraints?.required" class="required">*</span>
+                    <em v-if="field.constraints?.helpText" class="help-inline">
+                      {{ field.constraints.helpText }}
+                    </em>
+                    <i
+                      v-if="hasConstraints(field)"
+                      class="fas fa-question-circle helper-icon"
+                      @click="openConstraintDialog(field)"
+                    ></i>
+                  </label>
 
-              <!-- TEXTAREA -->
-              <textarea
-                v-else-if="field.type === 'textarea'"
-                :id="fieldId(mIdx, fIdx)"
-                v-model="entryData[currentSubjectIndex][currentVisitIndex][currentGroupIndex][mIdx][fIdx]"
-                :placeholder="field.placeholder"
-                :required="!!field.constraints?.required"
-                :readonly="!!field.constraints?.readonly || !canEdit"
-                :minlength="field.constraints?.minLength"
-                :maxlength="field.constraints?.maxLength"
-                :pattern="field.constraints?.pattern"
-                rows="4"
-                @blur="onFieldBlur(mIdx, fIdx)"
-                @input="clearError(mIdx, fIdx)"
-              ></textarea>
+                  <!-- TEXT -->
+                  <input
+                    v-if="field.type === 'text'"
+                    :id="fieldId(mIdx, fIdx)"
+                    type="text"
+                    v-model="entryData[currentSubjectIndex][currentVisitIndex][currentGroupIndex][mIdx][fIdx]"
+                    :placeholder="field.placeholder"
+                    :required="!!field.constraints?.required"
+                    :readonly="isReadonlyField(field, mIdx, fIdx)"
+                    :minlength="field.constraints?.minLength"
+                    :maxlength="field.constraints?.maxLength"
+                    :pattern="field.constraints?.pattern"
+                    @blur="onFieldBlur(mIdx, fIdx)"
+                    @input="() => { clearError(mIdx, fIdx); onRuntimeFieldChanged(mIdx, fIdx); }"
+                  />
 
-              <!-- NUMBER -->
-              <input
-                v-else-if="field.type === 'number'"
-                :id="fieldId(mIdx, fIdx)"
-                type="number"
-                v-model.number="entryData[currentSubjectIndex][currentVisitIndex][currentGroupIndex][mIdx][fIdx]"
-                :placeholder="field.placeholder"
-                :required="!!field.constraints?.required"
-                :readonly="!!field.constraints?.readonly || !canEdit"
-                :min="field.constraints?.min"
-                :max="field.constraints?.max"
-                :step="field.constraints?.step"
-                @blur="validateField(mIdx, fIdx)"
-                @input="clearError(mIdx, fIdx)"
-              />
+                  <!-- TEXTAREA -->
+                  <textarea
+                    v-else-if="field.type === 'textarea'"
+                    :id="fieldId(mIdx, fIdx)"
+                    v-model="entryData[currentSubjectIndex][currentVisitIndex][currentGroupIndex][mIdx][fIdx]"
+                    :placeholder="field.placeholder"
+                    :required="!!field.constraints?.required"
+                    :readonly="isReadonlyField(field, mIdx, fIdx)"
+                    :minlength="field.constraints?.minLength"
+                    :maxlength="field.constraints?.maxLength"
+                    :pattern="field.constraints?.pattern"
+                    rows="4"
+                    @blur="onFieldBlur(mIdx, fIdx)"
+                    @input="() => { clearError(mIdx, fIdx); onRuntimeFieldChanged(mIdx, fIdx); }"
+                  ></textarea>
 
-              <!-- CHECKBOX -->
-              <FieldCheckbox
-                  v-else-if="field.type === 'checkbox'"
-                  :id="fieldId(mIdx, fIdx)"
-                  v-model="entryData[currentSubjectIndex][currentVisitIndex][currentGroupIndex][mIdx][fIdx]"
-                  v-bind="selectedModels[mIdx].fields[fIdx].constraints"
-                  :disabled="!canEdit"
-                  @update:modelValue="() => { clearError(mIdx, fIdx); validateField(mIdx, fIdx); }"
-                />
+                  <!-- NUMBER -->
+                  <input
+                    v-else-if="field.type === 'number'"
+                    :id="fieldId(mIdx, fIdx)"
+                    type="number"
+                    v-model.number="entryData[currentSubjectIndex][currentVisitIndex][currentGroupIndex][mIdx][fIdx]"
+                    :placeholder="field.placeholder"
+                    :required="!!field.constraints?.required"
+                    :readonly="isReadonlyField(field, mIdx, fIdx)"
+                    :min="field.constraints?.min"
+                    :max="field.constraints?.max"
+                    :step="field.constraints?.step"
+                    @blur="() => { validateField(mIdx, fIdx); onRuntimeFieldChanged(mIdx, fIdx); }"
+                    @input="() => { clearError(mIdx, fIdx); onRuntimeFieldChanged(mIdx, fIdx); }"
+                  />
 
-              <!-- RADIO -->
-              <FieldRadioGroup
-                v-else-if="field.type === 'radio'"
-                :id="fieldId(mIdx, fIdx)"
-                :name="fieldId(mIdx, fIdx)"
-                :options="field.options || []"
-                v-model="entryData[currentSubjectIndex][currentVisitIndex][currentGroupIndex][mIdx][fIdx]"
-                :default-value="field.constraints?.defaultValue"
-                v-bind="selectedModels[mIdx].fields[fIdx].constraints"
-                :disabled="!canEdit"
-                @change="validateField(mIdx, fIdx)"
-                @update:modelValue="() => { clearError(mIdx, fIdx); validateField(mIdx, fIdx); }"
-              />
+                  <!-- CHECKBOX -->
+                  <FieldCheckbox
+                    v-else-if="field.type === 'checkbox'"
+                    :id="fieldId(mIdx, fIdx)"
+                    v-model="entryData[currentSubjectIndex][currentVisitIndex][currentGroupIndex][mIdx][fIdx]"
+                    v-bind="selectedModels[mIdx].fields[fIdx].constraints"
+                    :disabled="isReadonlyField(field, mIdx, fIdx)"
+                    @update:modelValue="() => { clearError(mIdx, fIdx); validateField(mIdx, fIdx); onRuntimeFieldChanged(mIdx, fIdx); }"
+                  />
 
-              <!-- DATE -->
-              <DateFormatPicker
-                v-else-if="field.type === 'date'"
-                :id="fieldId(mIdx, fIdx)"
-                v-model="entryData[currentSubjectIndex][currentVisitIndex][currentGroupIndex][mIdx][fIdx]"
-                :format="field.constraints?.dateFormat || 'dd.MM.yyyy'"
-                :placeholder="field.placeholder || (field.constraints?.dateFormat || 'dd.MM.yyyy')"
-                :min-date="field.constraints?.minDate || null"
-                :max-date="field.constraints?.maxDate || null"
-                :readonly="!!field.constraints?.readonly || !canEdit"
-                @change="validateField(mIdx, fIdx)"
-                @blur="validateField(mIdx, fIdx)"
-              />
+                  <!-- RADIO -->
+                  <FieldRadioGroup
+                    v-else-if="field.type === 'radio'"
+                    :id="fieldId(mIdx, fIdx)"
+                    :name="fieldId(mIdx, fIdx)"
+                    :options="field.options || []"
+                    v-model="entryData[currentSubjectIndex][currentVisitIndex][currentGroupIndex][mIdx][fIdx]"
+                    :default-value="field.constraints?.defaultValue"
+                    v-bind="selectedModels[mIdx].fields[fIdx].constraints"
+                    :disabled="isReadonlyField(field, mIdx, fIdx)"
+                    @change="() => { validateField(mIdx, fIdx); onRuntimeFieldChanged(mIdx, fIdx); }"
+                    @update:modelValue="() => { clearError(mIdx, fIdx); validateField(mIdx, fIdx); onRuntimeFieldChanged(mIdx, fIdx); }"
+                  />
 
-              <!-- TIME -->
-              <FieldTime
-                v-else-if="field.type === 'time'"
-                :id="fieldId(mIdx, fIdx)"
-                v-model="entryData[currentSubjectIndex][currentVisitIndex][currentGroupIndex][mIdx][fIdx]"
-                :placeholder="field.placeholder || (field.constraints?.timeFormat || 'HH:mm')"
-                v-bind="selectedModels[mIdx].fields[fIdx].constraints"
-                :readonly="!!field.constraints?.readonly || !canEdit"
-                @change="validateField(mIdx, fIdx)"
-                @blur="validateField(mIdx, fIdx)"
-              />
+                  <!-- DATE -->
+                  <DateFormatPicker
+                    v-else-if="field.type === 'date'"
+                    :id="fieldId(mIdx, fIdx)"
+                    v-model="entryData[currentSubjectIndex][currentVisitIndex][currentGroupIndex][mIdx][fIdx]"
+                    :format="field.constraints?.dateFormat || 'dd.MM.yyyy'"
+                    :placeholder="field.placeholder || (field.constraints?.dateFormat || 'dd.MM.yyyy')"
+                    :min-date="field.constraints?.minDate || null"
+                    :max-date="field.constraints?.maxDate || null"
+                    :readonly="isReadonlyField(field, mIdx, fIdx)"
+                    @change="() => { validateField(mIdx, fIdx); onRuntimeFieldChanged(mIdx, fIdx); }"
+                    @blur="() => { validateField(mIdx, fIdx); onRuntimeFieldChanged(mIdx, fIdx); }"
+                  />
 
-              <!-- SELECT -->
-              <FieldSelect
-                v-else-if="field.type === 'select'"
-                :id="fieldId(mIdx, fIdx)"
-                v-model="entryData[currentSubjectIndex][currentVisitIndex][currentGroupIndex][mIdx][fIdx]"
-                :options="field.options || []"
-                :multiple="!!field.constraints?.allowMultiple"
-                :readonly="!!field.constraints?.readonly || !canEdit"
-                :default-value="field.constraints?.defaultValue"
-                :placeholder="'Select…'"
-                @update:modelValue="() => validateField(mIdx, fIdx)"
-              />
+                  <!-- TIME -->
+                  <FieldTime
+                    v-else-if="field.type === 'time'"
+                    :id="fieldId(mIdx, fIdx)"
+                    v-model="entryData[currentSubjectIndex][currentVisitIndex][currentGroupIndex][mIdx][fIdx]"
+                    :placeholder="field.placeholder || (field.constraints?.timeFormat || 'HH:mm')"
+                    v-bind="selectedModels[mIdx].fields[fIdx].constraints"
+                    :readonly="isReadonlyField(field, mIdx, fIdx)"
+                    @change="() => { validateField(mIdx, fIdx); onRuntimeFieldChanged(mIdx, fIdx); }"
+                    @blur="() => { validateField(mIdx, fIdx); onRuntimeFieldChanged(mIdx, fIdx); }"
+                  />
 
-              <!-- SLIDER (mode=slider) -->
-              <FieldSlider
-                v-else-if="field.type === 'slider' && (field.constraints?.mode || 'slider') === 'slider'"
-                :id="fieldId(mIdx, fIdx)"
-                v-model="entryData[currentSubjectIndex][currentVisitIndex][currentGroupIndex][mIdx][fIdx]"
-                v-bind="getSliderProps(field)"
-                :disabled="!canEdit"
-                @update:modelValue="() => { clearError(mIdx, fIdx); validateField(mIdx, fIdx); }"
-                @change="validateField(mIdx, fIdx)"
-              />
+                  <!-- SELECT -->
+                  <FieldSelect
+                    v-else-if="field.type === 'select'"
+                    :id="fieldId(mIdx, fIdx)"
+                    v-model="entryData[currentSubjectIndex][currentVisitIndex][currentGroupIndex][mIdx][fIdx]"
+                    :options="field.options || []"
+                    :multiple="!!field.constraints?.allowMultiple"
+                    :readonly="isReadonlyField(field, mIdx, fIdx)"
+                    :default-value="field.constraints?.defaultValue"
+                    :placeholder="'Select…'"
+                    @update:modelValue="() => { validateField(mIdx, fIdx); onRuntimeFieldChanged(mIdx, fIdx); }"
+                  />
 
-              <!-- LINEAR SCALE -->
-              <FieldLinearScale
-                v-else-if="field.type === 'slider' && field.constraints?.mode === 'linear'"
-                :id="fieldId(mIdx, fIdx)"
-                v-model="entryData[currentSubjectIndex][currentVisitIndex][currentGroupIndex][mIdx][fIdx]"
-                v-bind="getLinearProps(field)"
-                :disabled="!canEdit"
-                @update:modelValue="() => { clearError(mIdx, fIdx); validateField(mIdx, fIdx); }"
-                @change="validateField(mIdx, fIdx)"
-              />
+                  <!-- SLIDER -->
+                  <FieldSlider
+                    v-else-if="field.type === 'slider' && (field.constraints?.mode || 'slider') === 'slider'"
+                    :id="fieldId(mIdx, fIdx)"
+                    v-model="entryData[currentSubjectIndex][currentVisitIndex][currentGroupIndex][mIdx][fIdx]"
+                    v-bind="getSliderProps(field)"
+                    :disabled="isReadonlyField(field, mIdx, fIdx)"
+                    @update:modelValue="() => { clearError(mIdx, fIdx); validateField(mIdx, fIdx); onRuntimeFieldChanged(mIdx, fIdx); }"
+                    @change="() => { validateField(mIdx, fIdx); onRuntimeFieldChanged(mIdx, fIdx); }"
+                  />
 
-              <!-- FILE -->
-              <FieldFileUpload
-                v-else-if="field.type === 'file'"
-                :id="fieldId(mIdx, fIdx)"
-                :value="entryData[currentSubjectIndex][currentVisitIndex][currentGroupIndex][mIdx][fIdx]"
-                :constraints="field.constraints || {}"
-                :readonly="!!field.constraints?.readonly || !canEdit"
-                :required="!!field.constraints?.required"
-                stage="runtime"
-                @input="(meta) => setEntryValue(mIdx, fIdx, meta)"
-                @file-selected="(file) => onRawFileSelected(mIdx, fIdx, file)"
-              />
+                  <!-- LINEAR SCALE -->
+                  <FieldLinearScale
+                    v-else-if="field.type === 'slider' && field.constraints?.mode === 'linear'"
+                    :id="fieldId(mIdx, fIdx)"
+                    v-model="entryData[currentSubjectIndex][currentVisitIndex][currentGroupIndex][mIdx][fIdx]"
+                    v-bind="getLinearProps(field)"
+                    :disabled="isReadonlyField(field, mIdx, fIdx)"
+                    @update:modelValue="() => { clearError(mIdx, fIdx); validateField(mIdx, fIdx); onRuntimeFieldChanged(mIdx, fIdx); }"
+                    @change="() => { validateField(mIdx, fIdx); onRuntimeFieldChanged(mIdx, fIdx); }"
+                  />
 
-              <!-- FALLBACK -->
-              <input
-                v-else
-                :id="fieldId(mIdx, fIdx)"
-                type="text"
-                v-model="entryData[currentSubjectIndex][currentVisitIndex][currentGroupIndex][mIdx][fIdx]"
-                :placeholder="field.placeholder"
-                :required="!!field.constraints?.required"
-                :readonly="!!field.constraints?.readonly || !canEdit"
-                @blur="onFieldBlur(mIdx, fIdx)"
-                @input="clearError(mIdx, fIdx)"
-              />
+                  <!-- FILE -->
+                  <FieldFileUpload
+                    v-else-if="field.type === 'file'"
+                    :id="fieldId(mIdx, fIdx)"
+                    :value="entryData[currentSubjectIndex][currentVisitIndex][currentGroupIndex][mIdx][fIdx]"
+                    :constraints="field.constraints || {}"
+                    :readonly="isReadonlyField(field, mIdx, fIdx)"
+                    :required="!!field.constraints?.required"
+                    stage="runtime"
+                    @input="(meta) => setEntryValue(mIdx, fIdx, meta)"
+                    @file-selected="(file) => onRawFileSelected(mIdx, fIdx, file)"
+                  />
 
-              <!-- ERROR -->
-              <div v-if="fieldErrors(mIdx, fIdx)" class="error-message">
-                {{ fieldErrors(mIdx, fIdx) }}
-                <span
-                  v-if="isFieldSkipped(mIdx,fIdx)"
-                  class="skip-pill"
-                  title="Required validation skipped for this field"
-                >Skipped</span>
-              </div>
-              <div v-else-if="isFieldSkipped(mIdx,fIdx)" class="error-message">
-                <span class="skip-pill" title="Required validation skipped for this field">Skipped</span>
-              </div>
+                  <!-- FALLBACK -->
+                  <input
+                    v-else
+                    :id="fieldId(mIdx, fIdx)"
+                    type="text"
+                    v-model="entryData[currentSubjectIndex][currentVisitIndex][currentGroupIndex][mIdx][fIdx]"
+                    :placeholder="field.placeholder"
+                    :required="!!field.constraints?.required"
+                    :readonly="isReadonlyField(field, mIdx, fIdx)"
+                    @blur="onFieldBlur(mIdx, fIdx)"
+                    @input="() => { clearError(mIdx, fIdx); onRuntimeFieldChanged(mIdx, fIdx); }"
+                  />
+
+                  <div v-if="fieldErrors(mIdx, fIdx)" class="error-message">
+                    {{ fieldErrors(mIdx, fIdx) }}
+                    <span
+                      v-if="isFieldSkipped(mIdx, fIdx)"
+                      class="skip-pill"
+                      title="Required validation skipped for this field"
+                    >Skipped</span>
+                  </div>
+                  <div v-else-if="isFieldSkipped(mIdx, fIdx)" class="error-message">
+                    <span class="skip-pill" title="Required validation skipped for this field">Skipped</span>
+                  </div>
+
+                  <div v-if="fieldCalcWarning(mIdx, fIdx)" class="calc-warning-message">
+                    {{ fieldCalcWarning(mIdx, fIdx) }}
+                  </div>
+                </div>
+              </template>
             </div>
-          </div>
+          </template>
 
           <!-- Actions -->
           <div class="form-actions">
@@ -356,105 +386,40 @@
       </div>
     </div>
 
-    <!-- dialogs (unchanged except share hidden on shared) -->
-    <div v-if="showShareDialog && !isShared" class="dialog-overlay">
-      <div class="dialog">
-        <h3>Generate Share Link</h3>
-        <p>
-          Sharing for Subject
-          {{ shareParams.subjectIndex != null ? sd.subjects?.[shareParams.subjectIndex]?.id : 'N/A' }},
-          Visit {{ visitList[shareParams.visitIndex]?.name }}
-        </p>
-        <label>
-          Permission:
-          <select v-model="shareConfig.permission">
-            <option value="view">View Only</option>
-            <option value="add">Allow Add</option>
-          </select>
-        </label>
-        <label>
-          Max Uses:
-          <input type="number" v-model.number="shareConfig.maxUses" min="1" />
-        </label>
-        <label>
-          Expires in (days):
-          <input type="number" v-model.number="shareConfig.expiresInDays" min="1" />
-        </label>
-        <div class="dialog-actions">
-          <button @click="createShareLink">Generate</button>
-          <button @click="showShareDialog = false">Cancel</button>
-        </div>
+    <StudyShareDialog
+      v-if="showShareDialog && !isShared"
+      :visible="showShareDialog"
+      :subject-label="shareParams.subjectIndex != null ? sd.subjects?.[shareParams.subjectIndex]?.id : 'N/A'"
+      :visit-label="visitList[shareParams.visitIndex]?.name || 'N/A'"
+      :available-sections="shareDialogSections"
+      :permission="shareConfig.permission"
+      :max-uses="shareConfig.maxUses"
+      :expires-in-days="shareConfig.expiresInDays"
+      :generated-link="generatedLink"
+      :copy-status="copyStatus"
+      @close="showShareDialog = false"
+      @copy="copyGeneratedLink"
+      @generate="onShareDialogGenerate"
+    />
 
-        <!-- Copy link UI (only after successful generation) -->
-        <div v-if="generatedLink" class="share-result">
-          <span class="share-result-text">Link generated.</span>
-          <button type="button" class="btn-copy-link" @click="copyGeneratedLink">
-            Copy link
-          </button>
-        </div>
-        <div v-if="generatedLink" class="generated-link-preview" :title="generatedLink">
-          {{ generatedLink }}
-        </div>
-        <div v-if="copyStatus" class="copy-status">
-          {{ copyStatus }}
-        </div>
-      </div>
-    </div>
+    <PermissionDeniedDialog
+      :visible="permissionError"
+      @close="permissionError = false"
+    />
 
-    <div v-if="permissionError" class="dialog-overlay">
-      <div class="dialog">
-        <h3>Permission Denied</h3>
-        <p>You do not have permission to create a share link. Please contact your administrator.</p>
-        <div class="dialog-actions">
-          <button @click="permissionError = false">Close</button>
-        </div>
-      </div>
-    </div>
+    <StudyConstraintDialog
+      :visible="showConstraintDialog"
+      :title="constraintDialogFieldName"
+      :items="constraintDialogItems"
+      @close="closeConstraintDialog"
+    />
 
-    <!-- Constraint dialog -->
-    <div v-if="showConstraintDialog" class="mini-overlay" @click.self="closeConstraintDialog">
-      <div class="mini-dialog" role="dialog" aria-modal="true">
-        <div class="mini-head">
-          <h4 class="mini-title">{{ constraintDialogFieldName }}</h4>
-          <button class="mini-close" @click="closeConstraintDialog" aria-label="Close">✕</button>
-        </div>
-        <ul class="mini-list">
-          <li v-for="(line, idx) in constraintDialogItems" :key="idx">{{ line }}</li>
-        </ul>
-      </div>
-    </div>
-
-    <!-- Legend dialog (field-level) -->
-    <div v-if="showLegendDialog" class="mini-overlay" @click.self="closeLegendDialog">
-      <div class="mini-dialog" role="dialog" aria-modal="true">
-        <div class="mini-head">
-          <h4 class="mini-title">Legend</h4>
-          <button class="mini-close" @click="closeLegendDialog" aria-label="Close">✕</button>
-        </div>
-        <ul class="mini-list">
-          <li><span class="legend-swatch swatch-none"></span> None — no data saved yet.</li>
-          <li><span class="legend-swatch swatch-partial"></span> Partial — some fields filled.</li>
-          <li><span class="legend-swatch swatch-complete"></span> Complete — all assigned fields filled.</li>
-          <li><span class="legend-swatch swatch-skipped"></span> Skipped — one or more required fields were skipped.</li>
-        </ul>
-      </div>
-    </div>
-
-    <!-- Legend dialog (selection status) -->
-    <div v-if="showStatusLegend" class="mini-overlay" @click.self="closeStatusLegend">
-      <div class="mini-dialog" role="dialog" aria-modal="true">
-        <div class="mini-head">
-          <h4 class="mini-title">Selection Status</h4>
-          <button class="mini-close" @click="closeStatusLegend" aria-label="Close">✕</button>
-        </div>
-        <ul class="mini-list legend-explain">
-          <li><span class="legend-swatch swatch-none"></span> None — no data saved yet.</li>
-          <li><span class="legend-swatch swatch-partial"></span> Partial — some fields filled.</li>
-          <li><span class="legend-swatch swatch-complete"></span> Complete — all assigned fields filled.</li>
-          <li><span class="legend-swatch swatch-skipped"></span> Skipped — one or more required fields were skipped.</li>
-        </ul>
-      </div>
-    </div>
+    <StudyLegendDialogs
+      :showLegendDialog="showLegendDialog"
+      :showStatusLegend="showStatusLegend"
+      @close-legend="closeLegendDialog"
+      @close-status-legend="closeStatusLegend"
+    />
 
     <!-- Add Subjects dialog (moved to its own component) -->
     <AddSubjectsDialog
@@ -471,113 +436,47 @@
       @close="closeSubjectDialog"
       @save="saveNewSubjects"
     />
-    <div v-if="showGroupAssignDialog" class="dialog-overlay">
-      <div class="dialog">
-        <h3>Group assignment required</h3>
-        <p>This subject has no group. Choose how you want to assign a group.</p>
 
-        <label>
-          Assignment:
-          <select v-model="groupAssignScope">
-            <option value="one">Assign group to this subject only</option>
-            <option value="all">Assign group to all unassigned subjects</option>
-          </select>
-        </label>
-
-        <!-- Single-subject assignment -->
-        <label v-if="groupAssignScope === 'one'">
-          Group:
-          <select v-model="groupAssignSelectedGroup">
-            <option v-for="g in groupList" :key="g.name" :value="g.name">
-              {{ g.name }}
-            </option>
-          </select>
-        </label>
-
-        <!-- Multi-subject assignment: per-subject selection (NOT blanket assignment) -->
-        <div v-else>
-          <p style="margin: 0 0 10px 0;">
-            Assign a group for each unassigned subject:
-          </p>
-
-          <div style="max-height: 260px; overflow: auto; border: 1px solid #e5e7eb; border-radius: 6px; padding: 8px;">
-            <div
-              v-for="row in groupAssignDrafts"
-              :key="row.index"
-              style="display:flex; align-items:center; justify-content:space-between; gap:10px; padding:6px 0; border-bottom:1px solid #f3f4f6;"
-            >
-              <div style="min-width:0;">
-                <strong>{{ row.id || ('Subject ' + (row.index + 1)) }}</strong>
-              </div>
-
-              <div style="flex: 0 0 180px;">
-                <select v-model="row.group" style="width:100%;">
-                  <option v-for="g in groupList" :key="g.name" :value="g.name">
-                    {{ g.name }}
-                  </option>
-                </select>
-              </div>
-            </div>
-
-            <div v-if="!groupAssignDrafts || !groupAssignDrafts.length" style="font-size: 12px; color: #6b7280; padding: 8px 0;">
-              No unassigned subjects found.
-            </div>
-          </div>
-        </div>
-
-        <p v-if="groupAssignError" style="color:#dc2626; font-size:12px; margin-top:6px;">
-          {{ groupAssignError }}
-        </p>
-
-        <div class="dialog-actions">
-          <button @click="saveGroupAssignment" :disabled="savingGroupAssign">
-            {{ savingGroupAssign ? "Saving..." : "Save" }}
-          </button>
-          <button @click="closeGroupAssignDialog" :disabled="savingGroupAssign">
-            Cancel
-          </button>
-        </div>
-      </div>
-    </div>
+    <GroupAssignDialog
+      :visible="showGroupAssignDialog"
+      :groupAssignScope="groupAssignScope"
+      :groupAssignSelectedGroup="groupAssignSelectedGroup"
+      :groupAssignError="groupAssignError"
+      :savingGroupAssign="savingGroupAssign"
+      :groupAssignDrafts="groupAssignDrafts"
+      :groupList="groupList"
+      @close="closeGroupAssignDialog"
+      @save="saveGroupAssignment"
+      @update:groupAssignScope="groupAssignScope = $event"
+      @update:groupAssignSelectedGroup="groupAssignSelectedGroup = $event"
+      @update:groupAssignDrafts="groupAssignDrafts = $event"
+    />
 
     <CustomDialog :message="dialogMessage" :isVisible="showDialog" @close="closeDialog" />
 
-    <!-- Skip required dialog -->
-    <div v-if="showSkipDialog" class="dialog-overlay">
-      <div class="dialog dialog-wide">
-        <h3>Fix validation before saving</h3>
-        <p>
-          The fields below are required but empty. You can fill them now or choose to
-          <em>Skip for now</em> to save the rest.
-        </p>
-
-        <div class="skip-list">
-          <div class="skip-row" v-for="item in skipCandidates" :key="item.key">
-            <div class="skip-left">
-              <div class="skip-title">
-                <strong>{{ item.sectionTitle }}</strong> / {{ item.fieldLabel }}
-              </div>
-            </div>
-            <div class="skip-right">
-              <label class="skip-chk">
-                <input type="checkbox" v-model="skipSelections[item.key]" />
-                Skip for now
-              </label>
-              <button class="btn-jump" @click="jumpToField(item)">Go to field</button>
-            </div>
-          </div>
-        </div>
-
-        <div class="dialog-actions">
-          <button @click="confirmSkipSelection" class="btn-primary" :disabled="!canEdit">
-            Skip selected & Save
-          </button>
-          <button @click="cancelSkipSelection" class="btn-option">
-            Cancel
-          </button>
-        </div>
-      </div>
-    </div>
+    <SkipRequiredDialog
+      :visible="showSkipDialog"
+      :skipCandidates="skipCandidates"
+      :skipSelections="skipSelections"
+      :canEdit="canEdit"
+      @confirm="confirmSkipSelectionFromDialog"
+      @cancel="cancelSkipSelection"
+      @jump="jumpToField"
+    />
+    <StudyDataImportDialog
+      v-if="showImportDialog"
+      :visible="showImportDialog"
+      :available-fields="importableFields"
+      :subjects="importDialogSubjects"
+      :visit-label="visitList[selectedVisitIndex === -1 ? 0 : selectedVisitIndex]?.name || ''"
+      :preview-rows="importPreviewRows"
+      :preview-summary="importPreviewSummary"
+      :analyzing="importAnalyzing"
+      :committing="importCommitting"
+      @close="closeImportDialog"
+      @analyze="buildImportPreview"
+      @commit="commitImportPreview"
+    />
   </div>
 
   <div v-else class="loading">
@@ -603,6 +502,22 @@ import AddSubjectsDialog from "@/components/AddSubjectsDialog.vue";
 import { createAjv, validateFieldValue } from "@/utils/jsonschemaValidation";
 
 import MergeStudy from "@/components/MergeStudy.vue";
+import StudyShareDialog from "@/components/dataentry/StudyShareDialog.vue";
+import PermissionDeniedDialog from "@/components/dataentry/PermissionDeniedDialog.vue";
+import StudyConstraintDialog from "@/components/dataentry/StudyConstraintDialog.vue";
+import StudyLegendDialogs from "@/components/dataentry/StudyLegendDialogs.vue";
+import GroupAssignDialog from "@/components/dataentry/GroupAssignDialog.vue";
+import SkipRequiredDialog from "@/components/dataentry/SkipRequiredDialog.vue";
+import StudyDataImportDialog from "@/components/dataentry/StudyDataImportDialog.vue";
+import {
+  getCalculationRulesFromStudy,
+  getCalculationFormulaForField,
+  buildFieldLookup,
+  isCalculatedRuntimeField as isCalculatedRuntimeFieldUtil,
+  computeCalculation,
+  sectionHasVisibleFields,
+  evaluateFieldVisibility,
+} from "@/utils/formLogicRuntime";
 
 export default {
   name: "StudyDataEntryComponent",
@@ -619,6 +534,13 @@ export default {
     SelectionMatrixView,
     AddSubjectsDialog,
     MergeStudy,
+    StudyShareDialog,
+    PermissionDeniedDialog,
+    StudyConstraintDialog,
+    StudyLegendDialogs,
+    GroupAssignDialog,
+    SkipRequiredDialog,
+    StudyDataImportDialog,
   },
   data() {
     return {
@@ -648,10 +570,13 @@ export default {
       skipFlags: [],
       validationErrors: {},
 
+      // calc warnings
+      calcWarnings: {},
+
       icons,
       showShareDialog: false,
       shareParams: { subjectIndex: null, visitIndex: null, groupIndex: null },
-      shareConfig: { permission: "view", maxUses: 1, expiresInDays: 7 },
+      shareConfig: { permission: "view", maxUses: 1, expiresInDays: 7, allowed_section_ids: [] },
       generatedLink: "",
       copyStatus: "",
       permissionError: false,
@@ -704,10 +629,104 @@ export default {
       groupAssignError: "",
       savingGroupAssign: false,
       groupAssignDrafts: [],
+      showImportDialog: false,
+      importPreviewRows: [],
+      importPreviewSummary: {
+      totalRows: 0,
+      readyRows: 0,
+      warningRows: 0,
+      errorRows: 0,
+    },
+      importPreviewPayload: null,
+      importAnalyzing: false,
+      importCommitting: false,
     };
   },
 
   computed: {
+    importDialogSubjects() {
+      const subjects = Array.isArray(this.sd?.subjects) ? this.sd.subjects : [];
+
+      return subjects.map((s, idx) => {
+        const subjectLabel = String(s?.id || s?.subject_id || `Subject ${idx + 1}`).trim();
+        const groupName = String(s?.group || "").trim();
+
+        return {
+          index: idx,
+          label: subjectLabel,
+          groupLabel: groupName || "Unassigned",
+        };
+      });
+    },
+    importableFields() {
+      const models = Array.isArray(this.selectedModels) ? this.selectedModels : [];
+      const assigned = Array.isArray(this.assignedModelIndices) ? this.assignedModelIndices : [];
+
+      const out = [];
+
+      assigned.forEach((mIdx) => {
+        const section = models[mIdx] || {};
+        const fields = Array.isArray(section.fields) ? section.fields : [];
+
+        fields.forEach((field, fIdx) => {
+          out.push({
+            key: `${mIdx}-${fIdx}`,
+            modelIndex: mIdx,
+            fieldIndex: fIdx,
+            sectionTitle: section.title || `Section ${mIdx + 1}`,
+            fieldLabel: field.label || field.name || field.title || `Field ${fIdx + 1}`,
+            fieldName: field.name || field.label || field.title || `Field ${fIdx + 1}`,
+            fieldType: field.type || "text",
+          });
+        });
+      });
+
+      return out;
+    },
+    shareDialogSections() {
+      const v = Number(this.shareParams?.visitIndex);
+      const g = Number(this.shareParams?.groupIndex);
+
+      if (!Number.isInteger(v) || v < 0) return [];
+      if (!Number.isInteger(g) || g < 0) return [];
+
+      const selectedModels = Array.isArray(this.selectedModels) ? this.selectedModels : [];
+      const assignments = Array.isArray(this.assignments) ? this.assignments : [];
+
+      return selectedModels
+        .map((section, mIdx) => {
+          const assigned = !!assignments?.[mIdx]?.[v]?.[g];
+          if (!assigned) return null;
+
+          return {
+              id:
+                section?._id ||
+                section?.id ||
+                section?.uuid ||
+                section?.title ||
+                `section-${mIdx}`,
+              title: section?.title || `Section ${mIdx + 1}`,
+              modelIndex: mIdx,
+            };
+        })
+        .filter(Boolean);
+    },
+
+    shareableSectionsForCurrentCell() {
+      const v = this.shareParams?.visitIndex;
+      const g = this.shareParams?.groupIndex;
+
+      if (v == null || g == null) return [];
+
+      return (this.selectedModels || [])
+        .map((sec, mIdx) => ({ sec, mIdx }))
+        .filter(({ mIdx }) => !!this.assignments?.[mIdx]?.[v]?.[g])
+        .map(({ sec }) => ({
+          id: String(sec?._id || sec?.id || "").trim(),
+          title: sec?.title || "Untitled Section"
+        }))
+        .filter(s => s.id);
+    },
     unassignedSubjectIndices() {
       const subjects = this.sd.subjects || [];
       const out = [];
@@ -720,17 +739,9 @@ export default {
     canSeeGroupColumn() {
       if (!this.study?.metadata) return false;
 
-      // creator
-      const isCreator =
-        this.study.metadata.created_by === this.$store.state.user?.id;
-
-      // shared link with add permission
-      const hasAddPermission =
-        this.isShared && this.sharedPermission === "add";
-
-
-      const isAdmin =
-        this.$store.state.user?.role === "Administrator";
+      const isCreator = this.study.metadata.created_by === this.$store.state.user?.id;
+      const hasAddPermission = this.isShared && this.sharedPermission === "add";
+      const isAdmin = this.$store.state.user?.role === "Administrator";
 
       return isCreator || hasAddPermission || isAdmin;
     },
@@ -820,12 +831,8 @@ export default {
     },
 
     assignedModelIndices() {
-      const v = Number.isInteger(this.currentVisitIndex)
-        ? this.currentVisitIndex
-        : 0;
-      const g = Number.isInteger(this.currentGroupIndex)
-        ? this.currentGroupIndex
-        : 0;
+      const v = Number.isInteger(this.currentVisitIndex) ? this.currentVisitIndex : 0;
+      const g = Number.isInteger(this.currentGroupIndex) ? this.currentGroupIndex : 0;
       if (v == null || g == null) return [];
       return this.selectedModels
         .map((_, mIdx) => mIdx)
@@ -848,7 +855,21 @@ export default {
       }
       return false;
     },
-  },
+
+    calculationRules() {
+      return getCalculationRulesFromStudy(this.study);
+    },
+
+    shareDialogSubjectLabel() {
+      const idx = this.shareParams?.subjectIndex;
+      return idx != null ? (this.sd.subjects?.[idx]?.id || "N/A") : "N/A";
+    },
+
+    shareDialogVisitLabel() {
+      const idx = this.shareParams?.visitIndex;
+      return this.visitList?.[idx]?.name || "";
+    },
+},
 
   async created() {
     this.ajv = createAjv();
@@ -924,9 +945,856 @@ export default {
   },
 
   methods: {
-    // --- Merge Study controls ---
+  async commitImportPreview() {
+  try {
+    this.importCommitting = true;
 
-    // --- Merge Study controls ---
+    const validRows = (this.importPreviewRows || []).filter((r) => r.status === "Ready");
+    if (!validRows.length) {
+      this.showDialogMessage("No valid rows are available to commit.");
+      return;
+    }
+
+    let committed = 0;
+    let failed = 0;
+
+    for (const row of validRows) {
+      try {
+        const s = row.targetSubjectIndex;
+        const v = row.targetVisitIndex;
+        const g = row.targetGroupIndex;
+
+        if (s == null || v == null || g == null) {
+          failed += 1;
+          continue;
+        }
+
+        this.currentSubjectIndex = s;
+        this.currentVisitIndex = v;
+        this.currentGroupIndex = g;
+
+        this.ensureSlot(s, v, g);
+
+        row.importedFields.forEach((item) => {
+          const mIdx = Number(item.modelIndex);
+          const fIdx = Number(item.fieldIndex);
+          const field = this.selectedModels?.[mIdx]?.fields?.[fIdx];
+          if (!field) return;
+          if (this.isReadonlyField(field, mIdx, fIdx)) return;
+
+          const parsed = this.normalizeImportedValueForField(field, item.rawValue);
+          this.setDeepValue(s, v, g, mIdx, fIdx, parsed);
+          this.setDeepSkip(s, v, g, mIdx, fIdx, false);
+        });
+
+        this.runCalculationsForCell(s, v, g, null, null);
+
+        const dictData = this.arrayToDict(this.entryData[s][v][g]);
+        const rawSkipFlags = this.skipFlags[s][v][g];
+
+        const payload = {
+          study_id: this.study?.metadata?.id,
+          subject_index: s,
+          visit_index: v,
+          group_index: g,
+          data: dictData,
+          skipped_required_flags: rawSkipFlags,
+        };
+
+        const headers = {
+          headers: { Authorization: `Bearer ${this.token}` },
+        };
+
+        const existing = this.getBestEntryFor(s, v, g);
+
+        if (existing?.id) {
+          const resp = await axios.put(
+            `/forms/studies/${this.study.metadata.id}/data_entries/${existing.id}`,
+            payload,
+            { ...headers, params: { audit_label: "Bulk Import Update" } }
+          );
+          const idx = this.existingEntries.findIndex((x) => x.id === existing.id);
+          if (idx >= 0) this.existingEntries.splice(idx, 1, resp.data);
+        } else {
+          const params = this.safeVersionParams(this.selectedVersion);
+          const resp = await axios.post(
+            `/forms/studies/${this.study.metadata.id}/data`,
+            payload,
+            params
+              ? { ...headers, params: { ...params, audit_label: "Bulk Import Create" } }
+              : { ...headers, params: { audit_label: "Bulk Import Create" } }
+          );
+
+          const newId = resp?.data?.id;
+          this.entryIds[s][v][g] = newId;
+          this.existingEntries.push({
+            id: newId,
+            study_id: this.study.metadata.id,
+            subject_index: s,
+            visit_index: v,
+            group_index: g,
+            data: dictData,
+            skipped_required_flags: rawSkipFlags,
+            form_version: resp?.data?.form_version ?? this.selectedVersion,
+            created_at: resp?.data?.created_at ?? new Date().toISOString(),
+          });
+        }
+
+        this.hydrateCache.delete(`${s}|${v}|${g}|${this.selectedVersion}`);
+        this.updateStatusCacheFor(s, v, g);
+        committed += 1;
+      } catch (e) {
+        console.error("Bulk import row commit failed", row, e);
+        failed += 1;
+      }
+    }
+
+    this.rebuildEntriesIndex();
+    this.buildStatusCache();
+    this.closeImportDialog();
+
+    if (failed) {
+      this.showDialogMessage(`Bulk import finished. ${committed} row(s) committed, ${failed} row(s) failed during save.`);
+    } else {
+      this.showDialogMessage(`Bulk import finished successfully. ${committed} row(s) committed.`);
+    }
+  } catch (e) {
+    console.error("Bulk import commit failed", e);
+    this.showDialogMessage("Failed to commit bulk import.");
+  } finally {
+    this.importCommitting = false;
+  }
+},
+  simulateImportedRowValidation({
+  targetSubjectIndex,
+  targetVisitIndex,
+  targetGroupIndex,
+  importedFields,
+}) {
+  const issues = [];
+
+  const originalEntryData = this.entryData;
+  const originalSkipFlags = this.skipFlags;
+  const originalValidationErrors = this.validationErrors;
+  const originalCalcWarnings = this.calcWarnings;
+  const originalCurrentSubjectIndex = this.currentSubjectIndex;
+  const originalCurrentVisitIndex = this.currentVisitIndex;
+  const originalCurrentGroupIndex = this.currentGroupIndex;
+
+  try {
+    // lightweight deep clone only for simulation
+    this.entryData = JSON.parse(JSON.stringify(this.entryData || []));
+    this.skipFlags = JSON.parse(JSON.stringify(this.skipFlags || []));
+    this.validationErrors = {};
+    this.calcWarnings = {};
+
+    this.currentSubjectIndex = targetSubjectIndex;
+    this.currentVisitIndex = targetVisitIndex;
+    this.currentGroupIndex = targetGroupIndex;
+
+    this.ensureSlot(targetSubjectIndex, targetVisitIndex, targetGroupIndex);
+
+    importedFields.forEach((item) => {
+      const mIdx = Number(item.modelIndex);
+      const fIdx = Number(item.fieldIndex);
+
+      if (!this.assignments?.[mIdx]?.[targetVisitIndex]?.[targetGroupIndex]) {
+        issues.push(
+          `${item.sectionTitle} → ${item.fieldLabel}: section is not assigned for this visit/group.`
+        );
+        return;
+      }
+
+      const field = this.selectedModels?.[mIdx]?.fields?.[fIdx];
+      if (!field) {
+        issues.push(`${item.sectionTitle} → ${item.fieldLabel}: field not found in current template.`);
+        return;
+      }
+
+      if (this.isReadonlyField(field, mIdx, fIdx)) {
+        issues.push(`${item.sectionTitle} → ${item.fieldLabel}: field is read-only and cannot be imported.`);
+        return;
+      }
+
+      const normalized = this.normalizeImportedValueForField(field, item.rawValue);
+      this.setDeepValue(targetSubjectIndex, targetVisitIndex, targetGroupIndex, mIdx, fIdx, normalized);
+      this.setDeepSkip(targetSubjectIndex, targetVisitIndex, targetGroupIndex, mIdx, fIdx, false);
+    });
+
+    this.runCalculationsForCell(targetSubjectIndex, targetVisitIndex, targetGroupIndex, null, null);
+
+    const assigned = this.selectedModels
+      .map((_, mIdx) => mIdx)
+      .filter((mIdx) => !!this.assignments?.[mIdx]?.[targetVisitIndex]?.[targetGroupIndex]);
+
+    assigned.forEach((mIdx) => {
+      const section = this.selectedModels?.[mIdx];
+      (section?.fields || []).forEach((field, fIdx) => {
+        if (!this.hasVisibleFieldsInSection(mIdx)) return;
+        if (!this.isFieldVisible(mIdx, fIdx)) return;
+
+        const valid = this.validateField(mIdx, fIdx);
+        if (!valid) {
+          const msg = this.fieldErrors(mIdx, fIdx);
+          if (msg) {
+            issues.push(`${section?.title || `Section ${mIdx + 1}`} → ${field?.label || field?.name || `Field ${fIdx + 1}`}: ${msg}`);
+          }
+        }
+      });
+    });
+
+    return { issues };
+  } finally {
+    this.entryData = originalEntryData;
+    this.skipFlags = originalSkipFlags;
+    this.validationErrors = originalValidationErrors;
+    this.calcWarnings = originalCalcWarnings;
+    this.currentSubjectIndex = originalCurrentSubjectIndex;
+    this.currentVisitIndex = originalCurrentVisitIndex;
+    this.currentGroupIndex = originalCurrentGroupIndex;
+  }
+},
+async buildImportPreview(payload) {
+  try {
+    this.importAnalyzing = true;
+    this.importPreviewRows = [];
+    this.importPreviewSummary = {
+      totalRows: 0,
+      readyRows: 0,
+      warningRows: 0,
+      errorRows: 0,
+    };
+    this.importPreviewPayload = payload || null;
+
+    const rows = Array.isArray(payload?.dataRows) ? payload.dataRows : [];
+    const columns = Array.isArray(payload?.columns) ? payload.columns : [];
+    const mappings = payload?.mappings || {};
+    const metadataMapping = payload?.metadataMapping || {};
+    const mode = String(payload?.mode || "single");
+
+    const previewRows = [];
+
+    for (let rowIndex = 0; rowIndex < rows.length; rowIndex++) {
+      const row = rows[rowIndex] || [];
+      const issues = [];
+      let targetSubjectIndex = null;
+      let targetVisitIndex = null;
+      let targetGroupIndex = null;
+
+      const getMeta = (key) => {
+        const idx = metadataMapping?.[key];
+        if (idx == null || idx === "") return "";
+        return String(row[Number(idx)] ?? "").trim();
+      };
+
+      const subjectValue = getMeta("subject");
+      const visitValue = getMeta("visit");
+      const groupValue = getMeta("group");
+
+      // match subject
+      if (mode === "single") {
+        targetSubjectIndex = Number(payload?.selectedSubjectIndex);
+      } else {
+        const normalizedSubject = String(subjectValue || "").trim().toLowerCase();
+        targetSubjectIndex = (this.sd.subjects || []).findIndex((s) => {
+          const sid = String(s?.id || s?.subject_id || "").trim().toLowerCase();
+          return sid && sid === normalizedSubject;
+        });
+
+        if (targetSubjectIndex < 0) {
+          issues.push(`Subject "${subjectValue || "blank"}" was not found in this study.`);
+          targetSubjectIndex = null;
+        }
+      }
+
+      // visit
+      if (mode === "single") {
+        targetVisitIndex =
+          this.selectedVisitIndex === -1
+            ? 0
+            : Number.isInteger(this.selectedVisitIndex)
+            ? this.selectedVisitIndex
+            : 0;
+      } else {
+        const normalizedVisit = String(visitValue || "").trim().toLowerCase();
+        const matchedVisitIndex = this.visitList.findIndex((v) => {
+          return String(v?.name || "").trim().toLowerCase() === normalizedVisit;
+        });
+
+        if (matchedVisitIndex < 0) {
+          issues.push(`Visit "${visitValue || "blank"}" was not found in this study.`);
+          targetVisitIndex = null;
+        } else {
+          targetVisitIndex = matchedVisitIndex;
+        }
+      }
+
+      // group
+      if (targetSubjectIndex != null && targetSubjectIndex >= 0) {
+        targetGroupIndex = this.subjectToGroupIdx?.[targetSubjectIndex];
+        if (targetGroupIndex == null || targetGroupIndex < 0) {
+          issues.push(`Matched subject does not have a valid assigned group.`);
+          targetGroupIndex = null;
+        }
+      }
+
+      if (mode === "all" && targetGroupIndex != null && targetGroupIndex >= 0) {
+        const expectedGroup = String(this.groupList?.[targetGroupIndex]?.name || "").trim().toLowerCase();
+        const actualGroup = String(groupValue || "").trim().toLowerCase();
+
+        if (!actualGroup) {
+          issues.push(`Group value is missing in the spreadsheet row.`);
+        } else if (expectedGroup && actualGroup !== expectedGroup) {
+          issues.push(`Group "${groupValue}" does not match the subject group "${this.groupList?.[targetGroupIndex]?.name || ""}".`);
+        }
+      }
+
+      // mapped values
+      let mappedValueCount = 0;
+      const importedFields = [];
+
+      Object.keys(mappings || {}).forEach((colIndexStr) => {
+        const targetKey = mappings[colIndexStr];
+        if (!targetKey) return;
+
+        const colIndex = Number(colIndexStr);
+        const rawValue = row[colIndex];
+
+        if (rawValue == null || String(rawValue).trim() === "") return;
+
+        const targetField = this.importableFields.find((f) => f.key === targetKey);
+        if (!targetField) return;
+
+        importedFields.push({
+          columnIndex: colIndex,
+          rawValue,
+          modelIndex: targetField.modelIndex,
+          fieldIndex: targetField.fieldIndex,
+          sectionTitle: targetField.sectionTitle,
+          fieldLabel: targetField.fieldLabel,
+        });
+        mappedValueCount += 1;
+      });
+
+      if (!mappedValueCount) {
+        issues.push("No mapped spreadsheet values were found in this row.");
+      }
+
+      // run actual form pipeline only if metadata matched enough
+      if (
+        targetSubjectIndex != null &&
+        targetVisitIndex != null &&
+        targetGroupIndex != null &&
+        mappedValueCount > 0
+      ) {
+        const validationResult = this.simulateImportedRowValidation({
+          targetSubjectIndex,
+          targetVisitIndex,
+          targetGroupIndex,
+          importedFields,
+        });
+
+        if (validationResult?.issues?.length) {
+          issues.push(...validationResult.issues);
+        }
+      }
+
+      let status = "Ready";
+      if (issues.length) {
+        const hasHardError = issues.some((x) =>
+          /not found|does not match|required|invalid|must be|readonly|not assigned/i.test(String(x))
+        );
+        status = hasHardError ? "Error" : "Warning";
+      }
+
+      previewRows.push({
+        rowIndex,
+        subjectLabel:
+          targetSubjectIndex != null && targetSubjectIndex >= 0
+            ? String(this.sd.subjects?.[targetSubjectIndex]?.id || "")
+            : subjectValue || "",
+        visitLabel:
+          targetVisitIndex != null && targetVisitIndex >= 0
+            ? String(this.visitList?.[targetVisitIndex]?.name || "")
+            : visitValue || "",
+        groupLabel:
+          targetGroupIndex != null && targetGroupIndex >= 0
+            ? String(this.groupList?.[targetGroupIndex]?.name || "")
+            : groupValue || "",
+        mappedValueCount,
+        status,
+        issues,
+        targetSubjectIndex,
+        targetVisitIndex,
+        targetGroupIndex,
+        importedFields,
+      });
+    }
+
+    // duplicate target check for bulk
+    if (mode === "all") {
+      const keyMap = new Map();
+      previewRows.forEach((r) => {
+        if (
+          r.targetSubjectIndex != null &&
+          r.targetVisitIndex != null &&
+          r.targetGroupIndex != null
+        ) {
+          const key = `${r.targetSubjectIndex}|${r.targetVisitIndex}|${r.targetGroupIndex}`;
+          const arr = keyMap.get(key) || [];
+          arr.push(r.rowIndex);
+          keyMap.set(key, arr);
+        }
+      });
+
+      previewRows.forEach((r) => {
+        const key = `${r.targetSubjectIndex}|${r.targetVisitIndex}|${r.targetGroupIndex}`;
+        const arr = keyMap.get(key) || [];
+        if (arr.length > 1) {
+          r.issues.push(
+            `Multiple spreadsheet rows target the same Subject / Visit / Group (${arr.map((x) => `row ${x + 1}`).join(", ")}).`
+          );
+          r.status = "Error";
+        }
+      });
+    }
+
+    this.importPreviewRows = previewRows;
+    this.importPreviewSummary = {
+      totalRows: previewRows.length,
+      readyRows: previewRows.filter((r) => r.status === "Ready").length,
+      warningRows: previewRows.filter((r) => r.status === "Warning").length,
+      errorRows: previewRows.filter((r) => r.status === "Error").length,
+    };
+  } catch (e) {
+    console.error("Failed to build import preview", e);
+    this.showDialogMessage("Failed to build import preview.");
+  } finally {
+    this.importAnalyzing = false;
+  }
+},
+  closeImportDialog() {
+      this.showImportDialog = false;
+      this.importPreviewRows = [];
+      this.importPreviewSummary = {
+        totalRows: 0,
+        readyRows: 0,
+        warningRows: 0,
+        errorRows: 0,
+      };
+      this.importPreviewPayload = null;
+      this.importAnalyzing = false;
+      this.importCommitting = false;
+    },
+  openImportDialogFromSelection() {
+  if (this.isShared) return;
+
+  if (!this.visitList.length) {
+    this.showDialogMessage("No visits available for import.");
+    return;
+  }
+
+  if (this.selectedVisitIndex === -1) {
+    this.selectedVisitIndex = 0;
+  }
+
+  this.showImportDialog = true;
+},
+normalizeImportedValueForField(field, rawValue) {
+  const type = String(field?.type || "text").toLowerCase();
+  const c = field?.constraints || {};
+
+  if (rawValue == null) return this.defaultForField(field);
+  const text = String(rawValue).trim();
+
+  if (text === "") return this.defaultForField(field);
+
+  if (type === "number" || type === "slider") {
+    const n = Number(String(rawValue).replace(/,/g, "."));
+    return Number.isFinite(n) ? n : this.defaultForField(field);
+  }
+
+  if (type === "checkbox") {
+    const v = text.toLowerCase();
+    return ["true", "yes", "y", "1", "checked"].includes(v);
+  }
+
+  if (type === "select") {
+    if (c.allowMultiple) {
+      return text.split(",").map((x) => x.trim()).filter(Boolean);
+    }
+    return text;
+  }
+
+  if (type === "radio" || type === "date" || type === "time") {
+    return text;
+  }
+
+  if (type === "file") {
+    return this.defaultForField(field);
+  }
+
+  return text;
+},
+
+applyImportedRowFromDialog(payload) {
+  try {
+    if (payload?.mode !== "single") {
+      this.showDialogMessage("Only single-subject import is supported right now.");
+      return;
+    }
+
+    const targetSubjectIndex = Number(payload?.targetSubjectIndex);
+    if (!Number.isInteger(targetSubjectIndex) || targetSubjectIndex < 0) {
+      this.showDialogMessage("Invalid target subject selected.");
+      return;
+    }
+
+    const visitIdx =
+      this.selectedVisitIndex === -1
+        ? 0
+        : Number.isInteger(this.selectedVisitIndex)
+        ? this.selectedVisitIndex
+        : 0;
+
+    const targetGroupIdx = this.subjectToGroupIdx?.[targetSubjectIndex];
+
+    if (targetGroupIdx == null || targetGroupIdx < 0) {
+      this.showDialogMessage("Selected subject does not have a valid group assigned.");
+      return;
+    }
+
+    this.currentSubjectIndex = targetSubjectIndex;
+    this.currentVisitIndex = visitIdx;
+    this.currentGroupIndex = targetGroupIdx;
+
+    this.ensureSlot(this.currentSubjectIndex, this.currentVisitIndex, this.currentGroupIndex);
+
+    const items = Array.isArray(payload?.items) ? payload.items : [];
+    if (!items.length) {
+      this.showDialogMessage("No mapped values found to import.");
+      return;
+    }
+
+    items.forEach((item) => {
+      const mIdx = Number(item.modelIndex);
+      const fIdx = Number(item.fieldIndex);
+
+      if (!Number.isInteger(mIdx) || !Number.isInteger(fIdx)) return;
+
+      // only import if actually assigned for this subject's group and current visit
+      if (!this.assignments?.[mIdx]?.[visitIdx]?.[targetGroupIdx]) return;
+
+      const field = this.selectedModels?.[mIdx]?.fields?.[fIdx];
+      if (!field) return;
+      if (this.isReadonlyField(field, mIdx, fIdx)) return;
+
+      const parsed = this.normalizeImportedValueForField(field, item.rawValue);
+
+      this.setDeepValue(this.currentSubjectIndex, this.currentVisitIndex, this.currentGroupIndex, mIdx, fIdx, parsed);
+      this.setDeepSkip(this.currentSubjectIndex, this.currentVisitIndex, this.currentGroupIndex, mIdx, fIdx, false);
+      this.clearError(mIdx, fIdx);
+      this.clearCalcWarningFor(mIdx, fIdx);
+    });
+
+    this.showSelection = false;
+    this.validationErrors = {};
+    this.calcWarnings = {};
+
+    this.runAllCalculationsForCurrentCell();
+
+    this.assignedModelIndices.forEach((mIdx) => {
+      (this.selectedModels?.[mIdx]?.fields || []).forEach((field, fIdx) => {
+        if (this.isReadonlyField(field, mIdx, fIdx)) return;
+        this.validateField(mIdx, fIdx);
+      });
+    });
+
+    this.hydrateCache.delete(`${this.currentSubjectIndex}|${this.currentVisitIndex}|${this.currentGroupIndex}|${this.selectedVersion}`);
+    this.showImportDialog = false;
+
+    if (payload?.metadataReview?.hasMetadataMismatch) {
+      this.showDialogMessage("Data imported into the selected subject with metadata mismatch warning. Please review before saving.");
+    } else {
+      this.showDialogMessage("Data imported into the selected subject. Please review and click Save Data.");
+    }
+  } catch (e) {
+    console.error("Import apply failed", e);
+    this.showDialogMessage("Failed to import selected row.");
+  }
+},
+    openImportDialog() {
+      if (!this.canEdit) {
+        this.showDialogMessage("This shared link is view-only.");
+        return;
+      }
+
+      if (
+        this.currentSubjectIndex == null ||
+        this.currentVisitIndex == null ||
+        this.currentGroupIndex == null
+      ) {
+        this.showDialogMessage("Please open a subject/visit entry form first.");
+        return;
+      }
+
+      this.showImportDialog = true;
+    },
+
+
+    applyImportedRowToCurrentForm(payload) {
+      try {
+        const items = Array.isArray(payload?.items) ? payload.items : [];
+        if (!items.length) {
+          this.showDialogMessage("No mapped values found to import.");
+          return;
+        }
+
+        const s = this.currentSubjectIndex;
+        const v = this.currentVisitIndex;
+        const g = this.currentGroupIndex;
+
+        this.ensureSlot(s, v, g);
+
+        items.forEach((item) => {
+          const mIdx = Number(item.modelIndex);
+          const fIdx = Number(item.fieldIndex);
+
+          if (!Number.isInteger(mIdx) || !Number.isInteger(fIdx)) return;
+
+          const field = this.selectedModels?.[mIdx]?.fields?.[fIdx];
+          if (!field) return;
+
+          if (this.isReadonlyField(field, mIdx, fIdx)) return;
+
+          const parsed = this.normalizeImportedValueForField(field, item.rawValue);
+
+          this.setDeepValue(s, v, g, mIdx, fIdx, parsed);
+          this.setDeepSkip(s, v, g, mIdx, fIdx, false);
+          this.clearError(mIdx, fIdx);
+          this.clearCalcWarningFor(mIdx, fIdx);
+        });
+
+        this.runAllCalculationsForCurrentCell();
+
+        this.assignedModelIndices.forEach((mIdx) => {
+          (this.selectedModels?.[mIdx]?.fields || []).forEach((field, fIdx) => {
+            if (this.isReadonlyField(field, mIdx, fIdx)) return;
+            this.validateField(mIdx, fIdx);
+          });
+        });
+
+        this.hydrateCache.delete(`${s}|${v}|${g}|${this.selectedVersion}`);
+        this.showImportDialog = false;
+        this.showDialogMessage("Data imported into form. Please review and click Save Data.");
+      } catch (e) {
+        console.error("Import apply failed", e);
+        this.showDialogMessage("Failed to import selected row into the form.");
+      }
+    },
+    onShareDialogGenerate(cfg) {
+      this.shareConfig = {
+        permission: cfg.permission,
+        maxUses: cfg.maxUses,
+        expiresInDays: cfg.expiresInDays,
+        allowed_section_ids: cfg.allowed_section_ids || []
+      };
+
+      this.createShareLink();
+    },
+    getCurrentCellData() {
+      const s = this.currentSubjectIndex;
+      const v = this.currentVisitIndex;
+      const g = this.currentGroupIndex;
+
+      if (s == null || v == null || g == null) return [];
+      this.ensureSlot(s, v, g);
+      return this.entryData?.[s]?.[v]?.[g] || [];
+    },
+
+    isFieldVisible(mIdx, fIdx) {
+      const cellData = this.getCurrentCellData();
+      return evaluateFieldVisibility(this.study, this.selectedModels, cellData, mIdx, fIdx);
+    },
+
+    hasVisibleFieldsInSection(mIdx) {
+      const cellData = this.getCurrentCellData();
+      return sectionHasVisibleFields(this.study, this.selectedModels, cellData, mIdx);
+    },
+    fieldCalcWarning(mIdx, fIdx) {
+      const runtimeKey = this.currentCalcKey(mIdx, fIdx);
+      const runtimeWarning = this.calcWarnings?.[runtimeKey];
+      if (runtimeWarning) return runtimeWarning;
+
+      const field = this.selectedModels?.[mIdx]?.fields?.[fIdx];
+      if (!field) return "";
+
+      return getCalculationFormulaForField(this.study, this.selectedModels, field) || "";
+    },
+    /* ============================================================
+       CALC RUNTIME HELPERS
+       ============================================================ */
+    calcKey(s, v, g, m, f) {
+      return `${s}-${v}-${g}-${m}-${f}`;
+    },
+    currentCalcKey(mIdx, fIdx) {
+      return this.calcKey(
+        this.currentSubjectIndex,
+        this.currentVisitIndex,
+        this.currentGroupIndex,
+        mIdx,
+        fIdx
+      );
+    },
+    setCalcWarningFor(mIdx, fIdx, msg) {
+      const k = this.currentCalcKey(mIdx, fIdx);
+      const next = { ...this.calcWarnings };
+      if (msg) next[k] = msg;
+      else delete next[k];
+      this.calcWarnings = next;
+    },
+    clearCalcWarningFor(mIdx, fIdx) {
+      this.setCalcWarningFor(mIdx, fIdx, "");
+    },
+
+    isCalculatedRuntimeField(mIdx, fIdx) {
+      const field = this.selectedModels?.[mIdx]?.fields?.[fIdx];
+      return isCalculatedRuntimeFieldUtil(this.study, field);
+    },
+
+    isReadonlyField(field, mIdx, fIdx) {
+      return !!field?.constraints?.readonly || !this.canEdit || this.isCalculatedRuntimeField(mIdx, fIdx);
+    },
+
+    getFieldLookup() {
+      return buildFieldLookup(this.selectedModels);
+    },
+
+    getFieldMetaByRuleFieldId(ruleFieldId) {
+      if (!ruleFieldId) return null;
+      const lookup = this.getFieldLookup();
+      return lookup.get(String(ruleFieldId)) || null;
+    },
+
+    getCellValueByFieldId(s, v, g, ruleFieldId) {
+      const meta = this.getFieldMetaByRuleFieldId(ruleFieldId);
+      if (!meta) return undefined;
+      const { mIdx, fIdx } = meta;
+      return this.entryData?.[s]?.[v]?.[g]?.[mIdx]?.[fIdx];
+    },
+
+    setCellValueByFieldId(s, v, g, ruleFieldId, value) {
+      const meta = this.getFieldMetaByRuleFieldId(ruleFieldId);
+      if (!meta) return false;
+      const { mIdx, fIdx } = meta;
+      this.setDeepValue(s, v, g, mIdx, fIdx, value);
+      return true;
+    },
+
+    clearCalcWarningByRuleTarget(s, v, g, targetId) {
+      const meta = this.getFieldMetaByRuleFieldId(targetId);
+      if (!meta) return;
+      const { mIdx, fIdx } = meta;
+      const k = this.calcKey(s, v, g, mIdx, fIdx);
+      const next = { ...this.calcWarnings };
+      delete next[k];
+      this.calcWarnings = next;
+    },
+
+    setCalcWarningByRuleTarget(s, v, g, targetId, msg) {
+      const meta = this.getFieldMetaByRuleFieldId(targetId);
+      if (!meta) return;
+      const { mIdx, fIdx } = meta;
+      const k = this.calcKey(s, v, g, mIdx, fIdx);
+      const next = { ...this.calcWarnings };
+      if (msg) next[k] = msg;
+      else delete next[k];
+      this.calcWarnings = next;
+    },
+
+    runCalculationsForCell(s, v, g, changedMIdx = null, changedFIdx = null) {
+      const rules = this.calculationRules || [];
+      if (!rules.length) return;
+
+      const changedField = changedMIdx != null && changedFIdx != null
+        ? this.selectedModels?.[changedMIdx]?.fields?.[changedFIdx]
+        : null;
+
+      const changedKeys = changedField
+        ? new Set(
+            [
+              changedField?._id,
+              changedField?.id,
+              changedField?.field_id,
+              changedField?.uid,
+              changedField?.key,
+              changedField?.name,
+              changedField?.label,
+            ]
+              .filter(Boolean)
+              .map(String)
+          )
+        : null;
+
+      rules.forEach((rule) => {
+        if (!rule?.target || !Array.isArray(rule?.sources) || !rule.sources.length) return;
+
+        if (changedKeys) {
+          const touchesChanged = rule.sources.some((src) => changedKeys.has(String(src)));
+          if (!touchesChanged) return;
+        }
+
+        const sourceValues = rule.sources.map((srcId) => this.getCellValueByFieldId(s, v, g, srcId));
+        const result = computeCalculation(rule, sourceValues);
+
+        if (!result.ok) {
+          this.setCellValueByFieldId(s, v, g, rule.target, null);
+          this.setCalcWarningByRuleTarget(s, v, g, rule.target, result.warning || "Calculation could not be applied.");
+          return;
+        }
+
+        const targetMeta = this.getFieldMetaByRuleFieldId(rule.target);
+        if (!targetMeta) return;
+
+        const { mIdx, fIdx } = targetMeta;
+        this.setDeepValue(s, v, g, mIdx, fIdx, result.value);
+        this.clearError(mIdx, fIdx);
+        this.setCalcWarningByRuleTarget(s, v, g, rule.target, "");
+
+        const fieldDef = this.selectedModels?.[mIdx]?.fields?.[fIdx];
+        if (fieldDef) {
+          this.validateField(mIdx, fIdx);
+        }
+      });
+    },
+
+    runAllCalculationsForCurrentCell() {
+      const s = this.currentSubjectIndex;
+      const v = this.currentVisitIndex;
+      const g = this.currentGroupIndex;
+      if (s == null || v == null || g == null) return;
+      this.ensureSlot(s, v, g);
+      this.runCalculationsForCell(s, v, g, null, null);
+    },
+
+    onRuntimeFieldChanged(mIdx, fIdx) {
+      const s = this.currentSubjectIndex;
+      const v = this.currentVisitIndex;
+      const g = this.currentGroupIndex;
+      if (s == null || v == null || g == null) return;
+      this.ensureSlot(s, v, g);
+
+      // user changed something manually -> source errors may go away
+      this.clearError(mIdx, fIdx);
+
+      this.$nextTick(() => {
+        this.runCalculationsForCell(s, v, g, mIdx, fIdx);
+      });
+    },
+
+    /* ============================================================
+       MERGE CONTROLS
+       ============================================================ */
     openMergeStudy() {
       if (this.isShared) return;
       const id = this.studyId || Number(this.$route.params.id);
@@ -961,34 +1829,59 @@ export default {
 
     mergeStudyDataFromTemplate(schema) {
       const prev =
-        (this.study &&
-          this.study.content &&
-          this.study.content.study_data) ||
-        {};
+        (this.study && this.study.content && this.study.content.study_data) || {};
       const incoming = schema || {};
 
+      // Preserve ALL existing keys by default, then overlay schema.
+      // Then we normalize the known array fields safely.
       const merged = {
-        study: incoming.study ?? prev.study ?? {},
+        ...prev,
+        ...incoming,
+
+        // keep/merge nested study object instead of overwriting
+        study: {
+          ...(prev.study || {}),
+          ...(incoming.study || {}),
+        },
+
         subjects: Array.isArray(incoming.subjects)
           ? incoming.subjects
-          : prev.subjects || [],
+          : Array.isArray(prev.subjects)
+          ? prev.subjects
+          : [],
+
         groups: Array.isArray(incoming.groups)
           ? incoming.groups
-          : prev.groups || [],
+          : Array.isArray(prev.groups)
+          ? prev.groups
+          : [],
+
         visits: Array.isArray(incoming.visits)
           ? incoming.visits
-          : prev.visits || [],
+          : Array.isArray(prev.visits)
+          ? prev.visits
+          : [],
+
         selectedModels: Array.isArray(incoming.selectedModels)
           ? incoming.selectedModels
-          : prev.selectedModels || [],
+          : Array.isArray(prev.selectedModels)
+          ? prev.selectedModels
+          : [],
+
         assignments: Array.isArray(incoming.assignments)
           ? incoming.assignments
-          : prev.assignments || [],
+          : Array.isArray(prev.assignments)
+          ? prev.assignments
+          : [],
       };
 
-      const content = this.study && this.study.content
-        ? this.study.content
-        : {};
+      //  keep subjectCount stable if schema doesn't provide it
+      if (!Number.isFinite(merged.subjectCount)) {
+        const n = Array.isArray(merged.subjects) ? merged.subjects.length : 0;
+        merged.subjectCount = n;
+      }
+
+      const content = this.study && this.study.content ? this.study.content : {};
       this.study = {
         ...this.study,
         content: {
@@ -1018,42 +1911,72 @@ export default {
 
     applyTemplateSchema(schema) {
       const current =
-        (this.study &&
-          this.study.content &&
-          this.study.content.study_data) ||
-        {};
+        (this.study && this.study.content && this.study.content.study_data) || {};
 
+      const incoming = schema || {};
+
+      //  Preserve current keys (assignmentMethod, skipSubjectCreationNow, etc.)
+      // Overlay schema, then normalize known parts.
       const normalized = {
-        study: schema?.study ?? current.study ?? {},
+        ...current,
+        ...incoming,
+
+        // merge nested study object instead of replacing it
+        study: {
+          ...(current.study || {}),
+          ...(incoming.study || {}),
+        },
+
         subjects:
-          Array.isArray(schema?.subjects) && schema.subjects.length
-            ? schema.subjects
-            : current.subjects || [],
-        subjectCount: Number.isFinite(schema?.subjectCount)
-          ? schema.subjectCount
-          : current.subjectCount ??
-            (current.subjects?.length || 0),
+          Array.isArray(incoming.subjects) && incoming.subjects.length
+            ? incoming.subjects
+            : Array.isArray(current.subjects)
+            ? current.subjects
+            : [],
+
         visits:
-          Array.isArray(schema?.visits) && schema.visits.length
-            ? schema.visits
-            : current.visits || [],
+          Array.isArray(incoming.visits) && incoming.visits.length
+            ? incoming.visits
+            : Array.isArray(current.visits)
+            ? current.visits
+            : [],
+
         groups:
-          Array.isArray(schema?.groups) && schema.groups.length
-            ? schema.groups
-            : current.groups || [],
-        selectedModels: Array.isArray(schema?.selectedModels)
-          ? schema.selectedModels
-          : current.selectedModels || [],
-        assignments: Array.isArray(schema?.assignments)
-          ? schema.assignments
-          : current.assignments || [],
+          Array.isArray(incoming.groups) && incoming.groups.length
+            ? incoming.groups
+            : Array.isArray(current.groups)
+            ? current.groups
+            : [],
+
+        selectedModels: Array.isArray(incoming.selectedModels)
+          ? incoming.selectedModels
+          : Array.isArray(current.selectedModels)
+          ? current.selectedModels
+          : [],
+
+        assignments: Array.isArray(incoming.assignments)
+          ? incoming.assignments
+          : Array.isArray(current.assignments)
+          ? current.assignments
+          : [],
       };
 
-      if (!this.study)
+      //  subjectCount: keep schema value if valid, else keep current, else derive
+      if (Number.isFinite(incoming.subjectCount)) {
+        normalized.subjectCount = incoming.subjectCount;
+      } else if (Number.isFinite(current.subjectCount)) {
+        normalized.subjectCount = current.subjectCount;
+      } else {
+        normalized.subjectCount = Array.isArray(normalized.subjects) ? normalized.subjects.length : 0;
+      }
+
+      if (!this.study) {
         this.study = { metadata: {}, content: { study_data: normalized } };
-      else if (!this.study.content)
+      } else if (!this.study.content) {
         this.study.content = { study_data: normalized };
-      else this.study.content.study_data = normalized;
+      } else {
+        this.study.content.study_data = normalized;
+      }
 
       this.initializeEntryData();
       this.prepareSubjectGroupIndexMap();
@@ -1096,18 +2019,9 @@ export default {
         this.applyVersionView();
         const nS = this.numberOfSubjects;
         const nV = this.visitList.length;
-        if (
-          this.currentSubjectIndex == null ||
-          this.currentSubjectIndex >= nS
-        )
-          this.currentSubjectIndex = Math.min(0, nS - 1);
-        if (
-          this.currentVisitIndex == null ||
-          this.currentVisitIndex >= nV
-        )
-          this.currentVisitIndex = Math.min(0, nV - 1);
-        this.selectedVisitIndex =
-          this.visitList.length > this.VISIT_THRESHOLD ? 0 : -1;
+        if (this.currentSubjectIndex == null || this.currentSubjectIndex >= nS) this.currentSubjectIndex = Math.min(0, nS - 1);
+        if (this.currentVisitIndex == null || this.currentVisitIndex >= nV) this.currentVisitIndex = Math.min(0, nV - 1);
+        this.selectedVisitIndex = this.visitList.length > this.VISIT_THRESHOLD ? 0 : -1;
       });
     },
 
@@ -1170,14 +2084,15 @@ export default {
     },
     fieldDictKey(fieldObj, fallbackIndex) {
       return (
-            fieldObj?.name ||               //  "checkbox_3_1772010932126"
-            fieldObj?.id ||
-            fieldObj?.field_id ||
-            fieldObj?.uid ||
-            fieldObj?.key ||
-            fieldObj?.label ||
-            fieldObj?.title ||
-            `f${fallbackIndex}`
+        fieldObj?.id ||
+        fieldObj?._id ||
+        fieldObj?.name ||
+        fieldObj?.field_id ||
+        fieldObj?.uid ||
+        fieldObj?.key ||
+        fieldObj?.label ||
+        fieldObj?.title ||
+        `f${fallbackIndex}`
       );
     },
     arrayToDict(sectionFieldArray) {
@@ -1213,6 +2128,29 @@ export default {
       });
       return out;
     },
+        getValueFromSectionDict(secObj, field, fIdx) {
+      if (!secObj || typeof secObj !== "object") return undefined;
+
+      const candidates = [
+        field?.id,
+        field?._id,
+        field?.field_id,
+        field?.uid,
+        field?.key,
+        field?.name,
+        field?.label,
+        field?.title,
+        `f${fIdx}`,
+      ].filter(Boolean);
+
+      for (const k of candidates) {
+        if (Object.prototype.hasOwnProperty.call(secObj, k)) {
+          return secObj[k];
+        }
+      }
+
+      return undefined;
+    },
 
     dictToArray(dataDict) {
       return (this.selectedModels || []).map((sec) => {
@@ -1223,6 +2161,7 @@ export default {
           // Try multiple candidate keys
           const candidates = [
             f?.id,
+            f?._id,
             f?.field_id,
             f?.uid,
             f?.key,
@@ -1293,6 +2232,7 @@ export default {
         this.skipFlags[s] ??= [];
         this.skipFlags[s][v] ??= [];
         this.skipFlags[s][v][g] = cached.skipFlags;
+        this.runCalculationsForCell(s, v, g, null, null);
         return;
       }
 
@@ -1304,6 +2244,7 @@ export default {
           skipFlags: this.skipFlags[s][v][g],
           id: null,
         });
+        this.runCalculationsForCell(s, v, g, null, null);
         return;
       }
 
@@ -1338,6 +2279,8 @@ export default {
         skipFlags: this.skipFlags[s][v][g],
         id: best.id,
       });
+
+      this.runCalculationsForCell(s, v, g, null, null);
     },
 
     setDeepValue(s, v, g, m, f, val) {
@@ -1366,6 +2309,7 @@ export default {
       this.setDeepValue(s, v, g, mIdx, fIdx, val);
       this.clearError(mIdx, fIdx);
       this.validateField(mIdx, fIdx);
+      this.onRuntimeFieldChanged(mIdx, fIdx);
       this.hydrateCache.delete(`${s}|${v}|${g}|${this.selectedVersion}`);
     },
 
@@ -1597,6 +2541,7 @@ export default {
         }
       }
       this.validateField(mIdx, fIdx);
+      this.onRuntimeFieldChanged(mIdx, fIdx);
     },
     applyTransformsForSection() {
       this.assignedModelIndices.forEach((mIdx) => {
@@ -1613,7 +2558,7 @@ export default {
                   this.currentVisitIndex
                 ][this.currentGroupIndex][mIdx][fIdx];
               const t = this.applyTransform(cons.transform, cur);
-              if (t !== cur)
+              if (t !== cur) {
                 this.setDeepValue(
                   this.currentSubjectIndex,
                   this.currentVisitIndex,
@@ -1622,9 +2567,10 @@ export default {
                   fIdx,
                   t
                 );
+                this.onRuntimeFieldChanged(mIdx, fIdx);
+              }
             }
-          }
-        );
+          });
       });
     },
 
@@ -1684,11 +2630,8 @@ export default {
         this.currentSubjectIndex = payload.subject_index ?? 0;
         this.currentVisitIndex = payload.visit_index ?? 0;
         this.currentGroupIndex = payload.group_index ?? 0;
-        this.ensureSlot(
-          this.currentSubjectIndex,
-          this.currentVisitIndex,
-          this.currentGroupIndex
-        );
+        this.ensureSlot(this.currentSubjectIndex, this.currentVisitIndex, this.currentGroupIndex);
+        this.runAllCalculationsForCurrentCell();
         this.showSelection = false;
         this.validationErrors = {};
       } catch (e) {
@@ -1761,6 +2704,11 @@ export default {
         const section = this.selectedModels[mIdx];
         section.fields.forEach((f, fIdx) => {
           const cons = f?.constraints || {};
+          if (this.isCalculatedRuntimeField(mIdx, fIdx)) {
+            this.clearError(mIdx, fIdx);
+            this.clearCalcWarningFor(mIdx, fIdx);
+            return;
+          }
           if (cons.readonly) {
             this.clearError(mIdx, fIdx);
             return;
@@ -1771,8 +2719,10 @@ export default {
           this.setDeepValue(s, v, g, mIdx, fIdx, next);
           this.setDeepSkip(s, v, g, mIdx, fIdx, false);
           this.clearError(mIdx, fIdx);
+          this.clearCalcWarningFor(mIdx, fIdx);
         });
       });
+      this.runAllCalculationsForCurrentCell();
       this.hydrateCache.delete(`${s}|${v}|${g}|${this.selectedVersion}`);
     },
 
@@ -1800,6 +2750,7 @@ export default {
       );
 
       this.validationErrors = {};
+      this.calcWarnings = {};
     },
 
     prepareAssignmentsLookup() {
@@ -1818,7 +2769,7 @@ export default {
     prepareSubjectGroupIndexMap() {
       const subjects =
         this.study?.content?.study_data?.subjects || [];
-        this.subjectToGroupIdx = subjects.map((s) => {
+      this.subjectToGroupIdx = subjects.map((s) => {
         const raw = (s.group || "");
         const name = String(raw).trim();
         if (!name) return -1;
@@ -1866,8 +2817,8 @@ export default {
       }
     },
 
-    buildStatusCache() {
-      this.statusMap = new Map();
+        buildStatusCache() {
+      const nextMap = new Map();
       const nS = this.numberOfSubjects;
       const nV = this.visitList.length;
 
@@ -1883,29 +2834,29 @@ export default {
 
       for (let s = 0; s < nS; s++) {
         const g = this.subjectToGroupIdx[s];
+
         if (g == null || g < 0) {
-          for (const v of vIndices) this.statusMap.set(`${s}|${v}`, "none");
+          for (const v of vIndices) nextMap.set(`${s}|${v}`, "none");
           continue;
         }
+
         for (const v of vIndices) {
           const e = this.getBestEntryFor(s, v, g);
           const key = `${s}|${v}`;
 
           if (!e) {
-            this.statusMap.set(key, "none");
+            nextMap.set(key, "none");
             continue;
           }
 
           const flags = e.skipped_required_flags;
           const hasSkip = !!(
             Array.isArray(flags) &&
-            flags.some(
-              (row) =>
-                Array.isArray(row) && row.some((x) => !!x)
-            )
+            flags.some((row) => Array.isArray(row) && row.some((x) => !!x))
           );
+
           if (hasSkip) {
-            this.statusMap.set(key, "skipped");
+            nextMap.set(key, "skipped");
             continue;
           }
 
@@ -1918,34 +2869,51 @@ export default {
               const sec = this.selectedModels[mIdx] || {};
               const sKey = this.sectionDictKey(sec);
               const secObj = e.data[sKey] || {};
+
               (sec.fields || []).forEach((f, fIdx) => {
-                const fKey = this.fieldDictKey(f, fIdx);
-                const val = secObj[fKey];
+                const val = this.getValueFromSectionDict
+                  ? this.getValueFromSectionDict(secObj, f, fIdx)
+                  : secObj[this.fieldDictKey(f, fIdx)];
+
                 total += 1;
-                if (val != null && val !== "") filled += 1;
+
+                if (Array.isArray(val)) {
+                  if (val.length > 0) filled += 1;
+                } else if (typeof val === "boolean") {
+                  if (val === true) filled += 1;
+                } else if (val != null && String(val).trim() !== "") {
+                  filled += 1;
+                }
               });
             }
           } else if (Array.isArray(e.data)) {
             for (const mIdx of assigned) {
               const row = e.data[mIdx] || [];
               total += row.length;
-              filled += row.filter(
-                (vv) => vv != null && vv !== ""
-              ).length;
+              filled += row.filter((vv) => {
+                if (Array.isArray(vv)) return vv.length > 0;
+                if (typeof vv === "boolean") return vv === true;
+                return vv != null && String(vv).trim() !== "";
+              }).length;
             }
           }
 
-          if (total === 0 || filled === 0)
-            this.statusMap.set(key, "none");
-          else if (filled === total)
-            this.statusMap.set(key, "complete");
-          else this.statusMap.set(key, "partial");
+          if (total === 0 || filled === 0) {
+            nextMap.set(key, "none");
+          } else if (filled === total) {
+            nextMap.set(key, "complete");
+          } else {
+            nextMap.set(key, "partial");
+          }
         }
       }
+
+      this.statusMap = nextMap;
     },
 
     statusClassFast(sIdx, vIdx) {
-      const s = this.statusMap.get(`${sIdx}|${vIdx}`) || "none";
+      const map = this.statusMap instanceof Map ? this.statusMap : new Map();
+      const s = map.get(`${sIdx}|${vIdx}`) || "none";
       return s === "skipped" ? "status-skipped" : `status-${s}`;
     },
 
@@ -1981,24 +2949,24 @@ export default {
 
       this.showSelection = false;
       this.validationErrors = {};
+      this.calcWarnings = {};
 
       this.visitLoading = true;
-      this.hydrateCell(
-        this.currentSubjectIndex,
-        this.currentVisitIndex,
-        this.currentGroupIndex
-      );
+      this.hydrateCell(this.currentSubjectIndex, this.currentVisitIndex, this.currentGroupIndex);
+      this.runAllCalculationsForCurrentCell();
       this.visitLoading = false;
     },
 
-    backToSelection() {
+        backToSelection() {
       if (this.isShared) return;
+      this.buildStatusCache();
       this.showSelection = true;
       this.showDetails = false;
       this.currentSubjectIndex = null;
       this.currentVisitIndex = null;
       this.currentGroupIndex = 0;
       this.validationErrors = {};
+      this.calcWarnings = {};
     },
     toggleDetails() {
       this.showDetails = !this.showDetails;
@@ -2126,22 +3094,10 @@ export default {
           }
           return true;
         } else {
-          const min = Number.isFinite(+cons.min)
-            ? Math.round(+cons.min)
-            : 1;
-          const max = Number.isFinite(+cons.max)
-            ? Math.round(+cons.max)
-            : 5;
-          if (
-            n < min ||
-            n > max ||
-            Math.round(n) !== n
-          ) {
-            this.setError(
-              mIdx,
-              fIdx,
-              `${label} must be an integer between ${min} and ${max}.`
-            );
+          const min = Number.isFinite(+cons.min) ? Math.round(+cons.min) : 1;
+          const max = Number.isFinite(+cons.max) ? Math.round(+cons.max) : 5;
+          if (n < min || n > max || Math.round(n) !== n) {
+            this.setError(mIdx, fIdx, `${label} must be an integer between ${min} and ${max}.`);
             return false;
           }
           return true;
@@ -2149,25 +3105,15 @@ export default {
       }
 
       if (def.type !== "file") {
-        const { valid, message } = validateFieldValue(
-          this.ajv,
-          def,
-          val
-        );
+        const { valid, message } = validateFieldValue(this.ajv, def, val);
         if (!valid) {
-          this.setError(
-            mIdx,
-            fIdx,
-            message || `${label} is invalid.`
-          );
+          this.setError(mIdx, fIdx, message || `${label} is invalid.`);
           return false;
         }
       }
 
       if (def.type === "date" && val) {
-        const cons =
-          (this.selectedModels[mIdx].fields[fIdx] || {})
-            .constraints || {};
+        const cons = (this.selectedModels[mIdx].fields[fIdx] || {}).constraints || {};
         const fmt = cons.dateFormat || "dd.MM.yyyy";
         const parse = (s) => {
           const map = {
@@ -2222,22 +3168,14 @@ export default {
           if (cons.minDate) {
             const md = parse(cons.minDate);
             if (md && d < md) {
-              this.setError(
-                mIdx,
-                fIdx,
-                `${def.label || def.name || "This field"} must be ≥ ${cons.minDate}.`
-              );
+              this.setError(mIdx, fIdx, `${def.label || def.name || "This field"} must be ≥ ${cons.minDate}.`);
               return false;
             }
           }
           if (cons.maxDate) {
             const xd = parse(cons.maxDate);
             if (xd && d > xd) {
-              this.setError(
-                mIdx,
-                fIdx,
-                `${def.label || def.name || "This field"} must be ≤ ${cons.maxDate}.`
-              );
+              this.setError(mIdx, fIdx, `${def.label || def.name || "This field"} must be ≤ ${cons.maxDate}.`);
               return false;
             }
           }
@@ -2245,12 +3183,9 @@ export default {
       }
 
       if (def.type === "time" && val) {
-        const cons =
-          (this.selectedModels[mIdx].fields[fIdx] || {})
-            .constraints || {};
+        const cons = (this.selectedModels[mIdx].fields[fIdx] || {}).constraints || {};
         const toSec = (s) => {
-          const mm =
-            /^(\d{2}):(\d{2})(?::(\d{2}))?$/.exec(String(s));
+          const mm = /^(\d{2}):(\d{2})(?::(\d{2}))?$/.exec(String(s));
           if (!mm) return null;
           const h = +mm[1],
             mi = +mm[2],
@@ -2262,22 +3197,14 @@ export default {
           if (cons.minTime) {
             const m = toSec(cons.minTime);
             if (m != null && secs < m) {
-              this.setError(
-                mIdx,
-                fIdx,
-                `${def.label || def.name || "This field"} must be ≥ ${cons.minTime}.`
-              );
+              this.setError(mIdx, fIdx, `${def.label || def.name || "This field"} must be ≥ ${cons.minTime}.`);
               return false;
             }
           }
           if (cons.maxTime) {
             const x = toSec(cons.maxTime);
             if (x != null && secs > x) {
-              this.setError(
-                mIdx,
-                fIdx,
-                `${def.label || def.name || "This field"} must be ≤ ${cons.maxTime}.`
-              );
+              this.setError(mIdx, fIdx, `${def.label || def.name || "This field"} must be ≤ ${cons.maxTime}.`);
               return false;
             }
           }
@@ -2288,21 +3215,17 @@ export default {
 
     validateCurrentSection() {
       this.assignedModelIndices.forEach((mIdx) => {
-        this.selectedModels[mIdx].fields.forEach(
-          (_, fIdx) => {
-            this.clearError(mIdx, fIdx);
-          }
-        );
+        this.selectedModels[mIdx].fields.forEach((_, fIdx) => {
+          this.clearError(mIdx, fIdx);
+        });
       });
 
       let ok = true;
       this.assignedModelIndices.forEach((mIdx) => {
-        this.selectedModels[mIdx].fields.forEach(
-          (_, fIdx) => {
-            const r = this.validateField(mIdx, fIdx);
-            ok = ok && r;
-          }
-        );
+        this.selectedModels[mIdx].fields.forEach((_, fIdx) => {
+          const r = this.validateField(mIdx, fIdx);
+          ok = ok && r;
+        });
       });
       return ok;
     },
@@ -2318,47 +3241,26 @@ export default {
         (section.fields || []).forEach((f, fIdx) => {
           const c = f?.constraints || {};
           if (!c.required) return;
-          if (this.skipFlags[s]?.[v]?.[g]?.[mIdx]?.[fIdx])
-            return;
+          if (this.skipFlags[s]?.[v]?.[g]?.[mIdx]?.[fIdx]) return;
           const val = this.entryData[s][v][g][mIdx][fIdx];
           const empty =
             f.type === "checkbox"
               ? val !== true
               : f.type === "file"
               ? c.allowMultipleFiles
-                ? !(
-                    Array.isArray(val) &&
-                    val.length > 0
-                  )
-                : !val ||
-                  (val.source === "url"
-                    ? !(
-                        val.url &&
-                        String(val.url).trim()
-                      )
-                    : !(
-                        val.name &&
-                        Number.isFinite(
-                          Number(val.size)
-                        )
-                      ))
+                ? !(Array.isArray(val) && val.length > 0)
+                : !val || (val.source === "url" ? !(val.url && String(val.url).trim()) : !(val.name && Number.isFinite(Number(val.size))))
               : Array.isArray(val)
               ? val.length === 0
-              : val == null ||
-                (typeof val === "string" &&
-                  val.trim() === "");
+              : val == null || (typeof val === "string" && val.trim() === "");
           if (empty) {
             items.push({
               key: this.errorKey(mIdx, fIdx),
               id: this.fieldId(mIdx, fIdx),
               sectionIndex: mIdx,
               fieldIndex: fIdx,
-              sectionTitle:
-                section.title || `Section ${mIdx + 1}`,
-              fieldLabel:
-                f.label ||
-                f.name ||
-                `Field ${fIdx + 1}`,
+              sectionTitle: section.title || `Section ${mIdx + 1}`,
+              fieldLabel: f.label || f.name || `Field ${fIdx + 1}`,
             });
           }
         });
@@ -2375,11 +3277,7 @@ export default {
 
       for (const mIdx of this.assignedModelIndices) {
         const section = this.selectedModels[mIdx];
-        for (
-          let fIdx = 0;
-          fIdx < (section.fields || []).length;
-          fIdx++
-        ) {
+        for (let fIdx = 0; fIdx < (section.fields || []).length; fIdx++) {
           const def = section.fields[fIdx] || {};
           if (def.type !== "file") continue;
 
@@ -2389,22 +3287,10 @@ export default {
           const val = this.entryData[s][v][g][mIdx][fIdx];
           if (!val && !allowMulti) continue;
 
-          const modalities = Array.isArray(
-            def?.constraints?.modalities
-          )
-            ? def.constraints.modalities
-            : [];
-          const modalitiesJson = JSON.stringify(
-            modalities || []
-          );
+          const modalities = Array.isArray(def?.constraints?.modalities) ? def.constraints.modalities : [];
+          const modalitiesJson = JSON.stringify(modalities || []);
 
-          const pendingArr = Array.isArray(
-            this.pendingFiles[key]
-          )
-            ? this.pendingFiles[key]
-            : this.pendingFiles[key]
-            ? [this.pendingFiles[key]]
-            : [];
+          const pendingArr = Array.isArray(this.pendingFiles[key]) ? this.pendingFiles[key] : this.pendingFiles[key] ? [this.pendingFiles[key]] : [];
           const matchFile = (meta) =>
             pendingArr.find(
               (f) =>
@@ -2412,14 +3298,10 @@ export default {
                 meta &&
                 f.name === meta.name &&
                 Number(f.size) === Number(meta.size) &&
-                (f.lastModified
-                  ? f.lastModified === meta.lastModified
-                  : true)
+                (f.lastModified ? f.lastModified === meta.lastModified : true)
             );
 
-          const base = this.isShared
-            ? `/forms/shared/${this.shareToken}`
-            : `/forms/studies/${studyId}`;
+          const base = this.isShared ? `/forms/shared/${this.shareToken}` : `/forms/studies/${studyId}`;
 
           if (allowMulti) {
             const items = Array.isArray(val) ? [...val] : [];
@@ -2432,14 +3314,8 @@ export default {
                 if (!file) continue;
                 const fd = new FormData();
                 fd.append("uploaded_file", file);
-                fd.append(
-                  "description",
-                  def.label || def.name || ""
-                );
-                fd.append(
-                  "modalities_json",
-                  modalitiesJson
-                );
+                fd.append("description", def.label || def.name || "");
+                fd.append("modalities_json", modalitiesJson);
                 if (!this.isShared) {
                   fd.append("storage_option", "local");
                   fd.append("subject_index", String(s));
@@ -2450,48 +3326,30 @@ export default {
                   ? { "Content-Type": "multipart/form-data" }
                   : {
                       Authorization: `Bearer ${this.token}`,
-                      "Content-Type":
-                        "multipart/form-data",
+                      "Content-Type": "multipart/form-data",
                     };
-                const resp = await axios.post(
-                  `${base}/files`,
-                  fd,
-                  { headers }
-                );
+                const resp = await axios.post(`${base}/files`, fd, {
+                  headers,
+                  params: { audit_label: "Upload File (Local)" },
+                });
                 const saved = resp?.data || {};
                 items[i] = {
                   ...it,
                   dbId: saved.id,
                   file_path: saved.file_path,
-                  storage_option:
-                    saved.storage_option ||
-                    (this.isShared ? "bids" : "local"),
+                  storage_option: saved.storage_option || (this.isShared ? "bids" : "local"),
                   file_name: saved.file_name || it.name,
                 };
-              } else if (
-                it.source === "url" &&
-                it.url
-              ) {
+              } else if (it.source === "url" && it.url) {
                 const fd = new FormData();
                 fd.append("url", it.url);
-                fd.append(
-                  "description",
-                  def.label || def.name || ""
-                );
-                fd.append(
-                  "modalities_json",
-                  modalitiesJson
-                );
-                const headers = this.isShared
-                  ? {}
-                  : {
-                      Authorization: `Bearer ${this.token}`,
-                    };
-                const resp = await axios.post(
-                  `${base}/files/url`,
-                  fd,
-                  { headers }
-                );
+                fd.append("description", def.label || def.name || "");
+                fd.append("modalities_json", modalitiesJson);
+                const headers = this.isShared ? {} : { Authorization: `Bearer ${this.token}` };
+                const resp = await axios.post(`${base}/files/url`, fd, {
+                  headers,
+                  params: { audit_label: "Upload - File (URL)" },
+                });
                 const saved = resp?.data || {};
                 items[i] = {
                   ...it,
@@ -2502,33 +3360,17 @@ export default {
                 };
               }
             }
-            this.setDeepValue(
-              s,
-              v,
-              g,
-              mIdx,
-              fIdx,
-              items
-            );
+            this.setDeepValue(s, v, g, mIdx, fIdx, items);
             delete this.pendingFiles[key];
           } else {
             if (!val) continue;
 
-            if (
-              val.source === "local" &&
-              pendingArr[0] instanceof File
-            ) {
+            if (val.source === "local" && pendingArr[0] instanceof File) {
               const file = pendingArr[0];
               const fd = new FormData();
               fd.append("uploaded_file", file);
-              fd.append(
-                "description",
-                def.label || def.name || ""
-              );
-              fd.append(
-                "modalities_json",
-                modalitiesJson
-              );
+              fd.append("description", def.label || def.name || "");
+              fd.append("modalities_json", modalitiesJson);
               if (!this.isShared) {
                 fd.append("storage_option", "local");
                 fd.append("subject_index", String(s));
@@ -2539,70 +3381,41 @@ export default {
                 ? { "Content-Type": "multipart/form-data" }
                 : {
                     Authorization: `Bearer ${this.token}`,
-                    "Content-Type":
-                      "multipart/form-data",
+                    "Content-Type": "multipart/form-data",
                   };
-              const resp = await axios.post(
-                `${base}/files`,
-                fd,
-                { headers }
-              );
+              const resp = await axios.post(`${base}/files`, fd, {
+                headers,
+                params: { audit_label: "Upload - File (Local)" },
+              });
               const saved = resp?.data || {};
-              this.setDeepValue(
-                s,
-                v,
-                g,
-                mIdx,
-                fIdx,
-                {
-                  ...val,
-                  dbId: saved.id,
-                  file_path: saved.file_path,
-                  storage_option:
-                    saved.storage_option ||
-                    (this.isShared ? "bids" : "local"),
-                  file_name: saved.file_name || val.name,
-                }
-              );
+              this.setDeepValue(s, v, g, mIdx, fIdx, {
+                ...val,
+                dbId: saved.id,
+                file_path: saved.file_path,
+                storage_option: saved.storage_option || (this.isShared ? "bids" : "local"),
+                file_name: saved.file_name || val.name,
+              });
               delete this.pendingFiles[key];
             }
 
             if (val.source === "url" && val.url) {
               const fd = new FormData();
               fd.append("url", val.url);
-              fd.append(
-                "description",
-                def.label || def.name || ""
-              );
-              fd.append(
-                "modalities_json",
-                modalitiesJson
-              );
-              const headers = this.isShared
-                ? {}
-                : {
-                    Authorization: `Bearer ${this.token}`,
-                  };
-              const resp = await axios.post(
-                `${base}/files/url`,
-                fd,
-                { headers }
-              );
+              fd.append("description", def.label || def.name || "");
+              fd.append("modalities_json", modalitiesJson);
+              const headers = this.isShared ? {} : { Authorization: `Bearer ${this.token}` };
+              const resp = await axios.post(`${base}/files/url`, fd, {
+                headers,
+                params: { audit_label: "Upload - File (URL)" },
+              });
               const saved = resp?.data || {};
-              this.setDeepValue(
-                s,
-                v,
-                g,
-                mIdx,
-                fIdx,
-                {
-                  ...val,
-                  dbId: saved.id,
-                  file_path: saved.file_path,
-                  storage_option: "url",
-                  file_name: saved.file_name || "",
-                }
-              );
+              this.setDeepValue(s, v, g, mIdx, fIdx, {
+                ...val,
+                dbId: saved.id,
+                file_path: saved.file_path,
+                storage_option: "url",
+                file_name: saved.file_name || "",
+              });
             }
           }
         }
@@ -2611,46 +3424,36 @@ export default {
 
     async submitData() {
       if (!this.canEdit) {
-        this.showDialogMessage(
-          "This shared link is view-only."
-        );
+        this.showDialogMessage("This shared link is view-only.");
         return;
       }
 
       this.applyTransformsForSection();
+      this.runAllCalculationsForCurrentCell();
 
       const ok = this.validateCurrentSection();
-      const blocking = Object.entries(
-        this.validationErrors
-      ).filter(([k, msg]) => {
+      const blocking = Object.entries(this.validationErrors).filter(([k, msg]) => {
         if (!msg) return false;
         const idx = this.parseKey(k);
         if (!idx) return true;
         const { s, v, g, m, f } = idx;
-        const isSkipped = !!(
-          this.skipFlags[s]?.[v]?.[g]?.[m]?.[f]
-        );
+        const isSkipped = !!(this.skipFlags[s]?.[v]?.[g]?.[m]?.[f]);
         if (isSkipped) return false;
         return !/ is required\.$/.test(msg);
       });
 
       if (!ok && blocking.length) {
-        this.showDialogMessage(
-          "Please fix validation errors before saving."
-        );
+        this.showDialogMessage("Please fix validation errors before saving.");
         return;
       }
 
       const requiredFailures = this.computeRequiredFailures();
       if (requiredFailures.length) {
         this.skipCandidates = requiredFailures;
-        this.skipSelections = requiredFailures.reduce(
-          (acc, it) => {
-            acc[it.key] = false;
-            return acc;
-          },
-          {}
-        );
+        this.skipSelections = requiredFailures.reduce((acc, it) => {
+          acc[it.key] = false;
+          return acc;
+        }, {});
         this.showSkipDialog = true;
         return;
       }
@@ -2659,9 +3462,7 @@ export default {
         await this.uploadPendingFilesForCurrentSection();
       } catch (e) {
         console.error("File upload/register failed:", e);
-        this.showDialogMessage(
-          "File upload failed. Please try again."
-        );
+        this.showDialogMessage("File upload failed. Please try again.");
         return;
       }
 
@@ -2669,14 +3470,14 @@ export default {
         v = this.currentVisitIndex,
         g = this.currentGroupIndex;
       this.ensureSlot(s, v, g);
-      const dictData = this.arrayToDict(
-        this.entryData[s][v][g]
-      );
+      const dictData = this.arrayToDict(this.entryData[s][v][g]);
 
       const rawSkipFlags = this.skipFlags[s][v][g];
-      const flagsPayload = this.isShared
-        ? this.flagsArrayToDict(rawSkipFlags)
-        : rawSkipFlags;
+      const flagsPayload = this.isShared ? this.flagsArrayToDict(rawSkipFlags) : rawSkipFlags;
+
+      const hasAnySkip = !!(
+        Array.isArray(rawSkipFlags) && rawSkipFlags.some((row) => Array.isArray(row) && row.some((x) => !!x))
+      );
 
       const payload = {
         study_id: this.study?.metadata?.id,
@@ -2689,10 +3490,10 @@ export default {
 
       try {
         if (this.isShared) {
-          const resp = await axios.post(
-            `/forms/shared/${this.shareToken}/data`,
-            payload
-          );
+          const auditLabel = hasAnySkip ? "Shared link data Entry (Skipped Required)" : "Shared link data Entry";
+          const resp = await axios.post(`/forms/shared/${this.shareToken}/data`, payload, {
+            params: { audit_label: auditLabel },
+          });
 
           const saved = {
             id: resp?.data?.id,
@@ -2701,26 +3502,15 @@ export default {
             visit_index: v,
             group_index: g,
             data: dictData,
-            skipped_required_flags:
-              resp?.data?.skipped_required_flags ??
-              rawSkipFlags,
-            form_version:
-              resp?.data?.form_version ??
-              this.selectedVersion,
-            created_at:
-              resp?.data?.created_at ??
-              new Date().toISOString(),
+            skipped_required_flags: resp?.data?.skipped_required_flags ?? rawSkipFlags,
+            form_version: resp?.data?.form_version ?? this.selectedVersion,
+            created_at: resp?.data?.created_at ?? new Date().toISOString(),
           };
-          (this.existingEntries =
-            this.existingEntries || []).push(saved);
+          (this.existingEntries = this.existingEntries || []).push(saved);
 
-          this.showDialogMessage(
-            "Data saved successfully."
-          );
+          this.showDialogMessage("Data saved successfully.");
           this.rebuildEntriesIndex();
-          this.hydrateCache.delete(
-            `${s}|${v}|${g}|${this.selectedVersion}`
-          );
+          this.hydrateCache.delete(`${s}|${v}|${g}|${this.selectedVersion}`);
           this.applyVersionView();
           this.updateStatusCacheFor(s, v, g);
           return;
@@ -2732,27 +3522,22 @@ export default {
         const existingId = this.entryIds[s][v][g];
 
         if (existingId) {
+          const auditLabel = hasAnySkip ? "Update/Edit Data Entry (Skipped Required)" : "Update/Edit Data Entry";
           const resp = await axios.put(
             `/forms/studies/${this.study.metadata.id}/data_entries/${existingId}`,
             payload,
-            headers
+            { ...headers, params: { audit_label: auditLabel } }
           );
-          this.showDialogMessage(
-            "Data updated successfully."
-          );
-          const idx = this.existingEntries.findIndex(
-            (x) => x.id === existingId
-          );
-          if (idx >= 0)
-            this.existingEntries.splice(idx, 1, resp.data);
+          this.showDialogMessage("Data updated successfully.");
+          const idx = this.existingEntries.findIndex((x) => x.id === existingId);
+          if (idx >= 0) this.existingEntries.splice(idx, 1, resp.data);
         } else {
-          const params = this.safeVersionParams(
-            this.selectedVersion
-          );
+          const params = this.safeVersionParams(this.selectedVersion);
+          const auditLabel = hasAnySkip ? "New Data Entry (Skipped Required)" : params ? "New Data Entry (Versioned)" : "New Data Entry";
           const resp = await axios.post(
             `/forms/studies/${this.study.metadata.id}/data`,
             payload,
-            params ? { ...headers, params } : headers
+            params ? { ...headers, params: { ...params, audit_label: auditLabel } } : { ...headers, params: { audit_label: auditLabel } }
           );
           const newId = resp?.data?.id;
           this.entryIds[s][v][g] = newId;
@@ -2763,89 +3548,95 @@ export default {
             visit_index: v,
             group_index: g,
             data: dictData,
-            skipped_required_flags:
-              resp?.data?.skipped_required_flags ??
-              rawSkipFlags,
-            form_version:
-              resp?.data?.form_version ??
-              this.selectedVersion,
-            created_at:
-              resp?.data?.created_at ??
-              new Date().toISOString(),
+            skipped_required_flags: resp?.data?.skipped_required_flags ?? rawSkipFlags,
+            form_version: resp?.data?.form_version ?? this.selectedVersion,
+            created_at: resp?.data?.created_at ?? new Date().toISOString(),
           };
-          (this.existingEntries =
-            this.existingEntries || []).push(saved);
-          this.showDialogMessage(
-            "Data saved successfully."
-          );
+          (this.existingEntries = this.existingEntries || []).push(saved);
+          this.showDialogMessage("Data saved successfully.");
         }
 
         this.rebuildEntriesIndex();
-        this.hydrateCache.delete(
-          `${s}|${v}|${g}|${this.selectedVersion}`
-        );
+        this.hydrateCache.delete(`${s}|${v}|${g}|${this.selectedVersion}`);
         this.applyVersionView();
         this.updateStatusCacheFor(s, v, g);
       } catch (err) {
         console.error(err);
-        this.showDialogMessage(
-          "Failed to save data. Check console for details."
-        );
+        this.showDialogMessage("Failed to save data. Check console for details.");
       }
     },
 
-    updateStatusCacheFor(s, v, g) {
+        updateStatusCacheFor(s, v, g) {
       const e = this.getBestEntryFor(s, v, g);
       const key = `${s}|${v}`;
+
+      const nextMap = new Map(this.statusMap || []);
+
       if (!e) {
-        this.statusMap.set(key, "none");
+        nextMap.set(key, "none");
+        this.statusMap = nextMap;
         return;
       }
 
       const flags = e.skipped_required_flags;
       const hasSkip = !!(
         Array.isArray(flags) &&
-        flags.some(
-          (row) =>
-            Array.isArray(row) && row.some((x) => !!x)
-        )
+        flags.some((row) => Array.isArray(row) && row.some((x) => !!x))
       );
+
       if (hasSkip) {
-        this.statusMap.set(key, "skipped");
+        nextMap.set(key, "skipped");
+        this.statusMap = nextMap;
         return;
       }
 
       const assigned = this.assignedLookup?.[v]?.[g] || [];
-      let total = 0,
-        filled = 0;
+      let total = 0;
+      let filled = 0;
 
       if (e.data && !Array.isArray(e.data) && typeof e.data === "object") {
         for (const mIdx of assigned) {
           const sec = this.selectedModels[mIdx] || {};
           const sKey = this.sectionDictKey(sec);
           const secObj = e.data[sKey] || {};
+
           (sec.fields || []).forEach((f, fIdx) => {
-            const fKey = this.fieldDictKey(f, fIdx);
-            const val = secObj[fKey];
+            const val = this.getValueFromSectionDict
+              ? this.getValueFromSectionDict(secObj, f, fIdx)
+              : secObj[this.fieldDictKey(f, fIdx)];
+
             total += 1;
-            if (val != null && val !== "") filled += 1;
+
+            if (Array.isArray(val)) {
+              if (val.length > 0) filled += 1;
+            } else if (typeof val === "boolean") {
+              if (val === true) filled += 1;
+            } else if (val != null && String(val).trim() !== "") {
+              filled += 1;
+            }
           });
         }
       } else if (Array.isArray(e.data)) {
         for (const mIdx of assigned) {
           const row = e.data[mIdx] || [];
           total += row.length;
-          filled += row.filter(
-            (vv) => vv != null && vv !== ""
-          ).length;
+          filled += row.filter((vv) => {
+            if (Array.isArray(vv)) return vv.length > 0;
+            if (typeof vv === "boolean") return vv === true;
+            return vv != null && String(vv).trim() !== "";
+          }).length;
         }
       }
 
-      if (total === 0 || filled === 0)
-        this.statusMap.set(key, "none");
-      else if (filled === total)
-        this.statusMap.set(key, "complete");
-      else this.statusMap.set(key, "partial");
+      if (total === 0 || filled === 0) {
+        nextMap.set(key, "none");
+      } else if (filled === total) {
+        nextMap.set(key, "complete");
+      } else {
+        nextMap.set(key, "partial");
+      }
+
+      this.statusMap = nextMap;
     },
 
     confirmSkipSelection() {
@@ -2854,19 +3645,18 @@ export default {
         g = this.currentGroupIndex;
       this.skipCandidates.forEach((it) => {
         const on = !!this.skipSelections[it.key];
-        this.setDeepSkip(
-          s,
-          v,
-          g,
-          it.sectionIndex,
-          it.fieldIndex,
-          on
-        );
+        this.setDeepSkip(s, v, g, it.sectionIndex, it.fieldIndex, on);
         if (on) this.clearError(it.sectionIndex, it.fieldIndex);
       });
       this.showSkipDialog = false;
       this.submitData();
     },
+
+    confirmSkipSelectionFromDialog(nextSelections) {
+      this.skipSelections = { ...(nextSelections || {}) };
+      this.confirmSkipSelection();
+    },
+
     cancelSkipSelection() {
       this.showSkipDialog = false;
     },
@@ -2884,13 +3674,29 @@ export default {
         visitIndex: vIdx,
         groupIndex: gIdx,
       };
+
+      const available = (this.selectedModels || [])
+        .map((sec, mIdx) => ({ sec, mIdx }))
+        .filter(({ mIdx }) => !!this.assignments?.[mIdx]?.[vIdx]?.[gIdx])
+        .map(({ sec }) => ({
+          id: String(sec?._id || sec?.id || "").trim(),
+          title: sec?.title || "Untitled Section"
+        }))
+        .filter(s => s.id);
+
+      this.shareConfig = {
+        permission: "view",
+        maxUses: 1,
+        expiresInDays: 7,
+        allowed_section_ids: available.map(x => x.id)
+      };
+
       this.generatedLink = "";
       this.copyStatus = "";
       this.showShareDialog = true;
     },
     async createShareLink() {
-      const { subjectIndex, visitIndex, groupIndex } =
-        this.shareParams;
+      const { subjectIndex, visitIndex, groupIndex } = this.shareParams;
       const payload = {
         study_id: this.study.metadata.id,
         subject_index: subjectIndex,
@@ -2899,32 +3705,26 @@ export default {
         permission: this.shareConfig.permission,
         max_uses: this.shareConfig.maxUses,
         expires_in_days: this.shareConfig.expiresInDays,
+        allowed_section_ids: this.shareConfig.allowed_section_ids || []
       };
       try {
-        const resp = await axios.post(
-          "/forms/share-link/",
-          payload,
-          {
-            headers: { Authorization: `Bearer ${this.token}` },
-          }
-        );
+        const resp = await axios.post("/forms/share-link/", payload, {
+          headers: { Authorization: `Bearer ${this.token}` },
+          params: { audit_label: "Create - Sharable Link" },
+        });
         this.generatedLink = resp.data.link;
         this.copyStatus = "";
+        this.showShareDialog = true;
       } catch (err) {
         this.generatedLink = "";
         this.copyStatus = "";
-        if (err.response?.status === 403)
-          this.permissionError = true;
+        if (err.response?.status === 403) this.permissionError = true;
       }
     },
 
-    // --- Add Subjects flow ---
-
     openSubjectDialog() {
       if (this.isShared) {
-        this.showDialogMessage(
-          "Subjects can only be added from the main study, not from shared links."
-        );
+        this.showDialogMessage("Subjects can only be added from the main study, not from shared links.");
         return;
       }
 
@@ -2963,9 +3763,7 @@ export default {
         return { prefix: "S", startIndex: 1, width: 3 };
       }
 
-      const last = String(
-        subjects[subjects.length - 1].id || ""
-      ).trim();
+      const last = String(subjects[subjects.length - 1].id || "").trim();
       const match = /^(\D*?)(\d+)$/.exec(last);
 
       if (!match) {
@@ -2993,24 +3791,16 @@ export default {
       const existing = this.sd.subjects || [];
       const existingIds = new Set(
         existing
-          .map((s) =>
-            String(
-              s.id || s.subject_id || ""
-            ).trim()
-          )
+          .map((s) => String(s.id || s.subject_id || "").trim())
           .filter(Boolean)
       );
 
-      const { prefix, startIndex, width } =
-        this.inferSubjectIdPattern();
+      const { prefix, startIndex, width } = this.inferSubjectIdPattern();
       const drafts = [];
 
       let num = startIndex;
       while (drafts.length < count) {
-        const id = `${prefix}${String(num).padStart(
-          width,
-          "0"
-        )}`;
+        const id = `${prefix}${String(num).padStart(width, "0")}`;
         if (!existingIds.has(id)) {
           drafts.push({
             id,
@@ -3026,66 +3816,50 @@ export default {
 
     defaultGroupForIndex(index) {
       if (!this.groupList.length) return null;
-      const g = this.groupList[
-        index % this.groupList.length
-      ];
+      const g = this.groupList[index % this.groupList.length];
       return g && g.name ? g.name : null;
     },
 
     applyAssignmentMethod() {
-      if (!this.subjectDrafts.length || !this.groupList.length)
-        return;
+      if (!this.subjectDrafts.length || !this.groupList.length) return;
 
-      const method = String(
-        this.assignmentMethodDraft || ""
-      ).toLowerCase();
+      const method = String(this.assignmentMethodDraft || "").toLowerCase();
 
       if (method === "random") {
-        this.subjectDrafts = this.subjectDrafts.map(
-          (s) => {
-            const idx = Math.floor(
-              Math.random() * this.groupList.length
-            );
-            const g = this.groupList[idx];
-            return {
-              ...s,
-              group: g && g.name ? g.name : null,
-            };
-          }
-        );
-      } else if (method === "manual") {
-        this.subjectDrafts = this.subjectDrafts.map(
-          (s, idx) => {
-            if (s.group) return s;
-            return {
-              ...s,
-              group: this.defaultGroupForIndex(idx),
-            };
-          }
-        );
-      } else if (method === "skip") {
-        this.subjectDrafts = this.subjectDrafts.map(
-          (s, idx) => ({
+        this.subjectDrafts = this.subjectDrafts.map((s) => {
+          const idx = Math.floor(Math.random() * this.groupList.length);
+          const g = this.groupList[idx];
+          return {
             ...s,
-            group:
-              s.group || this.defaultGroupForIndex(idx),
-          })
-        );
+            group: g && g.name ? g.name : null,
+          };
+        });
+      } else if (method === "manual") {
+        this.subjectDrafts = this.subjectDrafts.map((s, idx) => {
+          if (s.group) return s;
+          return {
+            ...s,
+            group: this.defaultGroupForIndex(idx),
+          };
+        });
+      } else if (method === "skip") {
+        this.subjectDrafts = this.subjectDrafts.map((s, idx) => ({
+          ...s,
+          group: s.group || this.defaultGroupForIndex(idx),
+        }));
       }
     },
 
     async saveNewSubjects() {
       if (this.isShared) {
-        this.subjectDialogError =
-          "Subjects cannot be added from a shared link.";
+        this.subjectDialogError = "Subjects cannot be added from a shared link.";
         return;
       }
 
       this.subjectDialogError = "";
 
       if (!this.subjectDrafts.length) {
-        this.subjectDialogError =
-          "Please configure at least one subject.";
+        this.subjectDialogError = "Please configure at least one subject.";
         return;
       }
 
@@ -3096,13 +3870,11 @@ export default {
 
       for (const s of cleanedDrafts) {
         if (!s.id) {
-          this.subjectDialogError =
-            "Each subject must have an ID.";
+          this.subjectDialogError = "Each subject must have an ID.";
           return;
         }
         if (!s.group) {
-          this.subjectDialogError =
-            "Each subject must be assigned to a group.";
+          this.subjectDialogError = "Each subject must be assigned to a group.";
           return;
         }
       }
@@ -3110,8 +3882,7 @@ export default {
       const seen = new Set();
       for (const s of cleanedDrafts) {
         if (seen.has(s.id)) {
-          this.subjectDialogError =
-            "Duplicate subject IDs in the new subjects.";
+          this.subjectDialogError = "Duplicate subject IDs in the new subjects.";
           return;
         }
         seen.add(s.id);
@@ -3120,11 +3891,7 @@ export default {
       const existing = this.sd.subjects || [];
       const existingIds = new Set(
         existing
-          .map((s) =>
-            String(
-              s.id || s.subject_id || ""
-            ).trim()
-          )
+          .map((s) => String(s.id || s.subject_id || "").trim())
           .filter(Boolean)
       );
       for (const s of cleanedDrafts) {
@@ -3136,11 +3903,7 @@ export default {
 
       const merged = [...existing, ...cleanedDrafts];
 
-      const currentStudyData =
-        (this.study &&
-          this.study.content &&
-          this.study.content.study_data) ||
-        {};
+      const currentStudyData = (this.study && this.study.content && this.study.content.study_data) || {};
       const updatedStudyData = {
         ...currentStudyData,
         subjects: merged,
@@ -3156,20 +3919,14 @@ export default {
 
       this.savingSubjects = true;
       try {
-        await axios.put(
-          `/forms/studies/${this.study.metadata.id}`,
-          payload,
-          { headers: { Authorization: `Bearer ${this.token}` } }
-        );
+        await axios.put(`/forms/studies/${this.study.metadata.id}`, payload, {
+          headers: { Authorization: `Bearer ${this.token}` },
+          params: { audit_label: "New Subjects (Add)" },
+        });
 
-        if (
-          this.study &&
-          this.study.content &&
-          this.study.content.study_data
-        ) {
+        if (this.study && this.study.content && this.study.content.study_data) {
           this.study.content.study_data.subjects = merged;
-          this.study.content.study_data.subjectCount =
-            merged.length;
+          this.study.content.study_data.subjectCount = merged.length;
         }
 
         this.initializeEntryData();
@@ -3181,13 +3938,10 @@ export default {
         this.subjectCountDraft = 1;
         this.assignmentMethodDraft = "Random";
 
-        this.showDialogMessage(
-          "Subjects added successfully."
-        );
+        this.showDialogMessage("Subjects added successfully.");
       } catch (e) {
         console.error("Failed to add subjects", e);
-        this.subjectDialogError =
-          "Failed to save subjects. Please try again.";
+        this.subjectDialogError = "Failed to save subjects. Please try again.";
       } finally {
         this.savingSubjects = false;
       }
@@ -3267,34 +4021,31 @@ export default {
       let updatedSubjects;
 
       if (scope === "all") {
-      const drafts = Array.isArray(this.groupAssignDrafts) ? this.groupAssignDrafts : [];
+        const drafts = Array.isArray(this.groupAssignDrafts) ? this.groupAssignDrafts : [];
 
-      if (!drafts.length) {
-        this.groupAssignError = "No unassigned subjects found.";
-        return;
-      }
-
-      for (const d of drafts) {
-        const g = String(d.group || "").trim();
-        if (!g) {
-          this.groupAssignError = "Each listed subject must be assigned to a group.";
+        if (!drafts.length) {
+          this.groupAssignError = "No unassigned subjects found.";
           return;
         }
-      }
 
-      const map = new Map(drafts.map((d) => [Number(d.index), String(d.group || "").trim()]));
+        for (const d of drafts) {
+          const g = String(d.group || "").trim();
+          if (!g) {
+            this.groupAssignError = "Each listed subject must be assigned to a group.";
+            return;
+          }
+        }
 
-      updatedSubjects = subjects.map((s, idx) => {
-        const cur = String(s.group || "").trim();
-        if (cur) return s; // already assigned stays untouched
-        const chosen = map.get(idx);
-        return chosen ? { ...s, group: chosen } : s;
-      });
-    } else {
-        // Assign ONLY this subject
-        updatedSubjects = subjects.map((s, idx) =>
-          idx === sIdx ? { ...s, group: groupName } : s
-        );
+        const map = new Map(drafts.map((d) => [Number(d.index), String(d.group || "").trim()]));
+
+        updatedSubjects = subjects.map((s, idx) => {
+          const cur = String(s.group || "").trim();
+          if (cur) return s;
+          const chosen = map.get(idx);
+          return chosen ? { ...s, group: chosen } : s;
+        });
+      } else {
+        updatedSubjects = subjects.map((s, idx) => (idx === sIdx ? { ...s, group: groupName } : s));
       }
 
       const updatedStudyData = {
@@ -3312,20 +4063,16 @@ export default {
       this.groupAssignError = "";
 
       try {
-        await axios.put(
-          `/forms/studies/${this.study.metadata.id}`,
-          payload,
-          { headers: { Authorization: `Bearer ${this.token}` } }
-        );
+        await axios.put(`/forms/studies/${this.study.metadata.id}`, payload, {
+          headers: { Authorization: `Bearer ${this.token}` },
+          params: { audit_label: scope === "all" ? "Update - Subject Groups (All)" : "Update - Subject Group" },
+        });
 
-        // Update local
         this.study.content.study_data.subjects = updatedSubjects;
         this.study.content.study_data.subjectCount = updatedSubjects.length;
 
-        // Rebuild map
         this.prepareSubjectGroupIndexMap();
 
-        // Continue into entry for the originally clicked subject only
         const g = this.subjectToGroupIdx[sIdx];
         if (g == null || g < 0) {
           this.groupAssignError = "Group assignment failed. Please try again.";
@@ -3341,7 +4088,9 @@ export default {
 
         this.showSelection = false;
         this.validationErrors = {};
+        this.calcWarnings = {};
         this.hydrateCell(this.currentSubjectIndex, this.currentVisitIndex, this.currentGroupIndex);
+        this.runAllCalculationsForCurrentCell();
 
         this.showGroupAssignDialog = false;
       } catch (e) {
@@ -3354,8 +4103,30 @@ export default {
   },
 };
 </script>
-
 <style scoped>
+.selection-import-bar {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 12px;
+}
+
+.import-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: #2563eb;
+  color: #ffffff;
+  border: none;
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-size: 14px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.import-btn:hover {
+  background: #1d4ed8;
+}
 .study-data-container {
   max-width: none;
   margin: 24px auto;
@@ -3369,7 +4140,7 @@ export default {
 .back-buttons-container {
   margin-bottom: 16px;
 }
- .btn-back {
+.btn-back {
   display: inline-flex;
   align-items: center;
   gap: 8px;
@@ -3397,7 +4168,7 @@ export default {
 
 .btn-back i {
   font-size: 14px;
- }
+}
 
 /* Header */
 .study-header-container {
@@ -3676,248 +4447,6 @@ select:focus {
   font-size: 16px;
   color: #6b7280;
 }
-.dialog-overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.5);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 1000;
-}
-.dialog {
-  background: #ffffff;
-  padding: 1.5rem;
-  border-radius: 8px;
-  width: 320px;
-  max-width: 90%;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-}
-.dialog h3 {
-  margin: 0 0 1rem 0;
-  font-size: 1.25rem;
-  font-weight: 600;
-  color: #1f2937;
-}
-.dialog label {
-  display: block;
-  margin-bottom: 0.75rem;
-  font-size: 0.9rem;
-  color: #374151;
-}
-.dialog label select,
-.dialog label input {
-  width: 100%;
-  margin-top: 0.25rem;
-  padding: 0.5rem;
-  border: 1px solid #d1d5db;
-  border-radius: 6px;
-  font-size: 0.9rem;
-}
-.dialog-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 0.5rem;
-  margin-top: 1rem;
-}
-.dialog-actions button {
-  padding: 0.5rem 1rem;
-  border: none;
-  border-radius: 6px;
-  cursor: pointer;
-  font-size: 0.9rem;
-}
-.dialog-actions button:first-child,
-.dialog-actions button:last-child {
-  background: #e5e7eb;
-  color: #1f2937;
-}
-
-/* Share result + copy button layout */
-.share-result {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  margin-top: 12px;
-}
-.share-result-text {
-  font-size: 13px;
-  color: #374151;
-}
-.btn-copy-link {
-  background: #2563eb;
-  color: #ffffff;
-  border: none;
-  padding: 8px 12px;
-  border-radius: 6px;
-  font-size: 13px;
-  cursor: pointer;
-  transition: background 0.2s;
-  white-space: nowrap;
-}
-.btn-copy-link:hover {
-  background: #1d4ed8;
-}
-.generated-link-preview {
-  margin-top: 8px;
-  font-size: 12px;
-  color: #6b7280;
-  background: #f9fafb;
-  border: 1px solid #e5e7eb;
-  border-radius: 6px;
-  padding: 8px;
-  word-break: break-all;
-}
-.copy-status {
-  margin-top: 6px;
-  font-size: 12px;
-  color: #374151;
-}
-
-/* Mini dialog (constraints / legends) */
-.mini-overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(17, 24, 39, 0.35);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 1200;
-}
-.mini-dialog {
-  width: 360px;
-  max-width: 92%;
-  background: #fff;
-  border-radius: 10px;
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25);
-  padding: 12px 12px 10px;
-}
-.mini-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 6px;
-}
-.mini-title {
-  margin: 0;
-  font-size: 16px;
-  font-weight: 600;
-  color: #111827;
-}
-.mini-close {
-  background: transparent;
-  border: none;
-  font-size: 16px;
-  line-height: 1;
-  cursor: pointer;
-  color: #6b7280;
-}
-.mini-close:hover {
-  color: #111827;
-}
-.mini-list {
-  margin: 0;
-  padding-left: 18px;
-  color: #374151;
-  font-size: 14px;
-}
-.mini-list li {
-  margin: 4px 0;
-}
-
-/* Legend swatches */
-.legend-swatch {
-  width: 12px;
-  height: 12px;
-  border-radius: 3px;
-  border: 1px solid rgba(0, 0, 0, 0.12);
-  display: inline-block;
-  margin-right: 8px;
-  vertical-align: -1px;
-}
-.swatch-none {
-  background: #e5e7eb;
-}
-.swatch-partial {
-  background: #fbbf24;
-}
-.swatch-complete {
-  background: #16a34a;
-}
-.swatch-skipped {
-  background: #ef4444;
-}
-.legend-explain li {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-/* Skip dialog */
-.dialog-wide {
-  width: 680px;
-  max-width: 95%;
-}
-.skip-list {
-  max-height: 360px;
-  overflow: auto;
-  border: 1px dashed #e5e7eb;
-  padding: 8px;
-  border-radius: 8px;
-  margin: 10px 0;
-}
-.skip-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 8px;
-  border-bottom: 1px solid #f3f4f6;
-  gap: 12px;
-}
-.skip-row:last-child {
-  border-bottom: none;
-}
-.skip-left {
-  min-width: 0;
-}
-.skip-title {
-  font-size: 14px;
-  color: #111827;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.skip-right {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.skip-chk {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-}
-.btn-jump {
-  background: #e5e7eb;
-  color: #111827;
-  border: none;
-  padding: 6px 10px;
-  border-radius: 6px;
-  cursor: pointer;
-}
-.btn-jump:hover {
-  background: #d1d5db;
-}
-.btn-primary {
-  background: #2563eb;
-  color: #fff;
-  border: none;
-}
-.btn-option {
-  background: #e5e7eb;
-  color: #111827;
-}
 
 /* Tiny pill near error */
 .skip-pill {
@@ -3937,5 +4466,37 @@ select:focus {
   border: 1px solid #e5e7eb;
   border-radius: 10px;
   background: #ffffff;
+}
+.calc-warning-message {
+  color: #92400e;
+  font-size: 12px;
+  margin-top: 4px;
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+  border-radius: 6px;
+  padding: 6px 8px;
+}
+.crumb-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.import-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: #2563eb;
+  color: #ffffff;
+  border: none;
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-size: 14px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.import-btn:hover {
+  background: #1d4ed8;
 }
 </style>

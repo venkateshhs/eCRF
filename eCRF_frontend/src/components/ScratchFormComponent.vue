@@ -1,15 +1,15 @@
 <template>
   <div class="create-form-container">
     <!-- Header -->
-    <div class="header-container">
+    <div v-if="!showMatrix && !showLogic" class="header-container">
       <button @click="goBack" class="btn-back" title="Go Back">
-       Back
+        Back
       </button>
     </div>
 
-    <div class="scratch-form-content">
+    <div class="scratch-form-content" :class="{ 'scratch-form-content-full': showMatrix || showLogic }">
       <!-- ───────── Available Fields ───────── -->
-      <div v-if="!showMatrix" class="available-fields">
+      <div v-if="!showMatrix && !showLogic" class="available-fields">
         <h2>Available Fields</h2>
 
         <div class="tabs">
@@ -26,6 +26,7 @@
             @click="activeTab = 'obi'"
           >Ontology (OBI)</button>
           <button
+            v-if="false"
             :class="{ active: activeTab === 'shacl' }"
             @click="activeTab = 'shacl'"
           >SHACL Components</button>
@@ -179,16 +180,16 @@
         </div>
 
         <!-- SHACL -->
-        <div v-else-if="activeTab === 'shacl'">
+        <div v-else-if="false && activeTab === 'shacl'">
           <ShaclComponents :shaclComponents="shaclComponents" @takeover="onShaclTakeover" />
         </div>
       </div>
 
       <!-- ───────── Form Area / Protocol Matrix ───────── -->
-      <div class="form-area">
+      <div class="form-area" :class="{ 'form-area-full': showMatrix || showLogic }">
         <div class="sections-container">
           <!-- Sections View -->
-          <div v-if="!showMatrix">
+          <div v-if="!showMatrix && !showLogic">
             <transition-group name="reorder" tag="div" class="sections-list">
               <div
                 v-for="(section, si) in currentForm.sections"
@@ -457,25 +458,41 @@
           </div>
 
           <!-- Protocol Matrix View -->
-          <div v-else>
+          <div v-else-if="showMatrix">
             <ProtocolMatrix
               :visits="visits"
               :groups="groups"
               :selectedModels="selectedModels"
               :assignments="assignments"
+              :forms="forms"
               @assignment-updated="onAssignmentUpdated"
               @edit-template="editTemplate"
             />
           </div>
+          <div v-else-if="showLogic">
+          <LogicCalculationsRoute
+            :form="currentForm"
+            @back-to-builder="closeLogicAndCalculations"
+            @update-form-structure="applyLogicFormUpdate"
+            @update-logic="applyLogicPayload"
+          />
+        </div>
         </div>
 
         <!-- Form Actions -->
-        <div v-if="!showMatrix" class="form-actions">
+        <div v-if="!showMatrix && !showLogic" class="form-actions">
           <button @click.prevent="addNewSection" class="btn-option">
             + Add Section
           </button>
           <button @click.prevent="confirmClearForm" class="btn-option">
             Clear All
+          </button>
+          <button
+            @click.prevent="openLogicAndCalculations"
+            class="btn-option"
+            title="Configure conditional logic and calculations"
+          >
+            Logic & Calculations
           </button>
 
           <button
@@ -594,13 +611,16 @@
 
     <!-- Constraints Dialog -->
     <div v-if="showConstraintsDialog" class="modal-overlay">
-      <FieldConstraintsDialog
-        :currentFieldType="currentFieldType"
-        :constraintsForm="constraintsForm"
-        @updateConstraints="confirmConstraintsDialog"
-        @closeConstraintsDialog="cancelConstraintsDialog"
-        @showGenericDialog="openGenericDialog"
-      />
+    <FieldConstraintsDialog
+      :currentFieldType="currentFieldType"
+      :constraintsForm="constraintsForm"
+      :form="currentForm"
+      :currentFieldKey="currentEditingFieldKey"
+      :currentFieldLabel="currentEditingFieldLabel"
+      @updateConstraints="confirmConstraintsDialog"
+      @closeConstraintsDialog="cancelConstraintsDialog"
+      @showGenericDialog="openGenericDialog"
+    />
     </div>
 
     <!-- Preview Dialog -->
@@ -699,12 +719,13 @@ import FieldSlider from "@/components/fields/FieldSlider.vue";
 import FieldLinearScale from "@/components/fields/FieldLinearScale.vue";
 import FieldFileUpload from "@/components/fields/FieldFileUpload.vue";
 import { normalizeConstraints, coerceDefaultForType } from "@/utils/constraints";
-
+import LogicCalculationsRoute from "./LogicCalculationsRoute.vue";
 export default {
   name: "ScratchFormComponent",
   components: {
     ShaclComponents,
     ProtocolMatrix,
+    LogicCalculationsRoute,
     FieldConstraintsDialog,
     FormPreview,
     DateFormatPicker,
@@ -719,7 +740,7 @@ export default {
   // IMPORTANT:
   // When ProtocolMatrix is open, let ProtocolMatrix handle unsaved guard/dialog.
   // This prevents double dialogs (one from Scratch + one from ProtocolMatrix).
-  if (this.showMatrix) {
+  if (this.showMatrix || this.showLogic) {
     next();
     return;
   }
@@ -771,6 +792,7 @@ export default {
       currentModel: null,
       selectedProps: [],
       showMatrix: false,
+      showLogic: false,
       visits: [],
       groups: [],
       assignments: [],
@@ -842,6 +864,19 @@ export default {
   },
 
   computed: {
+    currentEditingFieldKey() {
+      const { sectionIndex, fieldIndex } = this.currentFieldIndices || {};
+      const field = this.currentForm.sections?.[sectionIndex]?.fields?.[fieldIndex];
+      if (!field) return "";
+      return this.getFieldLogicKey(field, sectionIndex, fieldIndex);
+    },
+
+    currentEditingFieldLabel() {
+      const { sectionIndex, fieldIndex } = this.currentFieldIndices || {};
+      const field = this.currentForm.sections?.[sectionIndex]?.fields?.[fieldIndex];
+      if (!field) return "";
+      return field.label || field.name || "";
+    },
     icons() { return icons; },
     studyDetails() { return this.$store.state.studyDetails || {}; },
 
@@ -853,6 +888,7 @@ export default {
 
     selectedModels() {
       return (this.currentForm.sections || []).map(sec => ({
+        _id: sec._id,
         title: sec.title,
         fields: sec.fields
       }));
@@ -929,6 +965,7 @@ export default {
 
   async mounted() {
     document.addEventListener("click", this.onGlobalClick);
+    window.addEventListener("beforeunload", this.beforeUnloadHandler);
     this.hydratingScratch = true;
 
     if (this.studyDetails.study_metadata?.id) {
@@ -987,9 +1024,177 @@ export default {
 
   beforeUnmount() {
     document.removeEventListener("click", this.onGlobalClick);
+    window.removeEventListener("beforeunload", this.beforeUnloadHandler);
   },
 
   methods: {
+    uuidForLogic() {
+      if (typeof crypto !== "undefined" && crypto.randomUUID) return crypto.randomUUID();
+      return `id_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+    },
+    getFieldLogicKey(field, sectionIndex, fieldIndex) {
+      if (!field || typeof field !== "object") return "";
+
+      // Prefer persistent ID if available
+      if (field._id) return String(field._id);
+
+      // Fallback to name
+      if (field.name) return String(field.name);
+
+      // Last fallback
+      return `section_${sectionIndex}_field_${fieldIndex}`;
+    },
+    applyLogicFormUpdate(updatedForm) {
+  this.ensureCurrentFormExists();
+  if (!updatedForm || typeof updatedForm !== "object") return;
+
+  console.log("[ScratchForm] applyLogicFormUpdate() BEFORE", {
+    currentFormIndex: this.currentFormIndex,
+    existingForm: JSON.parse(JSON.stringify(this.forms[this.currentFormIndex] || {})),
+    incomingUpdatedForm: JSON.parse(JSON.stringify(updatedForm || {}))
+  });
+
+  this.forms.splice(this.currentFormIndex, 1, JSON.parse(JSON.stringify(updatedForm)));
+
+  try {
+    localStorage.setItem("scratchForms", JSON.stringify(this.forms));
+  } catch (e) {
+    console.error("Failed to persist updated form from logic builder", e);
+  }
+
+  this.$store.commit("setStudyDetails", {
+    ...this.studyDetails,
+    forms: JSON.parse(JSON.stringify(this.forms || []))
+  });
+
+  console.log("[ScratchForm] applyLogicFormUpdate() AFTER", {
+    savedForm: JSON.parse(JSON.stringify(this.forms[this.currentFormIndex] || {})),
+    savedLogic: JSON.parse(JSON.stringify(this.forms[this.currentFormIndex]?.logic || {})),
+    storeForms: JSON.parse(JSON.stringify(this.$store.state.studyDetails?.forms || []))
+  });
+
+  if (!this.hydratingScratch) {
+    this.$store.commit("setStudyCreationDirty", true);
+  }
+},
+
+    applyLogicPayload(logicPayload) {
+  this.ensureCurrentFormExists();
+
+  console.log("[ScratchForm] applyLogicPayload() incoming", JSON.parse(JSON.stringify(logicPayload || {})));
+
+  if (!this.forms[this.currentFormIndex].logic || typeof this.forms[this.currentFormIndex].logic !== "object") {
+    this.forms[this.currentFormIndex].logic = { version: 1, calculations: [], conditions: [] };
+  }
+
+  this.forms[this.currentFormIndex].logic = {
+    version: 1,
+    calculations: Array.isArray(logicPayload?.calculations) ? logicPayload.calculations : [],
+    conditions: Array.isArray(logicPayload?.conditions) ? logicPayload.conditions : []
+  };
+
+  console.log("[ScratchForm] applyLogicPayload() saved on form", {
+    currentFormIndex: this.currentFormIndex,
+    logic: JSON.parse(JSON.stringify(this.forms[this.currentFormIndex].logic || {}))
+  });
+
+  try {
+    localStorage.setItem("scratchForms", JSON.stringify(this.forms));
+    console.log("[ScratchForm] localStorage scratchForms after applyLogicPayload", JSON.parse(localStorage.getItem("scratchForms") || "[]"));
+  } catch (e) {
+    console.error("Failed to persist logic payload", e);
+  }
+
+  this.$store.commit("setStudyDetails", {
+    ...this.studyDetails,
+    forms: JSON.parse(JSON.stringify(this.forms || []))
+  });
+
+  console.log("[ScratchForm] store.studyDetails.forms synced after applyLogicPayload", JSON.parse(JSON.stringify(this.$store.state.studyDetails?.forms || [])));
+
+  if (!this.hydratingScratch) {
+    this.$store.commit("setStudyCreationDirty", true);
+  }
+},
+     onLogicUpdated(nextLogic) {
+      this.ensureCurrentFormExists();
+
+      const safeLogic = {
+        version: 1,
+        calculations: Array.isArray(nextLogic?.calculations)
+          ? JSON.parse(JSON.stringify(nextLogic.calculations))
+          : [],
+        conditions: Array.isArray(nextLogic?.conditions)
+          ? JSON.parse(JSON.stringify(nextLogic.conditions))
+          : []
+      };
+
+      if (this.$set) this.$set(this.currentForm, "logic", safeLogic);
+      else this.currentForm.logic = safeLogic;
+
+      try {
+        localStorage.setItem("scratchForms", JSON.stringify(this.forms));
+      } catch (e) {
+        console.error("Failed to persist logic into scratchForms", e);
+      }
+
+      if (!this.hydratingScratch) {
+        this.$store.commit("setStudyCreationDirty", true);
+      }
+    },
+     openLogicAndCalculations() {
+      this.ensurePersistentIdsForLogic();
+
+      try {
+        localStorage.setItem("scratchForms", JSON.stringify(this.forms));
+      } catch (e) {
+        console.error("Failed to persist scratchForms before opening logic view", e);
+      }
+
+      this.showMatrix = false;
+      this.showLogic = true;
+    },
+
+
+
+    ensurePersistentIdsForLogic() {
+      this.ensureCurrentFormExists();
+
+      const form = this.forms[this.currentFormIndex];
+      if (!form) return;
+
+      // sections + fields get persisted _id
+      (form.sections || []).forEach(sec => {
+        if (!sec._id) sec._id = this.uuidForLogic();
+        if (!Array.isArray(sec.fields)) sec.fields = [];
+
+        sec.fields.forEach(f => {
+          if (!f._id) f._id = this.uuidForLogic();
+          if (!f.constraints || typeof f.constraints !== "object") {
+            f.constraints = {};
+          }
+        });
+      });
+
+      if (!form.logic || typeof form.logic !== "object") {
+        form.logic = { version: 1, calculations: [], conditions: [] };
+      }
+      if (!Array.isArray(form.logic.calculations)) form.logic.calculations = [];
+      if (!Array.isArray(form.logic.conditions)) form.logic.conditions = [];
+      if (!form.logic.version) form.logic.version = 1;
+
+      // Mark dirty because IDs/logic are structural metadata
+      if (!this.hydratingScratch) this.$store.commit("setStudyCreationDirty", true);
+    },
+    beforeUnloadHandler(e) {
+      const isDirty = !!this.$store.state.studyCreationDirty;
+
+      if (!isDirty) return;
+
+      console.log("[ScratchForm] You have unsaved changes. Preventing accidental window/tab close.");
+      e.preventDefault();
+      e.returnValue = "";
+    },
     openScratchUnsavedDialog(pendingAction) {
       this.unsavedPendingAction = typeof pendingAction === "function" ? pendingAction : null;
       this.showUnsavedDialog = true;
@@ -1030,12 +1235,9 @@ export default {
         });
       }
     },
-    /* ============================================================
-       CORE FIX: ensure mutable forms[currentFormIndex].sections exists
-       ============================================================ */
     ensureCurrentFormExists() {
       if (!Array.isArray(this.forms)) {
-        this.forms = [{ sections: [] }];
+        this.forms = [{ sections: [], logic: { version: 1, calculations: [], conditions: [] } }];
       }
 
       if (!Number.isInteger(this.currentFormIndex) || this.currentFormIndex < 0) {
@@ -1043,26 +1245,64 @@ export default {
       }
 
       if (!this.forms.length) {
-        this.forms.push({ sections: [] });
+        this.forms.push({ sections: [], logic: { version: 1, calculations: [], conditions: [] } });
       }
 
       if (!this.forms[this.currentFormIndex]) {
-        // pad missing indexes if needed
         while (this.forms.length <= this.currentFormIndex) {
-          this.forms.push({ sections: [] });
+          this.forms.push({ sections: [], logic: { version: 1, calculations: [], conditions: [] } });
         }
       }
 
       const form = this.forms[this.currentFormIndex];
       if (!form || typeof form !== "object") {
-        this.$set
-          ? this.$set(this.forms, this.currentFormIndex, { sections: [] })
-          : (this.forms[this.currentFormIndex] = { sections: [] });
+        if (this.$set) {
+          this.$set(this.forms, this.currentFormIndex, {
+            sections: [],
+            logic: { version: 1, calculations: [], conditions: [] }
+          });
+        } else {
+          this.forms[this.currentFormIndex] = {
+            sections: [],
+            logic: { version: 1, calculations: [], conditions: [] }
+          };
+        }
       }
 
       if (!Array.isArray(this.forms[this.currentFormIndex].sections)) {
         if (this.$set) this.$set(this.forms[this.currentFormIndex], "sections", []);
         else this.forms[this.currentFormIndex].sections = [];
+      }
+
+      if (!this.forms[this.currentFormIndex].logic || typeof this.forms[this.currentFormIndex].logic !== "object") {
+        if (this.$set) {
+          this.$set(this.forms[this.currentFormIndex], "logic", {
+            version: 1,
+            calculations: [],
+            conditions: []
+          });
+        } else {
+          this.forms[this.currentFormIndex].logic = {
+            version: 1,
+            calculations: [],
+            conditions: []
+          };
+        }
+      }
+
+      if (!Array.isArray(this.forms[this.currentFormIndex].logic.calculations)) {
+        if (this.$set) this.$set(this.forms[this.currentFormIndex].logic, "calculations", []);
+        else this.forms[this.currentFormIndex].logic.calculations = [];
+      }
+
+      if (!Array.isArray(this.forms[this.currentFormIndex].logic.conditions)) {
+        if (this.$set) this.$set(this.forms[this.currentFormIndex].logic, "conditions", []);
+        else this.forms[this.currentFormIndex].logic.conditions = [];
+      }
+
+      if (!this.forms[this.currentFormIndex].logic.version) {
+        if (this.$set) this.$set(this.forms[this.currentFormIndex].logic, "version", 1);
+        else this.forms[this.currentFormIndex].logic.version = 1;
       }
 
       return this.forms[this.currentFormIndex];
@@ -1071,15 +1311,39 @@ export default {
     /* ============================================================
        SAVE & EXIT FIX: backend persistence so dashboard shows draft
        ============================================================ */
-    buildScratchStudyPayload() {
+     buildScratchStudyPayload() {
       const details = this.studyDetails || {};
       const studyNode = JSON.parse(JSON.stringify(details.study || {}));
       const meta = details.study_metadata || {};
 
-      const selectedModels = this.selectedModels.map(sec => ({
-        title: sec.title,
-        fields: JSON.parse(JSON.stringify(sec.fields || []))
+      const normalizedForms = JSON.parse(JSON.stringify(this.forms || [])).map(form => ({
+        sections: Array.isArray(form.sections)
+          ? form.sections.map(sec => ({
+              ...sec,
+              fields: Array.isArray(sec.fields)
+                ? sec.fields.map(field => ({
+                    ...field,
+                    constraints: field.constraints || {}
+                  }))
+                : []
+            }))
+          : [],
+        logic: {
+          version: form.logic?.version || 1,
+          calculations: Array.isArray(form.logic?.calculations) ? form.logic.calculations : [],
+          conditions: Array.isArray(form.logic?.conditions) ? form.logic.conditions : []
+        }
       }));
+
+      const selectedModels = (this.currentForm.sections || []).map(sec => ({
+          _id: sec._id || this.uuidForLogic(),
+          title: sec.title,
+          fields: JSON.parse(JSON.stringify(sec.fields || [])).map(field => ({
+            ...field,
+            _id: field._id || this.uuidForLogic(),
+            constraints: field.constraints || {}
+          }))
+        }));
 
       const studyName =
         studyNode.title ||
@@ -1102,7 +1366,11 @@ export default {
         description: studyDescription,
         study_description: studyDescription
       };
-
+      console.log("[ScratchForm] buildScratchStudyPayload()", {
+      normalizedForms: JSON.parse(JSON.stringify(normalizedForms || [])),
+      selectedModels: JSON.parse(JSON.stringify(selectedModels || [])),
+      currentForm: JSON.parse(JSON.stringify(this.currentForm || {}))
+    });
       return {
         study_metadata: {
           created_by: meta.created_by || this.currentUserId,
@@ -1119,13 +1387,19 @@ export default {
             subjects: JSON.parse(JSON.stringify(details.subjects || [])),
             assignments: JSON.parse(JSON.stringify(this.assignments || details.assignments || [])),
             skipSubjectCreationNow: !!details.skipSubjectCreationNow,
-            selectedModels
+
+            // old structure kept for compatibility
+            selectedModels,
+
+            // new canonical full builder structure
+            forms: normalizedForms
           }
         }
       };
     },
 
     async persistScratchToBackend() {
+      this.ensurePersistentIdsForLogic();
       const token = this.$store.state.token;
       if (!token) {
         this.$router.push("/login");
@@ -1134,13 +1408,20 @@ export default {
 
       this.ensureCurrentFormExists();
 
-      const selectedFormsForStore = [{
-        sections: JSON.parse(JSON.stringify(this.currentForm.sections || [])).map(sec => ({
-          title: sec.title,
-          fields: sec.fields,
-          source: sec.source
+      const selectedFormsForStore = JSON.parse(JSON.stringify(this.forms || [])).map(form => ({
+      sections: (form.sections || []).map(sec => ({
+        ...sec,
+        fields: (sec.fields || []).map(field => ({
+          ...field,
+          constraints: field.constraints || {}
         }))
-      }];
+      })),
+      logic: {
+        version: form.logic?.version || 1,
+        calculations: Array.isArray(form.logic?.calculations) ? form.logic.calculations : [],
+        conditions: Array.isArray(form.logic?.conditions) ? form.logic.conditions : []
+      }
+    }));
 
       this.$store.commit("setStudyDetails", {
         ...this.studyDetails,
@@ -1153,9 +1434,15 @@ export default {
 
       try {
         if (existingId) {
-          await axios.put(`/forms/studies/${existingId}`, payload, {
-            headers: this.authHeader
-          });
+          await axios.put(
+              `/forms/studies/${existingId}`,
+              payload,
+              {
+                headers: this.authHeader,
+                // audit_label: user clicked "Save & Exit" from ScratchForm (builder) while a study already exists (edit/update)
+                params: { audit_label: "Existing Study Updated" }
+              }
+            );
 
           this.$store.commit("setStudyDetails", {
             ...this.studyDetails,
@@ -1183,7 +1470,11 @@ export default {
         const resp = await axios.post(
           `/forms/studies/?status=DRAFT&last_completed_step=${encodeURIComponent(lastCompletedStep)}`,
           payload,
-          { headers: this.authHeader }
+          {
+            headers: this.authHeader,
+            // audit_label: user clicked "Save & Exit" from ScratchForm (builder) and backend creates a DRAFT study
+            params: { audit_label: "Save & Exit - Create New Study Draft" }
+          }
         );
 
         const meta = resp.data?.metadata || resp.data?.study_metadata || {};
@@ -1637,10 +1928,12 @@ export default {
       this.ensureCurrentFormExists();
       const insertAt = Math.min(this.activeSection + 1, this.currentForm.sections.length);
       const sec = {
+        _id: this.uuidForLogic(),
         title: section.title,
         fields: (section.fields || []).map(f => ({
-          ...f,
-          constraints: f.constraints || {}
+          ...JSON.parse(JSON.stringify(f)),
+          _id: f._id || this.uuidForLogic(),
+          constraints: JSON.parse(JSON.stringify(f.constraints || {}))
         })),
         collapsed: false,
         source: "shacl"
@@ -1652,6 +1945,10 @@ export default {
     },
 
     goBack() {
+      if (this.showLogic) {
+        this.showLogic = false;
+        return;
+      }
       // If ProtocolMatrix is open, let ProtocolMatrix own the unsaved dialog logic
       if (this.showMatrix) {
         this.$router.back();
@@ -1797,8 +2094,12 @@ export default {
       }
     },
 
-    handleProtocolClick() { this.showMatrix = true; },
+    handleProtocolClick() { this.showLogic = false;this.showMatrix = true; },
     editTemplate() { this.showMatrix = false; },
+    closeLogicAndCalculations() {
+      this.showMatrix = false;
+      this.showLogic = false;
+    },
 
     onAssignmentUpdated({ mIdx, vIdx, gIdx, checked }) {
       this.assignments[mIdx][vIdx][gIdx] = checked;
@@ -1852,7 +2153,11 @@ export default {
           const nm = String(f?.name || "");
           if (nm && existingNames.has(nm)) return;
           existingNames.add(nm);
-          targetSec.fields.push({ ...f });
+          targetSec.fields.push({
+          ...JSON.parse(JSON.stringify(f)),
+          _id: f._id || this.uuidForLogic(),
+          constraints: JSON.parse(JSON.stringify(f.constraints || {}))
+        });
           added += 1;
         });
 
@@ -1869,11 +2174,16 @@ export default {
 
       const insertAt = Math.min(this.activeSection + 1, this.currentForm.sections.length);
       const sec = {
-        title: this.currentModel.title,
-        fields: chosen,
-        collapsed: false,
-        source: "template"
-      };
+          _id: this.uuidForLogic(),
+          title: this.currentModel.title,
+          fields: chosen.map(f => ({
+            ...JSON.parse(JSON.stringify(f)),
+            _id: f._id || this.uuidForLogic(),
+            constraints: JSON.parse(JSON.stringify(f.constraints || {}))
+          })),
+          collapsed: false,
+          source: "template"
+        };
 
       this.forms[this.currentFormIndex].sections.splice(insertAt, 0, sec);
       this.activeSection = insertAt;
@@ -1883,10 +2193,10 @@ export default {
     },
 
     addNewSection() {
-      // FIX: guard before mutation
       this.ensureCurrentFormExists();
 
       const sec = {
+        _id: this.uuidForLogic(),
         title: `Section ${this.currentForm.sections.length + 1}`,
         fields: [],
         collapsed: false,
@@ -1906,9 +2216,11 @@ export default {
       if (!current) return;
 
       const sec = {
+        _id: this.uuidForLogic(),
         title: `${current.title} (Copy)`,
         fields: (current.fields || []).map(field => ({
           ...field,
+          _id: this.uuidForLogic(),
           name: `${field.name}_${Date.now()}`,
           constraints: field.constraints || {}
         })),
@@ -1964,16 +2276,17 @@ export default {
       if (sec.collapsed) this.toggleSection(this.activeSection);
 
       const base = {
-        name: `${(field.name || field.type)}_${Date.now()}`,
-        label: field.label,
-        type: field.type,
-        options: (field.type === "select" || field.type === "radio")
-          ? (Array.isArray(field.options) && field.options.length ? [...field.options] : ["Option 1"])
-          : (field.options || []),
-        placeholder: field.description || field.placeholder || "",
-        value: field.type === "checkbox" ? false : "",
-        constraints: field.constraints || {}
-      };
+      _id: this.uuidForLogic(),
+      name: `${(field.name || field.type)}_${Date.now()}`,
+      label: field.label,
+      type: field.type,
+      options: (field.type === "select" || field.type === "radio")
+        ? (Array.isArray(field.options) && field.options.length ? [...field.options] : ["Option 1"])
+        : (field.options || []),
+      placeholder: field.description || field.placeholder || "",
+      value: field.type === "checkbox" ? false : "",
+      constraints: JSON.parse(JSON.stringify(field.constraints || {}))
+    };
 
       if (base.type === "slider") {
         base.value = null;
@@ -2080,10 +2393,9 @@ export default {
       if (!f) return;
 
       const clone = {
-        ...f,
+        ...JSON.parse(JSON.stringify(f)),
+        _id: this.uuidForLogic(),
         name: `${f.name}_${Date.now()}`,
-        options: f.options ? [...f.options] : [],
-        constraints: f.constraints || {},
         value:
           f.type === "radio" && f.constraints?.allowMultiple ? [] :
           (f.type === "radio" || f.type === "select") ? "" :
@@ -2108,25 +2420,34 @@ export default {
       this.currentFieldIndices = { sectionIndex: si, fieldIndex: fi };
       this.currentFieldType = f.type === "slider" ? "slider" : f.type;
 
+      const existing = JSON.parse(JSON.stringify(f.constraints || {}));
+
       this.constraintsForm = {
-        ...(f.constraints || {}),
+        ...existing,
         type: this.currentFieldType,
-        options: (f.type === "select" || f.type === "radio") ? (f.options || []) : undefined,
+
+        // choice options for dialog
+        options: (f.type === "select" || f.type === "radio")
+          ? (Array.isArray(f.options) ? [...f.options] : [])
+          : existing.options,
+
+        // date defaults
         dateFormat: f.type === "date"
-          ? (f.constraints?.dateFormat || "dd.MM.yyyy")
-          : undefined,
+          ? (existing.dateFormat || "dd.MM.yyyy")
+          : existing.dateFormat,
+
+        // slider defaults
         ...(f.type === "slider" ? {
-          mode: f.constraints?.mode === "linear" ? "linear" : "slider",
-          min: Number.isFinite(f.constraints?.min) ? f.constraints.min : 1,
-          max: Number.isFinite(f.constraints?.max) ? f.constraints.max : 100,
-          step: Number.isFinite(f.constraints?.step) ? f.constraints.step : 1,
-          percent: !!f.constraints?.percent
+          mode: existing.mode === "linear" ? "linear" : "slider",
+          min: Number.isFinite(existing.min) ? existing.min : 1,
+          max: Number.isFinite(existing.max) ? existing.max : 100,
+          step: Number.isFinite(existing.step) ? existing.step : 1,
+          percent: !!existing.percent
         } : {})
       };
 
       this.showConstraintsDialog = true;
     },
-
     confirmConstraintsDialog(c) {
       const { sectionIndex, fieldIndex } = this.currentFieldIndices;
       const f = this.currentForm.sections[sectionIndex]?.fields?.[fieldIndex];
@@ -2136,9 +2457,16 @@ export default {
       }
 
       const originalType = f.type;
+      const prevConstraints = JSON.parse(JSON.stringify(f.constraints || {}));
+
+      // helper: keep any unknown / future advanced settings
+      const mergeConstraints = (normalized) => ({
+        ...prevConstraints,
+        ...normalized
+      });
 
       if (originalType === "file") {
-        const cleaned = {
+        const cleaned = mergeConstraints({
           helpText: c.helpText || "",
           required: !!c.required,
           readonly: !!c.readonly,
@@ -2146,8 +2474,15 @@ export default {
           maxSizeMB: (Number.isFinite(c.maxSizeMB) && c.maxSizeMB > 0) ? Number(c.maxSizeMB) : undefined,
           storagePreference: (c.storagePreference === "url") ? "url" : "local",
           modalities: Array.isArray(c.modalities) ? c.modalities.filter(Boolean).map(String) : [],
-          allowMultipleFiles: c.allowMultipleFiles !== false
-        };
+          allowMultipleFiles: c.allowMultipleFiles !== false,
+          visibilityLogic: c.visibilityLogic || prevConstraints.visibilityLogic || {
+            enabled: false,
+            match: "all",
+            action: "show",
+            targetFieldKeys: [],
+            rules: []
+          }
+        });
 
         if (!cleaned.modalities.length) {
           const fallback = (String(f.label || "").trim()) || f.name;
@@ -2163,8 +2498,8 @@ export default {
         const norm = normalizeConstraints(originalType, c);
 
         if ((f.type === "select" || f.type === "radio") && Array.isArray(c.options)) {
-          const cleaned = c.options.map(o => String(o || "").trim()).filter(Boolean);
-          f.options = cleaned.length ? cleaned : ["Option 1"];
+          const cleanedOptions = c.options.map(o => String(o || "").trim()).filter(Boolean);
+          f.options = cleanedOptions.length ? cleanedOptions : ["Option 1"];
         }
 
         if (f.type === "radio") {
@@ -2213,7 +2548,16 @@ export default {
           norm.dateFormat = fmt;
         }
 
-        f.constraints = { ...norm };
+        f.constraints = mergeConstraints({
+          ...norm,
+          visibilityLogic: c.visibilityLogic || prevConstraints.visibilityLogic || {
+            enabled: false,
+            match: "all",
+            action: "show",
+            targetFieldKeys: [],
+            rules: []
+          }
+        });
 
         if (
           (f.value === "" || f.value === undefined || f.value === null) &&
@@ -2233,15 +2577,24 @@ export default {
         if (max <= min) max = min + 1;
         if (max - min + 1 > 10) max = min + 9;
 
-        f.constraints = {
+        f.constraints = mergeConstraints({
           mode: "linear",
           required: !!c.required,
           readonly: !!c.readonly,
           helpText: c.helpText || "",
-          min, max,
+          min,
+          max,
           leftLabel: c.leftLabel || "",
-          rightLabel: c.rightLabel || ""
-        };
+          rightLabel: c.rightLabel || "",
+          visibilityLogic: c.visibilityLogic || prevConstraints.visibilityLogic || {
+            enabled: false,
+            match: "all",
+            action: "show",
+            targetFieldKeys: [],
+            rules: []
+          }
+        });
+
         f.value = null;
         this.showConstraintsDialog = false;
         return;
@@ -2252,15 +2605,24 @@ export default {
       if (max <= min) max = min + 1;
       let step = Number.isFinite(+c.step) && +c.step > 0 ? +c.step : 1;
 
-      f.constraints = {
+      f.constraints = mergeConstraints({
         mode: "slider",
         required: !!c.required,
         readonly: !!c.readonly,
         helpText: c.helpText || "",
         percent: !!c.percent,
-        min, max, step,
-        marks: Array.isArray(c.marks) ? c.marks : []
-      };
+        min,
+        max,
+        step,
+        marks: Array.isArray(c.marks) ? c.marks : [],
+        visibilityLogic: c.visibilityLogic || prevConstraints.visibilityLogic || {
+          enabled: false,
+          match: "all",
+          action: "show",
+          targetFieldKeys: [],
+          rules: []
+        }
+      });
 
       const v = Number(f.value);
       f.value = Number.isFinite(v) && v >= min && v <= max ? v : null;
@@ -2309,8 +2671,10 @@ export default {
           if (Array.isArray(pd.sections)) {
             pd.sections = pd.sections.map(sec => ({
               ...sec,
+              _id: sec._id || this.uuidForLogic(),
               fields: (sec.fields || []).map(field => ({
                 ...field,
+                _id: field._id || this.uuidForLogic(),
                 constraints: field.constraints || {}
               }))
             }));
@@ -2969,6 +3333,13 @@ input, textarea, select {
   overflow: hidden;
   text-overflow: ellipsis;    /* prevent wrap in narrow modal */
   line-height: 1.1;
+}
+.scratch-form-content-full {
+  margin-top: 0;
+}
+
+.form-area-full {
+  height: calc(100vh - 40px);
 }
 
 /* Override global input styling that makes checkboxes huge/fuzzy */

@@ -1,4 +1,4 @@
-# bids_exported.py
+# bids_exporter.py
 import os
 import re
 import csv
@@ -7,6 +7,7 @@ import logging
 import pathlib
 import shutil
 import sys
+import uuid
 from datetime import datetime
 from typing import Dict, List, Tuple, Optional, Any
 from urllib.parse import urlparse
@@ -16,6 +17,7 @@ from .versions import VersionManager  # <<— use versioned schemas
 
 from .crud import record_event as _db_record_event  # (db, user_id, study_id, subject_id, action, details)
 from .utils import local_now
+
 logger = logging.getLogger(__name__)
 
 # -------------------- Config --------------------
@@ -673,6 +675,65 @@ def _append_change_line(study_id: int, study_name: Optional[str], action: str, d
         with open(path, "a", encoding="utf-8") as f:
             f.write(json.dumps(payload, ensure_ascii=False) + "\n")
 
+# -------------------- Diff file storage (inside BIDS) --------------------
+def _diff_dir(dataset_path: str) -> str:
+    # Store within the dataset (same directory as BIDS), under metadata
+    p = os.path.join(dataset_path, "metadata", "diffs")
+    _ensure_dir(p)
+    return p
+
+def _persist_diff_payload(
+    dataset_path: str,
+    *,
+    action: str,
+    payload: Dict[str, Any],
+    study_id: Optional[int] = None,
+    entry_id: Optional[Any] = None,
+) -> Optional[str]:
+    """
+    If payload has `has_diff=True` and a `diff_payload`, write it to a JSON file
+    inside the BIDS dataset folder and replace payload['diff_payload'] with a
+    relative diff_path.
+    Returns the relative path (from dataset_path) if written.
+    """
+    try:
+        has_diff = bool(payload.get("has_diff", False))
+        diff_payload = payload.get("diff_payload", None)
+        if not has_diff or not diff_payload:
+            return None
+
+        ts = local_now().strftime("%Y%m%dT%H%M%S")
+        sid = f"study{study_id}" if isinstance(study_id, int) and study_id > 0 else "study"
+        eid = ""
+        if entry_id is not None:
+            try:
+                eid = f"_entry{int(entry_id)}"
+            except Exception:
+                eid = f"_entry{_alnum(str(entry_id))}"
+        safe_action = _normalize_token(action) or "action"
+        uniq = uuid.uuid4().hex[:10]
+
+        filename = f"{ts}_{sid}{eid}_{safe_action}_{uniq}.json"
+        out_dir = _diff_dir(dataset_path)
+        out_path = os.path.join(out_dir, filename)
+
+        lock = FileLock(out_path + ".lock")
+        with lock:
+            with open(out_path, "w", encoding="utf-8") as f:
+                json.dump(diff_payload, f, ensure_ascii=False, indent=2)
+
+        rel = os.path.relpath(out_path, dataset_path)
+
+        # mutate payload: store path only (no inline diff)
+        payload["diff_path"] = rel
+        payload.pop("diff_payload", None)
+
+        return rel
+    except Exception as e:
+        logger.error("Failed to persist diff payload to BIDS: %s", e)
+        return None
+
+
 def audit_change_both(
     *,
     scope: Optional[str] = None,
@@ -690,10 +751,15 @@ def audit_change_both(
 ) -> None:
     """
     Unified auditor:
-      1) Always tries to write to DB provenance if `db` and `_db_record_event` are available.
+      1) Always tries DB provenance if `db` and `_db_record_event` are available.
       2) Writes to BIDS `metadata/changes.txt` only when we have a real study context
          (study_id > 0 and non-empty study_name). System-scope never creates study_0_*.
       3) If AUDIT_SYSTEM_TO_BIDS=1, system events also go to BIDS_ROOT/_system/changes.txt.
+
+    NEW:
+      - If payload includes `has_diff=True` + `diff_payload`, it is stored as a JSON
+        file inside the study's BIDS dataset (metadata/diffs/...), and the event
+        payload keeps only `diff_path` (relative to dataset root).
     """
 
     # ---- normalize scope -----------------------------------------------------
@@ -721,9 +787,21 @@ def audit_change_both(
     if actor:
         payload["actor"] = actor
 
-    # ---- 1) DB provenance (best-effort) -------------------------------------
-    # If your project wires _db_record_event(db, user_id, study_id, subject_id, action, details)
-    # this will capture the audit in the database.
+    # Persist diff into BIDS (study scope only, and only if dataset can be resolved)
+    write_study_bids = (
+        scope == "study"
+        and isinstance(study_id, int) and study_id > 0
+        and isinstance(study_name, str) and study_name.strip() != ""
+    )
+    if write_study_bids:
+        try:
+            ds_path = _dataset_path(study_id, study_name)
+            entry_id = payload.get("entry_id", payload.get("entryId", payload.get("previous_entry_id")))
+            _persist_diff_payload(ds_path, action=action, payload=payload, study_id=study_id, entry_id=entry_id)
+        except Exception:
+            pass
+
+    # 1) DB provenance (best-effort)
     if _db_record_event and db is not None:
         try:
             _db_record_event(
@@ -734,15 +812,10 @@ def audit_change_both(
                 action=action,
                 details=payload,
             )
-        except Exception as e:  # keep audit non-fatal
+        except Exception as e:
             logger.error("audit_change_both: DB provenance write failed: %s", e)
 
-    # ---- 2) BIDS changes.txt (study scope only) ------------------------------
-    write_study_bids = (
-        scope == "study"
-        and isinstance(study_id, int) and study_id > 0
-        and isinstance(study_name, str) and study_name.strip() != ""
-    )
+    # 2) BIDS changes.txt (study scope only)
     if write_study_bids:
         try:
             _append_change_line(
@@ -755,7 +828,7 @@ def audit_change_both(
             logger.error("audit_change_both: failed to write study changes.txt: %s", e)
         return
 
-    # ---- 3) Optional system bucket (never creates study_0_*) -----------------
+    # 3) Optional system bucket
     if scope == "system" and AUDIT_SYSTEM_TO_BIDS:
         try:
             _append_system_change_line(action=action, detail=payload)
@@ -767,7 +840,7 @@ def audit_access_change_both(
     db=None,
     study_id: int,
     study_name: Optional[str],
-    action: str,  # "access_granted" | "access_updated" | "access_revoked"
+    action: str,
     actor_id: int,
     actor_name: str,
     target_user_id: int,
@@ -778,7 +851,6 @@ def audit_access_change_both(
     """
     Unified access audit: writes to Study Access.csv, study changes.txt, and DB.
     """
-    # 1) CSV line
     path = _study_access_csv_path(study_id, study_name)
     headers = [
         "timestamp",
@@ -815,7 +887,7 @@ def audit_access_change_both(
 
     # 2) changes.txt + DB via the unified helper (scope auto-infers to "study")
     audit_change_both(
-        db=db,
+        db=None,
         study_id=study_id,
         study_name=study_name,
         action=action,
@@ -1048,8 +1120,7 @@ def write_entry_to_bids(
     prev_row = None
     for row in rows:
         if row.get("entry_id") == entry_id_str:
-            prev_row = dict(row)  # snapshot for diffing later
-            # refresh fixed, then all catalog cols; drop legacy
+            prev_row = dict(row)
             for k in FIXED_ENTRY_HEADERS:
                 row[k] = new_row.get(k, row.get(k))
             for col in catalog_cols:
@@ -1124,12 +1195,12 @@ def write_entry_to_bids(
 
     # Unified audit (BIDS + DB)
     audit_change_both(
-        db=db,
+        db=None,
         study_id=study_id,
         study_name=study_name,
         action="entry_upsert",
         actor_id=actor_id,
-        actor_name=actor_name or actor,  # keep legacy 'actor' param
+        actor_name=actor_name or actor,
         subject_index=subject_index,
         visit_index=visit_index,
         detail={
@@ -1155,7 +1226,7 @@ def bulk_write_entries_to_bids(
     study_name: str,
     study_description: Optional[str],
     study_data: dict,
-    entries: List[Dict[str, Any]],           # each: {id, subject_index, visit_index, group_index, form_version, data, skipped_required_flags}
+    entries: List[Dict[str, Any]],
     form_version: int,
     db=None,
     actor: Optional[str] = "Bulk import",
@@ -1268,7 +1339,6 @@ def bulk_write_entries_to_bids(
                 "status": status,
             }
 
-            # Data columns (respect assignments)
             data_cols: Dict[str, str] = {}
             assigned_cols_for_subject_row: List[str] = []
             for item in catalog:
@@ -1291,7 +1361,6 @@ def bulk_write_entries_to_bids(
 
             new_row = {**base_row, **data_cols}
 
-            # ---- upsert into dataset-level entries.tsv map ----
             if entry_id_str in rows_by_id:
                 row = rows_by_id[entry_id_str]
                 for k in FIXED_ENTRY_HEADERS:
@@ -1306,16 +1375,13 @@ def bulk_write_entries_to_bids(
                     new_row.pop(legacy, None)
                 rows_by_id[entry_id_str] = new_row
 
-            # ---- per-subject mirror (optional) ----
             if MIRROR_SUBJECT_FOLDER:
-                sub_path, store = _get_subject_store(participant_id, visit_index)
+                _, store = _get_subject_store(participant_id, visit_index)
                 s_headers_old = store["headers"]
                 s_rows_map = store["rows_by_id"]
 
-                # Subject headers = FIXED + union(assigned cols across writes), preserve old extras
                 s_headers_desired = FIXED_ENTRY_HEADERS + assigned_cols_for_subject_row
                 s_union = (set(s_headers_old) | set(s_headers_desired)) - LEGACY_DROP
-                # Keep FIXED order, then keep old order for the rest
                 s_headers_new = (
                     [h for h in FIXED_ENTRY_HEADERS if h in s_union] +
                     [h for h in s_headers_old if h not in FIXED_ENTRY_HEADERS and h in s_union] +
@@ -1329,7 +1395,6 @@ def bulk_write_entries_to_bids(
                         r[k] = new_row.get(k, r.get(k))
                     for col in assigned_cols_for_subject_row:
                         r[col] = new_row.get(col, r.get(col))
-                    # drop anything not in headers
                     for k in list(r.keys()):
                         if k not in s_headers_new:
                             r.pop(k, None)
@@ -1339,30 +1404,25 @@ def bulk_write_entries_to_bids(
 
             subjects_touched.add(participant_id)
         except Exception as ex:
-            # Keep bulk robust: continue other rows; single-row issues won’t abort all
             logger.warning("bulk_write_entries_to_bids: skip one row due to %s", ex)
             continue
 
-    # ---------- Write dataset-level entries.tsv once ----------
     out_rows = list(rows_by_id.values())
     _write_tsv_rows(entries_tsv, ordered_headers, out_rows)
     _write_csv_mirror_from_tsv(entries_tsv)
 
-    # ---------- Write per-subject files once ----------
     if MIRROR_SUBJECT_FOLDER:
         for sub_tsv, store in subject_files.items():
             s_rows = list(store["rows_by_id"].values())
             _write_tsv_rows(sub_tsv, store["headers"], s_rows)
             _write_csv_mirror_from_tsv(sub_tsv)
 
-    # ---------- Rebuild participants.tsv ONCE for this version ----------
     _rebuild_participants_tsv_for_schema(dataset_path, sd, version=form_version)
 
-    # One save & one audit summary
     _datalad_save(dataset_path, msg=f"Bulk upsert {len(entries)} entries (v={form_version:03d})")
     try:
         audit_change_both(
-            db=db,
+            db=None,
             study_id=study_id,
             study_name=study_name,
             action="bulk_entry_upsert",
@@ -1378,7 +1438,6 @@ def bulk_write_entries_to_bids(
         pass
 
     return {"written": len(entries), "subjects_touched": len(subjects_touched)}
-
 
 # -------------------- File staging (version-aware) --------------------
 
@@ -1456,7 +1515,7 @@ def stage_file_for_modalities(
         if written:
             _datalad_save(dataset_path, msg="Mirror study-level document(s) into metadata/")
             audit_change_both(
-                db=db,
+                db=None,
                 study_id=study_id,
                 study_name=study_name,
                 action="file_mirrored_study_level",
@@ -1530,7 +1589,7 @@ def stage_file_for_modalities(
     if written:
         _datalad_save(dataset_path, msg=f"Mirror files/links for sub-{_alnum(sub_label_num)} (visit={visit_index}, v={target_version:03d})")
         audit_change_both(
-            db=db,
+            db=None,
             study_id=study_id,
             study_name=study_name,
             action="file_mirrored",
@@ -1561,7 +1620,7 @@ def log_dataset_change_to_changes(
     db=None,
 ):
     audit_change_both(
-        db=db,
+        db=None,
         study_id=study_id,
         study_name=study_name,
         action=action,

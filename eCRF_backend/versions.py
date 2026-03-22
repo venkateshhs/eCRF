@@ -439,9 +439,6 @@ class VersionManager:
                                 "subject_ids": added_subject_ids,
                             },
                         )
-                    audit_callback(
-                        "version_snapshot_refreshed", {"version": latest.version}
-                    )
                 logger.info(
                     "Refreshed template v%s in place for study_id=%s (non-structural)",
                     latest.version,

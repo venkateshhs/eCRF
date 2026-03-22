@@ -8,7 +8,7 @@
   >
     <!-- Header -->
     <div class="header-row">
-      <h2 class="existing-studies-title">Import Study Data</h2>
+      <h2 class="existing-studies-title">Import Data</h2>
 
       <div class="header-actions">
         <button
@@ -22,22 +22,48 @@
       </div>
     </div>
 
-    <!-- File actions (study meta removed as requested) -->
+    <!-- Source selection -->
     <div class="top-bar card-surface">
+      <div class="source-switch">
+        <label class="source-pill" :class="{ active: sourceType === 'bundle' }">
+          <input type="radio" value="bundle" v-model="sourceType" @change="resetImportStateKeepStudy()" />
+          <span>Merge study data from other device</span>
+        </label>
+
+        <label class="source-pill" :class="{ active: sourceType === 'subject-import' }">
+          <input type="radio" value="subject-import" v-model="sourceType" @change="resetImportStateKeepStudy()" />
+          <span>Import Subject data</span>
+        </label>
+      </div>
+
       <div class="actions">
         <input
-          ref="fileInput"
+          ref="fileInputBundle"
           type="file"
           accept=".zip"
           class="file-hidden"
           @change="onBundleFile"
         />
-        <button class="btn-primary" @click="triggerFile">
-          Choose file (.zip)
+
+        <input
+          ref="fileInputSubject"
+          type="file"
+          accept=".csv,.xlsx,.xls"
+          class="file-hidden"
+          @change="onSubjectImportFile"
+        />
+
+        <button
+          v-if="sourceType === 'bundle'"
+          class="btn-primary"
+          @click="triggerFile"
+        >
+          Choose study bundle (.zip)
         </button>
+
         <button
           class="btn-option"
-          :disabled="!hasBundle"
+          :disabled="!hasBundle && !subjectImportReady"
           @click="clearBundle"
         >
           Clear
@@ -45,7 +71,7 @@
       </div>
     </div>
 
-    <!-- Parsing / validation banner -->
+    <!-- Banner -->
     <div
       v-if="parseInfo.message"
       class="parse-banner"
@@ -54,39 +80,58 @@
       {{ parseInfo.message }}
     </div>
 
-    <!-- Extra info when parse was OK but templates mismatch -->
+    <!-- Bundle template mismatch -->
     <div
-      v-if="hasBundle && parseInfo.ok && templateMismatch"
+      v-if="sourceType === 'bundle' && hasBundle && parseInfo.ok && templateMismatch"
       class="parse-banner warn"
     >
       Merge is currently disabled because the template in this file does not
       match the study template. Please align template versions before merging.
     </div>
 
-    <!-- Nothing loaded yet -->
-    <div v-if="!hasBundle" class="empty-state card-surface">
-      <p class="empty-title">Import study data</p>
+    <!-- Subject import assumption warning -->
+    <div
+      v-if="sourceType === 'subject-import' && subjectImportReady && subjectImportAssumptionWarning"
+      class="parse-banner warn"
+    >
+      Subject / visit columns were not found in the uploaded file. This import assumes the data belongs to
+      subject <strong>{{ selectedSubjectLabel || "—" }}</strong>
+      and visit <strong>{{ selectedVisitLabel || "—" }}</strong>.
+    </div>
+
+    <!-- Empty -->
+    <div
+      v-if="sourceType === 'bundle' && !hasBundle"
+      class="empty-state card-surface"
+    >
+      <p class="empty-title">Merge study data from other device</p>
       <p class="empty-text">
-        Select the ZIP file created by <code>downloadStudyBundle</code>. It
-        should contain <code>template_vX.json</code> and
-        <code>data_vX.csv</code>.
-      </p>
-      <p class="empty-text small">
-        After loading, you can merge data for all subjects or restrict to specific subjects, and resolve any differences.
+        Select the ZIP file exported from another Case-e device. It should contain
+        <code>template_vX.json</code> and <code>data_vX.csv</code>.
       </p>
     </div>
 
-    <!-- Main layout once file is parsed -->
-    <div v-else class="main-layout" :class="{ 'single-column': !showImportDetails }">
-      <!-- Left column: import + template info (collapsible) -->
-      <section
-        v-if="showImportDetails"
-        class="card-surface left-column"
-      >
-        <!-- Import summary -->
+    <div
+      v-if="sourceType === 'subject-import' && !subjectImportReady"
+      class="empty-state card-surface"
+    >
+      <p class="empty-title">Import Subject data</p>
+      <p class="empty-text">
+        Select the target subject and visit first, then upload a CSV or Excel file.
+      </p>
+    </div>
+
+    <!-- Bundle layout -->
+    <div
+      v-if="sourceType === 'bundle' && hasBundle"
+      class="main-layout"
+      :class="{ 'single-column': !showImportDetails || conflicts.length === 0 }"
+    >
+      <section v-if="showImportDetails" class="card-surface left-column">
         <div class="section-header">
           <h3>Import summary</h3>
         </div>
+
         <div class="summary-grid">
           <div class="summary-item">
             <div class="label">Import file</div>
@@ -94,34 +139,26 @@
           </div>
           <div class="summary-item">
             <div class="label">Imported version</div>
-            <div class="value">
-              v{{ bundleVersion || '—' }}
-            </div>
+            <div class="value">v{{ bundleVersion || "—" }}</div>
           </div>
           <div class="summary-item">
             <div class="label">Rows in CSV</div>
-            <div class="value">
-              {{ bundleRowCount }}
-            </div>
+            <div class="value">{{ bundleRowCount }}</div>
           </div>
           <div class="summary-item">
             <div class="label">Subjects in file</div>
-            <div class="value">
-              {{ bundleSubjectIds.length }}
-            </div>
+            <div class="value">{{ bundleSubjectIds.length }}</div>
           </div>
           <div class="summary-item">
             <div class="label">Visits in file</div>
-            <div class="value">
-              {{ bundleVisitNames.length }}
-            </div>
+            <div class="value">{{ bundleVisitNames.length }}</div>
           </div>
         </div>
 
-        <!-- Template comparison -->
         <div class="section-header mt">
           <h3>Template comparison</h3>
         </div>
+
         <div class="template-compare">
           <div class="compare-row">
             <div class="label">Current template sections</div>
@@ -139,10 +176,10 @@
             <div class="label">Imported template fields</div>
             <div class="value">{{ importedTemplateSummary.fields }}</div>
           </div>
+
           <div v-if="templateMismatch" class="template-warning">
             <div>
-              Template structure does not match. Merge is disabled to avoid data
-              loss. Please align template versions before importing this file.
+              Template structure does not match. Merge is disabled to avoid data loss.
             </div>
             <ul v-if="templateMismatchDetails.length" class="mismatch-list">
               <li v-for="(msg, idx) in templateMismatchDetails" :key="idx">
@@ -152,10 +189,10 @@
           </div>
         </div>
 
-        <!-- Scope selection (whole study vs per subject) -->
         <div class="section-header mt">
-          <h3>Import scope</h3>
+          <h3>Merge scope</h3>
         </div>
+
         <div class="scope-card">
           <label class="radio-row">
             <input
@@ -166,6 +203,7 @@
             />
             <span>Merge data for all subjects in the file</span>
           </label>
+
           <label class="radio-row">
             <input
               type="radio"
@@ -176,10 +214,7 @@
             <span>Merge data only for selected subjects</span>
           </label>
 
-          <div
-            v-if="scopeMode === 'subset'"
-            class="subject-select"
-          >
+          <div v-if="scopeMode === 'subset'" class="subject-select">
             <p class="helper">
               Select subjects from the file to include in this merge.
             </p>
@@ -198,33 +233,16 @@
                 <span>{{ sid }}</span>
               </label>
             </div>
-            <button
-              class="btn-minimal sm"
-              @click="selectAllSubjects"
-            >
-              Select all
-            </button>
-            <button
-              class="btn-minimal sm"
-              @click="clearSelectedSubjects"
-            >
-              Clear
-            </button>
+            <button class="btn-minimal sm" @click="selectAllSubjects">Select all</button>
+            <button class="btn-minimal sm" @click="clearSelectedSubjects">Clear</button>
           </div>
         </div>
 
-        <!-- Merge summary (collapsible) -->
         <div class="section-header mt">
           <h3>Merge summary</h3>
-          <button
-            type="button"
-            class="link-toggle"
-            @click="showMergeSummary = !showMergeSummary"
-          >
-            {{ showMergeSummary ? 'Hide' : 'Show' }}
-          </button>
         </div>
-        <div v-if="showMergeSummary" class="summary-grid">
+
+        <div class="summary-grid">
           <div class="summary-item">
             <div class="label">Entries to import</div>
             <div class="value">{{ importEntryCount }}</div>
@@ -246,26 +264,25 @@
           <div class="summary-item">
             <div class="label">Auto-merge possible</div>
             <div class="value">
-              {{ autoMergePossible ? 'Yes (no conflicts)' : 'No (review needed)' }}
+              {{ autoMergePossible ? "Yes (no conflicts)" : "No (review needed)" }}
             </div>
           </div>
         </div>
       </section>
 
-      <!-- Right column: conflicts table (primary view) -->
       <section class="card-surface right-column" v-if="conflicts.length">
         <div class="section-header">
           <h3>Resolve conflicts</h3>
+
           <div class="section-actions">
             <button
               type="button"
               class="btn-minimal sm"
               @click="toggleImportDetails"
             >
-              {{ showImportDetails ? 'Hide import details' : 'Show import details' }}
+              {{ showImportDetails ? "Hide import details" : "Show import details" }}
             </button>
 
-            <!-- Subject filter dropdown -->
             <div class="subject-filter">
               <label for="conflict-subject-filter">Subject:</label>
               <select
@@ -283,23 +300,17 @@
               </select>
             </div>
 
-            <button
-              class="btn-option sm"
-              @click="applyDecisionToAll('incoming')"
-            >
+            <button class="btn-option sm" @click="applyDecisionToAll('incoming')">
               Use incoming for all
             </button>
-            <button
-              class="btn-option sm"
-              @click="applyDecisionToAll('existing')"
-            >
+            <button class="btn-option sm" @click="applyDecisionToAll('existing')">
               Keep existing for all
             </button>
           </div>
         </div>
 
         <p class="helper">
-          For each difference, choose whether to keep the current value or use the value from the file.
+          For each difference, choose whether to keep the current value or use the value from the imported file.
         </p>
 
         <div class="conflict-table-wrapper">
@@ -324,13 +335,13 @@
                 <td>
                   <div class="val-cell">
                     <div class="val-main">{{ displayVal(c.existingValue) }}</div>
-                    <div class="val-meta">v{{ c.existingVersion || '—' }}</div>
+                    <div class="val-meta">v{{ c.existingVersion || "—" }}</div>
                   </div>
                 </td>
                 <td>
                   <div class="val-cell">
                     <div class="val-main">{{ displayVal(c.incomingValue) }}</div>
-                    <div class="val-meta">v{{ c.incomingVersion || '—' }}</div>
+                    <div class="val-meta">v{{ c.incomingVersion || "—" }}</div>
                   </div>
                 </td>
                 <td>
@@ -345,6 +356,7 @@
                       />
                       Existing
                     </label>
+
                     <label class="radio-inline">
                       <input
                         type="radio"
@@ -363,8 +375,7 @@
         </div>
       </section>
 
-      <!-- No conflicts: simple notice -->
-      <section v-else class="card-surface right-column">
+      <section v-else class="card-surface right-column no-conflicts-panel">
         <div class="section-header">
           <h3>No conflicts</h3>
           <div class="section-actions">
@@ -373,29 +384,257 @@
               class="btn-minimal sm"
               @click="toggleImportDetails"
             >
-              {{ showImportDetails ? 'Hide import details' : 'Show import details' }}
+              {{ showImportDetails ? "Hide import details" : "Show import details" }}
             </button>
           </div>
         </div>
-        <p class="helper">
+
+        <p class="helper large">
           All incoming values either match existing data or fill empty fields.
           You can go ahead and merge safely.
         </p>
+
+        <div class="summary-grid summary-grid-4">
+          <div class="summary-item">
+            <div class="label">Entries to import</div>
+            <div class="value">{{ importEntryCount }}</div>
+          </div>
+          <div class="summary-item">
+            <div class="label">Subjects in scope</div>
+            <div class="value">{{ scopeMode === "all" ? bundleSubjectIds.length : selectedSubjectIds.length }}</div>
+          </div>
+          <div class="summary-item">
+            <div class="label">Conflicts</div>
+            <div class="value">0</div>
+          </div>
+        </div>
       </section>
     </div>
 
-    <!-- Footer (fixed on full page, sticky when embedded) -->
+    <!-- Subject import layout -->
+    <div
+      v-if="sourceType === 'subject-import'"
+      class="subject-import-layout"
+    >
+      <!-- Step 1 -->
+      <section class="card-surface subject-step">
+        <div class="section-header">
+          <h3>1. Select target subject and visit</h3>
+        </div>
+
+        <div class="control-grid">
+          <div class="control-block">
+            <label>Subject</label>
+            <select v-model.number="subjectImport.subjectIndex" @change="onSubjectSelectionChange">
+              <option
+                v-for="(s, idx) in subjects"
+                :key="`subj-${idx}`"
+                :value="idx"
+              >
+                {{ s.id }}
+              </option>
+            </select>
+          </div>
+
+          <div class="control-block">
+            <label>Visit</label>
+            <select v-model.number="subjectImport.visitIndex" @change="rebuildSubjectImportPreview">
+              <option
+                v-for="(v, idx) in availableVisitsForSelectedSubject"
+                :key="`visit-${idx}`"
+                :value="v.index"
+              >
+                {{ v.name }}
+              </option>
+            </select>
+          </div>
+
+          <div class="control-block">
+            <label>Group</label>
+            <input
+              type="text"
+              :value="selectedSubjectGroupLabel"
+              disabled
+            />
+          </div>
+        </div>
+      </section>
+
+      <!-- Step 2 -->
+      <section class="card-surface subject-step">
+        <div class="section-header">
+          <h3>2. Upload file</h3>
+        </div>
+
+        <div class="step-upload-actions">
+          <button
+            type="button"
+            class="btn-primary"
+            @click="triggerSubjectImportFile"
+          >
+            Choose data file (.csv, .xlsx, .xls)
+          </button>
+        </div>
+
+        <p class="helper mt">
+          Supported layouts:
+        </p>
+
+        <div class="layout-hint-wrap">
+          <div class="layout-hint">
+            <div class="layout-title">Horizontal</div>
+            <code>Header1 | Header2 | Header3</code><br />
+            <code>Value1&nbsp;&nbsp;| Value2&nbsp;&nbsp;| Value3</code>
+          </div>
+          <div class="layout-hint">
+            <div class="layout-title">Vertical key-value</div>
+            <code>Header1 | Value1</code><br />
+            <code>Header2 | Value2</code>
+          </div>
+        </div>
+
+        <div v-if="subjectImport.fileName" class="file-meta">
+          <strong>File:</strong> {{ subjectImport.fileName }}
+        </div>
+      </section>
+
+      <!-- Step 3 -->
+      <section
+        v-if="subjectImportReady"
+        class="card-surface subject-step"
+      >
+        <div class="section-header">
+          <h3>3. Selected row / data source</h3>
+        </div>
+
+        <div class="summary-grid summary-grid-4">
+          <div class="summary-item">
+            <div class="label">Target subject</div>
+            <div class="value">{{ selectedSubjectLabel || "—" }}</div>
+          </div>
+          <div class="summary-item">
+            <div class="label">Target visit</div>
+            <div class="value">{{ selectedVisitLabel || "—" }}</div>
+          </div>
+          <div class="summary-item">
+            <div class="label">Detected layout</div>
+            <div class="value">{{ subjectImport.detectedLayoutLabel }}</div>
+          </div>
+          <div class="summary-item">
+            <div class="label">Matched source</div>
+            <div class="value">{{ subjectImport.matchResultLabel }}</div>
+          </div>
+        </div>
+
+        <div
+          v-if="subjectImportHorizontalHeaders.length"
+          class="preview-table-wrap spreadsheet-row-preview"
+        >
+          <table class="preview-table row-preview-table">
+            <thead>
+              <tr>
+                <th
+                  v-for="header in subjectImportHorizontalHeaders"
+                  :key="`hdr-${header}`"
+                >
+                  {{ header }}
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td
+                  v-for="header in subjectImportHorizontalHeaders"
+                  :key="`val-${header}`"
+                >
+                  {{ subjectImportHorizontalValues[header] || "—" }}
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div
+          v-if="subjectImportReady && !subjectImportHasMatchedValues"
+          class="template-warning mt"
+        >
+          No uploaded columns could be matched to Case-e fields for the current subject / visit selection.
+          Please check the file headers or choose the correct row / layout.
+        </div>
+      </section>
+
+      <!-- Step 4 -->
+      <section
+        v-if="subjectImportSummaryRows.length"
+        class="card-surface subject-step"
+      >
+        <div class="section-header">
+          <h3>4. Data that will be imported</h3>
+        </div>
+
+        <div class="summary-grid summary-grid-4">
+          <div class="summary-item">
+            <div class="label">Matched fields</div>
+            <div class="value">{{ subjectImportSummaryRows.length }}</div>
+          </div>
+          <div class="summary-item">
+            <div class="label">Unmatched file headers</div>
+            <div class="value">{{ subjectImport.unmatchedHeaders.length }}</div>
+          </div>
+          <div class="summary-item">
+            <div class="label">Existing entry</div>
+            <div class="value">{{ subjectImportExistingEntry ? "Yes" : "No" }}</div>
+          </div>
+          <div class="summary-item">
+            <div class="label">Save mode</div>
+            <div class="value">Merge into target visit</div>
+          </div>
+        </div>
+
+        <div class="preview-table-wrap">
+          <table class="preview-table">
+            <thead>
+              <tr>
+                <th>Section</th>
+                <th>Field</th>
+                <th>Imported value</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="row in subjectImportSummaryRows" :key="row.key">
+                <td>{{ row.sectionTitle }}</td>
+                <td>{{ row.fieldLabel }}</td>
+                <td>{{ row.value || "—" }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div
+          v-if="subjectImport.unmatchedHeaders.length"
+          class="template-warning mt"
+        >
+          The following file headers could not be matched to Case-e fields:
+          <strong>{{ subjectImport.unmatchedHeaders.join(", ") }}</strong>
+        </div>
+      </section>
+    </div>
+
+    <!-- Footer -->
     <div
       class="global-commit"
-      v-if="hasBundle"
+      v-if="
+        (sourceType === 'bundle' && hasBundle && importEntryCount > 0) ||
+        (sourceType === 'subject-import' && subjectImportHasMatchedValues)
+      "
       :class="{ embedded: isEmbedded && !isExpanded }"
     >
-      <div class="gc-left">
+      <div class="gc-left" v-if="sourceType === 'bundle'">
         <div class="sel-summary">
           <span>Subjects in scope:</span>
           <strong>
             {{
-              scopeMode === 'all'
+              scopeMode === "all"
                 ? bundleSubjectIds.length
                 : selectedSubjectIds.length
             }}
@@ -404,15 +643,48 @@
           <span>Conflicts:</span>
           <strong>{{ conflicts.length }}</strong>
         </div>
+
         <div class="sel-sub" v-if="!autoMergePossible">
           Decisions made:
           <strong>{{ decidedConflictCount }}</strong> /
           <strong>{{ conflicts.length }}</strong>
         </div>
       </div>
+
+      <div class="gc-left" v-else>
+        <div class="sel-summary">
+          <span>Target:</span>
+          <strong>{{ selectedSubjectLabel || "—" }}</strong>
+          <span class="dot">·</span>
+          <span>Visit:</span>
+          <strong>{{ selectedVisitLabel || "—" }}</strong>
+          <span class="dot">·</span>
+          <span>Fields to import:</span>
+          <strong>{{ subjectImportSummaryRows.length }}</strong>
+        </div>
+      </div>
+
       <div class="gc-right">
-        <button class="btn-primary" :disabled="!canMerge" @click="performMerge">
-          {{ isMerging ? 'Merging…' : (autoMergePossible ? 'Merge' : 'Merge with decisions') }}
+        <button
+          v-if="sourceType === 'bundle'"
+          class="btn-primary"
+          :disabled="!canMerge"
+          @click="performMerge"
+        >
+          {{
+            isMerging
+              ? "Merging…"
+              : (autoMergePossible ? "Merge" : "Merge with decisions")
+          }}
+        </button>
+
+        <button
+          v-else
+          class="btn-primary"
+          :disabled="!canSaveSubjectImport || isSavingSubjectImport"
+          @click="saveSubjectImport"
+        >
+          {{ isSavingSubjectImport ? "Saving…" : "Save imported data" }}
         </button>
       </div>
     </div>
@@ -430,6 +702,7 @@
 import axios from "axios";
 import JSZip from "jszip";
 import * as Papa from "papaparse";
+import * as XLSX from "xlsx";
 import CustomDialog from "@/components/CustomDialog.vue";
 import icons from "@/assets/styles/icons";
 
@@ -437,7 +710,6 @@ export default {
   name: "MergeStudyBundle",
   components: { CustomDialog },
   props: {
-    // Optional when embedded. If not provided, falls back to route param.
     studyId: {
       type: [String, Number],
       default: null,
@@ -447,11 +719,12 @@ export default {
     return {
       icons,
 
-      // layout state
+      // layout
       isEmbedded: false,
       isExpanded: false,
       _prevBodyOverflow: "",
 
+      // current study
       study: null,
       meta: {},
       subjects: [],
@@ -459,33 +732,32 @@ export default {
       groups: [],
       subjectToGroupIdx: [],
 
-      // template index (from current study)
-      sectionIndex: new Map(),       // title -> { displayByCanon, fieldNameByCanon, fieldTypeByCanon }
-      sectionTitleByCanon: new Map(),// canon(sectionTitle) -> sectionTitle
+      // template index
+      sectionIndex: new Map(),
+      sectionTitleByCanon: new Map(),
 
-      // existing entries (server)
+      // existing entries
       entries: [],
-      entriesIndex: new Map(),       // svgKey -> latest entry
+      entriesIndex: new Map(),
 
-      // imported file
+      // main mode
+      sourceType: "bundle", // bundle | subject-import
+
+      // bundle merge state
       hasBundle: false,
       bundleFileName: "",
       bundleVersion: null,
       bundleRowCount: 0,
       bundleSubjectIds: [],
       bundleVisitNames: [],
-      importedSchema: null,          // schema from template_vX.json
-      incomingEntries: {},           // svgKey -> { subject_index, visit_index, group_index, data, form_version }
+      importedSchema: null,
+      incomingEntries: {},
 
-      // scope
-      scopeMode: "all",              // 'all' | 'subset'
+      scopeMode: "all",
       selectedSubjectIds: [],
 
-      // conflicts
-      conflicts: [],                 // [{ key, svgKey, subjectId, visitName, sectionTitle, fieldCanon, fieldLabel, existingValue, incomingValue, existingVersion, incomingVersion }]
-      decisions: {},                 // conflictKey -> 'existing' | 'incoming'
-
-      // subject filter for conflicts table
+      conflicts: [],
+      decisions: {},
       selectedConflictSubject: "ALL",
 
       parseInfo: { ok: false, message: "" },
@@ -494,12 +766,39 @@ export default {
       showDialog: false,
       dialogMessage: "",
 
-      // UI toggles
-      showImportDetails: false,      // show/hide left column
-      showMergeSummary: false,       // collapse/expand merge summary
+      showImportDetails: true,
+
+      // subject import state
+      subjectImport: {
+        subjectIndex: 0,
+        visitIndex: 0,
+        groupIndex: 0,
+        fileName: "",
+        workbook: null,
+        sheetNames: [],
+        selectedSheetName: "",
+        rawAoA: [],
+        detectedLayout: "", // horizontal | vertical
+        matchedPairs: {},   // header -> value from source
+        normalizedImportData: {}, // section -> field -> value
+        unmatchedHeaders: [],
+        matchResultLabel: "—",
+        detectedLayoutLabel: "—",
+      },
+      subjectImportAssumptionWarning: false,
+      isSavingSubjectImport: false,
     };
   },
+
   computed: {
+    subjectImportHorizontalHeaders() {
+      return Object.keys(this.subjectImport.matchedPairs || {});
+    },
+
+    subjectImportHorizontalValues() {
+      return this.subjectImport.matchedPairs || {};
+    },
+
     resolvedStudyId() {
       const fromProp = this.studyId;
       const fromRoute = this.$route?.params?.id;
@@ -511,20 +810,24 @@ export default {
     importEntryCount() {
       return Object.keys(this.incomingEntries || {}).length;
     },
+
     autoMergePossible() {
       return this.conflicts.length === 0;
     },
+
     decidedConflictCount() {
       return this.conflicts.filter((c) => !!this.decisions[c.key]).length;
     },
+
     canMerge() {
       if (!this.hasBundle) return false;
       if (this.templateMismatch) return false;
+      if (this.importEntryCount <= 0) return false;
       if (this.scopeMode === "subset" && this.selectedSubjectIds.length === 0) return false;
       if (!this.autoMergePossible && this.decidedConflictCount < this.conflicts.length) return false;
       return !this.isMerging;
     },
-    // simple summaries for template comparison
+
     currentTemplateSummary() {
       const sd = this.study?.content?.study_data || {};
       const sections = sd.selectedModels || [];
@@ -534,6 +837,7 @@ export default {
       });
       return { sections: sections.length, fields: fieldCount };
     },
+
     importedTemplateSummary() {
       const schema = this.importedSchema || {};
       const sections = Array.isArray(schema.selectedModels) ? schema.selectedModels : [];
@@ -543,14 +847,14 @@ export default {
       });
       return { sections: sections.length, fields: fieldCount };
     },
+
     templateMismatch() {
-      // very conservative: require same number of sections and fields
       return (
         this.currentTemplateSummary.sections !== this.importedTemplateSummary.sections ||
         this.currentTemplateSummary.fields !== this.importedTemplateSummary.fields
       );
     },
-    // Explain what exactly is mismatching between templates
+
     templateMismatchDetails() {
       const details = [];
       if (!this.importedSchema) return details;
@@ -594,17 +898,83 @@ export default {
 
       return details;
     },
-    // distinct subject IDs present in conflicts
+
     conflictSubjectOptions() {
       const set = new Set(this.conflicts.map((c) => String(c.subjectId)));
       return Array.from(set).sort();
     },
-    // conflicts filtered by selected subject for the table only
+
     visibleConflicts() {
       if (!this.selectedConflictSubject || this.selectedConflictSubject === "ALL") {
         return this.conflicts;
       }
       return this.conflicts.filter((c) => String(c.subjectId) === String(this.selectedConflictSubject));
+    },
+
+    selectedSubjectLabel() {
+      const s = this.subjects[this.subjectImport.subjectIndex];
+      return s?.id ? String(s.id) : "";
+    },
+
+    selectedVisitLabel() {
+      const v = this.visits[this.subjectImport.visitIndex];
+      return v?.name ? String(v.name) : "";
+    },
+
+    selectedSubjectGroupLabel() {
+      const g = this.groups[this.subjectImport.groupIndex];
+      return g?.name ? String(g.name) : "";
+    },
+
+    availableVisitsForSelectedSubject() {
+      return (this.visits || []).map((v, idx) => ({
+        index: idx,
+        name: v.name,
+      }));
+    },
+
+    subjectImportReady() {
+      return !!this.subjectImport.fileName;
+    },
+
+    subjectImportHasMatchedValues() {
+      return this.subjectImportSummaryRows.length > 0;
+    },
+
+    subjectImportMatchedPreviewRows() {
+      return Object.keys(this.subjectImport.matchedPairs || {}).map((k) => ({
+        key: k,
+        header: k,
+        value: this.subjectImport.matchedPairs[k],
+      }));
+    },
+
+    subjectImportSummaryRows() {
+      const out = [];
+      const data = this.subjectImport.normalizedImportData || {};
+      Object.keys(data).forEach((sectionTitle) => {
+        const sec = data[sectionTitle] || {};
+        Object.keys(sec).forEach((fieldName) => {
+          const fieldLabel = this.displayLabelForField(sectionTitle, fieldName);
+          out.push({
+            key: `${sectionTitle}__${fieldName}`,
+            sectionTitle,
+            fieldName,
+            fieldLabel,
+            value: sec[fieldName],
+          });
+        });
+      });
+      return out;
+    },
+
+    canSaveSubjectImport() {
+      return this.subjectImportHasMatchedValues && !this.isSavingSubjectImport;
+    },
+
+    subjectImportExistingEntry() {
+      const key = `${this.subjectImport.subjectIndex}|${this.subjectImport.visitIndex}|${this.subjectImport.groupIndex}`;
+      return this.entriesIndex.get(key) || null;
     },
   },
 
@@ -617,10 +987,10 @@ export default {
     await this.loadEntries();
     this.indexEntries();
     this.buildSectionIndex();
+    this.initSubjectImportDefaults();
   },
 
   mounted() {
-    // Detect embedding inside StudyDataEntry "merge-panel" (or the main study container)
     try {
       const el = this.$el;
       this.isEmbedded = !!(el && (el.closest(".merge-panel") || el.closest(".study-data-container")));
@@ -634,18 +1004,24 @@ export default {
   },
 
   methods: {
-    // ---------- Expand/Shrink ----------
+    triggerSubjectImportFile() {
+      this.$refs.fileInputSubject && this.$refs.fileInputSubject.click();
+    },
+
+    // ---------- Layout ----------
     toggleExpand() {
       this.isExpanded = !this.isExpanded;
       if (this.isExpanded) this.lockBodyScroll();
       else this.restoreBodyOverflow();
     },
+
     lockBodyScroll() {
       try {
         this._prevBodyOverflow = document.body.style.overflow || "";
         document.body.style.overflow = "hidden";
       } catch (e) {}
     },
+
     restoreBodyOverflow() {
       try {
         document.body.style.overflow = this._prevBodyOverflow || "";
@@ -657,15 +1033,17 @@ export default {
       this.dialogMessage = msg;
       this.showDialog = true;
     },
+
     closeDialog() {
       this.showDialog = false;
       this.dialogMessage = "";
     },
+
     toggleImportDetails() {
       this.showImportDetails = !this.showImportDetails;
     },
 
-    // ---------- Load existing study ----------
+    // ---------- Load study ----------
     async loadStudy() {
       try {
         const { data } = await axios.get(`/forms/studies/${this.resolvedStudyId}`, {
@@ -685,10 +1063,11 @@ export default {
           return gi >= 0 ? gi : 0;
         });
       } catch (e) {
-        console.error("[Merge] Failed to load study:", e);
+        console.error("[Import] Failed to load study:", e);
         this.showDialogMessage("Failed to load study.");
       }
     },
+
     async loadEntries() {
       try {
         const { data } = await axios.get(`/forms/studies/${this.resolvedStudyId}/data_entries`, {
@@ -696,10 +1075,11 @@ export default {
         });
         this.entries = Array.isArray(data) ? data : data?.entries || [];
       } catch (e) {
-        console.error("[Merge] Failed to load entries:", e);
+        console.error("[Import] Failed to load entries:", e);
         this.entries = [];
       }
     },
+
     indexEntries() {
       const m = new Map();
       for (const e of this.entries) {
@@ -712,7 +1092,7 @@ export default {
       this.entriesIndex = m;
     },
 
-    // ---------- Template index & helpers ----------
+    // ---------- Template / field helpers ----------
     buildSectionIndex() {
       this.sectionIndex = new Map();
       this.sectionTitleByCanon = new Map();
@@ -755,20 +1135,13 @@ export default {
         this.sectionIndex.set(title, { displayByCanon, fieldNameByCanon, fieldTypeByCanon });
       });
     },
-    mapSectionTitle(raw) {
-      const mapped = this.sectionTitleByCanon.get(this.canonKey(raw));
-      return mapped || raw;
-    },
-    displayFor(sectionTitle, canon) {
-      const m = this.sectionIndex.get(sectionTitle);
-      return (m?.displayByCanon?.[canon]) || this.prettyFromCanon(canon);
-    },
 
     canonKey(s) {
       return String(s ?? "")
         .toLowerCase()
         .replace(/[\W_]+/g, "");
     },
+
     humanizeCamel(s) {
       if (!s) return "";
       const w = String(s)
@@ -777,12 +1150,26 @@ export default {
         .toLowerCase();
       return w.replace(/\b\w/g, (c) => c.toUpperCase());
     },
+
     prettyFromCanon(canon) {
       return this.humanizeCamel(canon);
     },
+
+    displayLabelForField(sectionTitle, fieldName) {
+      const idx = this.sectionIndex.get(sectionTitle);
+      if (!idx) return fieldName;
+      return idx.displayByCanon?.[this.canonKey(fieldName)] || fieldName;
+    },
+
+    displayFor(sectionTitle, canon) {
+      const m = this.sectionIndex.get(sectionTitle);
+      return (m?.displayByCanon?.[canon]) || this.prettyFromCanon(canon);
+    },
+
     hasValue(v) {
       return v !== null && v !== undefined && String(v).trim() !== "";
     },
+
     displayVal(v) {
       return this.hasValue(v) ? String(v) : "";
     },
@@ -840,7 +1227,6 @@ export default {
         return out;
       }
 
-      // array-shape fallback
       const arr = Array.isArray(entry.data) ? entry.data : [];
       models.forEach((sec, sIdx) => {
         const secTitle = sec.title;
@@ -853,11 +1239,6 @@ export default {
         out[secTitle] = this.normalizeSectionDict(secTitle, byName);
       });
       return out;
-    },
-
-    makeSkipSkeleton() {
-      const models = this.study?.content?.study_data?.selectedModels || [];
-      return models.map((sec) => (sec.fields || []).map(() => false));
     },
 
     denormalizeForSave(normBySection) {
@@ -881,6 +1262,11 @@ export default {
       return out;
     },
 
+    mapSectionTitle(raw) {
+      const mapped = this.sectionTitleByCanon.get(this.canonKey(raw));
+      return mapped || raw;
+    },
+
     valuesEqual(a, b) {
       const hv = (v) => v !== null && v !== undefined && String(v).trim() !== "";
       if (!hv(a) && !hv(b)) return true;
@@ -892,21 +1278,24 @@ export default {
       return aa === bb;
     },
 
-    // ---------- Scope helpers ----------
-    selectAllSubjects() {
-      this.selectedSubjectIds = [...this.bundleSubjectIds];
-      this.computeConflicts();
-    },
-    clearSelectedSubjects() {
-      this.selectedSubjectIds = [];
-      this.computeConflicts();
+    makeSkipSkeleton() {
+      const models = this.study?.content?.study_data?.selectedModels || [];
+      return models.map((sec) => (sec.fields || []).map(() => false));
     },
 
-    // ---------- File handling / parsing ----------
-    triggerFile() {
-      this.$refs.fileInput && this.$refs.fileInput.click();
+    resolveGroup(studyData, subjIdx) {
+      const subjects = studyData.subjects || [];
+      const groups = studyData.groups || [];
+      const subjGroup = (subjects[subjIdx]?.group || "").trim().toLowerCase();
+      const idx = groups.findIndex(
+        (g) => (g.name || "").trim().toLowerCase() === subjGroup
+      );
+      return idx >= 0 ? idx : 0;
     },
-    clearBundle() {
+
+    // ---------- Reset ----------
+    resetImportStateKeepStudy() {
+      // bundle
       this.hasBundle = false;
       this.bundleFileName = "";
       this.bundleVersion = null;
@@ -921,23 +1310,60 @@ export default {
       this.scopeMode = "all";
       this.selectedSubjectIds = [];
       this.selectedConflictSubject = "ALL";
-      this.showImportDetails = false;
-      this.showMergeSummary = false;
-      // keep expand state untouched
+
+      // subject import
+      this.subjectImport = {
+        subjectIndex: 0,
+        visitIndex: 0,
+        groupIndex: 0,
+        fileName: "",
+        workbook: null,
+        sheetNames: [],
+        selectedSheetName: "",
+        rawAoA: [],
+        detectedLayout: "",
+        matchedPairs: {},
+        normalizedImportData: {},
+        unmatchedHeaders: [],
+        matchResultLabel: "—",
+        detectedLayoutLabel: "—",
+      };
+      this.subjectImportAssumptionWarning = false;
+      this.isSavingSubjectImport = false;
+
+      if (this.$refs.fileInputBundle) this.$refs.fileInputBundle.value = "";
+      if (this.$refs.fileInputSubject) this.$refs.fileInputSubject.value = "";
+
+      this.initSubjectImportDefaults();
     },
+
+    clearBundle() {
+      this.resetImportStateKeepStudy();
+    },
+
+    triggerFile() {
+      if (this.sourceType === "bundle") {
+        this.$refs.fileInputBundle && this.$refs.fileInputBundle.click();
+      } else {
+        this.$refs.fileInputSubject && this.$refs.fileInputSubject.click();
+      }
+    },
+
+    // ---------- Bundle flow ----------
     async onBundleFile(ev) {
       const f = ev.target.files && ev.target.files[0];
       if (!f) return;
       try {
         await this.parseBundle(f);
       } catch (e) {
-        console.error("[Merge] Failed to parse file:", e);
-        this.parseInfo = { ok: false, message: "Failed to read file. See console." };
+        console.error("[Bundle] Failed to parse file:", e);
+        this.parseInfo = { ok: false, message: "Failed to read bundle file. See console." };
         this.hasBundle = false;
       }
     },
+
     async parseBundle(file) {
-      this.clearBundle();
+      this.resetImportStateKeepStudy();
       this.bundleFileName = file.name;
 
       const zip = await JSZip.loadAsync(file);
@@ -967,7 +1393,7 @@ export default {
         const parsed = JSON.parse(templateText);
         schema = parsed?.schema || parsed || {};
       } catch (e) {
-        console.error("[Merge] Failed to parse template JSON:", e);
+        console.error("[Bundle] Failed to parse template JSON:", e);
         this.parseInfo = { ok: false, message: "Failed to parse template JSON." };
         return;
       }
@@ -979,7 +1405,6 @@ export default {
         return;
       }
 
-      // Version from filename or schema
       const tmplMatch = templateFile.name.match(/template_v(\d+)/i);
       const dataMatch = dataFile.name.match(/data_v(\d+)/i);
       const versionFromName =
@@ -991,7 +1416,6 @@ export default {
       this.bundleRowCount = rows.length - 2;
       this.importedSchema = schema;
 
-      // Build incoming entries from rows
       const { incomingEntries, subjectIds, visitNames, warnings } =
         this.buildIncomingEntriesFromRows(rows, schema, this.bundleVersion);
 
@@ -999,6 +1423,14 @@ export default {
         this.parseInfo = {
           ok: false,
           message: `File contains unknown subjects/visits: ${warnings.join("; ")}. Merge is disabled to avoid data loss.`,
+        };
+        return;
+      }
+
+      if (!Object.keys(incomingEntries || {}).length) {
+        this.parseInfo = {
+          ok: false,
+          message: "No valid study entries were found in the uploaded bundle. Nothing can be merged.",
         };
         return;
       }
@@ -1011,109 +1443,182 @@ export default {
       this.hasBundle = true;
       this.parseInfo = {
         ok: true,
-        message: `File parsed. Rows: ${this.bundleRowCount}. Subjects: ${subjectIds.length}. Visits: ${visitNames.length}.`,
+        message: `Bundle parsed. Rows: ${this.bundleRowCount}. Subjects: ${subjectIds.length}. Visits: ${visitNames.length}.`,
       };
-
-      // By default, keep left panel hidden
-      this.showImportDetails = false;
-      this.showMergeSummary = false;
 
       this.computeConflicts();
     },
-
     buildIncomingEntriesFromRows(rows, schema, bundleVersion) {
-      const studyData = this.study?.content?.study_data || {};
-      const sections = Array.isArray(schema.selectedModels) ? schema.selectedModels : [];
-      const incomingEntries = {};
-      const subjectIdsSet = new Set();
-      const visitNamesSet = new Set();
-      const warnings = [];
+  const studyData = this.study?.content?.study_data || {};
+  const sections = Array.isArray(schema.selectedModels) ? schema.selectedModels : [];
+  const incomingEntries = {};
+  const subjectIdsSet = new Set();
+  const visitNamesSet = new Set();
+  const warnings = [];
 
-      // maps for current study
-      const subjMap = {};
-      this.subjects.forEach((s, idx) => {
-        subjMap[String(s.id)] = idx;
+  const subjMap = {};
+  this.subjects.forEach((s, idx) => {
+    subjMap[String(s.id)] = idx;
+  });
+
+  const visitMap = {};
+  this.visits.forEach((v, idx) => {
+    visitMap[String(v.name).trim().toLowerCase()] = idx;
+  });
+
+  // Build current template field lookup so we only accept fields that actually exist in current Case-e study
+  const currentSections = this.study?.content?.study_data?.selectedModels || [];
+  const currentFieldMap = new Map();
+
+  currentSections.forEach((section) => {
+    const secTitle = section.title || section.name || "";
+    if (!secTitle) return;
+
+    const fieldCanonToName = new Map();
+    (section.fields || []).forEach((field, idx) => {
+      const fieldName =
+        field?.name ||
+        field?.key ||
+        field?.id ||
+        field?.label ||
+        field?.title ||
+        `f${idx}`;
+
+      const candidates = [
+        field?.name,
+        field?.key,
+        field?.id,
+        field?.label,
+        field?.title,
+        this.humanizeCamel(field?.name),
+        this.humanizeCamel(field?.label),
+      ]
+        .filter(Boolean)
+        .map((x) => this.canonKey(x));
+
+      candidates.forEach((canon) => {
+        fieldCanonToName.set(canon, fieldName);
       });
-      const visitMap = {};
-      this.visits.forEach((v, idx) => {
-        visitMap[String(v.name).trim().toLowerCase()] = idx;
-      });
+    });
 
-      for (let r = 2; r < rows.length; r++) {
-        const row = rows[r] || [];
-        const subjectId = String(row[0] || "").trim();
-        const visitName = String(row[1] || "").trim();
-        if (!subjectId || !visitName) continue;
+    currentFieldMap.set(secTitle, fieldCanonToName);
+  });
 
-        subjectIdsSet.add(subjectId);
-        visitNamesSet.add(visitName);
+  for (let r = 2; r < rows.length; r++) {
+    const row = rows[r] || [];
+    const subjectId = String(row[0] || "").trim();
+    const visitName = String(row[1] || "").trim();
 
-        const sIdx = subjMap[subjectId];
-        const vIdx = visitMap[visitName.trim().toLowerCase()];
+    if (!subjectId || !visitName) continue;
 
-        if (sIdx == null || sIdx < 0) {
-          if (!warnings.includes("unknown subject(s)")) warnings.push("unknown subject(s)");
-          continue;
-        }
-        if (vIdx == null || vIdx < 0) {
-          if (!warnings.includes("unknown visit(s)")) warnings.push("unknown visit(s)");
-          continue;
-        }
+    const sIdx = subjMap[subjectId];
+    const vIdx = visitMap[visitName.trim().toLowerCase()];
 
-        const groupIdx = this.resolveGroup(studyData, sIdx);
+    if (sIdx == null || sIdx < 0) {
+      if (!warnings.includes("unknown subject(s)")) warnings.push("unknown subject(s)");
+      continue;
+    }
 
-        const key = `${sIdx}|${vIdx}|${groupIdx}`;
-        if (!incomingEntries[key]) {
-          incomingEntries[key] = {
-            study_id: this.resolvedStudyId,
-            subject_index: sIdx,
-            visit_index: vIdx,
-            group_index: groupIdx,
-            form_version: bundleVersion,
-            data: {},
-          };
-        }
-        const entry = incomingEntries[key];
+    if (vIdx == null || vIdx < 0) {
+      if (!warnings.includes("unknown visit(s)")) warnings.push("unknown visit(s)");
+      continue;
+    }
 
-        let col = 2;
-        sections.forEach((section, sIndex) => {
-          const secTitle = section.title || section.name || `Section ${sIndex + 1}`;
-          const fields = section.fields || [];
-          if (!entry.data[secTitle]) entry.data[secTitle] = {};
-          fields.forEach((field, fIdx) => {
-            const val = row[col++] ?? "";
-            const name =
-              field.name ||
-              field.key ||
-              field.id ||
-              field.label ||
-              field.title ||
-              `f${fIdx}`;
-            const trimmed = String(val).trim();
-            if (trimmed !== "") entry.data[secTitle][name] = trimmed;
-          });
-        });
+    const groupIdx = this.resolveGroup(studyData, sIdx);
+
+    const rowData = {};
+    let matchedValueCount = 0;
+
+    let col = 2;
+    sections.forEach((section, sIndex) => {
+      const importedSectionTitle = section.title || section.name || `Section ${sIndex + 1}`;
+      const mappedSectionTitle = this.mapSectionTitle(importedSectionTitle);
+      const currentFieldsForSection = currentFieldMap.get(mappedSectionTitle);
+
+      const fields = section.fields || [];
+      if (!currentFieldsForSection) {
+        col += fields.length;
+        return;
       }
 
-      return {
-        incomingEntries,
-        subjectIds: Array.from(subjectIdsSet),
-        visitNames: Array.from(visitNamesSet),
-        warnings,
-      };
-    },
+      fields.forEach((field, fIdx) => {
+        const val = row[col++] ?? "";
+        const trimmed = String(val).trim();
+        if (trimmed === "") return;
 
-    resolveGroup(studyData, subjIdx) {
-      const subjects = studyData.subjects || [];
-      const groups = studyData.groups || [];
-      const subjGroup = (subjects[subjIdx]?.group || "").trim().toLowerCase();
-      const idx = groups.findIndex(
-        (g) => (g.name || "").trim().toLowerCase() === subjGroup
-      );
-      return idx >= 0 ? idx : 0;
-    },
+        const importedFieldKey =
+          field?.name ||
+          field?.key ||
+          field?.id ||
+          field?.label ||
+          field?.title ||
+          `f${fIdx}`;
 
-    // ---------- Conflict detection ----------
+        const importedCandidates = [
+          field?.name,
+          field?.key,
+          field?.id,
+          field?.label,
+          field?.title,
+          this.humanizeCamel(field?.name),
+          this.humanizeCamel(field?.label),
+        ]
+          .filter(Boolean)
+          .map((x) => this.canonKey(x));
+
+        let matchedCurrentFieldName = null;
+        for (const canon of importedCandidates) {
+          const hit = currentFieldsForSection.get(canon);
+          if (hit) {
+            matchedCurrentFieldName = hit;
+            break;
+          }
+        }
+
+        if (!matchedCurrentFieldName) {
+          return;
+        }
+
+        if (!rowData[mappedSectionTitle]) rowData[mappedSectionTitle] = {};
+        rowData[mappedSectionTitle][matchedCurrentFieldName] = trimmed;
+        matchedValueCount += 1;
+      });
+    });
+
+    // Only keep row if at least one actual Case-e field matched
+    if (matchedValueCount > 0) {
+      subjectIdsSet.add(subjectId);
+      visitNamesSet.add(visitName);
+
+      const key = `${sIdx}|${vIdx}|${groupIdx}`;
+
+      if (!incomingEntries[key]) {
+        incomingEntries[key] = {
+          study_id: this.resolvedStudyId,
+          subject_index: sIdx,
+          visit_index: vIdx,
+          group_index: groupIdx,
+          form_version: bundleVersion,
+          data: {},
+        };
+      }
+
+      const entry = incomingEntries[key];
+      Object.keys(rowData).forEach((secTitle) => {
+        if (!entry.data[secTitle]) entry.data[secTitle] = {};
+        Object.assign(entry.data[secTitle], rowData[secTitle]);
+      });
+    }
+  }
+
+  return {
+    incomingEntries,
+    subjectIds: Array.from(subjectIdsSet),
+    visitNames: Array.from(visitNamesSet),
+    warnings,
+  };
+},
+
     computeConflicts() {
       const conflicts = [];
       const scopeAll = this.scopeMode === "all";
@@ -1134,7 +1639,7 @@ export default {
         if (!scopeAll && !scopeSet.has(String(subjectId))) continue;
 
         const existing = this.entriesIndex.get(svgKey);
-        if (!existing) continue; // new entry, no conflicts
+        if (!existing) continue;
 
         const exDict = this.entryToDictNormalized(existing);
         const inDict = this.entryToDictNormalized(incoming);
@@ -1181,7 +1686,6 @@ export default {
       this.decisions = {};
       this.selectedConflictSubject = "ALL";
 
-      // Auto decisions based on version (higher version wins by default)
       for (const c of conflicts) {
         const eV = Number(c.existingVersion || 0);
         const iV = Number(c.incomingVersion || 0);
@@ -1192,6 +1696,7 @@ export default {
     setDecision(key, choice) {
       this.decisions = { ...this.decisions, [key]: choice };
     },
+
     applyDecisionToAll(choice) {
       const next = { ...this.decisions };
       this.conflicts.forEach((c) => {
@@ -1200,7 +1705,16 @@ export default {
       this.decisions = next;
     },
 
-    // ---------- Merge ----------
+    selectAllSubjects() {
+      this.selectedSubjectIds = [...this.bundleSubjectIds];
+      this.computeConflicts();
+    },
+
+    clearSelectedSubjects() {
+      this.selectedSubjectIds = [];
+      this.computeConflicts();
+    },
+
     async performMerge() {
       if (!this.canMerge) return;
 
@@ -1252,10 +1766,9 @@ export default {
                 if (choice === "incoming") exSec[canon] = inVal;
                 else exSec[canon] = hasEx ? exVal : inVal;
               } else {
-                // Non-conflict: never drop non-empty data
                 if (hasIn && !hasEx) exSec[canon] = inVal;
                 else if (!hasIn && hasEx) exSec[canon] = exVal;
-                else if (hasIn && hasEx) exSec[canon] = inVal; // equal or compatible
+                else if (hasIn && hasEx) exSec[canon] = inVal;
                 else exSec[canon] = "";
               }
             }
@@ -1289,10 +1802,401 @@ export default {
         this.indexEntries();
         this.showDialogMessage("Merge completed successfully.");
       } catch (e) {
-        console.error("[Merge] Merge failed:", e?.response?.data || e);
+        console.error("[Bundle] Merge failed:", e?.response?.data || e);
         this.showDialogMessage("Merge failed. See console for details.");
       } finally {
         this.isMerging = false;
+      }
+    },
+
+    // ---------- Subject import flow ----------
+    initSubjectImportDefaults() {
+      const subjectIndex = 0;
+      const groupIndex = this.subjectToGroupIdx[subjectIndex] || 0;
+      this.subjectImport.subjectIndex = subjectIndex;
+      this.subjectImport.visitIndex = 0;
+      this.subjectImport.groupIndex = groupIndex;
+    },
+
+    onSubjectSelectionChange() {
+      this.subjectImport.groupIndex = this.subjectToGroupIdx[this.subjectImport.subjectIndex] || 0;
+
+      const available = this.availableVisitsForSelectedSubject;
+      if (!available.some((v) => Number(v.index) === Number(this.subjectImport.visitIndex))) {
+        this.subjectImport.visitIndex = available.length ? available[0].index : 0;
+      }
+
+      this.rebuildSubjectImportPreview();
+    },
+
+    async onSubjectImportFile(event) {
+      const file = event?.target?.files?.[0];
+      if (!file) return;
+
+      this.subjectImport.fileName = file.name;
+      this.subjectImportAssumptionWarning = false;
+      this.subjectImport.matchedPairs = {};
+      this.subjectImport.normalizedImportData = {};
+      this.subjectImport.unmatchedHeaders = [];
+      this.subjectImport.matchResultLabel = "—";
+      this.subjectImport.detectedLayoutLabel = "—";
+      this.parseInfo = { ok: false, message: "" };
+
+      try {
+        const buffer = await file.arrayBuffer();
+        let workbook = null;
+        const lower = file.name.toLowerCase();
+
+        if (lower.endsWith(".csv")) {
+          const text = new TextDecoder("utf-8").decode(buffer);
+          const parsed = Papa.parse(text, { skipEmptyLines: false });
+          const aoa = parsed.data || [];
+          workbook = XLSX.utils.book_new();
+          const ws = XLSX.utils.aoa_to_sheet(aoa);
+          XLSX.utils.book_append_sheet(workbook, ws, "Sheet1");
+        } else {
+          workbook = XLSX.read(buffer, { type: "array" });
+        }
+
+        this.subjectImport.workbook = workbook;
+        this.subjectImport.sheetNames = workbook.SheetNames || [];
+        this.subjectImport.selectedSheetName = this.subjectImport.sheetNames[0] || "";
+
+        if (!this.subjectImport.selectedSheetName) {
+          this.parseInfo = { ok: false, message: "No sheet was found in the uploaded file." };
+          return;
+        }
+
+        const sheet = workbook.Sheets[this.subjectImport.selectedSheetName];
+        const aoa = XLSX.utils.sheet_to_json(sheet, {
+          header: 1,
+          defval: "",
+          raw: false,
+          blankrows: false,
+        });
+
+        this.subjectImport.rawAoA = Array.isArray(aoa) ? aoa : [];
+        this.rebuildSubjectImportPreview();
+      } catch (e) {
+        console.error("[SubjectImport] Failed to read file", e);
+        this.parseInfo = { ok: false, message: "The selected file could not be read. Please upload a valid CSV or Excel file." };
+      }
+    },
+
+    normalizeText(s) {
+      return String(s || "")
+        .trim()
+        .toLowerCase()
+        .replace(/\s+/g, " ")
+        .replace(/[._/\\|:-]+/g, " ")
+        .replace(/[()]/g, "")
+        .trim();
+    },
+
+    findMetadataColumns(headers) {
+      const normHeaders = headers.map((h) => this.normalizeText(h));
+      const findIdx = (patterns) => {
+        return normHeaders.findIndex((h) => patterns.some((p) => h.includes(p)));
+      };
+
+      return {
+        subjectIdx: findIdx(["subject id", "subject", "participant", "participant id"]),
+        visitIdx: findIdx(["visit", "visit name", "session", "timepoint"]),
+      };
+    },
+
+    detectSubjectImportLayout(aoa) {
+      const rows = Array.isArray(aoa) ? aoa.filter((r) => Array.isArray(r)) : [];
+      if (!rows.length) return "unknown";
+
+      // vertical: many rows, first col header, second col value, usually 2 cols
+      const maxCols = Math.max(...rows.map((r) => r.length), 0);
+      if (maxCols <= 2 && rows.length >= 2) {
+        return "vertical";
+      }
+
+      // horizontal default
+      return "horizontal";
+    },
+
+    extractPairsFromVertical(aoa) {
+      const pairs = {};
+      (aoa || []).forEach((row) => {
+        if (!Array.isArray(row)) return;
+        const k = String(row[0] || "").trim();
+        const v = row.length > 1 ? row[1] : "";
+        if (!k) return;
+        if (String(v).trim() === "") return;
+        pairs[k] = String(v).trim();
+      });
+      return pairs;
+    },
+
+    extractPairsFromHorizontalForSelectedTarget(aoa) {
+      const rows = (aoa || []).filter((r) => Array.isArray(r));
+      if (rows.length < 2) return { pairs: {}, usedFallback: true, label: "No usable row found" };
+
+      const headers = (rows[0] || []).map((x) => String(x || "").trim());
+      const dataRows = rows.slice(1);
+
+      const { subjectIdx, visitIdx } = this.findMetadataColumns(headers);
+      const targetSubject = String(this.selectedSubjectLabel || "").trim();
+      const targetVisit = String(this.selectedVisitLabel || "").trim().toLowerCase();
+
+      let matchedRow = null;
+      let usedFallback = false;
+      let label = "";
+
+      if (subjectIdx >= 0 && visitIdx >= 0) {
+        matchedRow = dataRows.find((row) => {
+          const subj = String(row?.[subjectIdx] || "").trim();
+          const vis = String(row?.[visitIdx] || "").trim().toLowerCase();
+          return subj === targetSubject && vis === targetVisit;
+        });
+
+        if (matchedRow) {
+          label = `Matched row using subject + visit columns`;
+        } else {
+          usedFallback = true;
+          matchedRow = dataRows[0] || [];
+          label = `No exact row match found, used first data row`;
+        }
+      } else {
+        usedFallback = true;
+        matchedRow = dataRows[0] || [];
+        label = `Used first data row`;
+      }
+
+      const pairs = {};
+      headers.forEach((h, idx) => {
+        const val = matchedRow?.[idx];
+        if (!h) return;
+        if (!this.hasValue(val)) return;
+        pairs[h] = String(val).trim();
+      });
+
+      return { pairs, usedFallback, label, hasSubjectVisitCols: subjectIdx >= 0 && visitIdx >= 0 };
+    },
+
+    matchPairsToCaseEFields(pairs) {
+      const normalizedImportData = {};
+      const unmatchedHeaders = [];
+      const fields = this.study?.content?.study_data?.selectedModels || [];
+
+      const allFieldCandidates = [];
+      fields.forEach((sec) => {
+        const sectionTitle = sec.title || sec.name || "";
+        (sec.fields || []).forEach((f, idx) => {
+          const fieldName = f?.name || "";
+          const fieldLabel = f?.label || f?.title || f?.name || `Field ${idx + 1}`;
+          if (!fieldName) return;
+
+          const candidates = new Set([
+            this.normalizeText(fieldName),
+            this.normalizeText(fieldLabel),
+            this.normalizeText(`${sectionTitle} ${fieldLabel}`),
+            this.normalizeText(`${sectionTitle}.${fieldLabel}`),
+            this.normalizeText(this.humanizeCamel(fieldName)),
+          ]);
+
+          allFieldCandidates.push({
+            sectionTitle,
+            fieldName,
+            fieldLabel,
+            candidates: Array.from(candidates).filter(Boolean),
+          });
+        });
+      });
+
+      const isMetadataHeader = (header) => {
+        const h = this.normalizeText(header);
+
+        const metadataPatterns = [
+          "subject id",
+          "subject",
+          "participant",
+          "participant id",
+          "visit",
+          "visit name",
+          "session",
+          "timepoint",
+          "group",
+          "arm",
+          "cohort",
+        ];
+
+        return metadataPatterns.some((p) => h === p || h.includes(p));
+      };
+
+      Object.keys(pairs || {}).forEach((header) => {
+        const val = pairs[header];
+        const h = this.normalizeText(header);
+
+        let matched = allFieldCandidates.find((f) => f.candidates.includes(h));
+
+        if (!matched) {
+          matched = allFieldCandidates.find((f) =>
+            f.candidates.some((c) => c.includes(h) || h.includes(c))
+          );
+        }
+
+        if (!matched) {
+          if (!isMetadataHeader(header)) {
+            unmatchedHeaders.push(header);
+          }
+          return;
+        }
+
+        if (!normalizedImportData[matched.sectionTitle]) {
+          normalizedImportData[matched.sectionTitle] = {};
+        }
+        normalizedImportData[matched.sectionTitle][matched.fieldName] = val;
+      });
+
+      return { normalizedImportData, unmatchedHeaders };
+    },
+
+    rebuildSubjectImportPreview() {
+      if (!this.subjectImport.rawAoA || !this.subjectImport.rawAoA.length) {
+        this.subjectImport.matchedPairs = {};
+        this.subjectImport.normalizedImportData = {};
+        this.subjectImport.unmatchedHeaders = [];
+        this.subjectImport.matchResultLabel = "—";
+        this.subjectImport.detectedLayoutLabel = "—";
+        this.subjectImportAssumptionWarning = false;
+        this.parseInfo = { ok: false, message: "" };
+        return;
+      }
+
+      this.subjectImport.groupIndex = this.subjectToGroupIdx[this.subjectImport.subjectIndex] || 0;
+
+      const layout = this.detectSubjectImportLayout(this.subjectImport.rawAoA);
+      this.subjectImport.detectedLayout = layout;
+      this.subjectImport.detectedLayoutLabel =
+        layout === "vertical" ? "Vertical key-value" : "Horizontal row";
+
+      let pairs = {};
+      let usedFallback = false;
+      let label = "";
+      let hasSubjectVisitCols = false;
+
+      if (layout === "vertical") {
+        pairs = this.extractPairsFromVertical(this.subjectImport.rawAoA);
+        usedFallback = true;
+        label = "Used key-value pairs from file";
+        hasSubjectVisitCols = false;
+      } else {
+        const res = this.extractPairsFromHorizontalForSelectedTarget(this.subjectImport.rawAoA);
+        pairs = res.pairs || {};
+        usedFallback = !!res.usedFallback;
+        label = res.label || "Used row from file";
+        hasSubjectVisitCols = !!res.hasSubjectVisitCols;
+      }
+
+      this.subjectImport.matchedPairs = pairs;
+      this.subjectImport.matchResultLabel = label;
+      this.subjectImportAssumptionWarning = !hasSubjectVisitCols;
+
+      const { normalizedImportData, unmatchedHeaders } = this.matchPairsToCaseEFields(pairs);
+      this.subjectImport.normalizedImportData = normalizedImportData;
+      this.subjectImport.unmatchedHeaders = unmatchedHeaders;
+
+      const matchedFieldCount = this.subjectImportSummaryRows.length;
+
+      if (matchedFieldCount === 0) {
+        this.parseInfo = {
+          ok: false,
+          message:
+            "No file headers could be matched to Case-e fields for the selected subject/visit. Nothing will be imported.",
+        };
+      } else {
+        this.parseInfo = {
+          ok: true,
+          message: `Prepared subject import. Matched fields: ${matchedFieldCount}. Unmatched headers: ${unmatchedHeaders.length}.`,
+        };
+      }
+    },
+
+    async saveSubjectImport() {
+      if (!this.canSaveSubjectImport) {
+        this.showDialogMessage("No matched Case-e fields were found in the uploaded file. Nothing to save.");
+        return;
+      }
+
+      this.isSavingSubjectImport = true;
+      try {
+        const sIdx = this.subjectImport.subjectIndex;
+        const vIdx = this.subjectImport.visitIndex;
+        const gIdx = this.subjectImport.groupIndex;
+        const svgKey = `${sIdx}|${vIdx}|${gIdx}`;
+
+        const existing = this.entriesIndex.get(svgKey) || null;
+        const baseDict = this.entryToDictNormalized(existing);
+
+        const incomingEntry = {
+          study_id: this.resolvedStudyId,
+          subject_index: sIdx,
+          visit_index: vIdx,
+          group_index: gIdx,
+          form_version: Number(this.study?.metadata?.version || 1),
+          data: this.subjectImport.normalizedImportData,
+        };
+
+        const inDict = this.entryToDictNormalized(incomingEntry);
+
+        const allSections = new Set([
+          ...Object.keys(baseDict || {}),
+          ...Object.keys(inDict || {}),
+        ]);
+
+        for (const secTitle of allSections) {
+          if (!baseDict[secTitle]) baseDict[secTitle] = {};
+          const exSec = baseDict[secTitle];
+          const inSec = inDict[secTitle] || {};
+
+          Object.keys(inSec).forEach((canon) => {
+            if (this.hasValue(inSec[canon])) {
+              exSec[canon] = inSec[canon];
+            }
+          });
+        }
+
+        const payload = {
+          study_id: this.resolvedStudyId,
+          subject_index: sIdx,
+          visit_index: vIdx,
+          group_index: gIdx,
+          data: this.denormalizeForSave(baseDict),
+          skipped_required_flags: this.makeSkipSkeleton(),
+        };
+
+        const headers = {
+          headers: { Authorization: `Bearer ${this.$store.state.token}` },
+        };
+
+        if (existing?.id) {
+          await axios.put(
+            `/forms/studies/${this.resolvedStudyId}/data_entries/${existing.id}`,
+            payload,
+            headers
+          );
+        } else {
+          await axios.post(
+            `/forms/studies/${this.resolvedStudyId}/data`,
+            payload,
+            headers
+          );
+        }
+
+        await this.loadEntries();
+        this.indexEntries();
+
+        this.showDialogMessage("Subject data imported successfully.");
+      } catch (e) {
+        console.error("[SubjectImport] Save failed:", e?.response?.data || e);
+        this.showDialogMessage("Failed to save imported subject data. See console for details.");
+      } finally {
+        this.isSavingSubjectImport = false;
       }
     },
   },
@@ -1300,13 +2204,13 @@ export default {
 </script>
 
 <style scoped>
-/* Shared surface + buttons */
 .card-surface {
   border: 1px solid #e5e7eb;
   border-radius: 12px;
   background: #fff;
   box-shadow: 0 10px 25px rgba(16, 24, 40, 0.06);
 }
+
 .btn-primary {
   background: #2f6fed;
   border: 1px solid #245fe0;
@@ -1320,6 +2224,7 @@ export default {
   background: #285fce;
   box-shadow: 0 2px 10px rgba(47, 111, 237, 0.25);
 }
+
 .btn-option {
   background: #fff;
   border: 1px solid #e0e0e0;
@@ -1337,6 +2242,7 @@ export default {
   padding: 6px 10px;
   font-size: 13px;
 }
+
 .btn-minimal {
   background: none;
   border: 1px solid #e0e0e0;
@@ -1358,6 +2264,7 @@ export default {
   color: #000;
   border-color: #d6d6d6;
 }
+
 .icon-btn {
   padding: 8px 10px;
   line-height: 1;
@@ -1366,34 +2273,16 @@ export default {
   display: none;
 }
 
-/* link-like toggle */
-.link-toggle {
-  background: none;
-  border: none;
-  font-size: 12px;
-  color: #2563eb;
-  cursor: pointer;
-  padding: 2px 4px;
-}
-.link-toggle:hover {
-  text-decoration: underline;
-}
-
-/* Page shell: default (standalone route) */
 .merge-page:not(.embedded):not(.expanded) {
-  max-width: 1200px;
+  max-width: 1400px;
   margin: 24px auto;
   padding: 0 16px 72px;
 }
-
-/* Embedded inside StudyDataEntry: fill parent and avoid outer page margins/padding */
 .merge-page.embedded:not(.expanded) {
   width: 100%;
   margin: 0;
   padding: 0;
 }
-
-/* Expanded: full-screen overlay */
 .merge-page.expanded {
   position: fixed;
   inset: 0;
@@ -1407,7 +2296,6 @@ export default {
   box-sizing: border-box;
 }
 
-/* Header row */
 .header-row {
   position: relative;
   display: flex;
@@ -1428,20 +2316,46 @@ export default {
   color: #111827;
 }
 
-/* Top bar */
 .top-bar {
   display: flex;
   align-items: center;
-  justify-content: flex-start;
+  justify-content: space-between;
   gap: 12px;
   padding: 12px 14px;
   margin-bottom: 12px;
+  flex-wrap: wrap;
 }
 .actions {
   display: flex;
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
+}
+.source-switch {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.source-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border: 1px solid #e5e7eb;
+  border-radius: 999px;
+  background: #fff;
+  cursor: pointer;
+  font-size: 13px;
+  color: #374151;
+}
+.source-pill.active {
+  border-color: #2563eb;
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+.source-pill input {
+  margin: 0;
 }
 
 .parse-banner {
@@ -1461,7 +2375,6 @@ export default {
   border: 1px solid #fed7aa;
 }
 
-/* Empty state */
 .empty-state {
   margin-top: 16px;
   padding: 18px 20px;
@@ -1475,37 +2388,35 @@ export default {
   margin-top: 6px;
   color: #4b5563;
 }
-.empty-text.small {
-  font-size: 13px;
-}
 
-/* Main layout */
 .main-layout {
   margin-top: 16px;
   display: grid;
-  grid-template-columns: minmax(0, 0.55fr) minmax(0, 0.45fr);
+  grid-template-columns: minmax(0, 0.58fr) minmax(0, 0.42fr);
   gap: 12px;
   align-items: flex-start;
 }
 .main-layout.single-column {
   grid-template-columns: minmax(0, 1fr);
 }
-.left-column {
-  padding: 14px 14px 16px;
-}
+.left-column,
 .right-column {
   padding: 14px 14px 16px;
 }
-.main-layout.single-column .right-column {
-  grid-column: 1 / -1;
+
+.subject-import-layout {
+  margin-top: 16px;
+  display: grid;
+  gap: 12px;
+}
+.subject-step {
+  padding: 14px 14px 16px;
 }
 
-/* Embedded: prefer more space for main content */
-.merge-page.embedded .main-layout {
-  margin-top: 12px;
+.no-conflicts-panel {
+  min-height: 220px;
 }
 
-/* Sections */
 .section-header {
   display: flex;
   align-items: center;
@@ -1524,14 +2435,14 @@ export default {
   align-items: center;
   flex-wrap: wrap;
 }
-.mt {
-  margin-top: 12px;
-}
 
 .summary-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
+}
+.summary-grid-4 {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 .summary-item {
   padding: 8px 10px;
@@ -1549,7 +2460,8 @@ export default {
   word-break: break-word;
 }
 
-.template-compare {
+.template-compare,
+.scope-card {
   padding: 8px 10px;
   border-radius: 8px;
   background: #f9fafb;
@@ -1566,6 +2478,7 @@ export default {
 .compare-row .value {
   color: #111827;
 }
+
 .template-warning {
   margin-top: 8px;
   padding: 6px 8px;
@@ -1580,26 +2493,23 @@ export default {
   font-size: 12px;
 }
 
-/* Scope */
-.scope-card {
-  padding: 8px 10px;
-  border-radius: 8px;
-  background: #f9fafb;
-}
 .radio-row {
   display: flex;
   align-items: center;
   font-size: 13px;
   gap: 8px;
-  margin-bottom: 4px;
-}
-.subject-select {
-  margin-top: 8px;
+  margin-bottom: 6px;
 }
 .helper {
   margin: 0 0 6px;
   font-size: 13px;
   color: #6b7280;
+}
+.helper.large {
+  font-size: 14px;
+}
+.subject-select {
+  margin-top: 8px;
 }
 .subject-list {
   display: flex;
@@ -1619,37 +2529,100 @@ export default {
   cursor: pointer;
 }
 
-/* Conflicts */
-.conflict-table-wrapper {
-  margin-top: 10px;
-  max-height: 70vh;
-  overflow: auto;
+.control-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(180px, 1fr));
+  gap: 10px;
+}
+.control-block {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.control-block label {
+  font-size: 12px;
+  color: #374151;
+  font-weight: 600;
+}
+.control-block select,
+.control-block input {
+  min-height: 38px;
+  border: 1px solid #d1d5db;
   border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 14px;
+  background: #fff;
 }
-.merge-page.embedded .conflict-table-wrapper {
-  max-height: 52vh; /* better fit when embedded */
+.control-block input[disabled] {
+  background: #f3f4f6;
+  color: #6b7280;
 }
-.merge-page.expanded .conflict-table-wrapper {
-  max-height: calc(100vh - 240px);
+
+.layout-hint-wrap {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-top: 8px;
 }
-.conflict-table {
+.layout-hint {
+  padding: 10px 12px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #f9fafb;
+  font-size: 13px;
+  color: #374151;
+}
+.layout-title {
+  font-weight: 600;
+  margin-bottom: 6px;
+  color: #111827;
+}
+
+.file-meta {
+  margin-top: 10px;
+  font-size: 14px;
+  color: #374151;
+}
+
+.conflict-table-wrapper,
+.preview-table-wrap {
+  margin-top: 10px;
+  overflow: auto;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+}
+.conflict-table-wrapper {
+  max-height: 70vh;
+}
+
+.conflict-table,
+.preview-table {
   width: 100%;
   border-collapse: collapse;
+  min-width: 860px;
   font-size: 13px;
-  min-width: 860px; /* ensures horizontal scroll instead of crushing columns */
+}
+.preview-table {
+  min-width: 700px;
 }
 .conflict-table th,
-.conflict-table td {
+.conflict-table td,
+.preview-table th,
+.preview-table td {
   border-bottom: 1px solid #e5e7eb;
-  padding: 6px 8px;
+  padding: 8px 10px;
   vertical-align: top;
+  text-align: left;
 }
-.conflict-table th {
-  background: #f9fafb;
+.conflict-table th,
+.preview-table th {
+  background: #f3f4f6;
+  color: #111827;
   position: sticky;
   top: 0;
   z-index: 1;
 }
+
 .val-cell {
   display: flex;
   flex-direction: column;
@@ -1674,7 +2647,6 @@ export default {
   font-size: 12px;
 }
 
-/* Subject filter in conflicts header */
 .subject-filter {
   display: inline-flex;
   align-items: center;
@@ -1689,7 +2661,6 @@ export default {
   background: #fff;
 }
 
-/* Merge summary badge */
 .badge-pill {
   display: inline-flex;
   align-items: center;
@@ -1708,7 +2679,6 @@ export default {
   border: 1px solid #bbf7d0;
 }
 
-/* Footer */
 .global-commit {
   position: fixed;
   left: 12px;
@@ -1726,7 +2696,7 @@ export default {
   box-shadow: 0 10px 25px rgba(16, 24, 40, 0.08);
 }
 .global-commit.embedded {
-  position: sticky; /* crucial for embedded view so content isn't "lost" */
+  position: sticky;
   left: auto;
   right: auto;
   bottom: 0;
@@ -1751,25 +2721,53 @@ export default {
   color: #9ca3af;
 }
 
-/* Responsive */
+.mt {
+  margin-top: 12px;
+}
+
+@media (max-width: 1180px) {
+  .control-grid,
+  .summary-grid-4,
+  .layout-hint-wrap {
+    grid-template-columns: 1fr;
+  }
+}
+
 @media (max-width: 980px) {
   .main-layout {
     grid-template-columns: 1fr;
   }
+
   .global-commit {
     flex-direction: column;
     align-items: flex-start;
   }
+
   .section-header {
     flex-direction: column;
     align-items: flex-start;
     gap: 6px;
   }
-  .header-actions {
-    right: 0;
-  }
-  .conflict-table {
-    min-width: 760px;
-  }
+}
+.step-upload-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.spreadsheet-row-preview {
+  overflow-x: auto;
+}
+
+.row-preview-table {
+  min-width: max-content;
+  width: auto;
+}
+
+.row-preview-table th,
+.row-preview-table td {
+  min-width: 180px;
+  white-space: nowrap;
 }
 </style>

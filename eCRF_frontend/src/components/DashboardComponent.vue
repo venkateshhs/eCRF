@@ -30,7 +30,24 @@
           <div class="user-name" :title="userName">{{ userName }}</div>
           <div class="user-role" :title="role || '—'">{{ role || '—' }}</div>
         </div>
-        <button type="button" @click="logout" class="btn-minimal">Logout</button>
+
+        <button
+          v-if="isLoggedIn"
+          type="button"
+          @click="logout('Logged out.')"
+          class="btn-minimal"
+        >
+          Logout
+        </button>
+
+        <button
+          v-else
+          type="button"
+          @click="$router.push('/login')"
+          class="btn-minimal"
+        >
+          Login
+        </button>
       </div>
     </header>
 
@@ -394,6 +411,9 @@ export default {
       showImportData: false,
       importMaximized: false,
 
+      // auth restore guard
+      authReady: false,
+
       // Draft-blocker dialog state
       draftDialog: {
         open: false,
@@ -406,6 +426,7 @@ export default {
   },
   watch: {
     "$route.query.openStudies"(val) {
+      if (!this.authReady) return;
       if (this.showImportData) return;
 
       if (val === "true") {
@@ -418,9 +439,11 @@ export default {
       }
     },
     "$route.name"() {
+      if (!this.authReady) return;
       this.syncFromRoute();
     },
     "$route.query.view"() {
+      if (!this.authReady) return;
       this.syncFromRoute();
     },
     showImportData(val) {
@@ -435,6 +458,10 @@ export default {
         this.$route.name === "DashboardAddData" ||
         this.$route.name === "CreateFormScratch"
       );
+    },
+
+    isLoggedIn() {
+      return !!this.$store.state.token;
     },
 
     currentUser() {
@@ -466,6 +493,26 @@ export default {
     },
   },
   methods: {
+    async ensureAuth() {
+      // already available in memory
+      if (this.$store.state.token && this.$store.state.user) {
+        this.authReady = true;
+        return true;
+      }
+
+      const ok = await this.$store.dispatch("initAuth");
+      this.authReady = true;
+
+      if (!ok) {
+        this.setPageNoXScroll(false);
+        activityTracker.stop();
+        this.$router.replace("/login").catch(() => null);
+        return false;
+      }
+
+      return true;
+    },
+
     // ---- Per-study permission helpers (uses backend `study.permissions`) ----
     studyPerms(study) {
       const p = study?.permissions;
@@ -724,6 +771,12 @@ export default {
 
     // Logo click should always take user to /dashboard
     goToDashboardHome() {
+      // If not logged in, go to login instead of dashboard
+      if (!this.isLoggedIn) {
+        this.$router.push("/login").catch(() => null);
+        return;
+      }
+
       // no reload; just route to dashboard
       this.$router.push({ path: "/dashboard" }).catch(() => null);
     },
@@ -764,6 +817,11 @@ export default {
     },
 
     async setActiveSection(section) {
+      if (!this.isLoggedIn) {
+        this.$router.push("/login").catch(() => null);
+        return;
+      }
+
       await this.$router.push({ name: "Dashboard" });
       this.activeSection = section;
       this.showStudyOptions = false;
@@ -772,6 +830,11 @@ export default {
     },
 
     toggleStudyOptions() {
+      if (!this.isLoggedIn) {
+        this.$router.push("/login").catch(() => null);
+        return;
+      }
+
       this.showStudyOptions = !this.showStudyOptions;
       this.showImportData = false;
       this.importMaximized = false;
@@ -785,6 +848,11 @@ export default {
     },
 
     openImportData() {
+      if (!this.isLoggedIn) {
+        this.$router.push("/login").catch(() => null);
+        return;
+      }
+
       this.showStudyOptions = false;
       this.showImportData = true;
       this.importMaximized = false;
@@ -816,6 +884,8 @@ export default {
         console.error("Failed to load studies:", e);
         if (e.response?.status === 401) {
           alert("Session expired.");
+          this.$store.commit("clearAuth");
+          localStorage.removeItem("access_token");
           this.$router.push("/login");
         } else {
           alert("Failed to load studies.");
@@ -837,30 +907,47 @@ export default {
 
     //  Add Data inside dashboard layout
     addData(study) {
+      if (!this.isLoggedIn) {
+        this.$router.push("/login").catch(() => null);
+        return;
+      }
       this.$router.push({ name: "DashboardAddData", params: { id: study.id } });
     },
 
     // View Study inside dashboard layout (already)
     viewStudy(study) {
+      if (!this.isLoggedIn) {
+        this.$router.push("/login").catch(() => null);
+        return;
+      }
       this.$router.push({ name: "StudyView", params: { id: study.id } });
     },
 
     // accepts either string path or route object
     navigate(to) {
+      if (!this.isLoggedIn) {
+        this.$router.push("/login").catch(() => null);
+        return;
+      }
+
       this.activeSection = "";
       this.showImportData = false;
       this.importMaximized = false;
       this.$router.push(to);
     },
 
-    async logout(message) {
+    async logout(message = "Logged out.") {
+      // ignore DOM events accidentally passed by @click
+      if (message && typeof message !== "string") {
+        message = "Logged out.";
+      }
+
       console.log("[Dashboard] logout()", message || "");
 
       // stop tracker first to prevent any late pings racing with logout
       activityTracker.stop();
 
-      const token =
-        this.$store.state.token || localStorage.getItem("access_token");
+      const token = this.$store.state.token || localStorage.getItem("access_token");
 
       // Best-effort server revoke (do NOT block logout if this fails)
       try {
@@ -868,6 +955,7 @@ export default {
           console.log("[Dashboard] calling POST /users/logout");
           await axios.post("/users/logout", null, {
             headers: { Authorization: `Bearer ${token}` },
+            __skipActivityTracker: true,
           });
           console.log("[Dashboard] server session revoked");
         }
@@ -879,18 +967,20 @@ export default {
         );
       }
 
-      if (message) alert(message);
-
       // clear local auth
-      this.$store.commit("setUser", null);
-      this.$store.commit("setToken", null);
+      this.$store.commit("clearAuth");
       localStorage.removeItem("access_token");
+
+      if (message) alert(message);
 
       this.$router.push("/login");
     },
-
   },
-  mounted() {
+
+  async mounted() {
+    const ok = await this.ensureAuth();
+    if (!ok) return;
+
     this.syncFromRoute();
     this.setPageNoXScroll(!!this.showImportData);
 
@@ -901,14 +991,15 @@ export default {
     console.log("[Dashboard] starting ActivityTracker (DOM sampled + API activity)");
 
     activityTracker.start({
-      getToken: () => this.$store.state.token,
-      onLogout: (msg) => this.logout(msg),
+      getToken: () => this.$store.state.token || localStorage.getItem("access_token"),
+      onLogout: (msg) => this.logout(msg || "Session expired. Please log in again."),
 
       // only called every 5 min if there was activity in that window
       pingFn: (token) => {
         console.log("[Dashboard] ActivityTracker pingFn() called");
         return axios.post("/users/ping", null, {
           headers: { Authorization: `Bearer ${token}` },
+          __skipActivityTracker: true,
         });
       },
 
@@ -924,6 +1015,7 @@ export default {
       },
     });
   },
+
   beforeUnmount() {
     this.setPageNoXScroll(false);
     console.log("[Dashboard] stopping ActivityTracker (unmount)");
@@ -931,7 +1023,6 @@ export default {
   },
 };
 </script>
-
 
 <style scoped>
 /* page-level horizontal scroll lock when import overlay open */
