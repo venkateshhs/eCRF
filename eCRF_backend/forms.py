@@ -7,7 +7,6 @@ import tempfile
 from typing import List, Optional, Dict, Any
 from urllib.parse import urlparse
 from .crud_dts import upsert_study_to_dts
-from .dts_settings import CASEE_DTS_MODE
 from fastapi import Request
 from fastapi import APIRouter, HTTPException, Depends, Query, UploadFile, File, Form, Body, status
 from pathlib import Path
@@ -42,7 +41,7 @@ TEMPLATE_DIR = Path(os.environ.get("ECRF_TEMPLATES_DIR", "")) if os.environ.get(
 
 ALLOWED_STUDY_STATUS = {"DRAFT", "PUBLISHED", "ARCHIVED"}
 _DEFAULT_GRANT_PERMS = {"view": True, "add_data": True, "edit_study": False}
-
+CASEE_DTS_MODE == ""
 
 def _normalize_allowed_section_ids(section_ids: Optional[List[Any]]) -> List[str]:
     if not section_ids:
