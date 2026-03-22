@@ -1,4 +1,3 @@
-import os
 from typing import Optional, Dict, Any
 
 from sqlalchemy.orm import Session
@@ -7,8 +6,8 @@ from . import schemas, models
 from .models import User, AuditEvent
 from .logger import logger
 from zoneinfo import ZoneInfo
-from .dts_settings import CASEE_DTS_MODE
-from .crud_dts import get_study_from_dts
+from eCRF_backend.dts.dts_settings import CASEE_DTS_MODE
+from eCRF_backend.dts.crud_dts import get_study_from_dts
 
 _ALLOWED_STUDY_STATUS = {"DRAFT", "PUBLISHED", "ARCHIVED"}
 

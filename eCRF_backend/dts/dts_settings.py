@@ -1,0 +1,5 @@
+DTS_BASE_URL="http://127.0.0.1:8010"
+DTS_COLLECTION="casee_studies"
+DTS_CLASS="CaseeStudy"
+DTS_TOKEN="casee_backend"
+CASEE_DTS_MODE="dts_only"

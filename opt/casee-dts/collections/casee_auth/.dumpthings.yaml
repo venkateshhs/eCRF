@@ -1,0 +1,5 @@
+type: records
+version: 1
+schema: /Users/vshivashankar/Desktop/eCRF/eCRF/opt/casee-dts/schemas/casee_auth_schema.yaml
+format: yaml
+idfx: after-last-colon

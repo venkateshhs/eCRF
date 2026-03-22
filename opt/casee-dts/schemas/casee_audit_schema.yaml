@@ -1,0 +1,99 @@
+id: https://casee.local/schema/casee_audit
+name: casee_audit
+title: Case-e Audit Schema
+description: Structured audit trail for study-level and subject-level changes in Case-e.
+
+prefixes:
+  linkml: https://w3id.org/linkml/
+  casee: https://casee.local/schema/
+  schema: http://schema.org/
+
+imports:
+  - linkml:types
+
+default_prefix: casee
+default_range: string
+
+types:
+  json_string:
+    base: str
+    uri: xsd:string
+    description: JSON serialized string for flexible payloads
+
+classes:
+  Thing:
+    abstract: true
+    attributes:
+      pid:
+        identifier: true
+        required: true
+        range: string
+      schema_type:
+        required: true
+        range: string
+
+  CaseeAuditEvent:
+    is_a: Thing
+    tree_root: true
+    attributes:
+      event_id:
+        required: true
+        range: string
+
+      scope:
+        required: true
+        range: string   # system | study | subject | access | share | file
+
+      action:
+        required: true
+        range: string
+
+      event_time:
+        required: true
+        range: datetime
+
+      study_id:
+        range: integer
+      study_pid:
+        range: string
+
+      subject_index:
+        range: integer
+      subject_id:
+        range: string
+
+      visit_index:
+        range: integer
+      group_index:
+        range: integer
+
+      actor_user_id:
+        range: integer
+      actor_username:
+        range: string
+      actor_display_name:
+        range: string
+      actor_role:
+        range: string
+
+      ui_label:
+        range: string
+
+      has_diff:
+        range: boolean
+      diff_kind:
+        range: string
+      diff_payload_json:
+        range: json_string
+
+      related_entry_id:
+        range: integer
+      related_file_id:
+        range: integer
+      related_share_token:
+        range: string
+
+      details_json:
+        range: json_string
+      extra_json:
+        range: json_string

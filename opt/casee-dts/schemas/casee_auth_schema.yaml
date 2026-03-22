@@ -1,0 +1,92 @@
+id: https://casee.local/schema/casee_auth
+name: casee_auth
+title: Case-e Auth Schema
+description: Structured Case-e schema for users and server-side sessions.
+
+prefixes:
+  linkml: https://w3id.org/linkml/
+  casee: https://casee.local/schema/
+
+imports:
+  - linkml:types
+
+default_prefix: casee
+default_range: string
+
+types:
+  json_string:
+    base: str
+    uri: xsd:string
+    description: JSON serialized string for forward-compatible flexible payloads
+
+classes:
+  Thing:
+    abstract: true
+    attributes:
+      pid:
+        identifier: true
+        required: true
+        range: string
+      schema_type:
+        required: true
+        range: string
+
+  CaseeUser:
+    is_a: Thing
+    tree_root: true
+    attributes:
+      user_id:
+        required: true
+        range: integer
+      username:
+        required: true
+        range: string
+      email:
+        required: true
+        range: string
+      password_hash:
+        required: true
+        range: string
+      first_name:
+        required: true
+        range: string
+      last_name:
+        required: true
+        range: string
+      role:
+        required: true
+        range: string
+      status:
+        required: true
+        range: string
+      created_at:
+        range: datetime
+      updated_at:
+        range: datetime
+      extra_json:
+        range: json_string
+
+  CaseeUserSession:
+    is_a: Thing
+    attributes:
+      user_id:
+        required: true
+        range: integer
+      username:
+        required: true
+        range: string
+      jti:
+        required: true
+        range: string
+      created_at:
+        range: datetime
+      last_activity_at:
+        range: datetime
+      absolute_expires_at:
+        range: datetime
+      revoked_at:
+        range: datetime
+      client_info_json:
+        range: json_string
+      extra_json:
+        range: json_string

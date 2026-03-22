@@ -103,7 +103,7 @@ class StudyContentUpdate(StudyContentBase):
 
 
 class StudyContentOut(StudyContentBase):
-    id: int
+    id: Optional[int] = None
     study_id: int
 
     class Config:
@@ -154,13 +154,28 @@ class SettingsModel(BaseModel):
 
 
 class EventOut(BaseModel):
-    id: int
-    study_id: Optional[int]
-    subject_id: Optional[int]
-    user: Optional[UserResponse]    # nested user info (who did it)
+    id: str
+    study_id: Optional[int] = None
+    subject_index: Optional[int] = None
+    subject_id: Optional[str] = None
+    visit_index: Optional[int] = None
+    group_index: Optional[int] = None
+
     action: str
     timestamp: datetime
-    details: Dict[str, Any]
+
+    actor_user_id: Optional[int] = None
+    actor_username: Optional[str] = None
+    actor_display_name: Optional[str] = None
+    actor_role: Optional[str] = None
+
+    details: Dict[str, Any] = Field(default_factory=dict)
+
+    has_diff: bool = False
+    diff_kind: Optional[str] = None
+    diff: Optional[Any] = None
+
+    scope: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -168,10 +183,15 @@ class EventOut(BaseModel):
 
 class EventCreate(BaseModel):
     study_id: Optional[int] = None
-    subject_id: Optional[int] = None
-    user_id: int    # ID of the user/agent performing the action
+    subject_index: Optional[int] = None
+    subject_id: Optional[str] = None
+    visit_index: Optional[int] = None
+    group_index: Optional[int] = None
     action: str
     details: Optional[Dict[str, Any]] = None
+    has_diff: Optional[bool] = False
+    diff_kind: Optional[str] = None
+    diff: Optional[Any] = None
 
 
 class ShareLinkCreate(BaseModel):

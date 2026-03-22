@@ -1,0 +1,636 @@
+id: https://casee.local/schema/casee_study
+name: casee_study
+title: Case-e Study Schema
+description: Structured Case-e schema for study template creation, update, visits, groups, subjects, assignments, protocol matrix, BIDS metadata, forms, fields, and logic.
+
+prefixes:
+  linkml: https://w3id.org/linkml/
+  casee: https://casee.local/schema/
+
+imports:
+  - linkml:types
+
+default_prefix: casee
+default_range: string
+
+types:
+  json_string:
+    base: str
+    uri: xsd:string
+    description: JSON serialized string for forward-compatible flexible payloads
+
+classes:
+  Thing:
+    abstract: true
+    attributes:
+      pid:
+        identifier: true
+        required: true
+        range: string
+      schema_type:
+        required: true
+        range: string
+
+  CaseeStudy:
+    is_a: Thing
+    tree_root: true
+    attributes:
+      study_id:
+        required: true
+        range: integer
+      study_name:
+        required: true
+        range: string
+      study_description:
+        range: string
+      workflow_status:
+        range: string
+      created_by:
+        required: true
+        range: integer
+      created_at:
+        range: datetime
+      updated_at:
+        range: datetime
+      draft_of_study_id:
+        range: integer
+      last_completed_step:
+        range: integer
+
+      metadata:
+        range: CaseeStudyMetadata
+        inlined: true
+
+      groups:
+        range: CaseeGroup
+        multivalued: true
+        inlined: true
+        inlined_as_list: true
+
+      visits:
+        range: CaseeVisit
+        multivalued: true
+        inlined: true
+        inlined_as_list: true
+
+      subjects:
+        range: CaseeSubject
+        multivalued: true
+        inlined: true
+        inlined_as_list: true
+
+      subject_assignments:
+        range: CaseeSubjectAssignment
+        multivalued: true
+        inlined: true
+        inlined_as_list: true
+
+      selected_models:
+        range: CaseeModelDefinition
+        multivalued: true
+        inlined: true
+        inlined_as_list: true
+
+      forms:
+        range: CaseeFormDefinition
+        multivalued: true
+        inlined: true
+        inlined_as_list: true
+
+      protocol:
+        range: CaseeProtocol
+        inlined: true
+
+      template_logic:
+        range: CaseeLogicDefinition
+        inlined: true
+
+      current_template_version:
+        range: integer
+
+      template_snapshot_created_at:
+        range: datetime
+
+      raw_template_json:
+        range: json_string
+
+      extra_json:
+        range: json_string
+
+  CaseeStudyMetadata:
+    attributes:
+      source_study_id:
+        range: string
+      title:
+        range: string
+      short_name:
+        range: string
+      description:
+        range: string
+      study_type:
+        range: string
+      study_phase_status:
+        range: string
+      creator:
+        range: string
+      publisher:
+        range: string
+      start_date:
+        range: date
+      end_date:
+        range: date
+      location:
+        range: string
+      extra_json:
+        range: json_string
+
+  CaseeGroup:
+    is_a: Thing
+    attributes:
+      key:
+        required: true
+        range: string
+      name:
+        required: true
+        range: string
+      description:
+        range: string
+      order:
+        range: integer
+      extra_json:
+        range: json_string
+
+  CaseeVisit:
+    is_a: Thing
+    attributes:
+      key:
+        required: true
+        range: string
+      name:
+        required: true
+        range: string
+      description:
+        range: string
+      order:
+        range: integer
+      extra_json:
+        range: json_string
+
+  CaseeSubject:
+    is_a: Thing
+    attributes:
+      subject_id:
+        required: true
+        range: string
+      display_label:
+        range: string
+      group_key:
+        range: string
+      extra_json:
+        range: json_string
+
+  CaseeSubjectAssignment:
+    attributes:
+      subject_id:
+        required: true
+        range: string
+      group_key:
+        range: string
+      assignment_method:
+        range: string
+      extra_json:
+        range: json_string
+
+  CaseeModelDefinition:
+    is_a: Thing
+    attributes:
+      title:
+        required: true
+        range: string
+      description:
+        range: string
+      fields:
+        range: CaseeFieldDefinition
+        multivalued: true
+        inlined: true
+        inlined_as_list: true
+      source:
+        range: string
+      collapsed:
+        range: boolean
+      extra_json:
+        range: json_string
+
+  CaseeFormDefinition:
+    is_a: Thing
+    attributes:
+      sections:
+        range: CaseeSectionDefinition
+        multivalued: true
+        inlined: true
+        inlined_as_list: true
+      logic:
+        range: CaseeLogicDefinition
+        inlined: true
+      extra_json:
+        range: json_string
+
+  CaseeSectionDefinition:
+    is_a: Thing
+    attributes:
+      title:
+        required: true
+        range: string
+      description:
+        range: string
+      source:
+        range: string
+      collapsed:
+        range: boolean
+      fields:
+        range: CaseeFieldDefinition
+        multivalued: true
+        inlined: true
+        inlined_as_list: true
+      extra_json:
+        range: json_string
+
+  CaseeFieldDefinition:
+    is_a: Thing
+    attributes:
+      field_key:
+        required: true
+        range: string
+      name:
+        required: true
+        range: string
+      label:
+        range: string
+      description:
+        range: string
+      field_type:
+        required: true
+        range: string
+      placeholder:
+        range: string
+      value_json:
+        range: json_string
+      options:
+        range: CaseeFieldOption
+        multivalued: true
+        inlined: true
+        inlined_as_list: true
+      constraints:
+        range: CaseeFieldConstraints
+        inlined: true
+      extra_json:
+        range: json_string
+
+  CaseeFieldOption:
+    attributes:
+      value:
+        range: string
+      label:
+        range: string
+      description:
+        range: string
+      extra_json:
+        range: json_string
+
+  CaseeFieldConstraints:
+    attributes:
+      required:
+        range: boolean
+      readonly:
+        range: boolean
+      pattern:
+        range: string
+      placeholder:
+        range: string
+      default_value_json:
+        range: json_string
+      help_text:
+        range: string
+      transform:
+        range: string
+      visibility_logic:
+        range: CaseeVisibilityLogic
+        inlined: true
+      extra_json:
+        range: json_string
+
+  CaseeVisibilityLogic:
+    attributes:
+      action:
+        range: string
+      match:
+        range: string
+      rules:
+        range: CaseeVisibilityRule
+        multivalued: true
+        inlined: true
+        inlined_as_list: true
+      extra_json:
+        range: json_string
+
+  CaseeVisibilityRule:
+    attributes:
+      source_field_key:
+        range: string
+      operator:
+        range: string
+      value_json:
+        range: json_string
+      extra_json:
+        range: json_string
+
+  CaseeLogicDefinition:
+    attributes:
+      version:
+        range: integer
+      calculations:
+        range: CaseeCalculationRule
+        multivalued: true
+        inlined: true
+        inlined_as_list: true
+      conditions:
+        range: CaseeConditionRule
+        multivalued: true
+        inlined: true
+        inlined_as_list: true
+      extra_json:
+        range: json_string
+
+  CaseeCalculationRule:
+    attributes:
+      rule_id:
+        required: true
+        range: string
+      kind:
+        range: string
+      version:
+        range: integer
+      op:
+        range: string
+      sources:
+        range: string
+        multivalued: true
+      target:
+        range: string
+      target_mode:
+        range: string
+      enabled:
+        range: boolean
+      updated_at:
+        range: datetime
+      extra_json:
+        range: json_string
+
+  CaseeConditionRule:
+    attributes:
+      rule_id:
+        required: true
+        range: string
+      kind:
+        range: string
+      when_json:
+        range: json_string
+      then_json:
+        range: json_string
+      else_json:
+        range: json_string
+      enabled:
+        range: boolean
+      extra_json:
+        range: json_string
+
+  CaseeProtocol:
+    attributes:
+      subject_count:
+        range: integer
+      assignment_method:
+        range: string
+      skip_subject_creation_now:
+        range: boolean
+
+      assignment_matrix:
+        range: CaseeAssignmentMatrix
+        inlined: true
+
+      bids_metadata:
+        range: CaseeBidsMetadata
+        inlined: true
+
+      extra_json:
+        range: json_string
+
+  CaseeAssignmentMatrix:
+    attributes:
+      groups_count:
+        range: integer
+      visits_count:
+        range: integer
+      models_count:
+        range: integer
+      rows:
+        range: CaseeAssignmentMatrixRow
+        multivalued: true
+        inlined: true
+        inlined_as_list: true
+      raw_json:
+        range: json_string
+
+  CaseeAssignmentMatrixRow:
+    attributes:
+      row_index:
+        range: integer
+      cells:
+        range: CaseeAssignmentMatrixCellGroup
+        multivalued: true
+        inlined: true
+        inlined_as_list: true
+
+  CaseeAssignmentMatrixCellGroup:
+    attributes:
+      cell_index:
+        range: integer
+      values:
+        range: boolean
+        multivalued: true
+
+  CaseeBidsMetadata:
+    attributes:
+      subject_label_map:
+        range: CaseeKeyValue
+        multivalued: true
+        inlined: true
+        inlined_as_list: true
+
+      session_label_map:
+        range: CaseeKeyValue
+        multivalued: true
+        inlined: true
+        inlined_as_list: true
+
+      column_catalog:
+        range: CaseeBidsColumnCatalogItem
+        multivalued: true
+        inlined: true
+        inlined_as_list: true
+
+      raw_json:
+        range: json_string
+
+  CaseeKeyValue:
+    attributes:
+      key:
+        required: true
+        range: string
+      value:
+        range: string
+
+  CaseeBidsColumnCatalogItem:
+    attributes:
+      section_index:
+        range: integer
+      field_index:
+        range: integer
+      name:
+        range: string
+      raw_json:
+        range: json_string
+
+  CaseeStudyEntry:
+    is_a: Thing
+    attributes:
+      study_pid:
+        required: true
+        range: string
+      study_id:
+        required: true
+        range: integer
+      entry_id:
+        range: integer
+      form_version:
+        required: true
+        range: integer
+
+      subject_index:
+        required: true
+        range: integer
+      visit_index:
+        required: true
+        range: integer
+      group_index:
+        required: true
+        range: integer
+
+      subject_id:
+        range: string
+      visit_key:
+        range: string
+      group_key:
+        range: string
+
+      created_at:
+        range: datetime
+      actor_id:
+        range: integer
+      actor_name:
+        range: string
+
+      data_json:
+        required: true
+        range: json_string
+
+      skipped_required_flags_json:
+        range: json_string
+
+      field_values:
+        range: CaseeEntryFieldValue
+        multivalued: true
+        inlined: true
+        inlined_as_list: true
+
+      extra_json:
+        range: json_string
+
+  CaseeEntryFieldValue:
+    attributes:
+      field_key:
+        range: string
+      field_name:
+        range: string
+      field_label:
+        range: string
+      field_type:
+        range: string
+      section_title:
+        range: string
+      model_title:
+        range: string
+      value_json:
+        range: json_string
+      extra_json:
+        range: json_string
+
+  CaseeStudyFile:
+    is_a: Thing
+    attributes:
+      study_pid:
+        required: true
+        range: string
+      study_id:
+        required: true
+        range: integer
+      file_id:
+        range: integer
+      file_name:
+        required: true
+        range: string
+      file_path:
+        required: true
+        range: string
+      description:
+        range: string
+      storage_option:
+        range: string
+      created_at:
+        range: datetime
+
+      subject_index:
+        range: integer
+      visit_index:
+        range: integer
+      group_index:
+        range: integer
+
+      subject_id:
+        range: string
+      visit_key:
+        range: string
+      group_key:
+        range: string
+
+      extra_json:
+        range: json_string
+
+  CaseeStudyTemplateSnapshot:
+    is_a: Thing
+    attributes:
+      study_pid:
+        required: true
+        range: string
+      study_id:
+        required: true
+        range: integer
+      version:
+        required: true
+        range: integer
+      created_at:
+        range: datetime
+      schema_json:
+        required: true
+        range: json_string
+      extra_json:
+        range: json_string

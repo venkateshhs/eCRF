@@ -6,14 +6,32 @@ import shutil
 import tempfile
 from typing import List, Optional, Dict, Any
 from urllib.parse import urlparse
-from .crud_dts import upsert_study_to_dts
-from .dts_settings import CASEE_DTS_MODE
-from fastapi import Request
-from fastapi import APIRouter, HTTPException, Depends, Query, UploadFile, File, Form, Body, status
-from pathlib import Path
 import json
 import yaml
+import secrets
 from datetime import datetime, timedelta
+from pathlib import Path
+
+from fastapi import Request
+from fastapi import APIRouter, HTTPException, Depends, Query, UploadFile, File, Form, Body, status
+from sqlalchemy.orm import Session
+from sqlalchemy import or_, text
+from sqlalchemy.sql import func
+
+from eCRF_backend.dts.crud_dts import (
+    upsert_study_to_dts,
+    upsert_study_entry_to_dts,
+    list_study_entries_from_dts,
+    get_study_entry_from_dts,
+    upsert_study_file_to_dts,
+    upsert_template_snapshot_to_dts,
+    list_studies_from_dts,
+    get_study_from_dts,
+)
+from eCRF_backend.dts.dts_client import DTSClient
+from eCRF_backend.dts.dts_settings import DTS_COLLECTION
+from eCRF_backend.dts.dts_mapping import study_pid
+
 from .versions import VersionManager
 from .database import get_db
 from . import schemas, crud, models
@@ -21,20 +39,20 @@ from .bids_exporter import (
     upsert_bids_dataset,
     write_entry_to_bids,
     stage_file_for_modalities,
-    audit_change_both,  # unified audit (DB + BIDS)
-    audit_access_change_both,  # unified access audit
-    log_dataset_change_to_changes,  # optional BIDS CHANGES mirror
-    bump_bids_version, bulk_write_entries_to_bids, _dataset_path, _delete_bids_folder_safe,
+    audit_change_both,
+    audit_access_change_both,
+    log_dataset_change_to_changes,
+    bump_bids_version,
+    bulk_write_entries_to_bids,
+    _dataset_path,
+    _delete_bids_folder_safe,
 )
 from .logger import logger
 from .models import User, StudyTemplateVersion
 from .schemas import BulkPayload
 from .users import get_current_user
-from sqlalchemy.orm import Session
-import secrets
-from sqlalchemy import or_, text
 from .utils import local_now
-from sqlalchemy.sql import func
+
 router = APIRouter(prefix="/forms", tags=["forms"])
 
 TEMPLATE_DIR = Path(os.environ.get("ECRF_TEMPLATES_DIR", "")) if os.environ.get("ECRF_TEMPLATES_DIR") \
@@ -43,6 +61,138 @@ TEMPLATE_DIR = Path(os.environ.get("ECRF_TEMPLATES_DIR", "")) if os.environ.get(
 ALLOWED_STUDY_STATUS = {"DRAFT", "PUBLISHED", "ARCHIVED"}
 _DEFAULT_GRANT_PERMS = {"view": True, "add_data": True, "edit_study": False}
 
+
+# -------------------------------------------------------------------
+# DTS sync helpers (always-on in this file)
+# -------------------------------------------------------------------
+
+def _sync_template_snapshot_to_dts_safe(
+    study_id: int,
+    version_row: models.StudyTemplateVersion,
+    context: str = "",
+) -> None:
+    try:
+        upsert_template_snapshot_to_dts(study_id=study_id, version_row=version_row)
+        logger.info(
+            "DTS template snapshot sync successful study_id=%s version=%s context=%s",
+            study_id,
+            getattr(version_row, "version", None),
+            context,
+        )
+    except Exception as e:
+        logger.error(
+            "DTS template snapshot sync failed study_id=%s version=%s context=%s err=%s",
+            study_id,
+            getattr(version_row, "version", None),
+            context,
+            e,
+        )
+        raise
+
+
+def _sync_study_file_to_dts_safe(
+    study: models.StudyMetadata,
+    content: models.StudyContent,
+    db_file: models.File,
+    context: str = "",
+) -> None:
+    try:
+        upsert_study_file_to_dts(study=study, content=content, db_file=db_file)
+        logger.info(
+            "DTS study file sync successful study_id=%s file_id=%s context=%s",
+            study.id,
+            getattr(db_file, "id", None),
+            context,
+        )
+    except Exception as e:
+        logger.error(
+            "DTS study file sync failed study_id=%s file_id=%s context=%s err=%s",
+            getattr(study, "id", None),
+            getattr(db_file, "id", None),
+            context,
+            e,
+        )
+        raise
+
+
+def _sync_study_entry_to_dts_safe(
+    study: models.StudyMetadata,
+    content: models.StudyContent,
+    entry: models.StudyEntryData,
+    actor_id: Optional[int] = None,
+    actor_name: Optional[str] = None,
+    context: str = "",
+) -> None:
+    try:
+        upsert_study_entry_to_dts(
+            study=study,
+            content=content,
+            entry=entry,
+            actor_id=actor_id,
+            actor_name=actor_name,
+        )
+        logger.info(
+            "DTS study entry sync successful study_id=%s entry_id=%s context=%s",
+            study.id,
+            getattr(entry, "id", None),
+            context,
+        )
+    except Exception as e:
+        logger.error(
+            "DTS study entry sync failed study_id=%s entry_id=%s context=%s err=%s",
+            getattr(study, "id", None),
+            getattr(entry, "id", None),
+            context,
+            e,
+        )
+        raise
+
+
+def _latest_template_snapshot_info(db: Session, study_id: int) -> tuple[Optional[int], Optional[datetime]]:
+    row = (
+        db.query(models.StudyTemplateVersion)
+        .filter(models.StudyTemplateVersion.study_id == study_id)
+        .order_by(models.StudyTemplateVersion.version.desc())
+        .first()
+    )
+    if not row:
+        return None, None
+    return int(row.version), row.created_at
+
+
+def _sync_study_to_dts_safe(
+    db: Session,
+    metadata: models.StudyMetadata,
+    content: models.StudyContent,
+    context: str = "",
+) -> None:
+    try:
+        current_template_version, template_snapshot_created_at = _latest_template_snapshot_info(db, metadata.id)
+        upsert_study_to_dts(
+            metadata,
+            content,
+            current_template_version=current_template_version,
+            template_snapshot_created_at=template_snapshot_created_at,
+        )
+        logger.info(
+            "DTS study sync successful study_id=%s context=%s version=%s",
+            metadata.id,
+            context,
+            current_template_version,
+        )
+    except Exception as e:
+        logger.error(
+            "DTS study sync failed study_id=%s context=%s err=%s",
+            getattr(metadata, "id", None),
+            context,
+            e,
+        )
+        raise
+
+
+# -------------------------------------------------------------------
+# General helpers
+# -------------------------------------------------------------------
 
 def _normalize_allowed_section_ids(section_ids: Optional[List[Any]]) -> List[str]:
     if not section_ids:
@@ -58,11 +208,14 @@ def _normalize_allowed_section_ids(section_ids: Optional[List[Any]]) -> List[str
     return out
 
 
+def _deepcopy_json(obj):
+    try:
+        return json.loads(json.dumps(obj, ensure_ascii=False))
+    except Exception:
+        return {}
+
+
 def _filter_shared_study_data_by_sections(study_data: Dict[str, Any], allowed_section_ids: Optional[List[str]]) -> Dict[str, Any]:
-    """
-    Filter selectedModels + assignments so the shared-link user only sees allowed sections.
-    If allowed_section_ids is empty, keep existing behavior (all sections visible).
-    """
     raw = _deepcopy_json(study_data or {})
     allowed_ids = set(_normalize_allowed_section_ids(allowed_section_ids))
 
@@ -90,10 +243,6 @@ def _filter_shared_study_data_by_sections(study_data: Dict[str, Any], allowed_se
 
 
 def _allowed_shared_section_title_map(study_data: Dict[str, Any], allowed_section_ids: Optional[List[str]]) -> Dict[str, str]:
-    """
-    Returns {section_title: section_id} for sections allowed in this shared link.
-    If no allowed_section_ids are stored, all sections are allowed.
-    """
     selected_models = (study_data or {}).get("selectedModels") or []
     allowed_ids = set(_normalize_allowed_section_ids(allowed_section_ids))
 
@@ -119,11 +268,6 @@ def _validate_shared_payload_sections(
     study_data: Dict[str, Any],
     allowed_section_ids: Optional[List[str]],
 ) -> None:
-    """
-    Backend enforcement:
-    shared-link save payload may only contain allowed sections.
-    Payload structure is dict keyed by section title.
-    """
     if not isinstance(payload_data, dict):
         raise HTTPException(status_code=400, detail="Invalid payload data")
 
@@ -140,15 +284,13 @@ def _validate_shared_payload_sections(
             detail=f"Payload contains non-shared sections: {', '.join(sorted(map(str, unexpected)))}"
         )
 
+
 def _norm_audit_label(label: Optional[str]) -> Optional[str]:
-    """
-    Human readable audit label/description passed from frontend.
-    Keep None if absent so you can detect missing frontend wiring.
-    """
     if label is None:
         return None
     s = str(label).strip()
     return s if s else None
+
 
 def _json_safe(x: Any) -> Any:
     try:
@@ -160,12 +302,8 @@ def _json_safe(x: Any) -> Any:
         except Exception:
             return None
 
+
 def _compute_json_diff(old: Any, new: Any, path: str = "") -> List[Dict[str, Any]]:
-    """
-    Minimal, generic JSON diff.
-    Output entries like:
-      { "op": "replace"|"add"|"remove", "path": "...", "old": ..., "new": ... }
-    """
     diffs: List[Dict[str, Any]] = []
 
     if old is new:
@@ -216,26 +354,20 @@ def _compute_json_diff(old: Any, new: Any, path: str = "") -> List[Dict[str, Any
         diffs.append({"op": "replace", "path": path or "/", "old": _json_safe(old), "new": _json_safe(new)})
     return diffs
 
+
 def _is_admin(user: models.User) -> bool:
     role = (getattr(getattr(user, "profile", None), "role", "") or "").strip()
     return role == "Administrator"
 
-def _effective_study_permissions(db: Session, meta: models.StudyMetadata, user: models.User) -> Dict[str, bool]:
-    """
-    Effective permissions for (user, study).
 
-    Rules (per your description):
-    - Administrator: full access.
-    - Study owner (created_by): full access.
-    - Otherwise: use StudyAccessGrant.permissions (merged with defaults).
-    """
-    if _is_admin(user) or meta.created_by == user.id:
+def _effective_study_permissions(db: Session, meta: Any, user: models.User) -> Dict[str, bool]:
+    if _is_admin(user) or getattr(meta, "created_by", None) == user.id:
         return {"view": True, "add_data": True, "edit_study": True}
 
     grant = (
         db.query(models.StudyAccessGrant)
           .filter(
-              models.StudyAccessGrant.study_id == meta.id,
+              models.StudyAccessGrant.study_id == getattr(meta, "id", None),
               models.StudyAccessGrant.user_id == user.id,
           )
           .first()
@@ -244,8 +376,6 @@ def _effective_study_permissions(db: Session, meta: models.StudyMetadata, user: 
         return {"view": False, "add_data": False, "edit_study": False}
 
     perms = grant.permissions or {}
-
-    # merge with defaults
     return {
         "view": bool(perms.get("view", _DEFAULT_GRANT_PERMS["view"])),
         "add_data": bool(perms.get("add_data", _DEFAULT_GRANT_PERMS["add_data"])),
@@ -260,22 +390,23 @@ def _get_grant(db: Session, study_id: int, user_id: int):
           .first()
     )
 
-def _assert_has_study_permission(db: Session, meta: models.StudyMetadata, user: models.User, required: str = "view"):
-    role = (getattr(user.profile, "role", "") or "").strip()
+
+def _assert_has_study_permission(db: Session, meta: Any, user: models.User, required: str = "view"):
+    role = (getattr(getattr(user, "profile", None), "role", "") or "").strip()
     is_admin = role == "Administrator"
-    is_owner = (meta.created_by == user.id)
+    is_owner = (getattr(meta, "created_by", None) == user.id)
 
     if is_admin or is_owner:
         return {"view": True, "add_data": True, "edit_study": True}
 
-    grant = _get_grant(db, meta.id, user.id)
+    grant = _get_grant(db, getattr(meta, "id", None), user.id)
     perms = (grant.permissions or {}) if grant else {}
 
-    # default to False if missing
     if not perms.get(required, False):
         raise HTTPException(status_code=403, detail="Not authorized")
 
     return perms
+
 
 def _norm_status(s: Optional[str]) -> Optional[str]:
     if not s:
@@ -283,18 +414,18 @@ def _norm_status(s: Optional[str]) -> Optional[str]:
     s2 = str(s).strip().upper()
     return s2 if s2 in ALLOWED_STUDY_STATUS else None
 
-def _get_meta_status(meta: models.StudyMetadata) -> str:
-    # DB default should keep this non-null, but be defensive
+
+def _get_meta_status(meta: Any) -> str:
     return (getattr(meta, "status", None) or "PUBLISHED").strip().upper()
+
 
 def _is_publish_transition(old_status: str, new_status: str) -> bool:
     return old_status != "PUBLISHED" and new_status == "PUBLISHED"
 
+
 def _flags_dict_to_list(flags, selected_models):
-    # Already normalized
     if isinstance(flags, list):
         return flags
-    # Accept nulls and odd types
     if not isinstance(flags, dict):
         return []
 
@@ -311,26 +442,13 @@ def _flags_dict_to_list(flags, selected_models):
     return out
 
 
-def _deepcopy_json(obj):
-    try:
-        return json.loads(json.dumps(obj, ensure_ascii=False))
-    except Exception:
-        return {}
-
 def _coerce_snapshot_schema(raw):
-    """
-    Create a *version snapshot* that preserves rich study metadata and models.
-    Also normalizes groups/visits so diffs don't break if arrays are strings.
-    Does NOT affect the saved StudyContent; only the StudyTemplateVersion schema.
-    """
     snap = _deepcopy_json(raw if isinstance(raw, dict) else {})
-    # ensure study subobject exists
     if "study" not in snap or not isinstance(snap.get("study"), dict):
         title = snap.get("title") if isinstance(snap.get("title"), str) else ""
         description = snap.get("description") if isinstance(snap.get("description"), str) else ""
         snap["study"] = {"title": title, "description": description}
 
-    # normalize groups/visits into [{name}]
     def _norm_name_list(key):
         items = snap.get(key, [])
         if isinstance(items, list):
@@ -339,7 +457,6 @@ def _coerce_snapshot_schema(raw):
                 if isinstance(it, str):
                     norm.append({"name": it})
                 elif isinstance(it, dict):
-                    # keep dict; ensure it has name/title
                     if "name" in it and isinstance(it["name"], str):
                         norm.append(it)
                     elif "title" in it and isinstance(it["title"], str):
@@ -349,10 +466,10 @@ def _coerce_snapshot_schema(raw):
                 else:
                     norm.append({"name": str(it)})
             snap[key] = norm
+
     _norm_name_list("groups")
     _norm_name_list("visits")
 
-    # ensure selectedModels present; if only legacy "models" names exist, lift them
     if "selectedModels" not in snap and isinstance(snap.get("models"), list):
         snap["selectedModels"] = [
             ({"title": m} if isinstance(m, str) else m) for m in snap["models"]
@@ -361,73 +478,80 @@ def _coerce_snapshot_schema(raw):
     return snap
 
 
-def _assert_owner_or_admin(meta: models.StudyMetadata, user) -> None:
-    if meta.created_by != user.id and getattr(user.profile, "role", None) != "Administrator":
+def _assert_owner_or_admin(meta: Any, user) -> None:
+    if getattr(meta, "created_by", None) != user.id and getattr(getattr(user, "profile", None), "role", None) != "Administrator":
         raise HTTPException(status_code=403, detail="Not authorized")
+
 
 def _display_name(u: models.User) -> str:
     if not u:
         return ""
     first = getattr(getattr(u, "profile", None), "first_name", "") or ""
-    last  = getattr(getattr(u, "profile", None), "last_name", "") or ""
-    full  = (first + " " + last).strip()
+    last = getattr(getattr(u, "profile", None), "last_name", "") or ""
+    full = (first + " " + last).strip()
     return full or u.username or u.email or f"User#{u.id}"
-def _latest_template_snapshot_info(db: Session, study_id: int) -> tuple[Optional[int], Optional[datetime]]:
-    row = (
-        db.query(models.StudyTemplateVersion)
-        .filter(models.StudyTemplateVersion.study_id == study_id)
-        .order_by(models.StudyTemplateVersion.version.desc())
-        .first()
-    )
-    if not row:
-        return None, None
-    return int(row.version), row.created_at
 
 
-def _sync_study_to_dts_safe(
-    db: Session,
-    metadata: models.StudyMetadata,
-    content: models.StudyContent,
-    context: str = "",
-) -> None:
-    """
-    Best-effort DTS sync for study aggregate.
-    Uses latest template version metadata if available.
-    Never raises in dual_write mode.
-    """
-    if CASEE_DTS_MODE not in {"dual_write", "read_dts_fallback_sql", "dts_only"}:
-        return
+def _dts_study_full_response(study_id: int, db: Session, user: models.User) -> Dict[str, Any]:
+    metadata, content = get_study_from_dts(study_id)
+    if not metadata:
+        raise HTTPException(status_code=404, detail="Study not found")
 
+    perms = _assert_has_study_permission(db, metadata, user, required="view")
+
+    meta_out = {
+        "id": int(metadata.id),
+        "study_name": metadata.study_name,
+        "study_description": metadata.study_description,
+        "status": metadata.status,
+        "draft_of_study_id": metadata.draft_of_study_id,
+        "last_completed_step": metadata.last_completed_step,
+        "created_by": metadata.created_by,
+        "created_at": metadata.created_at,
+        "updated_at": metadata.updated_at,
+        "permissions": {
+            "view": bool(perms.get("view", False)),
+            "add_data": bool(perms.get("add_data", False)),
+            "edit_study": bool(perms.get("edit_study", False)),
+        },
+    }
+
+    content_out = {
+        "id": int(metadata.id),  # avoids response validation failure on DTS shim content.id=None
+        "study_id": int(metadata.id),
+        "study_data": (content.study_data or {}) if content else {},
+    }
+
+    return {"metadata": meta_out, "content": content_out}
+
+
+def _dts_entry_or_sql_fallback(study_id: int, entry_id: int, entry_obj: models.StudyEntryData) -> Dict[str, Any]:
     try:
-        current_template_version, template_snapshot_created_at = _latest_template_snapshot_info(db, metadata.id)
-        upsert_study_to_dts(
-            metadata,
-            content,
-            current_template_version=current_template_version,
-            template_snapshot_created_at=template_snapshot_created_at,
-        )
-        logger.info(
-            "DTS study sync successful study_id=%s context=%s version=%s",
-            metadata.id,
-            context,
-            current_template_version,
-        )
+        dts_entry = get_study_entry_from_dts(study_id, entry_id)
+        if dts_entry:
+            return dts_entry
     except Exception as e:
-        logger.error(
-            "DTS study sync failed study_id=%s context=%s err=%s",
-            getattr(metadata, "id", None),
-            context,
-            e,
-        )
-        if CASEE_DTS_MODE == "dts_only":
-            raise
+        logger.warning("DTS entry readback failed study_id=%s entry_id=%s: %s", study_id, entry_id, e)
+
+    return {
+        "id": entry_obj.id,
+        "study_id": entry_obj.study_id,
+        "form_version": entry_obj.form_version,
+        "subject_index": entry_obj.subject_index,
+        "visit_index": entry_obj.visit_index,
+        "group_index": entry_obj.group_index,
+        "data": entry_obj.data or {},
+        "skipped_required_flags": entry_obj.skipped_required_flags,
+        "created_at": entry_obj.created_at,
+    }
+
+
+# -------------------------------------------------------------------
+# Available fields
+# -------------------------------------------------------------------
 
 @router.get("/available-fields")
 async def get_available_fields():
-    """
-    Return list of generic/custom field definitions from available-fields.json.
-    If missing, return [] so the UI doesn't break.
-    """
     path = TEMPLATE_DIR / "available-fields.json"
     if not path.exists():
         logger.warning("available-fields.json not found at %s — returning empty list", path)
@@ -463,38 +587,43 @@ def load_yaml_file(file_path):
         return None
 
 
+# -------------------------------------------------------------------
+# Study CRUD
+# -------------------------------------------------------------------
+
 @router.post("/studies/", response_model=schemas.StudyFull)
 def create_study(
     study_metadata: schemas.StudyMetadataCreate,
     study_content: schemas.StudyContentCreate,
     create_bids: bool = Query(True, description="If false, skip BIDS dataset folder creation for this request"),
-
-    # allow draft creation without new endpoints
     status: Optional[str] = Query(None, description="Optional: DRAFT|PUBLISHED|ARCHIVED (defaults to PUBLISHED)"),
     draft_of_study_id: Optional[int] = Query(None, description="Optional: published study id if creating an edit-draft"),
     last_completed_step: Optional[int] = Query(None, description="Optional: resume helper"),
     audit_label: Optional[str] = Query(None, description="Optional: human-readable audit label from frontend"),
     db: Session = Depends(get_db),
-    user = Depends(get_current_user)
+    user=Depends(get_current_user)
 ):
     if study_metadata.created_by != user.id:
         raise HTTPException(status_code=403, detail="Not authorized to create study for this user")
 
     desired_status = _norm_status(status) or "PUBLISHED"
     if desired_status == "DRAFT":
-        # Drafts should not create BIDS folders by default (prevents clutter)
         create_bids = False
 
-    # If this is an edit-draft, validate the referenced published study exists + permissions
     if draft_of_study_id is not None:
-        base = db.query(models.StudyMetadata).filter(models.StudyMetadata.id == draft_of_study_id).first()
-        if not base:
-            raise HTTPException(status_code=404, detail="draft_of_study_id study not found")
-        if base.created_by != user.id and getattr(user.profile, "role", None) != "Administrator":
-            raise HTTPException(status_code=403, detail="Not authorized to draft-edit this study")
-        desired_status = "DRAFT"  # force
+        try:
+            base_meta, _ = get_study_from_dts(draft_of_study_id)
+        except Exception:
+            base_meta = None
 
-    # Keep a *pre-BIDS* snapshot (so labels/IDs aren’t rewritten) for versioning
+        if not base_meta:
+            raise HTTPException(status_code=404, detail="draft_of_study_id study not found")
+
+        if getattr(base_meta, "created_by", None) != user.id and getattr(user.profile, "role", None) != "Administrator":
+            raise HTTPException(status_code=403, detail="Not authorized to draft-edit this study")
+
+        desired_status = "DRAFT"
+
     incoming_snapshot = _deepcopy_json(study_content.study_data or {})
 
     try:
@@ -503,7 +632,6 @@ def create_study(
         logger.error("Error creating study: %s", e)
         raise HTTPException(status_code=500, detail=str(e))
 
-    # persist workflow fields on metadata (keeps crud unchanged)
     try:
         metadata.status = desired_status
         metadata.draft_of_study_id = draft_of_study_id
@@ -511,12 +639,12 @@ def create_study(
             metadata.last_completed_step = int(last_completed_step)
         db.commit()
         db.refresh(metadata)
+        db.refresh(content)
     except Exception as e:
         db.rollback()
         logger.error("Error updating draft workflow fields: %s", e)
         raise HTTPException(status_code=500, detail="Error creating draft workflow fields")
 
-    # Initialize BIDS dataset (OPTIONAL) — skip for drafts by default
     if create_bids and upsert_bids_dataset and _get_meta_status(metadata) != "DRAFT":
         try:
             dataset_path = upsert_bids_dataset(
@@ -525,18 +653,23 @@ def create_study(
                 study_description=metadata.study_description,
                 study_data=content.study_data,
             )
-            # persist any label-map mutations made by upsert
             db.query(models.StudyContent).filter(models.StudyContent.id == content.id).update(
                 {"study_data": content.study_data}
             )
             db.commit()
             db.refresh(content)
             logger.info("BIDS dataset initialized at %s (study_id=%s)", dataset_path, metadata.id)
-            log_dataset_change_to_changes(metadata.id, metadata.study_name, action="dataset_initialized",
-                                          actor_id=user.id, actor_name=_display_name(user),
-                                          detail="Initial BIDS dataset creation")
+
+            log_dataset_change_to_changes(
+                metadata.id,
+                metadata.study_name,
+                action="dataset_initialized",
+                actor_id=user.id,
+                actor_name=_display_name(user),
+                detail="Initial BIDS dataset creation"
+            )
+
             try:
-                # NO DIFF for new study creation
                 audit_change_both(
                     scope="study",
                     action="study_created",
@@ -557,13 +690,24 @@ def create_study(
         except Exception as be:
             logger.error("BIDS export (create) failed for study %s: %s", metadata.id, be)
 
-    # Ensure/initialize v1 template snapshot (structural)
     try:
         VersionManager.ensure_initial_version(db, metadata.id, incoming_snapshot)
+        latest_v_row = (
+            db.query(models.StudyTemplateVersion)
+            .filter(models.StudyTemplateVersion.study_id == metadata.id)
+            .order_by(models.StudyTemplateVersion.version.desc())
+            .first()
+        )
+        if latest_v_row:
+            _sync_template_snapshot_to_dts_safe(
+                study_id=metadata.id,
+                version_row=latest_v_row,
+                context="create_study:init_template_snapshot",
+            )
     except Exception as ve:
         logger.error("Failed to init template version for study %s: %s", metadata.id, ve)
+        raise HTTPException(status_code=500, detail="Failed to initialize template snapshot")
 
-    # DTS sync (best-effort in dual_write mode)
     try:
         _sync_study_to_dts_safe(
             db=db,
@@ -572,11 +716,10 @@ def create_study(
             context="create_study",
         )
     except Exception as de:
-        logger.error("DTS create_study failed for study_id=%s: %s", metadata.id, de)
-        if CASEE_DTS_MODE == "dts_only":
-            raise HTTPException(status_code=500, detail="DTS sync failed during study creation")
+        raise HTTPException(status_code=500, detail=f"DTS sync failed during study creation: {de}")
 
-    return {"metadata": metadata, "content": content}
+    return _dts_study_full_response(metadata.id, db, user)
+
 
 @router.get("/studies", response_model=List[schemas.StudyMetadataOut])
 def list_studies(
@@ -587,53 +730,28 @@ def list_studies(
     role = (getattr(getattr(current_user, "profile", None), "role", "") or "").strip()
     status_norm = _norm_status(status)
 
-    q = db.query(models.StudyMetadata)
+    try:
+        dts_studies = list_studies_from_dts()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"DTS list studies failed: {e}")
 
-    # ----------------------------
-    # Visibility filter
-    # ----------------------------
-    if role != "Administrator":
-        # SQLite JSON filtering:
-        # Include a study if user is owner OR there is a grant row that gives *any* access.
-        # "any access" = view OR add_data OR edit_study
-        # Defaults if key missing/null:
-        #   view: True, add_data: True, edit_study: False
-        view_expr = func.coalesce(func.json_extract(models.StudyAccessGrant.permissions, "$.view"), 1)
-        add_expr  = func.coalesce(func.json_extract(models.StudyAccessGrant.permissions, "$.add_data"), 1)
-        edit_expr = func.coalesce(func.json_extract(models.StudyAccessGrant.permissions, "$.edit_study"), 0)
+    out: List[schemas.StudyMetadataOut] = []
 
-        grant_subq = (
-            db.query(models.StudyAccessGrant.study_id)
-              .filter(models.StudyAccessGrant.user_id == current_user.id)
-              .filter(
-                  (view_expr == 1) | (add_expr == 1) | (edit_expr == 1)
-              )
-              .subquery()
-        )
+    for row in dts_studies:
+        row_status = (row.get("status") or "PUBLISHED").strip().upper()
+        if status_norm and row_status != status_norm:
+            continue
 
-        q = q.filter(
-            or_(
-                models.StudyMetadata.created_by == current_user.id,
-                models.StudyMetadata.id.in_(grant_subq),
-            )
-        )
+        row_obj = type("DTSStudyMeta", (), row)()
+        perms = _effective_study_permissions(db, row_obj, current_user)
 
-    # Optional status filter
-    if status_norm:
-        q = q.filter(models.StudyMetadata.status == status_norm)
+        if role != "Administrator" and not perms.get("view", False):
+            continue
 
-    studies = q.all()
+        row["permissions"] = perms
+        out.append(schemas.StudyMetadataOut(**row))
 
-    # ----------------------------
-    # Attach per-study effective permissions for current user
-    # (serialized as `permissions` via schema)
-    # ----------------------------
-    for m in studies:
-        m.permissions = _effective_study_permissions(db, m, current_user)
-
-    return studies
-
-
+    return out
 
 
 @router.get("/studies/{study_id}", response_model=schemas.StudyFull)
@@ -642,40 +760,13 @@ def read_study(
     db: Session = Depends(get_db),
     user: models.User = Depends(get_current_user),
 ):
-    result = crud.get_study_full(db, study_id)
-    if result is None:
-        raise HTTPException(status_code=404, detail="Study not found")
-
-    metadata, content = result
-
-    #  canonical auth + returns effective perms
-    perms = _assert_has_study_permission(db, metadata, user, required="view")
-
-    # Convert ORM -> schema dict, then attach perms
     try:
-        meta_out = schemas.StudyMetadataOut.model_validate(metadata).model_dump()
-    except Exception:
-        # fallback if you're not on pydantic v2 in this path
-        meta_out = {
-            "id": metadata.id,
-            "study_name": metadata.study_name,
-            "study_description": metadata.study_description,
-            "status": metadata.status,
-            "draft_of_study_id": metadata.draft_of_study_id,
-            "last_completed_step": metadata.last_completed_step,
-            "created_by": metadata.created_by,
-            "created_at": metadata.created_at,
-            "updated_at": metadata.updated_at,
-        }
+        return _dts_study_full_response(study_id, db, user)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"DTS read failed: {e}")
 
-    #  this is what StudyView/StudyDataDashboard need
-    meta_out["permissions"] = {
-        "view": bool(perms.get("view", False)),
-        "add_data": bool(perms.get("add_data", False)),
-        "edit_study": bool(perms.get("edit_study", False)),
-    }
-
-    return {"metadata": meta_out, "content": content}
 
 @router.get("/studies/{study_id}/versions")
 def list_study_versions(
@@ -683,20 +774,17 @@ def list_study_versions(
     db: Session = Depends(get_db),
     user: models.User = Depends(get_current_user),
 ):
-    meta = db.query(models.StudyMetadata).filter(models.StudyMetadata.id == study_id).first()
+    try:
+        meta, _ = get_study_from_dts(study_id)
+    except Exception:
+        meta = None
+
     if not meta:
         raise HTTPException(status_code=404, detail="Study not found")
-    role = (getattr(user.profile, "role", "") or "").strip()
-    is_admin = role == "Administrator"
-    is_owner = (meta.created_by == user.id)
-    if not (is_admin or is_owner):
-        grant = (
-            db.query(models.StudyAccessGrant)
-              .filter_by(study_id=study_id, user_id=user.id)
-              .first()
-        )
-        if not grant or not (grant.permissions or {}).get("view", True):
-            raise HTTPException(status_code=403, detail="Not authorized")
+
+    perms = _effective_study_permissions(db, meta, user)
+    if not perms.get("view", False):
+        raise HTTPException(status_code=403, detail="Not authorized")
 
     versions = (
         db.query(StudyTemplateVersion)
@@ -704,10 +792,7 @@ def list_study_versions(
           .order_by(StudyTemplateVersion.version.asc())
           .all()
     )
-    return [
-        {"version": v.version, "created_at": v.created_at}
-        for v in versions
-    ]
+    return [{"version": v.version, "created_at": v.created_at} for v in versions]
 
 
 @router.get("/studies/{study_id}/template")
@@ -717,11 +802,14 @@ def get_template_version(
     db: Session = Depends(get_db),
     user: models.User = Depends(get_current_user),
 ):
-    meta = db.query(models.StudyMetadata).filter(models.StudyMetadata.id == study_id).first()
+    try:
+        meta, _ = get_study_from_dts(study_id)
+    except Exception:
+        meta = None
+
     if not meta:
         raise HTTPException(status_code=404, detail="Study not found")
 
-    # allow any user who can view this study (or add/edit)
     _assert_has_study_permission(db, meta, user, required="view")
 
     q = db.query(StudyTemplateVersion).filter(StudyTemplateVersion.study_id == study_id)
@@ -736,6 +824,7 @@ def get_template_version(
         raise HTTPException(status_code=404, detail="No versions found")
     return {"study_id": study_id, "version": latest.version, "schema": latest.schema, "created_at": latest.created_at}
 
+
 @router.post("/studies/{study_id}/versioning/preview")
 def preview_versioning_decision(
     study_id: int,
@@ -743,12 +832,16 @@ def preview_versioning_decision(
     db: Session = Depends(get_db),
     user: models.User = Depends(get_current_user),
 ):
-    meta = db.query(models.StudyMetadata).filter(models.StudyMetadata.id == study_id).first()
+    try:
+        meta, content = get_study_from_dts(study_id)
+    except Exception:
+        meta, content = None, None
+
     if not meta:
         raise HTTPException(status_code=404, detail="Study not found")
+
     _assert_owner_or_admin(meta, user)
 
-    content = db.query(models.StudyContent).filter(models.StudyContent.study_id == study_id).first()
     old_sd = (content.study_data if content else {}) or {}
     new_sd = (study_content.study_data or {}) or {}
 
@@ -763,30 +856,26 @@ def update_study(
     study_content: schemas.StudyContentUpdate = Body(..., embed=True),
     audit_label: Optional[str] = Query(None, description="Optional: human-readable audit label from frontend"),
     db: Session = Depends(get_db),
-    user = Depends(get_current_user)
+    user=Depends(get_current_user)
 ):
+    # SQL row is still needed for versioning/audit/BIDS/shared access subsystems
     existing = crud.get_study_full(db, study_id)
     if existing is None:
         raise HTTPException(status_code=404, detail="Study not found")
+
     metadata, content = existing
     if metadata.created_by != user.id and user.profile.role != "Administrator":
         raise HTTPException(status_code=403, detail="Not authorized to update this study")
 
-    # normalize payload
     if not study_content.study_data:
         study_content.study_data = {}
 
-    # Ensure id present in study_data
     if not study_content.study_data.get("id"):
         study_content.study_data["id"] = study_id
 
     old_status = _get_meta_status(metadata)
+    incoming_status = _norm_status(getattr(study_metadata, "status", None)) or old_status
 
-    incoming_status = _norm_status(getattr(study_metadata, "status", None))
-    if not incoming_status:
-        incoming_status = old_status  # no change
-
-    # Track last_completed_step if provided in schema; ignore if schema doesn't include it
     if hasattr(study_metadata, "last_completed_step") and getattr(study_metadata, "last_completed_step", None) is not None:
         try:
             metadata.last_completed_step = int(getattr(study_metadata, "last_completed_step"))
@@ -799,23 +888,17 @@ def update_study(
     publish_edit_draft = is_edit_draft and _is_publish_transition(old_status, incoming_status)
     ui_label = _norm_audit_label(audit_label)
 
-    # --------------------------
-    # Case A: publishing an edit-draft
-    # --------------------------
     if publish_edit_draft:
         published_id = int(metadata.draft_of_study_id)
 
-        # 1) First, persist the last changes into the draft row itself (no BIDS/versioning for drafts)
         try:
             crud.update_study(db, study_id, study_metadata, study_content)
         except Exception as e:
             logger.error("Error updating draft before publish: %s", e)
             raise HTTPException(status_code=500, detail=str(e))
 
-        # Reload draft after update
         draft_meta, draft_content = crud.get_study_full(db, study_id)
 
-        # 2) Load published target and authorize
         published_full = crud.get_study_full(db, published_id)
         if not published_full:
             raise HTTPException(status_code=404, detail="Published study not found for draft_of_study_id")
@@ -824,7 +907,6 @@ def update_study(
         if pub_meta.created_by != user.id and user.profile.role != "Administrator":
             raise HTTPException(status_code=403, detail="Not authorized to publish changes to this study")
 
-        # Capture previous latest template version for published
         prev_v_row = (
             db.query(StudyTemplateVersion)
               .filter(StudyTemplateVersion.study_id == published_id)
@@ -835,9 +917,8 @@ def update_study(
 
         old_sd_published = _deepcopy_json(pub_content.study_data or {})
         new_sd_from_draft = _deepcopy_json(draft_content.study_data or {})
-        new_sd_from_draft["id"] = published_id  # critical: keep canonical id stable
+        new_sd_from_draft["id"] = published_id
 
-        # 3) Apply draft -> published in a transaction
         try:
             pub_meta.study_name = draft_meta.study_name
             pub_meta.study_description = draft_meta.study_description
@@ -851,7 +932,6 @@ def update_study(
             logger.error("Error applying draft to published: %s", e)
             raise HTTPException(status_code=500, detail="Failed to publish draft changes")
 
-        # 4) BIDS update for published (now that it's updated)
         if upsert_bids_dataset:
             try:
                 dataset_path = upsert_bids_dataset(
@@ -876,7 +956,6 @@ def update_study(
                     detail="Published changes from draft",
                 )
 
-                # CHANGE => diff payload for study template
                 diffs = _compute_json_diff(old_sd_published, _deepcopy_json(pub_content.study_data or {}))
 
                 try:
@@ -902,7 +981,6 @@ def update_study(
             except Exception as be:
                 logger.error("BIDS export (publish draft) failed for study %s: %s", pub_meta.id, be)
 
-        # 5) Versioning on published (diff old published vs new published)
         def _audit(action: str, extra: Dict[str, Any]):
             if action in {"version_snapshot_refreshed"}:
                 return
@@ -935,14 +1013,15 @@ def update_study(
             )
         except Exception as ve:
             logger.error("Versioning apply_on_update failed for published study %s: %s", published_id, ve)
+            raise HTTPException(status_code=500, detail="Versioning failed during draft publish")
 
-        # Detect template version bump and copy BIDS tree non-destructively
         new_v_row = (
             db.query(StudyTemplateVersion)
               .filter(StudyTemplateVersion.study_id == published_id)
               .order_by(StudyTemplateVersion.version.desc())
               .first()
         )
+
         new_latest_v = int(new_v_row.version) if new_v_row else prev_latest_v
         if new_latest_v > prev_latest_v:
             try:
@@ -950,7 +1029,13 @@ def update_study(
             except Exception as be:
                 logger.error("BIDS version bump copy failed for study %s: %s", published_id, be)
 
-        # 6) Archive the draft row so it no longer appears as unfinished
+        if new_v_row:
+            _sync_template_snapshot_to_dts_safe(
+                study_id=published_id,
+                version_row=new_v_row,
+                context="update_study:latest_template_snapshot",
+            )
+
         try:
             draft_meta.status = "ARCHIVED"
             db.commit()
@@ -958,7 +1043,6 @@ def update_study(
         except Exception:
             db.rollback()
 
-        # 7) DTS sync: published canonical study
         try:
             _sync_study_to_dts_safe(
                 db=db,
@@ -967,14 +1051,12 @@ def update_study(
                 context="publish_edit_draft:published",
             )
         except Exception as de:
-            logger.error("DTS publish sync failed for published study_id=%s: %s", pub_meta.id, de)
-            if CASEE_DTS_MODE == "dts_only":
-                raise HTTPException(status_code=500, detail="DTS sync failed during draft publish")
+            raise HTTPException(status_code=500, detail=f"DTS sync failed during draft publish: {de}")
 
-        # 8) DTS sync: archived draft row too (keeps DTS consistent with SQL workflow state)
         try:
             draft_content_latest = db.query(models.StudyContent).filter(
-                models.StudyContent.study_id == draft_meta.id).first()
+                models.StudyContent.study_id == draft_meta.id
+            ).first()
             if draft_content_latest:
                 _sync_study_to_dts_safe(
                     db=db,
@@ -983,20 +1065,12 @@ def update_study(
                     context="publish_edit_draft:archived_draft",
                 )
         except Exception as de:
-            logger.error("DTS archive-draft sync failed for study_id=%s: %s", draft_meta.id, de)
-            if CASEE_DTS_MODE == "dts_only":
-                raise HTTPException(status_code=500, detail="DTS sync failed while archiving draft")
+            raise HTTPException(status_code=500, detail=f"DTS sync failed while archiving draft: {de}")
 
-        return {"metadata": pub_meta, "content": pub_content}
+        return _dts_study_full_response(pub_meta.id, db, user)
 
-    # --------------------------
-    # Case B: normal update (draft save step OR published edit in-place)
-    # --------------------------
-
-    # snapshots for versioning (only for non-drafts)
     old_sd = _deepcopy_json(content.study_data or {})
 
-    # capture previous latest template version (only meaningful for non-drafts)
     prev_v_row = (
         db.query(StudyTemplateVersion)
           .filter(StudyTemplateVersion.study_id == study_id)
@@ -1013,16 +1087,15 @@ def update_study(
 
     metadata, content = result
 
-    # Apply status change (schema might not include it; keep safe)
     try:
         if incoming_status:
             metadata.status = incoming_status
         db.commit()
         db.refresh(metadata)
+        db.refresh(content)
     except Exception:
         db.rollback()
 
-    # If this is a draft update: do NOT touch BIDS/versioning (prevents clutter + avoids noisy versions)
     if _get_meta_status(metadata) == "DRAFT":
         try:
             _sync_study_to_dts_safe(
@@ -1032,15 +1105,10 @@ def update_study(
                 context="update_study:draft",
             )
         except Exception as de:
-            logger.error("DTS draft update failed for study_id=%s: %s", metadata.id, de)
-            if CASEE_DTS_MODE == "dts_only":
-                raise HTTPException(status_code=500, detail="DTS sync failed during draft update")
+            raise HTTPException(status_code=500, detail=f"DTS sync failed during draft update: {de}")
 
-        return {"metadata": metadata, "content": content}
+        return _dts_study_full_response(metadata.id, db, user)
 
-    # ---- existing behavior for published updates stays as-is ----
-
-    # Update BIDS structure (and persist any label updates)
     if upsert_bids_dataset:
         try:
             dataset_path = upsert_bids_dataset(
@@ -1090,7 +1158,6 @@ def update_study(
         except Exception as be:
             logger.error("BIDS export (update) failed for study %s: %s", metadata.id, be)
 
-    # Versioning: bump only if latest has data; otherwise overwrite; clone rows on bump
     def _audit(action: str, extra: Dict[str, Any]):
         if action in {"version_snapshot_refreshed"}:
             return
@@ -1114,9 +1181,16 @@ def update_study(
             pass
 
     try:
-        VersionManager.apply_on_update(db, study_id, old_sd, _deepcopy_json(content.study_data or {}), audit_callback=_audit)
+        VersionManager.apply_on_update(
+            db,
+            study_id,
+            old_sd,
+            _deepcopy_json(content.study_data or {}),
+            audit_callback=_audit
+        )
     except Exception as ve:
         logger.error("Versioning apply_on_update failed for study %s: %s", study_id, ve)
+        raise HTTPException(status_code=500, detail="Versioning failed during study update")
 
     new_v_row = (
         db.query(StudyTemplateVersion)
@@ -1131,7 +1205,13 @@ def update_study(
         except Exception as be:
             logger.error("BIDS version bump copy failed for study %s: %s", study_id, be)
 
-    # DTS sync after SQL/BIDS/versioning are complete
+    if new_v_row:
+        _sync_template_snapshot_to_dts_safe(
+            study_id=study_id,
+            version_row=new_v_row,
+            context="update_study:latest_template_snapshot",
+        )
+
     try:
         _sync_study_to_dts_safe(
             db=db,
@@ -1140,11 +1220,14 @@ def update_study(
             context="update_study",
         )
     except Exception as de:
-        logger.error("DTS update_study failed for study_id=%s: %s", metadata.id, de)
-        if CASEE_DTS_MODE == "dts_only":
-            raise HTTPException(status_code=500, detail="DTS sync failed during study update")
+        raise HTTPException(status_code=500, detail=f"DTS sync failed during study update: {de}")
 
-    return {"metadata": metadata, "content": content}
+    return _dts_study_full_response(metadata.id, db, user)
+
+
+# -------------------------------------------------------------------
+# Files
+# -------------------------------------------------------------------
 
 @router.get("/studies/{study_id}/files", response_model=List[schemas.FileOut])
 def read_files_for_study(
@@ -1152,12 +1235,17 @@ def read_files_for_study(
     db: Session = Depends(get_db),
     user: models.User = Depends(get_current_user)
 ):
-    meta = db.query(models.StudyMetadata).filter(models.StudyMetadata.id == study_id).first()
+    try:
+        meta, _ = get_study_from_dts(study_id)
+    except Exception:
+        meta = None
+
     if not meta:
         raise HTTPException(status_code=404, detail="Study not found")
 
     _assert_has_study_permission(db, meta, user, required="view")
 
+    # still SQL-backed because no DTS list-file helper was provided
     files = crud.get_files_for_study(db, study_id)
     return files
 
@@ -1192,7 +1280,6 @@ def upload_file(
         with tempfile.NamedTemporaryFile(delete=False, prefix=f"ecrf_study{study_id}_", suffix=f"_{uploaded_file.filename}") as tmp:
             shutil.copyfileobj(uploaded_file.file, tmp)
             tmp_path = tmp.name
-        logger.info("Staged temp upload: %s", tmp_path)
 
         content = db.query(models.StudyContent).filter(models.StudyContent.study_id == study_id).first()
         study_data = content.study_data if content else {}
@@ -1251,6 +1338,13 @@ def upload_file(
         except Exception:
             pass
 
+        if study and content and db_file:
+            _sync_study_file_to_dts_safe(
+                study=study,
+                content=content,
+                db_file=db_file,
+                context="upload_file",
+            )
         return db_file
 
     except HTTPException:
@@ -1358,13 +1452,24 @@ def create_url_file(
     except Exception:
         pass
 
+    content = db.query(models.StudyContent).filter(models.StudyContent.study_id == study_id).first()
+    if study and content and db_file:
+        _sync_study_file_to_dts_safe(
+            study=study,
+            content=content,
+            db_file=db_file,
+            context="create_url_file",
+        )
     return db_file
 
 
-# -------------------- Share Links --------------------
+# -------------------------------------------------------------------
+# Share links
+# -------------------------------------------------------------------
 
 def generate_token():
     return secrets.token_urlsafe(32)
+
 
 @router.post("/share-link/", status_code=201)
 def create_share_link(
@@ -1377,19 +1482,20 @@ def create_share_link(
     if current_user.profile.role not in ["Investigator", "Administrator", "Principal Investigator"]:
         raise HTTPException(status_code=403, detail="Not allowed")
 
-    study = db.query(models.StudyMetadata).filter(models.StudyMetadata.id == payload.study_id).first()
-    if not study:
+    try:
+        study_meta, study_content_shim = get_study_from_dts(payload.study_id)
+    except Exception:
+        study_meta, study_content_shim = None, None
+
+    if not study_meta:
         raise HTTPException(status_code=404, detail="Study not found")
 
-    content = db.query(models.StudyContent).filter(models.StudyContent.study_id == payload.study_id).first()
-    study_data = (content.study_data or {}) if content else {}
+    study_data = (study_content_shim.study_data or {}) if study_content_shim else {}
     selected_models = study_data.get("selectedModels") or []
     assignments = study_data.get("assignments") or []
 
-    # Validate requested section ids
     requested_allowed_ids = _normalize_allowed_section_ids(getattr(payload, "allowed_section_ids", []) or [])
 
-    # Build set of section ids that are actually assigned for this visit/group
     assigned_section_ids = set()
     v_idx = int(payload.visit_index)
     g_idx = int(payload.group_index)
@@ -1409,8 +1515,6 @@ def create_share_link(
             if sec_id:
                 assigned_section_ids.add(sec_id)
 
-    # If frontend sent explicit list, enforce it is a subset of assigned sections.
-    # If frontend sends nothing, default to all assigned sections.
     if requested_allowed_ids:
         invalid_ids = [sid for sid in requested_allowed_ids if sid not in assigned_section_ids]
         if invalid_ids:
@@ -1455,7 +1559,7 @@ def create_share_link(
                 "diff_payload": None,
             },
             study_id=payload.study_id,
-            study_name=None,
+            study_name=getattr(study_meta, "study_name", None),
             db=db,
             actor_id=current_user.id,
         )
@@ -1486,11 +1590,7 @@ def access_shared_form(
     token: str,
     db: Session = Depends(get_db),
 ):
-    access = (
-        db.query(models.SharedFormAccess)
-          .filter_by(token=token)
-          .first()
-    )
+    access = db.query(models.SharedFormAccess).filter_by(token=token).first()
     if not access:
         raise HTTPException(404, "Link not found")
     if access.used_count >= access.max_uses:
@@ -1501,24 +1601,13 @@ def access_shared_form(
     access.used_count += 1
     db.commit()
 
-    content = (
-        db.query(models.StudyContent)
-        .filter_by(study_id=access.study_id)
-        .first()
-    )
-    if not content:
-        raise HTTPException(500, "Study content missing")
+    try:
+        metadata, content = get_study_from_dts(access.study_id)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"DTS study read failed: {e}")
 
-    metadata = (
-        db.query(models.StudyMetadata)
-        .filter_by(id=access.study_id)
-        .first()
-    )
-    if not metadata:
-        raise HTTPException(500, "Study metadata missing")
-
-    if not content.study_data or not isinstance(content.study_data.get("assignments"), list):
-        raise HTTPException(500, "Study assignments data is missing or invalid")
+    if not metadata or not content:
+        raise HTTPException(500, "Study data missing")
 
     filtered_study_data = _filter_shared_study_data_by_sections(
         content.study_data,
@@ -1539,16 +1628,27 @@ def access_shared_form(
                 "study_description": metadata.study_description,
                 "created_by": metadata.created_by,
                 "created_at": metadata.created_at,
-                "updated_at": metadata.updated_at
+                "updated_at": metadata.updated_at,
             },
             "content": {
                 "study_data": filtered_study_data
             }
         }
     }
-# -------------------- Data Entry --------------------
+
+
+@router.get("/shared-api/{token}/", response_model=schemas.SharedFormAccessOut)
+def access_shared_form_slash(token: str, db: Session = Depends(get_db)):
+    return access_shared_form(token, db)
+
+
+# -------------------------------------------------------------------
+# Data entry
+# -------------------------------------------------------------------
+
 def get_current_form_version(db: Session, study_id: int) -> int:
     return VersionManager.latest_writable_version(db, study_id)
+
 
 @router.post("/studies/{study_id}/data", response_model=schemas.StudyDataEntryOut)
 def save_study_data(
@@ -1559,23 +1659,23 @@ def save_study_data(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    study = db.query(models.StudyMetadata).filter(models.StudyMetadata.id == study_id).first()
-    if not study:
+    try:
+        study_meta, content_shim = get_study_from_dts(study_id)
+    except Exception:
+        study_meta, content_shim = None, None
+
+    if not study_meta:
         raise HTTPException(status_code=404, detail="Study not found")
 
-    is_admin = getattr(getattr(current_user, "profile", None), "role", "") == "Administrator"
-    is_owner = study.created_by == current_user.id
-    if not (is_admin or is_owner):
-        grant = db.query(models.StudyAccessGrant).filter_by(study_id=study_id, user_id=current_user.id).first()
-        if not grant or not (grant.permissions or {}).get("add_data", False):
-            raise HTTPException(status_code=403, detail="Not allowed to add data for this study")
+    perms = _effective_study_permissions(db, study_meta, current_user)
+    if not perms.get("add_data", False):
+        raise HTTPException(status_code=403, detail="Not allowed to add data for this study")
 
     try:
         form_version = VersionManager.assert_latest_is_used(db, study_id, version)
     except ValueError as ve:
         raise HTTPException(status_code=400, detail=str(ve))
 
-    # If same subject/visit/group already has data in THIS version, compute diff (else: no diff)
     prev_entry = (
         db.query(models.StudyEntryData)
           .filter_by(
@@ -1588,6 +1688,7 @@ def save_study_data(
           .order_by(models.StudyEntryData.id.desc())
           .first()
     )
+
     entry_diffs: List[Dict[str, Any]] = []
     if prev_entry is not None:
         try:
@@ -1596,7 +1697,8 @@ def save_study_data(
             entry_diffs = []
 
     content = db.query(models.StudyContent).filter(models.StudyContent.study_id == study_id).first()
-    selected_models = ((content.study_data or {}).get("selectedModels") if content and isinstance(content.study_data, dict) else []) or []
+    selected_models = ((content.study_data or {}).get("selectedModels") if content and isinstance(content.study_data, dict) else []) or \
+                      ((content_shim.study_data or {}).get("selectedModels") if content_shim and isinstance(content_shim.study_data, dict) else []) or []
 
     entry = models.StudyEntryData(
         study_id=study_id,
@@ -1611,18 +1713,22 @@ def save_study_data(
     db.commit()
     db.refresh(entry)
 
-    content = db.query(models.StudyContent).filter(models.StudyContent.study_id == study_id).first()
     if upsert_bids_dataset and content:
         try:
-            upsert_bids_dataset(study_id=study.id, study_name=study.study_name,
-                                study_description=study.study_description, study_data=content.study_data)
+            upsert_bids_dataset(
+                study_id=study_meta.id,
+                study_name=study_meta.study_name,
+                study_description=study_meta.study_description,
+                study_data=content.study_data,
+            )
             db.query(models.StudyContent).filter(models.StudyContent.id == content.id).update({"study_data": content.study_data})
             db.commit()
+
             if write_entry_to_bids:
                 write_entry_to_bids(
-                    study_id=study.id,
-                    study_name=study.study_name,
-                    study_description=study.study_description,
+                    study_id=study_meta.id,
+                    study_name=study_meta.study_name,
+                    study_description=study_meta.study_description,
                     study_data=content.study_data,
                     entry={
                         "id": entry.id,
@@ -1638,7 +1744,6 @@ def save_study_data(
                     actor_name=_display_name(current_user),
                 )
 
-            # Diff only if prev_entry existed (and diffs exist). For first-time subject data -> no diff.
             try:
                 audit_change_both(
                     scope="study",
@@ -1657,8 +1762,8 @@ def save_study_data(
                         "diff_basis": "previous_entry" if prev_entry is not None else "none",
                         "previous_entry_id": prev_entry.id if prev_entry is not None else None,
                     },
-                    study_id=study.id,
-                    study_name=study.study_name,
+                    study_id=study_meta.id,
+                    study_name=study_meta.study_name,
                     db=db,
                     actor_id=current_user.id
                 )
@@ -1668,7 +1773,20 @@ def save_study_data(
         except Exception as be:
             logger.error("BIDS export (data save) failed for study %s: %s", study_id, be)
 
-    return entry
+    if content is not None:
+        try:
+            _sync_study_entry_to_dts_safe(
+                study=type("StudyObj", (), {"id": study_meta.id, "study_name": study_meta.study_name, "study_description": study_meta.study_description})(),
+                content=content,
+                entry=entry,
+                actor_id=current_user.id,
+                actor_name=_display_name(current_user),
+                context="save_study_data",
+            )
+        except Exception as de:
+            raise HTTPException(status_code=500, detail=f"DTS sync failed during save study data: {de}")
+
+    return _dts_entry_or_sql_fallback(study_id, entry.id, entry)
 
 
 @router.put("/studies/{study_id}/data_entries/{entry_id}", response_model=schemas.StudyDataEntryOut)
@@ -1688,7 +1806,11 @@ def update_study_data_entry(
     if not entry:
         raise HTTPException(status_code=404, detail="Entry not found")
 
-    # Compute diff vs existing entry row
+    study_meta, _ = get_study_from_dts(study_id)
+    perms = _effective_study_permissions(db, study_meta, user)
+    if not perms.get("add_data", False):
+        raise HTTPException(status_code=403, detail="Not allowed to update data for this study")
+
     entry_diffs: List[Dict[str, Any]] = []
     try:
         entry_diffs = _compute_json_diff(_deepcopy_json(entry.data or {}), _deepcopy_json(payload.data or {}))
@@ -1696,13 +1818,15 @@ def update_study_data_entry(
         entry_diffs = []
 
     entry.subject_index = payload.subject_index
-    entry.visit_index   = payload.visit_index
-    entry.group_index   = payload.group_index
-    entry.data          = payload.data
+    entry.visit_index = payload.visit_index
+    entry.group_index = payload.group_index
+    entry.data = payload.data
+
     if payload.skipped_required_flags is not None:
         content = db.query(models.StudyContent).filter(models.StudyContent.study_id == study_id).first()
         selected_models = ((content.study_data or {}).get("selectedModels") if content and isinstance(content.study_data, dict) else []) or []
         entry.skipped_required_flags = _flags_dict_to_list(payload.skipped_required_flags, selected_models)
+
     db.commit()
     db.refresh(entry)
 
@@ -1738,11 +1862,7 @@ def update_study_data_entry(
                     actor_id=user.id,
                     actor_name=_display_name(user),
                 )
-                logger.info(
-                    "BIDS eCRF upserted for study=%s sub_idx=%s visit_idx=%s entry_id=%s",
-                    study.id, entry.subject_index, entry.visit_index, entry.id
-                )
-            # AUDIT: user edits data
+
             try:
                 audit_change_both(
                     scope="study",
@@ -1771,7 +1891,20 @@ def update_study_data_entry(
         except Exception as be:
             logger.error("BIDS export (data update) failed for study %s: %s", study_id, be)
 
-    return entry
+    if study and content and entry:
+        try:
+            _sync_study_entry_to_dts_safe(
+                study=study,
+                content=content,
+                entry=entry,
+                actor_id=user.id,
+                actor_name=_display_name(user),
+                context="update_study_data_entry",
+            )
+        except Exception as de:
+            raise HTTPException(status_code=500, detail=f"DTS sync failed during update study data entry: {de}")
+
+    return _dts_entry_or_sql_fallback(study_id, entry.id, entry)
 
 
 @router.get("/studies/{study_id}/data_entries", response_model=schemas.PaginatedStudyDataEntries)
@@ -1783,42 +1916,36 @@ def list_study_data_entries(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    exists = db.query(models.StudyMetadata).filter_by(id=study_id).first()
-    if not exists:
+    try:
+        study_meta, _ = get_study_from_dts(study_id)
+    except Exception:
+        study_meta = None
+
+    if not study_meta:
         raise HTTPException(404, "Study not found")
 
-    q = (
-        db.query(models.StudyEntryData)
-          .filter_by(study_id=study_id)
-          .order_by(
-              models.StudyEntryData.subject_index.asc(),
-              models.StudyEntryData.visit_index.asc(),
-              models.StudyEntryData.group_index.asc(),
-              models.StudyEntryData.id.asc()
-          )
-    )
+    perms = _effective_study_permissions(db, study_meta, user)
+    if not perms.get("view", False):
+        raise HTTPException(status_code=403, detail="Not authorized")
 
-    total = q.count()
+    try:
+        entries = list_study_entries_from_dts(study_id)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"DTS read failed: {e}")
 
     if not all:
         if subject_indexes:
             subj_idx_list = [int(s) for s in subject_indexes.split(",") if s.strip().isdigit()]
             if subj_idx_list:
-                q = q.filter(models.StudyEntryData.subject_index.in_(subj_idx_list))
+                entries = [e for e in entries if e["subject_index"] in subj_idx_list]
 
         if visit_indexes:
             visit_idx_list = [int(s) for s in visit_indexes.split(",") if s.strip().isdigit()]
             if visit_idx_list:
-                q = q.filter(models.StudyEntryData.visit_index.in_(visit_idx_list))
+                entries = [e for e in entries if e["visit_index"] in visit_idx_list]
 
-    entries = q.all()
-    entries_out = [schemas.StudyDataEntryOut.from_orm(e) for e in entries]
-    return {"total": total, "entries": entries_out}
+    return {"total": len(entries), "entries": entries}
 
-
-@router.get("/shared-api/{token}/", response_model=schemas.SharedFormAccessOut)
-def access_shared_form_slash(token: str, db: Session = Depends(get_db)):
-    return access_shared_form(token, db)
 
 @router.post("/shared/{token}/files", response_model=schemas.FileOut)
 def shared_upload_file(
@@ -1891,7 +2018,6 @@ def shared_upload_file(
         )
         db_file = crud.create_file(db, file_data)
 
-        # AUDIT: share link file addition
         try:
             audit_change_both(
                 scope="study",
@@ -1937,11 +2063,7 @@ def shared_create_url_file(
     audit_label: Optional[str] = Form(None),
     db: Session = Depends(get_db),
 ):
-    access = (
-        db.query(models.SharedFormAccess)
-        .filter_by(token=token)
-        .first()
-    )
+    access = db.query(models.SharedFormAccess).filter_by(token=token).first()
     if not access:
         raise HTTPException(404, "Link not found")
     if access.used_count >= access.max_uses:
@@ -2056,17 +2178,21 @@ def shared_upsert_data(
     except ValueError as ve:
         raise HTTPException(status_code=400, detail=str(ve))
 
-    content = db.query(models.StudyContent).filter(models.StudyContent.study_id == study_id).first()
-    selected_models = ((content.study_data or {}).get("selectedModels") if content and isinstance(content.study_data, dict) else []) or []
+    try:
+        _, dts_content = get_study_from_dts(study_id)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"DTS study read failed: {e}")
 
-    # Enforce allowed sections for shared link
+    content = db.query(models.StudyContent).filter(models.StudyContent.study_id == study_id).first()
+    selected_models = ((content.study_data or {}).get("selectedModels") if content and isinstance(content.study_data, dict) else []) or \
+                      ((dts_content.study_data or {}).get("selectedModels") if dts_content and isinstance(dts_content.study_data, dict) else []) or []
+
     _validate_shared_payload_sections(
         payload_data=payload.data or {},
-        study_data=content.study_data if content else {},
+        study_data=(dts_content.study_data if dts_content else {}),
         allowed_section_ids=access.allowed_section_ids or [],
     )
 
-    # Idempotent within latest only: update if a row for this (s,v,g,latest) exists, else insert
     entry = (
         db.query(models.StudyEntryData)
           .filter_by(study_id=study_id, subject_index=s, visit_index=v, group_index=g, form_version=form_version)
@@ -2138,6 +2264,16 @@ def shared_upsert_data(
                     actor_name=None,
                 )
 
+            if study and content and entry:
+                _sync_study_entry_to_dts_safe(
+                    study=study,
+                    content=content,
+                    entry=entry,
+                    actor_id=None,
+                    actor_name="Shared link submit",
+                    context="shared_upsert_data",
+                )
+
             try:
                 audit_change_both(
                     scope="study",
@@ -2167,8 +2303,12 @@ def shared_upsert_data(
         except Exception as be:
             logger.error("BIDS export (shared data) failed for study %s: %s", study_id, be)
 
-    return entry
-# -------------------- Study Access Management --------------------
+    return _dts_entry_or_sql_fallback(study_id, entry.id, entry)
+
+
+# -------------------------------------------------------------------
+# Study access management
+# -------------------------------------------------------------------
 
 @router.get("/studies/{study_id}/access", response_model=List[schemas.StudyAccessGrantOut])
 def list_study_access(
@@ -2176,7 +2316,11 @@ def list_study_access(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    meta = db.query(models.StudyMetadata).filter(models.StudyMetadata.id == study_id).first()
+    try:
+        meta, _ = get_study_from_dts(study_id)
+    except Exception:
+        meta = None
+
     if not meta:
         raise HTTPException(status_code=404, detail="Study not found")
     _assert_owner_or_admin(meta, current_user)
@@ -2211,7 +2355,11 @@ def grant_study_access(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    meta = db.query(models.StudyMetadata).filter(models.StudyMetadata.id == study_id).first()
+    try:
+        meta, _ = get_study_from_dts(study_id)
+    except Exception:
+        meta = None
+
     if not meta:
         raise HTTPException(status_code=404, detail="Study not found")
     _assert_owner_or_admin(meta, current_user)
@@ -2278,7 +2426,11 @@ def revoke_study_access(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    meta = db.query(models.StudyMetadata).filter(models.StudyMetadata.id == study_id).first()
+    try:
+        meta, _ = get_study_from_dts(study_id)
+    except Exception:
+        meta = None
+
     if not meta:
         raise HTTPException(status_code=404, detail="Study not found")
     _assert_owner_or_admin(meta, current_user)
@@ -2311,6 +2463,10 @@ def revoke_study_access(
     except Exception:
         pass
 
+
+# -------------------------------------------------------------------
+# Bulk data
+# -------------------------------------------------------------------
 
 @router.post("/studies/{study_id}/data/bulk")
 def bulk_insert_data(
@@ -2358,17 +2514,14 @@ def bulk_insert_data(
 
     inserted_count = len(rows)
 
-    # allow skipping BIDS mirroring for performance (Windows) ----
     if not create_bids:
         return {"inserted": inserted_count, "failed": 0, "errors": []}
 
-    # Load study context for BIDS
     study = db.query(models.StudyMetadata).filter(models.StudyMetadata.id == study_id).first()
     content = db.query(models.StudyContent).filter(models.StudyContent.study_id == study_id).first()
     if not study or not content:
         return {"inserted": inserted_count, "failed": 0, "errors": []}
 
-    # Re-select just-inserted rows for this request, then one batched BIDS write
     just_inserted = (
         db.query(models.StudyEntryData)
           .filter(models.StudyEntryData.study_id == study_id, models.StudyEntryData.form_version == form_version)
@@ -2418,6 +2571,16 @@ def bulk_insert_data(
             actor="Bulk import",
         )
 
+        for r in just_inserted:
+            _sync_study_entry_to_dts_safe(
+                study=study,
+                content=content,
+                entry=r,
+                actor_id=None,
+                actor_name="Bulk import",
+                context="bulk_insert_data",
+            )
+
         try:
             audit_change_both(
                 scope="study",
@@ -2439,18 +2602,19 @@ def bulk_insert_data(
             pass
 
     except Exception as be:
-        return {"inserted": inserted_count, "failed": inserted_count, "errors": [f"BIDS mirror failed: {be}"]}
+        return {"inserted": inserted_count, "failed": inserted_count, "errors": [f"BIDS/DTS mirror failed: {be}"]}
 
     return {"inserted": inserted_count, "failed": 0, "errors": []}
 
-def _ensure_can_see_bids(current_user: models.User, study: models.StudyMetadata) -> None:
-    """
-    Only study owner or admins can see/open the BIDS dataset.
-    Adjust this to your own role logic if needed.
-    """
+
+# -------------------------------------------------------------------
+# BIDS helpers
+# -------------------------------------------------------------------
+
+def _ensure_can_see_bids(current_user: models.User, study: Any) -> None:
     role = (getattr(getattr(current_user, "profile", None), "role", "") or "").strip().lower()
     is_admin = role == "administrator"
-    is_owner = current_user.id == study.created_by
+    is_owner = current_user.id == getattr(study, "created_by", None)
 
     if not (is_admin or is_owner):
         raise HTTPException(
@@ -2465,16 +2629,10 @@ def get_study_bids_path(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
-    """
-    Return the absolute BIDS dataset path for this study.
-    Only visible to study owner and admins.
-    """
-    # was: study = crud.get_study_by_id(db, study_id)
-    study = (
-        db.query(models.StudyMetadata)
-        .filter(models.StudyMetadata.id == study_id)
-        .first()
-    )
+    try:
+        study, _ = get_study_from_dts(study_id)
+    except Exception:
+        study = None
 
     if not study:
         raise HTTPException(status_code=404, detail="Study not found")
@@ -2484,22 +2642,17 @@ def get_study_bids_path(
     dataset_path = _dataset_path(study.id, study.study_name or "")
     return {"dataset_path": dataset_path, "exists": os.path.isdir(dataset_path)}
 
+
 @router.post("/studies/{study_id}/bids_open", status_code=204)
 def open_study_bids_folder(
     study_id: int,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
-    """
-    Opens the BIDS dataset folder for this study in the OS file explorer.
-    Only allowed for study owner and admins.
-    """
-    # was: study = crud.get_study_by_id(db, study_id)
-    study = (
-        db.query(models.StudyMetadata)
-        .filter(models.StudyMetadata.id == study_id)
-        .first()
-    )
+    try:
+        study, _ = get_study_from_dts(study_id)
+    except Exception:
+        study = None
 
     if not study:
         raise HTTPException(status_code=404, detail="Study not found")
@@ -2526,6 +2679,10 @@ def open_study_bids_folder(
     return
 
 
+# -------------------------------------------------------------------
+# Delete
+# -------------------------------------------------------------------
+
 @router.delete("/studies/{study_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_study(
     study_id: int,
@@ -2535,7 +2692,11 @@ def delete_study(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    meta = db.query(models.StudyMetadata).filter(models.StudyMetadata.id == study_id).first()
+    try:
+        meta, _ = get_study_from_dts(study_id)
+    except Exception:
+        meta = None
+
     if not meta:
         raise HTTPException(status_code=404, detail="Study not found")
 
@@ -2606,9 +2767,10 @@ def delete_study(
 
     return
 
-from .dts_client import DTSClient
-from .dts_settings import DTS_BASE_URL, DTS_COLLECTION
-from .dts_mapping import study_pid
+
+# -------------------------------------------------------------------
+# DTS shadow debug
+# -------------------------------------------------------------------
 
 @router.get("/studies/{study_id}/dts-shadow")
 def read_study_dts_shadow(study_id: int):

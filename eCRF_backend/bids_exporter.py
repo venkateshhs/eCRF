@@ -11,7 +11,7 @@ import uuid
 from datetime import datetime
 from typing import Dict, List, Tuple, Optional, Any
 from urllib.parse import urlparse
-
+from .dts.crud_audit_dts import append_audit_event_to_dts
 from filelock import FileLock
 from .versions import VersionManager  # <<— use versioned schemas
 
@@ -748,90 +748,103 @@ def audit_change_both(
     actor_id: Optional[int] = None,
     actor_name: Optional[str] = None,
     detail: Optional[Dict[str, Any]] = None,
+    actor_username: Optional[str] = None,
+    actor_role: Optional[str] = None,
+    subject_id: Optional[str] = None,
 ) -> None:
     """
-    Unified auditor:
-      1) Always tries DB provenance if `db` and `_db_record_event` are available.
-      2) Writes to BIDS `metadata/changes.txt` only when we have a real study context
-         (study_id > 0 and non-empty study_name). System-scope never creates study_0_*.
-      3) If AUDIT_SYSTEM_TO_BIDS=1, system events also go to BIDS_ROOT/_system/changes.txt.
-
-    NEW:
-      - If payload includes `has_diff=True` + `diff_payload`, it is stored as a JSON
-        file inside the study's BIDS dataset (metadata/diffs/...), and the event
-        payload keeps only `diff_path` (relative to dataset root).
+    DTS is canonical.
+    Study-level events: study_id only
+    Subject-level events: study_id + subject_index
+    Diff stored inline in DTS event
+    Author stored inline in DTS event
+    Optional BIDS mirror stays
     """
-
-    # ---- normalize scope -----------------------------------------------------
-    # If not provided, infer: study if we have a real study_id, else system.
     if not scope:
-        scope = "study" if (isinstance(study_id, int) and study_id > 0) else "system"
+        if isinstance(study_id, int) and study_id > 0 and subject_index is not None:
+            scope = "subject"
+        elif isinstance(study_id, int) and study_id > 0:
+            scope = "study"
+        else:
+            scope = "system"
 
-    # ---- build detail payload ------------------------------------------------
-    # merge both naming styles; `detail` wins over `extra` for overlapping keys.
     payload: Dict[str, Any] = {}
     if isinstance(extra, dict):
         payload.update(extra)
     if isinstance(detail, dict):
         payload.update(detail)
 
-    # add subject/visit hints if provided
     if subject_index is not None and "subject_index" not in payload:
         payload["subject_index"] = subject_index
     if visit_index is not None and "visit_index" not in payload:
         payload["visit_index"] = visit_index
+    if subject_id is not None and "subject_id" not in payload:
+        payload["subject_id"] = subject_id
 
-    # actor precedence: explicit `actor` string > (actor_name + id) > nothing
     if not actor and actor_name:
         actor = f"{actor_name} (id={actor_id})" if actor_id is not None else actor_name
     if actor:
         payload["actor"] = actor
 
-    # Persist diff into BIDS (study scope only, and only if dataset can be resolved)
+    has_diff = bool(payload.get("has_diff", False))
+    diff_kind = payload.get("diff_kind")
+    diff_payload = payload.get("diff_payload")
+
+    related_entry_id = payload.get("entry_id") or payload.get("previous_entry_id")
+    related_file_id = payload.get("file_id")
+    related_share_token = payload.get("token")
+
+    # Canonical DTS write
+    try:
+        append_audit_event_to_dts(
+            scope=scope,
+            action=action,
+            event_time=local_now(),
+            study_id=study_id if isinstance(study_id, int) else None,
+            subject_index=payload.get("subject_index"),
+            subject_id=payload.get("subject_id"),
+            visit_index=payload.get("visit_index"),
+            group_index=payload.get("group_index"),
+            actor_user_id=actor_id,
+            actor_username=actor_username,
+            actor_display_name=actor_name or actor,
+            actor_role=actor_role,
+            ui_label=payload.get("ui_label"),
+            has_diff=has_diff,
+            diff_kind=diff_kind,
+            diff_payload=diff_payload if has_diff else None,
+            related_entry_id=int(related_entry_id) if isinstance(related_entry_id, int) else None,
+            related_file_id=int(related_file_id) if isinstance(related_file_id, int) else None,
+            related_share_token=str(related_share_token) if related_share_token is not None else None,
+            details=payload,
+        )
+    except Exception as e:
+        logger.error("audit_change_both: DTS audit write failed: %s", e)
+
+    # Keep BIDS mirror light
+    mirror_payload = dict(payload)
+    mirror_payload.pop("diff_payload", None)
+
     write_study_bids = (
-        scope == "study"
+        scope in {"study", "subject"}
         and isinstance(study_id, int) and study_id > 0
         and isinstance(study_name, str) and study_name.strip() != ""
     )
-    if write_study_bids:
-        try:
-            ds_path = _dataset_path(study_id, study_name)
-            entry_id = payload.get("entry_id", payload.get("entryId", payload.get("previous_entry_id")))
-            _persist_diff_payload(ds_path, action=action, payload=payload, study_id=study_id, entry_id=entry_id)
-        except Exception:
-            pass
-
-    # 1) DB provenance (best-effort)
-    if _db_record_event and db is not None:
-        try:
-            _db_record_event(
-                db=db,
-                user_id=actor_id,
-                study_id=(study_id if isinstance(study_id, int) else None),
-                subject_id=None,
-                action=action,
-                details=payload,
-            )
-        except Exception as e:
-            logger.error("audit_change_both: DB provenance write failed: %s", e)
-
-    # 2) BIDS changes.txt (study scope only)
     if write_study_bids:
         try:
             _append_change_line(
                 study_id=study_id,
                 study_name=study_name,
                 action=action,
-                detail=payload,
+                detail=mirror_payload,
             )
         except Exception as e:
             logger.error("audit_change_both: failed to write study changes.txt: %s", e)
         return
 
-    # 3) Optional system bucket
     if scope == "system" and AUDIT_SYSTEM_TO_BIDS:
         try:
-            _append_system_change_line(action=action, detail=payload)
+            _append_system_change_line(action=action, detail=mirror_payload)
         except Exception as e:
             logger.error("audit_change_both: failed to write system changes.txt: %s", e)
 
@@ -847,10 +860,9 @@ def audit_access_change_both(
     target_user_email: str,
     target_user_display: str,
     permissions: Dict[str, Any],
+    actor_username: Optional[str] = None,
+    actor_role: Optional[str] = None,
 ) -> None:
-    """
-    Unified access audit: writes to Study Access.csv, study changes.txt, and DB.
-    """
     path = _study_access_csv_path(study_id, study_name)
     headers = [
         "timestamp",
@@ -885,14 +897,16 @@ def audit_access_change_both(
                 "permissions_edit_study": bool((permissions or {}).get("edit_study", False)),
             })
 
-    # 2) changes.txt + DB via the unified helper (scope auto-infers to "study")
     audit_change_both(
         db=None,
         study_id=study_id,
         study_name=study_name,
+        scope="study",
         action=action,
         actor_id=actor_id,
         actor_name=actor_name,
+        actor_username=actor_username,
+        actor_role=actor_role,
         detail={
             "target_user_id": target_user_id,
             "target_user_display": target_user_display,
@@ -904,7 +918,6 @@ def audit_access_change_both(
             },
         },
     )
-
 # -------------------- Participants meta (per version) --------------------
 
 def _collect_entries_meta(entries_path: str) -> Dict[str, Dict[str, Any]]:
