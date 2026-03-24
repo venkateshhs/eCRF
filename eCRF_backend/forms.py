@@ -13,6 +13,8 @@ from pathlib import Path
 import json
 import yaml
 from datetime import datetime, timedelta
+
+from .datalad_hooks import snapshot_study_after_change
 from .versions import VersionManager
 from .database import get_db
 from . import schemas, crud, models
@@ -461,6 +463,11 @@ def create_study(
             metadata.last_completed_step = int(last_completed_step)
         db.commit()
         db.refresh(metadata)
+        snapshot_study_after_change(
+            db=db,
+            study_id=study_metadata.id,
+            action="create_study",
+        )
     except Exception as e:
         db.rollback()
         logger.error("Error updating draft workflow fields: %s", e)
@@ -728,6 +735,11 @@ def update_study(
         try:
             metadata.last_completed_step = int(getattr(study_metadata, "last_completed_step"))
             db.commit()
+            snapshot_study_after_change(
+                db=db,
+                study_id=study_id,
+                action="update_study",
+            )
             db.refresh(metadata)
         except Exception:
             db.rollback()
@@ -1110,7 +1122,11 @@ def upload_file(
             group_index=group_index,
         )
         db_file = crud.create_file(db, file_data)
-
+        snapshot_study_after_change(
+            db=db,
+            study_id=file_data.study_id,
+            action="upload_file",
+        )
         try:
             audit_change_both(
                 scope="study",
@@ -1492,7 +1508,12 @@ def save_study_data(
     db.add(entry)
     db.commit()
     db.refresh(entry)
-
+    snapshot_study_after_change(
+        db=db,
+        study_id=entry.study_id,
+        action="add_entry",
+        entry_id=entry.id,
+    )
     content = db.query(models.StudyContent).filter(models.StudyContent.study_id == study_id).first()
     if upsert_bids_dataset and content:
         try:
@@ -1587,7 +1608,12 @@ def update_study_data_entry(
         entry.skipped_required_flags = _flags_dict_to_list(payload.skipped_required_flags, selected_models)
     db.commit()
     db.refresh(entry)
-
+    snapshot_study_after_change(
+        db=db,
+        study_id=entry.study_id,
+        action="upsert_entry",
+        entry_id=entry.id,
+    )
     study = db.query(models.StudyMetadata).filter(models.StudyMetadata.id == study_id).first()
     content = db.query(models.StudyContent).filter(models.StudyContent.study_id == study_id).first()
     if upsert_bids_dataset and study and content:

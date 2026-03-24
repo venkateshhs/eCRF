@@ -16,39 +16,33 @@ from fastapi.staticfiles import StaticFiles
 from starlette.requests import Request
 from starlette.responses import FileResponse
 
-BACKEND_IMPORT = "eCRF_backend.main:app"
+# CHANGED: point to DataLad-enabled backend entrypoint
+BACKEND_IMPORT = "eCRF_backend.datalad_main:app"
 
 
 def exe_dir() -> Path:
-    # Folder containing the executable (or this file in dev)
     if getattr(sys, "frozen", False):
         return Path(sys.executable).resolve().parent
     return Path(__file__).resolve().parent
 
 
 def meipass_dir() -> Path | None:
-    # PyInstaller temp extraction dir (one-file mode)
     return Path(getattr(sys, "_MEIPASS", "")) if getattr(sys, "frozen", False) else None
 
 
 EXE_DIR = exe_dir()
 MEIPASS = meipass_dir()
 
-# Search bases for packaged resources
 SEARCH_BASES = [EXE_DIR]
 if MEIPASS:
     SEARCH_BASES.append(MEIPASS)
-# Our spec places the data trees under EXE_DIR/_internal
 SEARCH_BASES.append(EXE_DIR / "_internal")
 
 
 def find_frontend_dist() -> Path | None:
     candidates = [
         EXE_DIR / "eCRF_frontend" / "dist",
-        EXE_DIR / "eCRF_frontend" / "dist",
         EXE_DIR / "_internal" / "eCRF_frontend" / "dist",
-        EXE_DIR / "_internal" / "eCRF_frontend" / "dist",
-        MEIPASS / "eCRF_frontend" / "dist" if MEIPASS else None,
         MEIPASS / "eCRF_frontend" / "dist" if MEIPASS else None,
     ]
     for p in filter(None, candidates):
@@ -69,11 +63,6 @@ def find_backend_templates() -> Path | None:
     return None
 
 
-# =========================
-#   Data directory config
-# =========================
-
-# Config is stored next to the EXE / app folder, so it travels with the unzipped eCRF folder.
 CONFIG_FILENAME = "ecrf_config.json"
 
 
@@ -82,23 +71,12 @@ def _config_path() -> Path:
 
 
 def _default_data_dir() -> Path:
-    """
-    Fallback if user cancels or GUI is unavailable:
-    keep the original behaviour: ecrf_data next to the executable.
-    """
     return EXE_DIR / "ecrf_data"
 
 
 def _ask_user_for_data_dir() -> Path | None:
-    """
-    Try to show a small native GUI folder picker:
-      - macOS: AppleScript via `osascript`
-      - Windows: PowerShell + FolderBrowserDialog
-    Returns a Path or None if user cancels or anything fails.
-    """
     system = platform.system()
 
-    # --- macOS: osascript + choose folder ---
     if system == "Darwin":
         try:
             result = subprocess.run(
@@ -125,7 +103,6 @@ def _ask_user_for_data_dir() -> Path | None:
             print(f"[eCRF] osascript failed: {e}")
         return None
 
-    # --- Windows: PowerShell FolderBrowserDialog ---
     if system == "Windows":
         ps_script = r'''
         Add-Type -AssemblyName System.Windows.Forms | Out-Null
@@ -151,19 +128,12 @@ def _ask_user_for_data_dir() -> Path | None:
             print(f"[eCRF] powershell folder dialog failed: {e}")
         return None
 
-    # Other OSes: no GUI, let caller fall back to default
     return None
 
 
 def _load_or_init_data_dir() -> Path:
-    """
-    1. If EXE_DIR/ecrf_config.json exists, read data_dir from it.
-    2. Otherwise, show a GUI folder picker once.
-    3. If user cancels or GUI fails, use EXE_DIR / 'ecrf_data' (original behaviour).
-    """
     cfg_path = _config_path()
 
-    # 1) Existing config?
     if cfg_path.exists():
         try:
             with cfg_path.open("r", encoding="utf-8") as f:
@@ -177,18 +147,14 @@ def _load_or_init_data_dir() -> Path:
         except Exception as e:
             print(f"[eCRF] Failed to read {cfg_path}, regenerating: {e}")
 
-    # 2) No valid config: ask user via GUI
     data_dir = _ask_user_for_data_dir()
 
-    # 3) If user cancels or GUI fails, fall back to default
     if data_dir is None:
         data_dir = _default_data_dir()
         print(f"[eCRF] No folder chosen; using default data dir: {data_dir}")
 
-    # Ensure directory exists
     data_dir.mkdir(parents=True, exist_ok=True)
 
-    # Write config next to the EXE so we can reuse it next time
     cfg = {
         "data_dir": str(data_dir),
         "exe_dir": str(EXE_DIR),
@@ -203,17 +169,21 @@ def _load_or_init_data_dir() -> Path:
     return data_dir
 
 
-# === Writable data dir for the backend ===
-# Use config-based selection; default remains EXE_DIR / "ecrf_data"
 DATA_DIR = _load_or_init_data_dir()
 os.environ["ECRF_DATA_DIR"] = str(DATA_DIR)
 
-
 # =========================
-#   Templates & frontend
+#   DataLad local config
 # =========================
+os.environ.setdefault("BIDS_DATALAD_ENABLED", "1")
+os.environ.setdefault("ECRF_DATALAD_MODE", "shadow")
+os.environ.setdefault("ECRF_DATALAD_SYNC_MODE", "sync")
+os.environ.setdefault("BIDS_ROOT", str(DATA_DIR / "bids_datasets"))
+os.environ.setdefault("ECRF_DATALAD_GIT_NAME", "case-e local")
+os.environ.setdefault("ECRF_DATALAD_GIT_EMAIL", "case-e@localhost")
+os.environ.setdefault("ECRF_DATALAD_PUSH_ON_SAVE", "0")
 
-# Templates env var (read-only assets)
+
 tpl_dir = find_backend_templates()
 if tpl_dir:
     os.environ.setdefault("ECRF_TEMPLATES_DIR", str(tpl_dir))
@@ -221,7 +191,6 @@ if tpl_dir:
 FRONTEND_DIST = find_frontend_dist()
 INDEX_HTML = FRONTEND_DIST / "index.html" if FRONTEND_DIST else None
 
-# Ensure our collected code is discoverable (extra safety in frozen runs)
 if str(EXE_DIR) not in sys.path:
     sys.path.insert(0, str(EXE_DIR))
 if str(EXE_DIR / "_internal") not in sys.path:
@@ -243,11 +212,15 @@ def import_backend_app() -> FastAPI:
 def make_root_app() -> FastAPI:
     app = import_backend_app()
 
-    print(f"[eCRF] EXE_DIR       = {EXE_DIR}")
-    print(f"[eCRF] MEIPASS       = {MEIPASS}")
-    print(f"[eCRF] SEARCH_BASES  = {[str(p) for p in SEARCH_BASES]}")
-    print(f"[eCRF] FRONTEND_DIST = {FRONTEND_DIST} (exists={FRONTEND_DIST.exists() if FRONTEND_DIST else False})")
-    print(f"[eCRF] ECRF_DATA_DIR = {os.environ.get('ECRF_DATA_DIR')}")
+    print(f"[eCRF] EXE_DIR                  = {EXE_DIR}")
+    print(f"[eCRF] MEIPASS                  = {MEIPASS}")
+    print(f"[eCRF] SEARCH_BASES             = {[str(p) for p in SEARCH_BASES]}")
+    print(f"[eCRF] FRONTEND_DIST            = {FRONTEND_DIST} (exists={FRONTEND_DIST.exists() if FRONTEND_DIST else False})")
+    print(f"[eCRF] ECRF_DATA_DIR            = {os.environ.get('ECRF_DATA_DIR')}")
+    print(f"[eCRF] BIDS_ROOT                = {os.environ.get('BIDS_ROOT')}")
+    print(f"[eCRF] BIDS_DATALAD_ENABLED     = {os.environ.get('BIDS_DATALAD_ENABLED')}")
+    print(f"[eCRF] ECRF_DATALAD_MODE        = {os.environ.get('ECRF_DATALAD_MODE')}")
+    print(f"[eCRF] ECRF_DATALAD_SYNC_MODE   = {os.environ.get('ECRF_DATALAD_SYNC_MODE')}")
 
     if FRONTEND_DIST and FRONTEND_DIST.exists():
         app.mount("/", StaticFiles(directory=str(FRONTEND_DIST), html=True), name="spa")
@@ -256,7 +229,8 @@ def make_root_app() -> FastAPI:
         async def spa_fallback(request: Request, call_next):
             path = request.url.path
             API_PREFIXES = (
-                "/users", "/forms", "/api", "/health", "/docs", "/openapi.json", "/redoc", "/template_schema.yaml"
+                "/users", "/forms", "/api", "/health", "/docs",
+                "/openapi.json", "/redoc", "/template_schema.yaml", "/datalad"
             )
             if request.method != "GET" or any(path.startswith(p) for p in API_PREFIXES):
                 return await call_next(request)
@@ -296,9 +270,9 @@ def open_browser(url: str):
 
 
 def main():
-    # Ensure data dir exists
     try:
         Path(os.environ["ECRF_DATA_DIR"]).mkdir(parents=True, exist_ok=True)
+        Path(os.environ["BIDS_ROOT"]).mkdir(parents=True, exist_ok=True)
     except Exception:
         pass
 
