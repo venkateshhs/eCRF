@@ -640,6 +640,9 @@ export default {
       importPreviewPayload: null,
       importAnalyzing: false,
       importCommitting: false,
+
+      currentRevisionToken: "",
+      slotLoading: false,
     };
   },
 
@@ -698,16 +701,20 @@ export default {
           const assigned = !!assignments?.[mIdx]?.[v]?.[g];
           if (!assigned) return null;
 
+          const realId = String(
+            section?._id ||
+            section?.id ||
+            section?.uuid ||
+            ""
+          ).trim();
+
+          if (!realId) return null;
+
           return {
-              id:
-                section?._id ||
-                section?.id ||
-                section?.uuid ||
-                section?.title ||
-                `section-${mIdx}`,
-              title: section?.title || `Section ${mIdx + 1}`,
-              modelIndex: mIdx,
-            };
+            id: realId,
+            title: section?.title || `Section ${mIdx + 1}`,
+            modelIndex: mIdx,
+          };
         })
         .filter(Boolean);
     },
@@ -721,11 +728,16 @@ export default {
       return (this.selectedModels || [])
         .map((sec, mIdx) => ({ sec, mIdx }))
         .filter(({ mIdx }) => !!this.assignments?.[mIdx]?.[v]?.[g])
-        .map(({ sec }) => ({
-          id: String(sec?._id || sec?.id || "").trim(),
-          title: sec?.title || "Untitled Section"
-        }))
-        .filter(s => s.id);
+        .map(({ sec }) => {
+          const realId = String(sec?._id || sec?.id || sec?.uuid || "").trim();
+          if (!realId) return null;
+
+          return {
+            id: realId,
+            title: sec?.title || "Untitled Section"
+          };
+        })
+        .filter(Boolean);
     },
     unassignedSubjectIndices() {
       const subjects = this.sd.subjects || [];
@@ -1005,13 +1017,21 @@ export default {
           headers: { Authorization: `Bearer ${this.token}` },
         };
 
-        const existing = this.getBestEntryFor(s, v, g);
+        const slot = await this.fetchRevisionTokenForSlot(s, v, g, this.selectedVersion);
+        const expectedRevisionToken = String(slot?.revision_token || "");
+        const existing = slot?.entry_id ? { id: slot.entry_id } : this.getBestEntryFor(s, v, g);
 
         if (existing?.id) {
           const resp = await axios.put(
             `/forms/studies/${this.study.metadata.id}/data_entries/${existing.id}`,
             payload,
-            { ...headers, params: { audit_label: "Bulk Import Update" } }
+            {
+              ...headers,
+              params: {
+                audit_label: "Bulk Import Update",
+                expected_revision_token: expectedRevisionToken,
+              },
+            }
           );
           const idx = this.existingEntries.findIndex((x) => x.id === existing.id);
           if (idx >= 0) this.existingEntries.splice(idx, 1, resp.data);
@@ -1020,9 +1040,14 @@ export default {
           const resp = await axios.post(
             `/forms/studies/${this.study.metadata.id}/data`,
             payload,
-            params
-              ? { ...headers, params: { ...params, audit_label: "Bulk Import Create" } }
-              : { ...headers, params: { audit_label: "Bulk Import Create" } }
+            {
+              ...headers,
+              params: {
+                ...(params || {}),
+                audit_label: "Bulk Import Create",
+                expected_revision_token: expectedRevisionToken,
+              },
+            }
           );
 
           const newId = resp?.data?.id;
@@ -1039,7 +1064,6 @@ export default {
             created_at: resp?.data?.created_at ?? new Date().toISOString(),
           });
         }
-
         this.hydrateCache.delete(`${s}|${v}|${g}|${this.selectedVersion}`);
         this.updateStatusCacheFor(s, v, g);
         committed += 1;
@@ -1984,13 +2008,24 @@ applyImportedRowFromDialog(payload) {
       this.buildStatusCache();
     },
 
-    async loadTemplateForSelectedVersion() {
+        async loadTemplateForSelectedVersion() {
       const studyId = this.study?.metadata?.id;
       if (!studyId || !this.selectedVersion) return;
 
+      const currentSubjects = Array.isArray(this.study?.content?.study_data?.subjects)
+        ? this.study.content.study_data.subjects
+        : [];
+      const currentSubjectCount = Number.isFinite(this.study?.content?.study_data?.subjectCount)
+        ? this.study.content.study_data.subjectCount
+        : currentSubjects.length;
+
       if (this.templateCache.has(this.selectedVersion)) {
         const cached = this.templateCache.get(this.selectedVersion);
-        this.applyTemplateSchema(cached);
+        this.applyTemplateSchema({
+          ...cached,
+          subjects: currentSubjects,
+          subjectCount: currentSubjectCount,
+        });
         return;
       }
 
@@ -2002,45 +2037,70 @@ applyImportedRowFromDialog(payload) {
             params: { version: this.selectedVersion },
           }
         );
+
         const rawSchema = resp?.data?.schema || {};
         this.templateCache.set(this.selectedVersion, rawSchema);
-        this.applyTemplateSchema(rawSchema);
+
+        this.applyTemplateSchema({
+          ...rawSchema,
+          subjects: currentSubjects.length ? currentSubjects : (rawSchema.subjects || []),
+          subjectCount: currentSubjects.length ? currentSubjectCount : rawSchema.subjectCount,
+        });
       } catch (e) {
-        console.error(
-          "[Entry] loadTemplateForSelectedVersion error",
-          e
-        );
+        console.error("[Entry] loadTemplateForSelectedVersion error", e);
       }
     },
 
-    onVersionChange() {
+    async onVersionChange() {
       this.hydrateCache.clear();
-      this.loadTemplateForSelectedVersion().then(() => {
+      await this.loadTemplateForSelectedVersion();
+
+      if (!this.showSelection) {
+        await this.loadCurrentSlotState();
+      } else {
         this.applyVersionView();
-        const nS = this.numberOfSubjects;
-        const nV = this.visitList.length;
-        if (this.currentSubjectIndex == null || this.currentSubjectIndex >= nS) this.currentSubjectIndex = Math.min(0, nS - 1);
-        if (this.currentVisitIndex == null || this.currentVisitIndex >= nV) this.currentVisitIndex = Math.min(0, nV - 1);
-        this.selectedVisitIndex = this.visitList.length > this.VISIT_THRESHOLD ? 0 : -1;
-      });
+      }
+
+      const nS = this.numberOfSubjects;
+      const nV = this.visitList.length;
+      if (this.currentSubjectIndex == null || this.currentSubjectIndex >= nS) this.currentSubjectIndex = Math.min(0, nS - 1);
+      if (this.currentVisitIndex == null || this.currentVisitIndex >= nV) this.currentVisitIndex = Math.min(0, nV - 1);
+      this.selectedVisitIndex = this.visitList.length > this.VISIT_THRESHOLD ? 0 : -1;
     },
 
     rebuildEntriesIndex() {
-      const m = new Map();
-      for (const e of this.existingEntries || []) {
-        const key = `${e.subject_index}|${e.visit_index}|${e.group_index}`;
-        const arr = m.get(key) || [];
-        arr.push(e);
-        m.set(key, arr);
-      }
-      for (const [k, arr] of m) {
-        arr.sort(
-          (a, b) => Number(b.form_version) - Number(a.form_version)
-        );
-      }
-      this.entriesIndex = m;
-      this.hydrateCache.clear();
-    },
+  const m = new Map();
+
+  for (const e of this.existingEntries || []) {
+    const key = `${e.subject_index}|${e.visit_index}|${e.group_index}`;
+    const arr = m.get(key) || [];
+    arr.push(e);
+    m.set(key, arr);
+  }
+
+  const tsNum = (x) => {
+    const a = x?.updated_at ? Date.parse(x.updated_at) : NaN;
+    if (Number.isFinite(a)) return a;
+    const b = x?.created_at ? Date.parse(x.created_at) : NaN;
+    if (Number.isFinite(b)) return b;
+    return 0;
+  };
+
+  for (const [, arr] of m) {
+    arr.sort((a, b) => {
+      const fv = Number(b.form_version || 0) - Number(a.form_version || 0);
+      if (fv !== 0) return fv;
+
+      const t = tsNum(b) - tsNum(a);
+      if (t !== 0) return t;
+
+      return Number(b.id || 0) - Number(a.id || 0);
+    });
+  }
+
+  this.entriesIndex = m;
+  this.hydrateCache.clear();
+},
 
     getBestEntryFor(s, v, g) {
       const key = `${s}|${v}|${g}`;
@@ -2617,7 +2677,7 @@ applyImportedRowFromDialog(payload) {
     async loadShared(token) {
       try {
         const resp = await axios.get(
-          `/forms/shared-api/${token}/`
+          `/forms/shared-api/${token}`
         );
         const payload = resp.data || {};
         this.shareToken = token;
@@ -2646,7 +2706,10 @@ applyImportedRowFromDialog(payload) {
       try {
         const resp = await axios.get(
           `/forms/studies/${studyId}/data_entries`,
-          { headers: { Authorization: `Bearer ${this.token}` } }
+          {
+            headers: { Authorization: `Bearer ${this.token}` },
+            params: { current_only: true },
+          }
         );
         const payload = Array.isArray(resp.data)
           ? resp.data
@@ -2916,8 +2979,99 @@ applyImportedRowFromDialog(payload) {
       const s = map.get(`${sIdx}|${vIdx}`) || "none";
       return s === "skipped" ? "status-skipped" : `status-${s}`;
     },
+    async loadCurrentSlotState() {
+      if (this.isShared) return;
 
-    selectCell(sIdx, vIdx) {
+      const s = this.currentSubjectIndex;
+      const v = this.currentVisitIndex;
+      const g = this.currentGroupIndex;
+
+      if (s == null || v == null || g == null) return;
+      if (!this.study?.metadata?.id) return;
+
+      try {
+        this.slotLoading = true;
+
+        const params = {
+          subject_index: s,
+          visit_index: v,
+          group_index: g,
+          ...(this.safeVersionParams(this.selectedVersion) || {}),
+        };
+
+        const resp = await axios.get(
+          `/forms/studies/${this.study.metadata.id}/slot-data`,
+          {
+            headers: { Authorization: `Bearer ${this.token}` },
+            params,
+          }
+        );
+
+        this.applyLoadedSlotState(resp.data);
+      } catch (e) {
+        console.error("Failed to load slot state", e);
+        this.showDialogMessage("Failed to load latest data for this cell.");
+      } finally {
+        this.slotLoading = false;
+      }
+    },
+
+    applyLoadedSlotState(slot) {
+      const s = Number(slot?.subject_index);
+      const v = Number(slot?.visit_index);
+      const g = Number(slot?.group_index);
+
+      if (!Number.isInteger(s) || !Number.isInteger(v) || !Number.isInteger(g)) return;
+
+      this.ensureSlot(s, v, g);
+
+      const arr = this.dictToArray(slot?.data || {});
+      const skips = Array.isArray(slot?.skipped_required_flags)
+        ? slot.skipped_required_flags
+        : this.makeSkipSkeleton();
+
+      this.entryData[s][v][g] = arr;
+      this.skipFlags[s][v][g] = skips;
+      this.entryIds[s][v][g] = slot?.entry_id || null;
+      this.currentRevisionToken = String(slot?.revision_token || "");
+
+      const cacheKey = `${s}|${v}|${g}|${this.selectedVersion}`;
+      this.hydrateCache.set(cacheKey, {
+        dataArr: arr,
+        skipFlags: skips,
+        id: slot?.entry_id || null,
+      });
+
+      this.runCalculationsForCell(s, v, g, null, null);
+    },
+
+    async reloadLatestAfterConflict(latest) {
+      if (!latest) return;
+      this.applyLoadedSlotState(latest);
+      await this.$nextTick();
+      this.validationErrors = {};
+      this.calcWarnings = {};
+    },
+
+    async fetchRevisionTokenForSlot(s, v, g, versionOverride = null) {
+      const params = {
+        subject_index: s,
+        visit_index: v,
+        group_index: g,
+        ...(this.safeVersionParams(versionOverride != null ? versionOverride : this.selectedVersion) || {}),
+      };
+
+      const resp = await axios.get(
+        `/forms/studies/${this.study.metadata.id}/slot-data`,
+        {
+          headers: { Authorization: `Bearer ${this.token}` },
+          params,
+        }
+      );
+
+      return resp?.data || null;
+    },
+    async selectCell(sIdx, vIdx) {
       const nS = this.numberOfSubjects;
       const nV = this.visitList.length;
 
@@ -2932,7 +3086,6 @@ applyImportedRowFromDialog(payload) {
 
       const g = this.subjectToGroupIdx[this.currentSubjectIndex];
 
-      // if unassigned, prompt user instead of defaulting to 0
       if (g == null || g < 0) {
         this.openGroupAssignDialog(this.currentSubjectIndex, this.currentVisitIndex);
         return;
@@ -2952,7 +3105,7 @@ applyImportedRowFromDialog(payload) {
       this.calcWarnings = {};
 
       this.visitLoading = true;
-      this.hydrateCell(this.currentSubjectIndex, this.currentVisitIndex, this.currentGroupIndex);
+      await this.loadCurrentSlotState();
       this.runAllCalculationsForCurrentCell();
       this.visitLoading = false;
     },
@@ -3423,148 +3576,185 @@ applyImportedRowFromDialog(payload) {
     },
 
     async submitData() {
-      if (!this.canEdit) {
-        this.showDialogMessage("This shared link is view-only.");
-        return;
-      }
+  if (!this.canEdit) {
+    this.showDialogMessage("This shared link is view-only.");
+    return;
+  }
 
-      this.applyTransformsForSection();
-      this.runAllCalculationsForCurrentCell();
+  this.applyTransformsForSection();
+  this.runAllCalculationsForCurrentCell();
 
-      const ok = this.validateCurrentSection();
-      const blocking = Object.entries(this.validationErrors).filter(([k, msg]) => {
-        if (!msg) return false;
-        const idx = this.parseKey(k);
-        if (!idx) return true;
-        const { s, v, g, m, f } = idx;
-        const isSkipped = !!(this.skipFlags[s]?.[v]?.[g]?.[m]?.[f]);
-        if (isSkipped) return false;
-        return !/ is required\.$/.test(msg);
+  const ok = this.validateCurrentSection();
+  const blocking = Object.entries(this.validationErrors).filter(([k, msg]) => {
+    if (!msg) return false;
+    const idx = this.parseKey(k);
+    if (!idx) return true;
+    const { s, v, g, m, f } = idx;
+    const isSkipped = !!(this.skipFlags[s]?.[v]?.[g]?.[m]?.[f]);
+    if (isSkipped) return false;
+    return !/ is required\.$/.test(msg);
+  });
+
+  if (!ok && blocking.length) {
+    this.showDialogMessage("Please fix validation errors before saving.");
+    return;
+  }
+
+  const requiredFailures = this.computeRequiredFailures();
+  if (requiredFailures.length) {
+    this.skipCandidates = requiredFailures;
+    this.skipSelections = requiredFailures.reduce((acc, it) => {
+      acc[it.key] = false;
+      return acc;
+    }, {});
+    this.showSkipDialog = true;
+    return;
+  }
+
+  try {
+    await this.uploadPendingFilesForCurrentSection();
+  } catch (e) {
+    console.error("File upload/register failed:", e);
+    this.showDialogMessage("File upload failed. Please try again.");
+    return;
+  }
+
+  const s = this.currentSubjectIndex,
+    v = this.currentVisitIndex,
+    g = this.currentGroupIndex;
+  this.ensureSlot(s, v, g);
+
+  const dictData = this.arrayToDict(this.entryData[s][v][g]);
+  const rawSkipFlags = this.skipFlags[s][v][g];
+  const flagsPayload = this.isShared ? this.flagsArrayToDict(rawSkipFlags) : rawSkipFlags;
+
+  const hasAnySkip = !!(
+    Array.isArray(rawSkipFlags) && rawSkipFlags.some((row) => Array.isArray(row) && row.some((x) => !!x))
+  );
+
+  const payload = {
+    study_id: this.study?.metadata?.id,
+    subject_index: s,
+    visit_index: v,
+    group_index: g,
+    data: dictData,
+    skipped_required_flags: flagsPayload,
+  };
+
+  try {
+    if (this.isShared) {
+      const auditLabel = hasAnySkip ? "Shared link data Entry (Skipped Required)" : "Shared link data Entry";
+      const resp = await axios.post(`/forms/shared/${this.shareToken}/data`, payload, {
+        params: { audit_label: auditLabel },
       });
 
-      if (!ok && blocking.length) {
-        this.showDialogMessage("Please fix validation errors before saving.");
-        return;
-      }
-
-      const requiredFailures = this.computeRequiredFailures();
-      if (requiredFailures.length) {
-        this.skipCandidates = requiredFailures;
-        this.skipSelections = requiredFailures.reduce((acc, it) => {
-          acc[it.key] = false;
-          return acc;
-        }, {});
-        this.showSkipDialog = true;
-        return;
-      }
-
-      try {
-        await this.uploadPendingFilesForCurrentSection();
-      } catch (e) {
-        console.error("File upload/register failed:", e);
-        this.showDialogMessage("File upload failed. Please try again.");
-        return;
-      }
-
-      const s = this.currentSubjectIndex,
-        v = this.currentVisitIndex,
-        g = this.currentGroupIndex;
-      this.ensureSlot(s, v, g);
-      const dictData = this.arrayToDict(this.entryData[s][v][g]);
-
-      const rawSkipFlags = this.skipFlags[s][v][g];
-      const flagsPayload = this.isShared ? this.flagsArrayToDict(rawSkipFlags) : rawSkipFlags;
-
-      const hasAnySkip = !!(
-        Array.isArray(rawSkipFlags) && rawSkipFlags.some((row) => Array.isArray(row) && row.some((x) => !!x))
-      );
-
-      const payload = {
-        study_id: this.study?.metadata?.id,
+      const saved = {
+        id: resp?.data?.id,
+        study_id: payload.study_id,
         subject_index: s,
         visit_index: v,
         group_index: g,
         data: dictData,
-        skipped_required_flags: flagsPayload,
+        skipped_required_flags: resp?.data?.skipped_required_flags ?? rawSkipFlags,
+        form_version: resp?.data?.form_version ?? this.selectedVersion,
+        created_at: resp?.data?.created_at ?? new Date().toISOString(),
       };
+      (this.existingEntries = this.existingEntries || []).push(saved);
 
-      try {
-        if (this.isShared) {
-          const auditLabel = hasAnySkip ? "Shared link data Entry (Skipped Required)" : "Shared link data Entry";
-          const resp = await axios.post(`/forms/shared/${this.shareToken}/data`, payload, {
-            params: { audit_label: auditLabel },
-          });
+      this.showDialogMessage("Data saved successfully.");
+      this.rebuildEntriesIndex();
+      this.hydrateCache.delete(`${s}|${v}|${g}|${this.selectedVersion}`);
+      this.applyVersionView();
+      this.updateStatusCacheFor(s, v, g);
+      return;
+    }
 
-          const saved = {
-            id: resp?.data?.id,
-            study_id: payload.study_id,
-            subject_index: s,
-            visit_index: v,
-            group_index: g,
-            data: dictData,
-            skipped_required_flags: resp?.data?.skipped_required_flags ?? rawSkipFlags,
-            form_version: resp?.data?.form_version ?? this.selectedVersion,
-            created_at: resp?.data?.created_at ?? new Date().toISOString(),
-          };
-          (this.existingEntries = this.existingEntries || []).push(saved);
+    const headers = {
+      headers: { Authorization: `Bearer ${this.token}` },
+    };
+    const existingId = this.entryIds[s][v][g];
 
-          this.showDialogMessage("Data saved successfully.");
-          this.rebuildEntriesIndex();
-          this.hydrateCache.delete(`${s}|${v}|${g}|${this.selectedVersion}`);
-          this.applyVersionView();
-          this.updateStatusCacheFor(s, v, g);
-          return;
+    if (!this.currentRevisionToken) {
+      const slot = await this.fetchRevisionTokenForSlot(s, v, g, this.selectedVersion);
+      this.currentRevisionToken = String(slot?.revision_token || "");
+    }
+
+    if (existingId) {
+      const auditLabel = hasAnySkip ? "Update/Edit Data Entry (Skipped Required)" : "Update/Edit Data Entry";
+      const resp = await axios.put(
+        `/forms/studies/${this.study.metadata.id}/data_entries/${existingId}`,
+        payload,
+        {
+          ...headers,
+          params: {
+            audit_label: auditLabel,
+            expected_revision_token: this.currentRevisionToken,
+          },
         }
+      );
 
-        const headers = {
-          headers: { Authorization: `Bearer ${this.token}` },
-        };
-        const existingId = this.entryIds[s][v][g];
-
-        if (existingId) {
-          const auditLabel = hasAnySkip ? "Update/Edit Data Entry (Skipped Required)" : "Update/Edit Data Entry";
-          const resp = await axios.put(
-            `/forms/studies/${this.study.metadata.id}/data_entries/${existingId}`,
-            payload,
-            { ...headers, params: { audit_label: auditLabel } }
-          );
-          this.showDialogMessage("Data updated successfully.");
-          const idx = this.existingEntries.findIndex((x) => x.id === existingId);
-          if (idx >= 0) this.existingEntries.splice(idx, 1, resp.data);
-        } else {
-          const params = this.safeVersionParams(this.selectedVersion);
-          const auditLabel = hasAnySkip ? "New Data Entry (Skipped Required)" : params ? "New Data Entry (Versioned)" : "New Data Entry";
-          const resp = await axios.post(
-            `/forms/studies/${this.study.metadata.id}/data`,
-            payload,
-            params ? { ...headers, params: { ...params, audit_label: auditLabel } } : { ...headers, params: { audit_label: auditLabel } }
-          );
-          const newId = resp?.data?.id;
-          this.entryIds[s][v][g] = newId;
-          const saved = {
-            id: newId,
-            study_id: this.study.metadata.id,
-            subject_index: s,
-            visit_index: v,
-            group_index: g,
-            data: dictData,
-            skipped_required_flags: resp?.data?.skipped_required_flags ?? rawSkipFlags,
-            form_version: resp?.data?.form_version ?? this.selectedVersion,
-            created_at: resp?.data?.created_at ?? new Date().toISOString(),
-          };
-          (this.existingEntries = this.existingEntries || []).push(saved);
-          this.showDialogMessage("Data saved successfully.");
+      this.showDialogMessage("Data updated successfully.");
+      const idx = this.existingEntries.findIndex((x) => x.id === existingId);
+      if (idx >= 0) this.existingEntries.splice(idx, 1, resp.data);
+    } else {
+      const params = this.safeVersionParams(this.selectedVersion);
+      const auditLabel = hasAnySkip ? "New Data Entry (Skipped Required)" : params ? "New Data Entry (Versioned)" : "New Data Entry";
+      const resp = await axios.post(
+        `/forms/studies/${this.study.metadata.id}/data`,
+        payload,
+        {
+          ...headers,
+          params: {
+            ...(params || {}),
+            audit_label: auditLabel,
+            expected_revision_token: this.currentRevisionToken,
+          },
         }
+      );
 
-        this.rebuildEntriesIndex();
-        this.hydrateCache.delete(`${s}|${v}|${g}|${this.selectedVersion}`);
-        this.applyVersionView();
-        this.updateStatusCacheFor(s, v, g);
-      } catch (err) {
-        console.error(err);
-        this.showDialogMessage("Failed to save data. Check console for details.");
+      const newId = resp?.data?.id;
+      this.entryIds[s][v][g] = newId;
+      const saved = {
+        id: newId,
+        study_id: this.study.metadata.id,
+        subject_index: s,
+        visit_index: v,
+        group_index: g,
+        data: dictData,
+        skipped_required_flags: resp?.data?.skipped_required_flags ?? rawSkipFlags,
+        form_version: resp?.data?.form_version ?? this.selectedVersion,
+        created_at: resp?.data?.created_at ?? new Date().toISOString(),
+      };
+      (this.existingEntries = this.existingEntries || []).push(saved);
+      this.showDialogMessage("Data saved successfully.");
+    }
+
+    const latestSlot = await this.fetchRevisionTokenForSlot(s, v, g, this.selectedVersion);
+    if (latestSlot) {
+      this.applyLoadedSlotState(latestSlot);
+    }
+
+    this.rebuildEntriesIndex();
+    this.hydrateCache.delete(`${s}|${v}|${g}|${this.selectedVersion}`);
+    this.applyVersionView();
+    this.updateStatusCacheFor(s, v, g);
+  } catch (err) {
+    console.error(err);
+
+    if (err?.response?.status === 409) {
+      const latest = err?.response?.data?.detail?.latest || null;
+      if (latest) {
+        await this.reloadLatestAfterConflict(latest);
       }
-    },
+      this.showDialogMessage(
+        "This entry was changed in the backend after you opened it. Latest values were reloaded. Please review your values and save again."
+      );
+      return;
+    }
+
+    this.showDialogMessage("Failed to save data. Check console for details.");
+  }
+},
 
         updateStatusCacheFor(s, v, g) {
       const e = this.getBestEntryFor(s, v, g);
@@ -3924,19 +4114,48 @@ applyImportedRowFromDialog(payload) {
           params: { audit_label: "New Subjects (Add)" },
         });
 
-        if (this.study && this.study.content && this.study.content.study_data) {
-          this.study.content.study_data.subjects = merged;
-          this.study.content.study_data.subjectCount = merged.length;
+                if (this.study && this.study.content && this.study.content.study_data) {
+          this.study.content.study_data = {
+            ...this.study.content.study_data,
+            subjects: merged,
+            subjectCount: merged.length,
+          };
         }
 
-        this.initializeEntryData();
+        // very important: clear stale template cache before reloading
+        this.templateCache.clear();
+        this.hydrateCache.clear();
+        this.currentRevisionToken = "";
+
+        await this.loadVersions(this.study.metadata.id);
+        this.selectedVersion =
+          this.studyVersions[this.studyVersions.length - 1]?.version || 1;
+
+        await this.loadTemplateForSelectedVersion();
+
+        // force fresh subjects into current study state even if template endpoint
+        // returns an older schema snapshot without the newly added subjects
+        if (this.study && this.study.content && this.study.content.study_data) {
+          this.study.content.study_data = {
+            ...this.study.content.study_data,
+            subjects: merged,
+            subjectCount: merged.length,
+          };
+        }
+
         this.prepareSubjectGroupIndexMap();
+        this.prepareAssignmentsLookup();
+
+        this.initializeEntryData();
+        await this.loadExistingEntries(this.study.metadata.id);
         this.buildStatusCache();
 
         this.showSubjectDialog = false;
         this.subjectDrafts = [];
         this.subjectCountDraft = 1;
         this.assignmentMethodDraft = "Random";
+
+        await this.$nextTick();
 
         this.showDialogMessage("Subjects added successfully.");
       } catch (e) {

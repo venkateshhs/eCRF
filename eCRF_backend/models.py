@@ -1,6 +1,6 @@
 import datetime
 
-from sqlalchemy import Column, Integer, String, ForeignKey, DateTime, func, JSON, Text, UniqueConstraint, Index
+from sqlalchemy import Column, Integer, String, ForeignKey, DateTime, func, JSON, Text, UniqueConstraint, Index, Boolean
 from sqlalchemy.orm import relationship
 from .database import Base
 from .utils import local_now
@@ -15,8 +15,11 @@ class User(Base):
     password = Column(String(255), nullable=False)
     created_at = Column(DateTime, default=local_now)
 
-    # Update relationship to reference StudyMetadata instead of Study
-    studies = relationship("StudyMetadata", back_populates="user")
+    studies = relationship(
+        "StudyMetadata",
+        back_populates="user",
+        foreign_keys="StudyMetadata.created_by",
+    )
     profile = relationship("UserProfile", back_populates="user", uselist=False)
 
     # Relationship back to audit events (one-to-many)
@@ -64,16 +67,26 @@ class StudyMetadata(Base):
     # Which wizard step was last saved (optional but useful for resume)
     last_completed_step = Column(Integer, nullable=True)
 
+    is_locked = Column(Boolean, nullable=False, server_default="0", index=True)
+    locked_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    locked_at = Column(DateTime(timezone=True), nullable=True)
+
     created_at = Column(DateTime(timezone=True), default=local_now)
     updated_at = Column(DateTime(timezone=True), default=local_now, onupdate=local_now)
 
-    # Relationship back to User
-    user = relationship("User", back_populates="studies")
+    user = relationship(
+        "User",
+        back_populates="studies",
+        foreign_keys=[created_by],
+    )
 
-    # Self-referential relationship: published study -> drafts
+    locked_by_user = relationship(
+        "User",
+        foreign_keys=[locked_by],
+    )
+
     draft_of = relationship("StudyMetadata", remote_side=[id], backref="drafts")
 
-    # One-to-one relationship with StudyContent
     content = relationship("StudyContent", uselist=False, back_populates="study_metadata", cascade="all, delete")
     shared_links = relationship("SharedFormAccess", back_populates="study", cascade="all, delete-orphan")
     entry_data = relationship("StudyEntryData", back_populates="study", cascade="all, delete-orphan")

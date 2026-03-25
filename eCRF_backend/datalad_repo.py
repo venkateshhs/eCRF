@@ -1,4 +1,3 @@
-# eCRF_backend/datalad_repo.py
 from __future__ import annotations
 
 import copy
@@ -8,12 +7,12 @@ import re
 import shutil
 import subprocess
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
-
+from typing import Any, Dict, List, Optional
+import hashlib
 from .logger import logger
-from .bids_exporter_datalad import _dataset_path, latest_writable_version, get_version_schema
+
 try:
     from datalad.api import Dataset  # type: ignore
 except Exception:
@@ -57,10 +56,11 @@ def _json_load(path: Path, default: Any = None) -> Any:
 
 def _ensure_gitignore(ds_path: Path) -> None:
     gitignore = ds_path / ".gitignore"
-    lines = []
+    lines: List[str] = []
     if gitignore.exists():
         lines = gitignore.read_text(encoding="utf-8").splitlines()
-    wanted = {".DS_Store", "*.lock"}
+
+    wanted = {".DS_Store", "*.lock", "__pycache__/"}
     changed = False
     for item in wanted:
         if item not in lines:
@@ -92,6 +92,12 @@ def _safe_status(s: Optional[str]) -> str:
     return s2 if s2 in ALLOWED_STUDY_STATUS else "PUBLISHED"
 
 
+def _append_jsonl(path: Path, row: Dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as f:
+        f.write(json.dumps(row, ensure_ascii=False, separators=(",", ":")) + "\n")
+
+
 @dataclass
 class StudyPaths:
     dataset_path: Path
@@ -102,6 +108,9 @@ class StudyPaths:
     entries_dir: Path
     files_dir: Path
     audit_dir: Path
+    audit_system_dir: Path
+    audit_system_study_dir: Path
+    audit_subject_dir: Path
     shares_dir: Path
     access_dir: Path
 
@@ -112,27 +121,17 @@ class DataladStudyRepo:
         self.root = Path(base)
         self.root.mkdir(parents=True, exist_ok=True)
 
-    def next_study_id(self) -> int:
-        max_id = 0
-        for ds in self.root.glob("study_*"):
-            m = re.match(r"study_(\d+)_?.*$", ds.name)
-            if m:
-                max_id = max(max_id, int(m.group(1)))
-        return max_id + 1
-    def get_study_name_by_id(self, study_id: int) -> str:
-        for ds in sorted(self.root.glob("study_*")):
-            meta = _json_load(ds / "canonical" / "study_metadata.json")
-            if meta and int(meta.get("id", -1)) == int(study_id):
-                return str(meta.get("study_name") or "")
-        raise FileNotFoundError("Study not found")
-    # ---------- dataset layout ----------
+    # ------------------------------------------------------------------
+    # dataset layout
+    # ------------------------------------------------------------------
 
     def study_dataset_path(self, study_id: int, study_name: str) -> Path:
-        return Path(_dataset_path(study_id, study_name))
+        return self.root / f"study_{int(study_id)}_{_slugify(study_name)}"
 
     def paths(self, study_id: int, study_name: str) -> StudyPaths:
         ds = self.study_dataset_path(study_id, study_name)
         c = ds / "canonical"
+        audit_dir = c / "audit"
         return StudyPaths(
             dataset_path=ds,
             canonical_dir=c,
@@ -141,7 +140,10 @@ class DataladStudyRepo:
             templates_dir=c / "templates",
             entries_dir=c / "entries",
             files_dir=c / "files",
-            audit_dir=c / "audit",
+            audit_dir=audit_dir,
+            audit_system_dir=audit_dir / "system",
+            audit_system_study_dir=audit_dir / "system" / "study",
+            audit_subject_dir=audit_dir / "subject",
             shares_dir=c / "shared_links",
             access_dir=c / "access",
         )
@@ -165,6 +167,9 @@ class DataladStudyRepo:
             p.entries_dir,
             p.files_dir,
             p.audit_dir,
+            p.audit_system_dir,
+            p.audit_system_study_dir,
+            p.audit_subject_dir,
             p.shares_dir,
             p.access_dir,
         ]:
@@ -172,7 +177,21 @@ class DataladStudyRepo:
 
         return p
 
-    # ---------- git / datalad history ----------
+    def next_study_id(self) -> int:
+        max_id = 0
+        for ds in self.root.glob("study_*"):
+            m = re.match(r"study_(\d+)_", ds.name)
+            if m:
+                max_id = max(max_id, int(m.group(1)))
+            else:
+                m2 = re.match(r"study_(\d+)$", ds.name)
+                if m2:
+                    max_id = max(max_id, int(m2.group(1)))
+        return max_id + 1
+
+    # ------------------------------------------------------------------
+    # git / datalad history
+    # ------------------------------------------------------------------
 
     def save(self, ds_path: Path, message: str) -> None:
         if Dataset is None:
@@ -187,7 +206,215 @@ class DataladStudyRepo:
         rel = f"canonical/templates/v{int(version):03d}/schema.json"
         return _git_show_json(ds_path, "HEAD~1", rel, default={}) or {}
 
-    # ---------- study CRUD ----------
+    # ------------------------------------------------------------------
+    # helpers for labels / users
+    # ------------------------------------------------------------------
+
+    def _load_study_content_data(self, p: StudyPaths) -> Dict[str, Any]:
+        content = _json_load(p.content_json, {}) or {}
+        if isinstance(content, dict) and isinstance(content.get("study_data"), dict):
+            return content.get("study_data") or {}
+        return {}
+
+    def _resolve_subject_visit_group_labels(
+        self,
+        p: StudyPaths,
+        *,
+        subject_index: Optional[int] = None,
+        visit_index: Optional[int] = None,
+        group_index: Optional[int] = None,
+        subject_raw: Optional[str] = None,
+        visit_raw: Optional[str] = None,
+        group_raw: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        study_data = self._load_study_content_data(p)
+
+        subjects = study_data.get("subjects") if isinstance(study_data.get("subjects"), list) else []
+        visits = study_data.get("visits") if isinstance(study_data.get("visits"), list) else []
+        groups = study_data.get("groups") if isinstance(study_data.get("groups"), list) else []
+
+        resolved_subject_raw = subject_raw
+        resolved_visit_raw = visit_raw
+        resolved_group_raw = group_raw
+
+        try:
+            if resolved_subject_raw in (None, "") and subject_index is not None and 0 <= int(subject_index) < len(subjects):
+                subj = subjects[int(subject_index)] or {}
+                resolved_subject_raw = str(
+                    subj.get("id")
+                    or subj.get("subject_id")
+                    or subj.get("label")
+                    or subj.get("name")
+                    or f"Subject {subject_index}"
+                ).strip()
+        except Exception:
+            pass
+
+        try:
+            if resolved_visit_raw in (None, "") and visit_index is not None and 0 <= int(visit_index) < len(visits):
+                visit = visits[int(visit_index)] or {}
+                resolved_visit_raw = str(
+                    visit.get("name")
+                    or visit.get("id")
+                    or visit.get("label")
+                    or f"Visit {visit_index}"
+                ).strip()
+        except Exception:
+            pass
+
+        try:
+            if resolved_group_raw in (None, "") and group_index is not None and 0 <= int(group_index) < len(groups):
+                grp = groups[int(group_index)] or {}
+                resolved_group_raw = str(
+                    grp.get("name")
+                    or grp.get("id")
+                    or grp.get("label")
+                    or f"Group {group_index}"
+                ).strip()
+        except Exception:
+            pass
+
+        return {
+            "subject_raw": resolved_subject_raw,
+            "visit_raw": resolved_visit_raw,
+            "group_raw": resolved_group_raw,
+        }
+
+    def _build_actor_payload(
+        self,
+        *,
+        actor: Optional[str] = None,
+        user_id: Optional[int] = None,
+        actor_name: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        payload: Dict[str, Any] = {}
+        if user_id is not None:
+            payload["user_id"] = int(user_id)
+        if actor_name:
+            payload["actor_name"] = str(actor_name).strip()
+        if actor:
+            payload["actor"] = str(actor).strip()
+        elif actor_name:
+            payload["actor"] = str(actor_name).strip()
+        elif user_id is not None:
+            payload["actor"] = f"User#{int(user_id)}"
+        return payload
+
+    # ------------------------------------------------------------------
+    # published snapshot methods used by forms_hybrid
+    # ------------------------------------------------------------------
+
+    def create_or_replace_published_snapshot(
+        self,
+        *,
+        study_id: int,
+        study_name: str,
+        template_schema: Dict[str, Any],
+        metadata: Optional[Dict[str, Any]] = None,
+        study_content: Optional[Dict[str, Any]] = None,
+        created_by: Optional[int] = None,
+        study_description: Optional[str] = None,
+        study_data: Optional[Dict[str, Any]] = None,
+        status: Optional[str] = None,
+        draft_of_study_id: Optional[int] = None,
+        last_completed_step: Optional[int] = None,
+        actor: Optional[str] = None,
+        actor_name: Optional[str] = None,
+        user_id: Optional[int] = None,
+        audit_label: Optional[str] = None,
+        commit_message: Optional[str] = None,
+        **kwargs,
+    ) -> Dict[str, Any]:
+        p = self.ensure_dataset(study_id, study_name)
+        now_iso = local_now().isoformat()
+
+        if metadata is not None:
+            safe_meta = _deepcopy_json(metadata or {})
+        else:
+            safe_meta = {
+                "id": int(study_id),
+                "created_by": int(created_by) if created_by is not None else None,
+                "study_name": study_name,
+                "study_description": study_description or "",
+                "status": _safe_status(status),
+                "draft_of_study_id": draft_of_study_id,
+                "last_completed_step": last_completed_step,
+                "updated_at": now_iso,
+                "created_at": now_iso,
+            }
+
+        if study_content is not None:
+            safe_content = _deepcopy_json(study_content or {})
+        else:
+            safe_content = {
+                "id": int(study_id),
+                "study_id": int(study_id),
+                "study_data": _deepcopy_json(study_data or {}),
+            }
+
+        safe_schema = _deepcopy_json(template_schema or {})
+
+        safe_meta.setdefault("id", int(study_id))
+        safe_meta.setdefault("study_name", study_name)
+        safe_meta.setdefault("study_description", study_description or "")
+        safe_meta["status"] = _safe_status(safe_meta.get("status"))
+        safe_meta["updated_at"] = now_iso
+        safe_meta.setdefault("created_at", now_iso)
+
+        safe_content["id"] = int(study_id)
+        safe_content["study_id"] = int(study_id)
+        safe_content.setdefault("study_data", _deepcopy_json(study_data or {}))
+
+        _json_dump(p.metadata_json, safe_meta)
+        _json_dump(p.content_json, safe_content)
+
+        version = 1
+        if isinstance(safe_schema, dict):
+            try:
+                version = int(safe_schema.get("version") or safe_schema.get("template_version") or 1)
+            except Exception:
+                version = 1
+        version = max(1, version)
+
+        version_dir = p.templates_dir / f"v{version:03d}"
+        version_dir.mkdir(parents=True, exist_ok=True)
+        _json_dump(version_dir / "schema.json", safe_schema)
+
+        actor_payload = self._build_actor_payload(
+            actor=actor,
+            actor_name=actor_name,
+            user_id=user_id if user_id is not None else created_by,
+        )
+
+        self._append_audit(
+            p,
+            action="study_snapshot_written",
+            study_id=study_id,
+            payload={
+                "study_name": study_name,
+                "status": safe_meta.get("status"),
+                "version": version,
+                "ui_label": audit_label,
+                **actor_payload,
+            },
+        )
+
+        self.save(
+            p.dataset_path,
+            commit_message or f"case-e: published snapshot study={study_id} version={version}",
+        )
+
+        return {
+            "dataset_path": str(p.dataset_path),
+            "metadata_path": str(p.metadata_json),
+            "content_path": str(p.content_json),
+            "template_path": str(version_dir / "schema.json"),
+            "version": version,
+        }
+
+    # ------------------------------------------------------------------
+    # study CRUD
+    # ------------------------------------------------------------------
 
     def create_study(
         self,
@@ -200,6 +427,10 @@ class DataladStudyRepo:
         status: str = "PUBLISHED",
         draft_of_study_id: Optional[int] = None,
         last_completed_step: Optional[int] = None,
+        actor: Optional[str] = None,
+        actor_name: Optional[str] = None,
+        user_id: Optional[int] = None,
+        audit_label: Optional[str] = None,
     ) -> Dict[str, Any]:
         p = self.ensure_dataset(study_id, study_name)
 
@@ -225,17 +456,26 @@ class DataladStudyRepo:
 
         v1_dir = p.templates_dir / "v001"
         v1_dir.mkdir(parents=True, exist_ok=True)
-        _json_dump(v1_dir / "schema.json", self._snapshot_schema(study_data or {}, study_id))
+        _json_dump(v1_dir / "schema.json", self._snapshot_schema(study_data or {}, study_id, version=1))
+
+        actor_payload = self._build_actor_payload(
+            actor=actor,
+            actor_name=actor_name,
+            user_id=user_id if user_id is not None else created_by,
+        )
 
         self._append_audit(
-            p.audit_dir,
+            p,
             action="study_created",
             study_id=study_id,
-            payload={"study_name": study_name},
+            payload={
+                "study_name": study_name,
+                "ui_label": audit_label,
+                **actor_payload,
+            },
         )
 
         self.save(p.dataset_path, f"case-e: create_study study={study_id}")
-
         return {"metadata": metadata, "content": content}
 
     def read_study(self, study_id: int, study_name: str) -> Dict[str, Any]:
@@ -244,8 +484,6 @@ class DataladStudyRepo:
         content = _json_load(p.content_json)
         if not metadata or not content:
             raise FileNotFoundError("Study not found")
-        if "id" not in content:
-            content["id"] = int(study_id)
         return {"metadata": metadata, "content": content}
 
     def list_studies(self) -> List[Dict[str, Any]]:
@@ -267,6 +505,9 @@ class DataladStudyRepo:
         status: Optional[str] = None,
         last_completed_step: Optional[int] = None,
         audit_label: Optional[str] = None,
+        actor: Optional[str] = None,
+        actor_name: Optional[str] = None,
+        user_id: Optional[int] = None,
     ) -> Dict[str, Any]:
         p = self.paths(study_id, current_study_name)
         metadata = _json_load(p.metadata_json)
@@ -287,17 +528,18 @@ class DataladStudyRepo:
             metadata["last_completed_step"] = int(last_completed_step)
 
         metadata["updated_at"] = local_now().isoformat()
+        content["id"] = int(study_id)
+        content["study_id"] = int(study_id)
         content["study_data"] = _deepcopy_json(study_data or {})
 
         _json_dump(p.metadata_json, metadata)
         _json_dump(p.content_json, content)
 
-        latest_version = latest_writable_version(study_id, current_study_name)
+        latest_version = self.latest_template_version(p)
         latest_schema_path = p.templates_dir / f"v{latest_version:03d}" / "schema.json"
-        latest_schema_path.parent.mkdir(parents=True, exist_ok=True)
-        old_schema = get_version_schema(study_id, current_study_name, latest_version) or {}
+        old_schema = self.previous_template_schema(p.dataset_path, latest_version)
 
-        new_schema = self._snapshot_schema(content["study_data"], study_id)
+        new_schema = self._snapshot_schema(content["study_data"], study_id, version=latest_version)
         _json_dump(latest_schema_path, new_schema)
 
         diffs = self._compute_json_diff(
@@ -305,8 +547,10 @@ class DataladStudyRepo:
             content["study_data"],
         )
 
+        actor_payload = self._build_actor_payload(actor=actor, actor_name=actor_name, user_id=user_id)
+
         self._append_audit(
-            p.audit_dir,
+            p,
             action="study_edited",
             study_id=study_id,
             payload={
@@ -314,18 +558,17 @@ class DataladStudyRepo:
                 "diff_kind": "study_template",
                 "diff_payload": diffs,
                 "old_template_schema": old_schema,
+                **actor_payload,
             },
         )
 
+        self.save(p.dataset_path, f"case-e: update_study study={study_id}")
+
         final_name = metadata["study_name"]
         new_ds_path = self.study_dataset_path(study_id, final_name)
-
         if new_ds_path != p.dataset_path and not new_ds_path.exists():
             shutil.move(str(p.dataset_path), str(new_ds_path))
-            p = self.paths(study_id, final_name)
 
-        self.save(p.dataset_path, f"case-e: update_study study={study_id}")
-        content["id"] = int(study_id)
         return {"metadata": metadata, "content": content}
 
     def delete_study(self, study_id: int, study_name: str) -> None:
@@ -333,10 +576,17 @@ class DataladStudyRepo:
         if ds.exists():
             shutil.rmtree(ds, ignore_errors=True)
 
-    # ---------- templates ----------
+    # ------------------------------------------------------------------
+    # templates
+    # ------------------------------------------------------------------
 
-    def latest_template_version(self, study_id: int, study_name: str) -> int:
-        return latest_writable_version(study_id, study_name)
+    def latest_template_version(self, p: StudyPaths) -> int:
+        versions = []
+        for vdir in p.templates_dir.glob("v*"):
+            m = re.match(r"v(\d+)$", vdir.name)
+            if m:
+                versions.append(int(m.group(1)))
+        return max(versions) if versions else 1
 
     def list_versions(self, study_id: int, study_name: str) -> List[Dict[str, Any]]:
         p = self.paths(study_id, study_name)
@@ -353,8 +603,9 @@ class DataladStudyRepo:
         return out
 
     def get_template(self, study_id: int, study_name: str, version: Optional[int] = None) -> Dict[str, Any]:
-        v = int(version) if version is not None else latest_writable_version(study_id, study_name)
-        schema = get_version_schema(study_id, study_name, v)
+        p = self.paths(study_id, study_name)
+        v = version or self.latest_template_version(p)
+        schema = _json_load(p.templates_dir / f"v{v:03d}" / "schema.json")
         if not schema:
             raise FileNotFoundError("Template version not found")
         return {
@@ -364,7 +615,9 @@ class DataladStudyRepo:
             "created_at": schema.get("created_at"),
         }
 
-    # ---------- entries ----------
+    # ------------------------------------------------------------------
+    # entries
+    # ------------------------------------------------------------------
 
     def _entry_path(
         self,
@@ -392,6 +645,122 @@ class DataladStudyRepo:
             if m:
                 max_id = max(max_id, int(m.group(1)))
         return max_id + 1
+    def _next_entry_id_from_rows(self, rows: List[Dict[str, Any]]) -> int:
+        max_id = 0
+        for row in rows or []:
+            try:
+                max_id = max(max_id, int(row.get("id") or 0))
+            except Exception:
+                continue
+        return max_id + 1
+
+    def bulk_clone_entries_to_version(
+        self,
+        *,
+        study_id: int,
+        study_name: str,
+        source_version: int,
+        target_version: int,
+        clones: List[Dict[str, Any]],
+        actor: str = "system",
+        actor_name: Optional[str] = "System clone forward",
+        audit_label: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Efficiently clone many entries into a new form version with a single dataset save.
+
+        Each clone item must contain:
+          - subject_index
+          - visit_index
+          - group_index
+          - data
+          - skipped_required_flags
+          - optionally: subject_raw / visit_raw / group_raw
+        """
+        p = self.ensure_dataset(study_id, study_name)
+
+        existing_rows = self.list_entries(study_id, study_name)
+        next_entry_id = self._next_entry_id_from_rows(existing_rows)
+
+        written_ids: List[int] = []
+
+        for item in clones or []:
+            entry_id = next_entry_id
+            next_entry_id += 1
+
+            subject_index = int(item["subject_index"])
+            visit_index = int(item["visit_index"])
+            group_index = int(item["group_index"])
+
+            entry = {
+                "id": entry_id,
+                "study_id": int(study_id),
+                "subject_index": subject_index,
+                "visit_index": visit_index,
+                "group_index": group_index,
+                "form_version": int(target_version),
+                "data": _deepcopy_json(item.get("data") or {}),
+                "skipped_required_flags": _deepcopy_json(item.get("skipped_required_flags") or []),
+                "created_at": local_now().isoformat(),
+                "updated_at": local_now().isoformat(),
+                "cloned_from_version": int(source_version),
+            }
+
+            path = self._entry_path(
+                p,
+                form_version=target_version,
+                subject_index=subject_index,
+                visit_index=visit_index,
+                group_index=group_index,
+                entry_id=entry_id,
+            )
+            _json_dump(path, entry)
+
+            labels = self._resolve_subject_visit_group_labels(
+                p,
+                subject_index=subject_index,
+                visit_index=visit_index,
+                group_index=group_index,
+                subject_raw=item.get("subject_raw"),
+                visit_raw=item.get("visit_raw"),
+                group_raw=item.get("group_raw"),
+            )
+            actor_payload = self._build_actor_payload(
+                actor=actor,
+                actor_name=actor_name,
+                user_id=None,
+            )
+
+            self._append_audit(
+                p,
+                action="entry_cloned_forward",
+                study_id=study_id,
+                payload={
+                    "entry_id": entry_id,
+                    "subject_index": subject_index,
+                    "visit_index": visit_index,
+                    "group_index": group_index,
+                    "from_version": int(source_version),
+                    "to_version": int(target_version),
+                    "ui_label": audit_label or f"Clone entries forward v{source_version}→v{target_version}",
+                    **labels,
+                    **actor_payload,
+                },
+                subject_index=subject_index,
+            )
+
+            written_ids.append(entry_id)
+
+        if written_ids:
+            self.save(
+                p.dataset_path,
+                f"case-e: clone_entries_forward study={study_id} from_v={source_version} to_v={target_version} count={len(written_ids)}",
+            )
+
+        return {
+            "written_count": len(written_ids),
+            "entry_ids": written_ids,
+        }
 
     def save_entry(
         self,
@@ -406,10 +775,14 @@ class DataladStudyRepo:
         skipped_required_flags: Any,
         actor: str,
         audit_label: Optional[str] = None,
+        subject_raw: Optional[str] = None,
+        visit_raw: Optional[str] = None,
+        group_raw: Optional[str] = None,
+        user_id: Optional[int] = None,
+        actor_name: Optional[str] = None,
     ) -> Dict[str, Any]:
         p = self.ensure_dataset(study_id, study_name)
         entry_id = self._next_entry_id(p)
-        (p.templates_dir / f"v{int(form_version):03d}").mkdir(parents=True, exist_ok=True)
 
         entry = {
             "id": entry_id,
@@ -434,8 +807,19 @@ class DataladStudyRepo:
         )
         _json_dump(path, entry)
 
+        labels = self._resolve_subject_visit_group_labels(
+            p,
+            subject_index=subject_index,
+            visit_index=visit_index,
+            group_index=group_index,
+            subject_raw=subject_raw,
+            visit_raw=visit_raw,
+            group_raw=group_raw,
+        )
+        actor_payload = self._build_actor_payload(actor=actor, actor_name=actor_name, user_id=user_id)
+
         self._append_audit(
-            p.audit_dir,
+            p,
             action="entry_upserted",
             study_id=study_id,
             payload={
@@ -445,8 +829,10 @@ class DataladStudyRepo:
                 "group_index": group_index,
                 "form_version": form_version,
                 "ui_label": audit_label,
-                "actor": actor,
+                **labels,
+                **actor_payload,
             },
+            subject_index=subject_index,
         )
 
         self.save(p.dataset_path, f"case-e: upsert_entry study={study_id} entry={entry_id}")
@@ -461,6 +847,11 @@ class DataladStudyRepo:
         payload: Dict[str, Any],
         actor: str,
         audit_label: Optional[str] = None,
+        subject_raw: Optional[str] = None,
+        visit_raw: Optional[str] = None,
+        group_raw: Optional[str] = None,
+        user_id: Optional[int] = None,
+        actor_name: Optional[str] = None,
     ) -> Dict[str, Any]:
         p = self.paths(study_id, study_name)
         target = None
@@ -484,17 +875,33 @@ class DataladStudyRepo:
         diffs = self._compute_json_diff(old_entry.get("data", {}), new_entry.get("data", {}))
         _json_dump(target, new_entry)
 
+        labels = self._resolve_subject_visit_group_labels(
+            p,
+            subject_index=new_entry["subject_index"],
+            visit_index=new_entry["visit_index"],
+            group_index=new_entry["group_index"],
+            subject_raw=subject_raw,
+            visit_raw=visit_raw,
+            group_raw=group_raw,
+        )
+        actor_payload = self._build_actor_payload(actor=actor, actor_name=actor_name, user_id=user_id)
+
         self._append_audit(
-            p.audit_dir,
+            p,
             action="entry_upserted",
             study_id=study_id,
             payload={
                 "entry_id": entry_id,
+                "subject_index": new_entry["subject_index"],
+                "visit_index": new_entry["visit_index"],
+                "group_index": new_entry["group_index"],
                 "ui_label": audit_label,
-                "actor": actor,
                 "diff_kind": "entry_data",
                 "diff_payload": diffs,
+                **labels,
+                **actor_payload,
             },
+            subject_index=new_entry["subject_index"],
         )
 
         self.save(p.dataset_path, f"case-e: update_entry study={study_id} entry={entry_id}")
@@ -508,8 +915,255 @@ class DataladStudyRepo:
             if row:
                 out.append(row)
         return out
+    def _entry_sort_key(self, row: Dict[str, Any]) -> tuple:
+        """
+        Stable ordering for entries belonging to the same logical slot.
+        Later updated_at wins; if equal, later created_at wins; if equal, larger id wins.
+        """
+        updated_at = str(row.get("updated_at") or "")
+        created_at = str(row.get("created_at") or "")
+        entry_id = int(row.get("id") or 0)
+        return (updated_at, created_at, entry_id)
 
-    # ---------- files ----------
+    def _stable_json_dumps(self, obj: Any) -> str:
+        return json.dumps(obj, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+    def find_entries_for_slot(
+        self,
+        *,
+        study_id: int,
+        study_name: str,
+        subject_index: int,
+        visit_index: int,
+        group_index: int,
+        form_version: int,
+    ) -> List[Dict[str, Any]]:
+        """
+        Returns all raw entries for the same logical slot.
+        This does NOT merge them. It only finds them.
+        """
+        p = self.paths(study_id, study_name)
+        out: List[Dict[str, Any]] = []
+
+        for f in p.entries_dir.rglob("entry_*.json"):
+            row = _json_load(f)
+            if not row:
+                continue
+
+            try:
+                if int(row.get("study_id")) != int(study_id):
+                    continue
+                if int(row.get("subject_index")) != int(subject_index):
+                    continue
+                if int(row.get("visit_index")) != int(visit_index):
+                    continue
+                if int(row.get("group_index")) != int(group_index):
+                    continue
+                if int(row.get("form_version")) != int(form_version):
+                    continue
+            except Exception:
+                continue
+
+            out.append(row)
+
+        out.sort(key=self._entry_sort_key)
+        return out
+
+    def get_latest_entry_for_slot(
+        self,
+        *,
+        study_id: int,
+        study_name: str,
+        subject_index: int,
+        visit_index: int,
+        group_index: int,
+        form_version: int,
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Returns the latest raw entry for a logical slot, or None if slot is empty.
+        """
+        rows = self.find_entries_for_slot(
+            study_id=study_id,
+            study_name=study_name,
+            subject_index=subject_index,
+            visit_index=visit_index,
+            group_index=group_index,
+            form_version=form_version,
+        )
+        return rows[-1] if rows else None
+
+    def compute_entry_revision_token(self, entry: Optional[Dict[str, Any]]) -> str:
+        """
+        Computes a deterministic revision token for optimistic concurrency checks.
+
+        Empty slot also gets a stable token so we can detect:
+        - slot was empty when user opened it
+        - someone else created data before this user saved
+        """
+        if not entry:
+            payload = {
+                "empty": True,
+            }
+        else:
+            payload = {
+                "id": entry.get("id"),
+                "study_id": entry.get("study_id"),
+                "subject_index": entry.get("subject_index"),
+                "visit_index": entry.get("visit_index"),
+                "group_index": entry.get("group_index"),
+                "form_version": entry.get("form_version"),
+                "data": entry.get("data") or {},
+                "skipped_required_flags": entry.get("skipped_required_flags") or [],
+                "updated_at": entry.get("updated_at"),
+                "created_at": entry.get("created_at"),
+            }
+
+        raw = self._stable_json_dumps(payload).encode("utf-8")
+        return hashlib.sha256(raw).hexdigest()
+
+    def get_current_slot_state(
+        self,
+        *,
+        study_id: int,
+        study_name: str,
+        subject_index: int,
+        visit_index: int,
+        group_index: int,
+        form_version: int,
+    ) -> Dict[str, Any]:
+        """
+        Returns the current/latest state for one logical slot together with a revision token.
+        This is the object your add-data screen should use when opening a cell.
+        """
+        latest = self.get_latest_entry_for_slot(
+            study_id=study_id,
+            study_name=study_name,
+            subject_index=subject_index,
+            visit_index=visit_index,
+            group_index=group_index,
+            form_version=form_version,
+        )
+
+        labels = self._resolve_subject_visit_group_labels(
+            self.paths(study_id, study_name),
+            subject_index=subject_index,
+            visit_index=visit_index,
+            group_index=group_index,
+        )
+
+        if not latest:
+            return {
+                "exists": False,
+                "entry_id": None,
+                "study_id": int(study_id),
+                "subject_index": int(subject_index),
+                "visit_index": int(visit_index),
+                "group_index": int(group_index),
+                "form_version": int(form_version),
+                "data": {},
+                "skipped_required_flags": [],
+                "created_at": None,
+                "updated_at": None,
+                "revision_token": self.compute_entry_revision_token(None),
+                **labels,
+            }
+
+        return {
+            "exists": True,
+            "entry_id": latest.get("id"),
+            "study_id": int(study_id),
+            "subject_index": int(subject_index),
+            "visit_index": int(visit_index),
+            "group_index": int(group_index),
+            "form_version": int(form_version),
+            "data": _deepcopy_json(latest.get("data") or {}),
+            "skipped_required_flags": _deepcopy_json(latest.get("skipped_required_flags") or []),
+            "created_at": latest.get("created_at"),
+            "updated_at": latest.get("updated_at"),
+            "revision_token": self.compute_entry_revision_token(latest),
+            **labels,
+        }
+
+    def assert_slot_revision_unchanged(
+        self,
+        *,
+        study_id: int,
+        study_name: str,
+        subject_index: int,
+        visit_index: int,
+        group_index: int,
+        form_version: int,
+        expected_revision_token: Optional[str],
+    ) -> Dict[str, Any]:
+        """
+        Checks whether the slot is still in the same state as when the client opened it.
+
+        Returns latest slot state if OK.
+        Raises ValueError if changed.
+        """
+        latest_state = self.get_current_slot_state(
+            study_id=study_id,
+            study_name=study_name,
+            subject_index=subject_index,
+            visit_index=visit_index,
+            group_index=group_index,
+            form_version=form_version,
+        )
+
+        current_token = str(latest_state.get("revision_token") or "")
+        expected_token = str(expected_revision_token or "")
+
+        if expected_token != current_token:
+            raise ValueError("Slot state changed")
+
+        return latest_state
+    def version_has_entries(self, study_id: int, study_name: str, version: int) -> bool:
+        p = self.paths(study_id, study_name)
+        version_dir = p.entries_dir / f"v{int(version):03d}"
+        if not version_dir.exists():
+            return False
+        for _ in version_dir.rglob("entry_*.json"):
+            return True
+        return False
+
+    def list_latest_entries_by_slot(self, study_id: int, study_name: str) -> List[Dict[str, Any]]:
+        """
+        Returns only the latest entry for each logical slot:
+        (subject_index, visit_index, group_index, form_version)
+        """
+        rows = self.list_entries(study_id, study_name)
+        latest_by_slot: Dict[tuple, Dict[str, Any]] = {}
+
+        for row in rows:
+            try:
+                key = (
+                    int(row.get("subject_index")),
+                    int(row.get("visit_index")),
+                    int(row.get("group_index")),
+                    int(row.get("form_version")),
+                )
+            except Exception:
+                continue
+
+            prev = latest_by_slot.get(key)
+            if prev is None or self._entry_sort_key(row) > self._entry_sort_key(prev):
+                latest_by_slot[key] = row
+
+        out = list(latest_by_slot.values())
+        out.sort(key=self._entry_sort_key)
+        return out
+
+    # ------------------------------------------------------------------
+    # files
+    # ------------------------------------------------------------------
+
+    def _next_file_id(self, p: StudyPaths) -> int:
+        max_id = 0
+        for f in p.files_dir.glob("file_*.json"):
+            m = re.match(r"file_(\d+)\.json$", f.name)
+            if m:
+                max_id = max(max_id, int(m.group(1)))
+        return max_id + 1
 
     def save_uploaded_file(
         self,
@@ -524,6 +1178,8 @@ class DataladStudyRepo:
         group_index: Optional[int] = None,
         actor: str,
         audit_label: Optional[str] = None,
+        user_id: Optional[int] = None,
+        actor_name: Optional[str] = None,
     ) -> Dict[str, Any]:
         p = self.ensure_dataset(study_id, study_name)
         file_id = self._next_file_id(p)
@@ -546,16 +1202,29 @@ class DataladStudyRepo:
         }
         _json_dump(p.files_dir / f"file_{file_id:09d}.json", record)
 
+        labels = self._resolve_subject_visit_group_labels(
+            p,
+            subject_index=subject_index,
+            visit_index=visit_index,
+            group_index=group_index,
+        )
+        actor_payload = self._build_actor_payload(actor=actor, actor_name=actor_name, user_id=user_id)
+
         self._append_audit(
-            p.audit_dir,
+            p,
             action="file_added",
             study_id=study_id,
             payload={
                 "file_id": file_id,
                 "file_name": filename,
                 "ui_label": audit_label,
-                "actor": actor,
+                "subject_index": subject_index,
+                "visit_index": visit_index,
+                "group_index": group_index,
+                **labels,
+                **actor_payload,
             },
+            subject_index=subject_index,
         )
 
         self.save(p.dataset_path, f"case-e: upload_file study={study_id} file={file_id}")
@@ -573,6 +1242,8 @@ class DataladStudyRepo:
         group_index: Optional[int] = None,
         actor: str,
         audit_label: Optional[str] = None,
+        user_id: Optional[int] = None,
+        actor_name: Optional[str] = None,
     ) -> Dict[str, Any]:
         p = self.ensure_dataset(study_id, study_name)
         file_id = self._next_file_id(p)
@@ -592,16 +1263,30 @@ class DataladStudyRepo:
         }
         _json_dump(p.files_dir / f"file_{file_id:09d}.json", record)
 
+        labels = self._resolve_subject_visit_group_labels(
+            p,
+            subject_index=subject_index,
+            visit_index=visit_index,
+            group_index=group_index,
+        )
+        actor_payload = self._build_actor_payload(actor=actor, actor_name=actor_name, user_id=user_id)
+
         self._append_audit(
-            p.audit_dir,
+            p,
             action="file_added",
             study_id=study_id,
             payload={
                 "file_id": file_id,
                 "url": url,
+                "file_name": name,
                 "ui_label": audit_label,
-                "actor": actor,
+                "subject_index": subject_index,
+                "visit_index": visit_index,
+                "group_index": group_index,
+                **labels,
+                **actor_payload,
             },
+            subject_index=subject_index,
         )
 
         self.save(p.dataset_path, f"case-e: create_url_file study={study_id} file={file_id}")
@@ -617,15 +1302,9 @@ class DataladStudyRepo:
                     out.append(row)
         return out
 
-    def _next_file_id(self, p: StudyPaths) -> int:
-        max_id = 0
-        for f in p.files_dir.glob("file_*.json"):
-            m = re.match(r"file_(\d+)\.json$", f.name)
-            if m:
-                max_id = max(max_id, int(m.group(1)))
-        return max_id + 1
-
-    # ---------- access / shares ----------
+    # ------------------------------------------------------------------
+    # access / shares
+    # ------------------------------------------------------------------
 
     def save_access_grant(
         self,
@@ -635,6 +1314,8 @@ class DataladStudyRepo:
         user_id: int,
         permissions: Dict[str, Any],
         created_by: int,
+        actor: Optional[str] = None,
+        actor_name: Optional[str] = None,
     ) -> Dict[str, Any]:
         p = self.ensure_dataset(study_id, study_name)
         row = {
@@ -645,14 +1326,58 @@ class DataladStudyRepo:
             "created_at": local_now().isoformat(),
         }
         _json_dump(p.access_dir / f"user_{int(user_id):09d}.json", row)
+
+        actor_payload = self._build_actor_payload(
+            actor=actor,
+            actor_name=actor_name,
+            user_id=created_by,
+        )
+
+        self._append_audit(
+            p,
+            action="access_changed",
+            study_id=study_id,
+            payload={
+                "target_user_id": user_id,
+                "permissions": row["permissions"],
+                **actor_payload,
+            },
+        )
+
         self.save(p.dataset_path, f"case-e: access_change study={study_id} user={user_id}")
         return row
 
-    def revoke_access_grant(self, *, study_id: int, study_name: str, user_id: int) -> None:
+    def revoke_access_grant(
+        self,
+        *,
+        study_id: int,
+        study_name: str,
+        user_id: int,
+        actor: Optional[str] = None,
+        actor_name: Optional[str] = None,
+        acting_user_id: Optional[int] = None,
+    ) -> None:
         p = self.paths(study_id, study_name)
         f = p.access_dir / f"user_{int(user_id):09d}.json"
         if f.exists():
             f.unlink()
+
+            actor_payload = self._build_actor_payload(
+                actor=actor,
+                actor_name=actor_name,
+                user_id=acting_user_id,
+            )
+
+            self._append_audit(
+                p,
+                action="access_revoked",
+                study_id=study_id,
+                payload={
+                    "target_user_id": user_id,
+                    **actor_payload,
+                },
+            )
+
             self.save(p.dataset_path, f"case-e: revoke_access study={study_id} user={user_id}")
 
     def list_access(self, study_id: int, study_name: str) -> List[Dict[str, Any]]:
@@ -677,6 +1402,9 @@ class DataladStudyRepo:
         max_uses: int,
         expires_at: str,
         allowed_section_ids: List[str],
+        actor: Optional[str] = None,
+        actor_name: Optional[str] = None,
+        user_id: Optional[int] = None,
     ) -> Dict[str, Any]:
         p = self.ensure_dataset(study_id, study_name)
         row = {
@@ -693,6 +1421,33 @@ class DataladStudyRepo:
             "created_at": local_now().isoformat(),
         }
         _json_dump(p.shares_dir / f"{token}.json", row)
+
+        labels = self._resolve_subject_visit_group_labels(
+            p,
+            subject_index=subject_index,
+            visit_index=visit_index,
+            group_index=group_index,
+        )
+        actor_payload = self._build_actor_payload(actor=actor, actor_name=actor_name, user_id=user_id)
+
+        self._append_audit(
+            p,
+            action="share_link_created",
+            study_id=study_id,
+            payload={
+                "permission": permission,
+                "max_uses": max_uses,
+                "expires_at": expires_at,
+                "allowed_section_ids": allowed_section_ids or [],
+                "subject_index": subject_index,
+                "visit_index": visit_index,
+                "group_index": group_index,
+                **labels,
+                **actor_payload,
+            },
+            subject_index=subject_index,
+        )
+
         self.save(p.dataset_path, f"case-e: share_link_created study={study_id}")
         return row
 
@@ -708,9 +1463,105 @@ class DataladStudyRepo:
         _json_dump(p.shares_dir / f"{token}.json", row)
         self.save(p.dataset_path, f"case-e: shared_link_used study={study_id}")
 
-    # ---------- internal helpers ----------
+    # ------------------------------------------------------------------
+    # audit helpers
+    # ------------------------------------------------------------------
 
-    def _snapshot_schema(self, study_data: Dict[str, Any], study_id: int) -> Dict[str, Any]:
+    def _subject_audit_dir(self, p: StudyPaths, subject_index: Optional[int]) -> Optional[Path]:
+        if subject_index is None:
+            return None
+        subdir = p.audit_subject_dir / f"subject_{int(subject_index):05d}"
+        subdir.mkdir(parents=True, exist_ok=True)
+        return subdir
+
+    def _write_diff_blob(self, scope_dir: Path, event_id: str, diff_obj: Any) -> str:
+        diffs_dir = scope_dir / "diffs"
+        diffs_dir.mkdir(parents=True, exist_ok=True)
+        diff_file = diffs_dir / f"{event_id}.json"
+        _json_dump(diff_file, diff_obj)
+        return str(diff_file.relative_to(self.paths_from_scope_dir(scope_dir).canonical_dir))
+
+    def paths_from_scope_dir(self, scope_dir: Path) -> StudyPaths:
+        canonical_dir = scope_dir
+        while canonical_dir.name != "canonical" and canonical_dir.parent != canonical_dir:
+            canonical_dir = canonical_dir.parent
+        dataset_path = canonical_dir.parent
+        study_id = 0
+        study_name = "unknown"
+        return StudyPaths(
+            dataset_path=dataset_path,
+            canonical_dir=canonical_dir,
+            metadata_json=canonical_dir / "study_metadata.json",
+            content_json=canonical_dir / "study_content.json",
+            templates_dir=canonical_dir / "templates",
+            entries_dir=canonical_dir / "entries",
+            files_dir=canonical_dir / "files",
+            audit_dir=canonical_dir / "audit",
+            audit_system_dir=canonical_dir / "audit" / "system",
+            audit_system_study_dir=canonical_dir / "audit" / "system" / "study",
+            audit_subject_dir=canonical_dir / "audit" / "subject",
+            shares_dir=canonical_dir / "shared_links",
+            access_dir=canonical_dir / "access",
+        )
+
+    def _append_audit(
+        self,
+        p: StudyPaths,
+        *,
+        action: str,
+        study_id: int,
+        payload: Dict[str, Any],
+        subject_index: Optional[int] = None,
+    ) -> None:
+        now = local_now()
+        ts = now.strftime("%Y%m%dT%H%M%S%f")
+        scope = "subject" if subject_index is not None else "study"
+
+        if scope == "study":
+            scope_dir = p.audit_system_study_dir
+            subject_suffix = ""
+        else:
+            scope_dir = self._subject_audit_dir(p, subject_index)
+            subject_suffix = f"_s{int(subject_index):05d}"
+
+        if scope_dir is None:
+            raise RuntimeError("Failed to resolve audit scope directory")
+
+        event_id = f"{ts}_{action}{subject_suffix}"
+        safe_payload = _deepcopy_json(payload or {})
+
+        diff_obj = None
+        if safe_payload.get("diff_payload") is not None:
+            diff_obj = safe_payload.pop("diff_payload")
+        elif safe_payload.get("old_content") is not None:
+            diff_obj = {"old_content": safe_payload.pop("old_content")}
+        elif safe_payload.get("old_template_schema") is not None:
+            diff_obj = {"old_template_schema": safe_payload.pop("old_template_schema")}
+
+        diff_available = False
+        diff_path = None
+        if diff_obj is not None:
+            diff_available = True
+            diff_path = self._write_diff_blob(scope_dir, event_id, diff_obj)
+
+        body = {
+            "id": event_id,
+            "timestamp": now.isoformat(),
+            "study_id": int(study_id),
+            "action": action,
+            "scope": scope,
+            "payload": safe_payload,
+            "diff_available": diff_available,
+            "diff_path": diff_path,
+        }
+
+        _append_jsonl(scope_dir / "events.jsonl", body)
+
+    # ------------------------------------------------------------------
+    # internal helpers
+    # ------------------------------------------------------------------
+
+    def _snapshot_schema(self, study_data: Dict[str, Any], study_id: int, version: int = 1) -> Dict[str, Any]:
         snap = _deepcopy_json(study_data or {})
         snap.setdefault("id", study_id)
         if "study" not in snap or not isinstance(snap.get("study"), dict):
@@ -719,17 +1570,8 @@ class DataladStudyRepo:
                 "description": snap.get("description", ""),
             }
         snap["created_at"] = local_now().isoformat()
+        snap["version"] = int(version)
         return snap
-
-    def _append_audit(self, audit_dir: Path, *, action: str, study_id: int, payload: Dict[str, Any]) -> None:
-        ts = local_now().strftime("%Y%m%dT%H%M%S")
-        file = audit_dir / f"{ts}_{action}.json"
-        _json_dump(file, {
-            "timestamp": local_now().isoformat(),
-            "study_id": study_id,
-            "action": action,
-            "payload": payload or {},
-        })
 
     def _compute_json_diff(self, old: Any, new: Any, path: str = "") -> List[Dict[str, Any]]:
         diffs: List[Dict[str, Any]] = []

@@ -251,6 +251,34 @@ class StudyDataEntryOut(BaseModel):
     class Config:
         from_attributes = True
 
+class StudyDataSlotStateOut(BaseModel):
+    exists: bool
+    entry_id: Optional[int] = None
+    study_id: int
+    subject_index: int
+    visit_index: int
+    group_index: int
+    form_version: int
+    data: Dict[str, Any] = Field(default_factory=dict)
+    skipped_required_flags: Optional[List[List[bool]]] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+    revision_token: str
+    subject_raw: Optional[str] = None
+    visit_raw: Optional[str] = None
+    group_raw: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
+class StudyDataConflictDetail(BaseModel):
+    message: str
+    conflict: bool = True
+    latest: StudyDataSlotStateOut
+
+    class Config:
+        from_attributes = True
 
 class StudyDataEntryUpdate(BaseModel):
     data: Optional[Dict[str, Any]] = None
