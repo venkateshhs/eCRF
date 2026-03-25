@@ -1,0 +1,85 @@
+type: collections
+version: 1
+
+collections:
+  casee_studies:
+    default_token: no_access
+    curated: collections/casee_studies
+    incoming: incoming/casee_studies
+    use_classes:
+      - CaseeStudy
+      - CaseeStudyEntry
+      - CaseeStudyFile
+      - CaseeStudyTemplateSnapshot
+  casee_audit:
+    default_token: no_access
+    curated: collections/casee_audit
+    incoming: incoming/casee_audit
+    use_classes:
+      - CaseeAuditEvent
+    submission_tags:
+      submitter_id_tag: schema:user_id
+      submission_time_tag: schema:time
+
+
+  casee_auth:
+    default_token: no_access
+    curated: collections/casee_auth
+    incoming: incoming/casee_auth
+    use_classes:
+      - CaseeUser
+      - CaseeUserSession
+
+tokens:
+  no_access:
+    user_id: nobody
+    collections:
+      casee_studies:
+        mode: NOTHING
+        incoming_label: no-access
+      casee_auth:
+        mode: NOTHING
+        incoming_label: no-access
+      casee_audit:
+        mode: NOTHING
+        incoming_label: no-access
+
+  casee_backend:
+    user_id: casee-backend
+    collections:
+      casee_studies:
+        mode: WRITE_COLLECTION
+        incoming_label: casee-backend
+      casee_auth:
+        mode: WRITE_COLLECTION
+        incoming_label: casee-backend
+      casee_audit:
+        mode: WRITE_COLLECTION
+        incoming_label: casee-backend
+
+  casee_reader:
+    user_id: casee-reader
+    collections:
+      casee_studies:
+        mode: READ_COLLECTION
+        incoming_label: casee-reader
+      casee_auth:
+        mode: READ_COLLECTION
+        incoming_label: casee-reader
+      casee_audit:
+        mode: READ_COLLECTION
+        incoming_label: casee-reader
+
+  casee_submission_reader:
+    user_id: casee-submission-reader
+    collections:
+      casee_studies:
+        mode: READ_SUBMISSIONS
+        incoming_label: casee-backend
+      casee_auth:
+        mode: READ_SUBMISSIONS
+        incoming_label: casee-backend
+      casee_audit:
+        mode: READ_SUBMISSIONS
+        incoming_label: casee-backend
+
