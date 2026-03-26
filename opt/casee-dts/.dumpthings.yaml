@@ -11,6 +11,7 @@ collections:
       - CaseeStudyEntry
       - CaseeStudyFile
       - CaseeStudyTemplateSnapshot
+
   casee_audit:
     default_token: no_access
     curated: collections/casee_audit
@@ -20,7 +21,9 @@ collections:
     submission_tags:
       submitter_id_tag: schema:user_id
       submission_time_tag: schema:time
-
+    audit_backends:
+      - type: gitaudit
+        path: audit/casee_audit_git
 
   casee_auth:
     default_token: no_access
@@ -82,4 +85,3 @@ tokens:
       casee_audit:
         mode: READ_SUBMISSIONS
         incoming_label: casee-backend
-
