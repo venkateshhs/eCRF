@@ -320,6 +320,16 @@
           <div class="edit-hint muted">
             Tip: This will open the individual steps in edit mode with a dedicated Save button.
           </div>
+          <div v-if="canManageAccess" class="edit-danger-zone">
+          <button
+            class="btn-danger"
+            type="button"
+            @click="openDeleteStudyDialog"
+            :disabled="deleteConfirm.busy"
+          >
+            Delete Study
+          </button>
+        </div>
         </div>
 
         <!-- DOCUMENTS -->
@@ -594,6 +604,34 @@
         </div>
       </section>
     </div>
+        <!-- Delete study confirm dialog -->
+        <div
+          v-if="deleteConfirm.visible"
+          class="modal-backdrop"
+          role="dialog"
+          aria-modal="true"
+          @click.self="cancelDeleteStudy"
+        >
+          <div class="modal" tabindex="-1">
+            <h3 class="modal-title">Delete study?</h3>
+            <p class="modal-text">
+              This will permanently delete
+              <span class="strong">{{ studyMeta.study_name || "this study" }}</span>
+              from both the database and the study filesystem.
+            </p>
+            <p class="modal-text" style="margin-top:-6px;">
+              This action cannot be undone.
+            </p>
+            <div class="modal-actions">
+              <button class="btn-minimal" @click="cancelDeleteStudy" :disabled="deleteConfirm.busy">
+                Cancel
+              </button>
+              <button class="btn-primary danger" @click="confirmDeleteStudy" :disabled="deleteConfirm.busy">
+                {{ deleteConfirm.busy ? "Deleting…" : "Delete Study" }}
+              </button>
+            </div>
+          </div>
+        </div>
   </div>
 </template>
 
@@ -612,6 +650,10 @@ export default {
   components: { FieldFileUpload, StudyAuditLogs, TemplateDiffView, StudyDataDashboard, ExportStudy },
   data() {
     return {
+      deleteConfirm: {
+      visible: false,
+      busy: false,
+    },
       studyId: this.$route.params.id,
 
       // meta/content
@@ -796,6 +838,37 @@ export default {
     },
   },
   methods: {
+    openDeleteStudyDialog() {
+      this.deleteConfirm.visible = true;
+    },
+
+    cancelDeleteStudy() {
+      if (this.deleteConfirm.busy) return;
+      this.deleteConfirm.visible = false;
+    },
+
+    async confirmDeleteStudy() {
+      const token = this.token;
+      if (!token) {
+        this.$router.push("/login");
+        return;
+      }
+
+      this.deleteConfirm.busy = true;
+      try {
+        await axios.delete(`/forms/studies/${this.studyId}`, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+
+        this.deleteConfirm.visible = false;
+        this.$router.push({ name: "Dashboard", query: { openStudies: "true" } });
+      } catch (e) {
+        console.error("Failed to delete study:", e?.response?.data || e.message);
+        alert("Failed to delete study.");
+      } finally {
+        this.deleteConfirm.busy = false;
+      }
+    },
     tabAbbrev(label) {
       const s = String(label || "").trim();
       if (!s) return "•";
@@ -1570,5 +1643,34 @@ export default {
 
 .bids-actions.export-actions .btn-primary {
   margin: 0;
+}
+.edit-danger-zone {
+  margin-top: 18px;
+  display: flex;
+  justify-content: flex-start;
+  padding-left: 2px;
+}
+
+.btn-danger {
+  border-radius: 10px;
+  padding: 10px 14px;
+  font-size: 14px;
+  cursor: pointer;
+  border: 1px solid #b91c1c;
+  background: #b91c1c;
+  color: #fff;
+  transition: background .2s, border-color .2s, box-shadow .2s, transform .05s;
+}
+
+.btn-danger:hover:not([disabled]) {
+  background: #991b1b;
+  border-color: #991b1b;
+  box-shadow: 0 6px 18px rgba(185, 28, 28, 0.18);
+  transform: translateY(-1px);
+}
+
+.btn-danger[disabled] {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 </style>
