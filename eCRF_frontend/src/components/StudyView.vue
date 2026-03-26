@@ -307,9 +307,9 @@
           <div class="edit-steps-grid">
             <button
               v-for="s in editSteps"
-              :key="s.step"
+              :key="s.displayStep"
               class="edit-step-card"
-              @click="openEditStep(s.step)"
+              @click="openEditStep(s.routeStep)"
               :disabled="!canEditStudy"
             >
               <div class="esc-title">{{ s.label }}</div>
@@ -661,14 +661,13 @@ export default {
 
       //  7-step edit launcher (kept)
       editSteps: [
-        { step: 1, label: "1) Study details", desc: "Title, description, basics" },
-        { step: 2, label: "2) Arms / Groups", desc: "Treatment arms, groups, labels" },
-        { step: 3, label: "3) Visits", desc: "Visit definitions, windows, order" },
-        { step: 4, label: "4) eCRF / Forms", desc: "Forms, sections, fields (templates)" },
-        { step: 5, label: "5) Subject assignment", desc: "Randomization / assignment settings" },
-        { step: 6, label: "6) Subjects / Enrollment", desc: "Planned subject count, identifiers (if used)" },
-        { step: 7, label: "7) Schedule of assessments", desc: "SoA matrix: which forms in which visits/groups" },
-      ],
+      { displayStep: 1, routeStep: 1, label: "1) Study details", desc: "Title, description, basics" },
+      { displayStep: 2, routeStep: 2, label: "2) Groups", desc: "Treatment arms, groups, labels" },
+      { displayStep: 3, routeStep: 3, label: "3) Subject setup", desc: "Subject count and assignment method" },
+      { displayStep: 4, routeStep: 4, label: "4) Group assignment", desc: "Assign subjects to groups" },
+      { displayStep: 5, routeStep: 5, label: "5) Visits", desc: "Visit definitions, windows, order" },
+      { displayStep: 6, routeStep: 6, label: "6) Forms", desc: "Forms, sections, fields (templates)" },
+    ],
 
       // files
       allFiles: [],
