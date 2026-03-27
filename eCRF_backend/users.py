@@ -42,6 +42,25 @@ def _display_name(u: Optional[models.User]) -> str:
     return full or u.username or u.email or f"User#{u.id}"
 
 
+def _get_user_password_hash(user: Optional[models.User]) -> str:
+    if not user:
+        return ""
+    return (
+        getattr(user, "password_hash", None)
+        or getattr(user, "password", None)
+        or ""
+    )
+
+
+def _set_user_password_hash(user: models.User, hashed_password: str) -> None:
+    if hasattr(user, "password_hash"):
+        setattr(user, "password_hash", hashed_password)
+    elif hasattr(user, "password"):
+        setattr(user, "password", hashed_password)
+    else:
+        raise AttributeError("User model has neither 'password_hash' nor 'password'")
+
+
 def _to_naive_utc(dt: Optional[datetime]) -> Optional[datetime]:
     """
     Normalize datetimes so comparisons never crash:
@@ -106,10 +125,8 @@ def get_current_user(
         if not user:
             raise HTTPException(status_code=404, detail="User not found")
 
-        # Backward compatibility: old tokens without jti governed only by exp.
         if not jti:
-            logger.info("Authenticated user %s via legacy token (no jti).", user.username)
-            return user
+            raise HTTPException(status_code=401, detail="Session expired")
 
         sess = (
             db.query(models.UserSession)
@@ -135,14 +152,13 @@ def get_current_user(
             _revoke_session(db, sess)
             raise HTTPException(status_code=401, detail="Session expired due to inactivity")
 
-        # Update last activity (throttled) - use raw local_now() to preserve your existing storage style
+        # Update last activity (throttled)
         try:
             if (now - effective_last).total_seconds() > LAST_ACTIVITY_THROTTLE_SECONDS:
                 sess.last_activity_at = now_raw
                 db.commit()
         except Exception:
             db.rollback()
-            # don't fail the request due to an activity write
 
         logger.info("User %s authenticated successfully.", user.username)
         return user
@@ -169,27 +185,24 @@ def get_current_user_oauth(
 def register_user(user_data: UserRegister, db: Session = Depends(get_db)):
     logger.info("Attempting to register a new user.")
 
-    # Check if user already exists
     existing_user = db.query(models.User).filter(
         (models.User.username == user_data.username) | (models.User.email == user_data.email)
     ).first()
     if existing_user:
         raise HTTPException(status_code=400, detail="Username or email already exists.")
 
-    # Hash the password
     hashed_password = hash_password(user_data.password)
 
-    # Create the user
     user = models.User(
         username=user_data.username,
         email=user_data.email,
-        password=hashed_password,
     )
+    _set_user_password_hash(user, hashed_password)
+
     db.add(user)
     db.commit()
     db.refresh(user)
 
-    # Create a profile
     profile = models.UserProfile(
         user_id=user.id,
         first_name=user_data.first_name,
@@ -202,7 +215,6 @@ def register_user(user_data: UserRegister, db: Session = Depends(get_db)):
 
     logger.info("User %s registered successfully.", user.username)
 
-    # AUDIT: new user created (UI)
     try:
         audit_change_both(
             scope="system",
@@ -222,12 +234,12 @@ def register_user(user_data: UserRegister, db: Session = Depends(get_db)):
 def login_user(request: LoginRequest, db: Session = Depends(get_db)):
     """
     Returns token on success.
-    Now creates a server-side session for inactivity enforcement.
+    Creates a server-side session for inactivity enforcement.
     """
     logger.info("Login attempt for username: %s", request.username)
 
     user = get_user_by_username(db, request.username)
-    if not user or not verify_password(request.password, getattr(user, "password", "")):
+    if not user or not verify_password(request.password, _get_user_password_hash(user)):
         raise HTTPException(status_code=400, detail="Invalid username or password.")
 
     if user.profile and user.profile.role == "No Access":
@@ -248,7 +260,14 @@ def login_user(request: LoginRequest, db: Session = Depends(get_db)):
     db.add(sess)
     db.commit()
 
-    token = create_access_token(user.username, jti=jti, max_age_hours=ABSOLUTE_SESSION_HOURS)
+    token = create_access_token(
+        {
+            "sub": user.username,
+            "jti": jti,
+        },
+        expires_delta=timedelta(hours=ABSOLUTE_SESSION_HOURS),
+    )
+
     logger.info("User %s logged in successfully.", request.username)
     return {"access_token": token, "token_type": "bearer"}
 
@@ -261,6 +280,7 @@ def ping(current_user: models.User = Depends(get_current_user)):
     """
     return {"ok": True}
 
+
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
 def logout_user(
     authorization: str = Header(None),
@@ -270,12 +290,11 @@ def logout_user(
     """
     Best-effort logout:
     - Revokes the current server-side session row by jti.
-    - If token is legacy (no jti), revoke all active sessions for that user (safest fallback).
     Always returns 204 (idempotent).
     """
     try:
         if not authorization or not authorization.startswith("Bearer "):
-            return  # 204
+            return
 
         token = authorization.split("Bearer ")[1]
         payload = jwt.decode(
@@ -300,30 +319,14 @@ def logout_user(
             if sess:
                 sess.revoked_at = now
                 db.commit()
-            return  # 204
 
-        # Legacy fallback: revoke all active sessions for this user
-        sessions = (
-            db.query(models.UserSession)
-            .filter(
-                models.UserSession.user_id == current_user.id,
-                models.UserSession.revoked_at.is_(None),
-            )
-            .all()
-        )
-        if sessions:
-            for s in sessions:
-                s.revoked_at = now
-            db.commit()
-
-        return  # 204
+        return
 
     except Exception:
         db.rollback()
-        return  # 204
+        return
 
 
-# Request body model (accepts either just new_password, or username + new_password)
 class ChangePasswordRequest(BaseModel):
     new_password: str = Field(..., alias="new_password")
     username: Optional[str] = None
@@ -353,9 +356,10 @@ def change_password(
             detail="Password must be at least 8 characters, include a number, and a special character.",
         )
 
-    # Only allow changing own password, unless current user is Administrator
-    is_admin = (getattr(current_user, "profile", None) and
-                getattr(current_user.profile, "role", "") == "Administrator")
+    is_admin = (
+        getattr(current_user, "profile", None)
+        and getattr(current_user.profile, "role", "") == "Administrator"
+    )
     if payload.username and not is_admin and payload.username != current_user.username:
         raise HTTPException(status_code=403, detail="Not authorized to change another user's password.")
 
@@ -363,12 +367,11 @@ def change_password(
     if not user:
         raise HTTPException(status_code=404, detail="User not found.")
 
-    user.password = hash_password(payload.new_password)
+    _set_user_password_hash(user, hash_password(payload.new_password))
     db.commit()
 
     logger.info("Password successfully changed for user: %s", target_username)
 
-    # AUDIT
     try:
         actor_display = getattr(current_user, "username", "unknown")
         audit_change_both(
@@ -410,8 +413,9 @@ def admin_create_user(
     user = models.User(
         username=new.username,
         email=new.email,
-        password=hash_password(new.password)
     )
+    _set_user_password_hash(user, hash_password(new.password))
+
     db.add(user)
     db.commit()
     db.refresh(user)
@@ -426,7 +430,6 @@ def admin_create_user(
     db.commit()
     db.refresh(profile)
 
-    # AUDIT: new user created (admin)
     try:
         audit_change_both(
             scope="system",
@@ -460,7 +463,6 @@ def update_user_role(
     db.commit()
     db.refresh(user)
 
-    # AUDIT: admin changes roles
     try:
         audit_change_both(
             scope="system",

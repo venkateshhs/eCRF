@@ -1,0 +1,55 @@
+version: "3.9"
+
+services:
+  db:
+    image: postgres:16
+    container_name: casee-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: casee
+      POSTGRES_USER: casee
+      POSTGRES_PASSWORD: casee_password
+    volumes:
+      - casee_postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+
+  casee-app:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile
+    container_name: casee-app
+    restart: unless-stopped
+    depends_on:
+      - db
+    env_file:
+      - .env
+    environment:
+      ECRF_DATABASE_URL: postgresql+psycopg2://casee:casee_password@db:5432/casee
+      ECRF_BIND_HOST: 0.0.0.0
+      ECRF_PORT: 8000
+      ECRF_DATA_DIR: /srv/casee
+      BIDS_ROOT: /srv/casee/bids_datasets
+      ECRF_TEMPLATES_DIR: /app/eCRF_backend/templates
+      ECRF_DATALAD_RIA_URL: ria+file:///ria-store
+    volumes:
+      - casee_runtime_data:/srv/casee
+      - casee_ria_store:/ria-store
+    ports:
+      - "8000:8000"
+
+  apache:
+    image: httpd:2.4
+    container_name: casee-apache
+    restart: unless-stopped
+    depends_on:
+      - casee-app
+    volumes:
+      - ./apache/casee.conf:/usr/local/apache2/conf/httpd.conf:ro
+    ports:
+      - "8080:80"
+
+volumes:
+  casee_postgres_data:
+  casee_runtime_data:
+  casee_ria_store:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 import os
 import re
@@ -10,13 +11,22 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
-import hashlib
+
 from .logger import logger
+from .datalad_config import get_datalad_config
+from .datalad_lock import dataset_lock, LockSpec
+from .datalad_runtime import get_datalad_worker
+from .settings import get_settings
 
 try:
     from datalad.api import Dataset  # type: ignore
 except Exception:
     Dataset = None  # type: ignore
+
+try:
+    from datalad.api import create_sibling_ria  # type: ignore
+except Exception:
+    create_sibling_ria = None  # type: ignore
 
 
 ALLOWED_STUDY_STATUS = {"DRAFT", "PUBLISHED", "ARCHIVED"}
@@ -117,9 +127,88 @@ class StudyPaths:
 
 class DataladStudyRepo:
     def __init__(self, root: Optional[str] = None) -> None:
-        base = root or os.environ.get("BIDS_ROOT") or str(Path(os.environ["ECRF_DATA_DIR"]) / "bids_datasets")
-        self.root = Path(base)
+        settings = get_settings()
+        base = root or os.environ.get("BIDS_ROOT") or str(settings.bids_root)
+        self.root = Path(base).expanduser().resolve()
         self.root.mkdir(parents=True, exist_ok=True)
+
+    # ------------------------------------------------------------------
+    # config / runtime helpers
+    # ------------------------------------------------------------------
+
+    def _settings(self):
+        return get_settings()
+
+    def _cfg(self):
+        return get_datalad_config()
+
+    def _validate_storage_ready(self) -> None:
+        settings = self._settings()
+        cfg = self._cfg()
+
+        if settings.is_production and not settings.bids_root:
+            raise RuntimeError("BIDS_ROOT must be configured in production.")
+
+        if settings.is_production and cfg.require_ria_for_writes and not cfg.ria_url:
+            raise RuntimeError(
+                "ECRF_DATALAD_RIA_URL must be configured in production when "
+                "ECRF_DATALAD_REQUIRE_RIA_FOR_WRITES=1."
+            )
+
+    def _set_repo_identity(self, ds) -> None:
+        try:
+            ds.repo.set_config("user.name", self._cfg().git_name, where="local")
+            ds.repo.set_config("user.email", self._cfg().git_email, where="local")
+            if self._cfg().gpgsign:
+                ds.repo.set_config("commit.gpgsign", "true", where="local")
+                if self._cfg().gpg_keyid:
+                    ds.repo.set_config("user.signingkey", self._cfg().gpg_keyid, where="local")
+        except Exception:
+            pass
+
+    def _ensure_ria_sibling_if_needed(self, dataset_path: Path) -> None:
+        cfg = self._cfg()
+        if not cfg.ria_url:
+            return
+
+        if Dataset is None:
+            raise RuntimeError("DataLad is not installed")
+
+        ds = Dataset(str(dataset_path))
+        if not ds.is_installed():
+            raise RuntimeError(f"Dataset not installed at {dataset_path}")
+
+        try:
+            siblings = ds.siblings(result_renderer="disabled")
+        except Exception:
+            siblings = []
+
+        existing_names = set()
+        for item in siblings or []:
+            if isinstance(item, dict):
+                name = item.get("name")
+                if name:
+                    existing_names.add(str(name))
+
+        if cfg.ria_name in existing_names:
+            return
+
+        if create_sibling_ria is None:
+            raise RuntimeError(
+                "DataLad create_sibling_ria is not available but a RIA sibling is required."
+            )
+
+        create_sibling_ria(
+            dataset=str(dataset_path),
+            url=cfg.ria_url,
+            name=cfg.ria_name,
+            new_store_ok=True,
+            result_renderer="disabled",
+        )
+        logger.info("Configured RIA sibling for dataset=%s sibling=%s", dataset_path, cfg.ria_name)
+
+    def _logical_path(self, dataset_path: Path, absolute_path: Path) -> str:
+        return str(Path(absolute_path).resolve().relative_to(dataset_path.resolve()))
 
     # ------------------------------------------------------------------
     # dataset layout
@@ -149,31 +238,36 @@ class DataladStudyRepo:
         )
 
     def ensure_dataset(self, study_id: int, study_name: str) -> StudyPaths:
+        self._validate_storage_ready()
         p = self.paths(study_id, study_name)
         p.dataset_path.mkdir(parents=True, exist_ok=True)
 
         if Dataset is None:
             raise RuntimeError("DataLad is not installed")
 
-        ds = Dataset(str(p.dataset_path))
-        if not ds.is_installed():
-            ds.create(force=True, cfg_proc="text2git")
+        with dataset_lock(LockSpec(dataset_path=p.dataset_path)):
+            ds = Dataset(str(p.dataset_path))
+            if not ds.is_installed():
+                ds.create(force=True, cfg_proc="text2git")
 
-        _ensure_gitignore(p.dataset_path)
+            self._set_repo_identity(ds)
+            _ensure_gitignore(p.dataset_path)
 
-        for d in [
-            p.canonical_dir,
-            p.templates_dir,
-            p.entries_dir,
-            p.files_dir,
-            p.audit_dir,
-            p.audit_system_dir,
-            p.audit_system_study_dir,
-            p.audit_subject_dir,
-            p.shares_dir,
-            p.access_dir,
-        ]:
-            d.mkdir(parents=True, exist_ok=True)
+            for d in [
+                p.canonical_dir,
+                p.templates_dir,
+                p.entries_dir,
+                p.files_dir,
+                p.audit_dir,
+                p.audit_system_dir,
+                p.audit_system_study_dir,
+                p.audit_subject_dir,
+                p.shares_dir,
+                p.access_dir,
+            ]:
+                d.mkdir(parents=True, exist_ok=True)
+
+            self._ensure_ria_sibling_if_needed(p.dataset_path)
 
         return p
 
@@ -196,8 +290,36 @@ class DataladStudyRepo:
     def save(self, ds_path: Path, message: str) -> None:
         if Dataset is None:
             raise RuntimeError("DataLad is not installed")
-        Dataset(str(ds_path)).save(message=message)
-        logger.info("Saved dataset: %s msg=%s", ds_path, message)
+
+        cfg = self._cfg()
+        ds_path = Path(ds_path).expanduser().resolve()
+        worker = get_datalad_worker()
+
+        if cfg.sync_mode == "async" and worker is not None:
+            worker.enqueue_save(ds_path, message)
+            logger.info("Enqueued dataset save: %s msg=%s", ds_path, message)
+            return
+
+        with dataset_lock(LockSpec(dataset_path=ds_path)):
+            ds = Dataset(str(ds_path))
+            if not ds.is_installed():
+                raise RuntimeError(f"Dataset not installed at {ds_path}")
+
+            self._set_repo_identity(ds)
+            ds.save(message=message)
+            logger.info("Saved dataset: %s msg=%s", ds_path, message)
+
+            if cfg.push_on_save and cfg.ria_name:
+                push_kwargs = {"to": cfg.ria_name}
+                if cfg.push_data_mode != "nothing":
+                    push_kwargs["data"] = cfg.push_data_mode
+                ds.push(**push_kwargs)
+                logger.info(
+                    "Pushed dataset: %s to=%s data_mode=%s",
+                    ds_path,
+                    cfg.ria_name,
+                    cfg.push_data_mode,
+                )
 
     def previous_study_content(self, ds_path: Path) -> Dict[str, Any]:
         return _git_show_json(ds_path, "HEAD~1", "canonical/study_content.json", default={}) or {}
@@ -365,39 +487,40 @@ class DataladStudyRepo:
         safe_content["study_id"] = int(study_id)
         safe_content.setdefault("study_data", _deepcopy_json(study_data or {}))
 
-        _json_dump(p.metadata_json, safe_meta)
-        _json_dump(p.content_json, safe_content)
+        with dataset_lock(LockSpec(dataset_path=p.dataset_path)):
+            _json_dump(p.metadata_json, safe_meta)
+            _json_dump(p.content_json, safe_content)
 
-        version = 1
-        if isinstance(safe_schema, dict):
-            try:
-                version = int(safe_schema.get("version") or safe_schema.get("template_version") or 1)
-            except Exception:
-                version = 1
-        version = max(1, version)
+            version = 1
+            if isinstance(safe_schema, dict):
+                try:
+                    version = int(safe_schema.get("version") or safe_schema.get("template_version") or 1)
+                except Exception:
+                    version = 1
+            version = max(1, version)
 
-        version_dir = p.templates_dir / f"v{version:03d}"
-        version_dir.mkdir(parents=True, exist_ok=True)
-        _json_dump(version_dir / "schema.json", safe_schema)
+            version_dir = p.templates_dir / f"v{version:03d}"
+            version_dir.mkdir(parents=True, exist_ok=True)
+            _json_dump(version_dir / "schema.json", safe_schema)
 
-        actor_payload = self._build_actor_payload(
-            actor=actor,
-            actor_name=actor_name,
-            user_id=user_id if user_id is not None else created_by,
-        )
+            actor_payload = self._build_actor_payload(
+                actor=actor,
+                actor_name=actor_name,
+                user_id=user_id if user_id is not None else created_by,
+            )
 
-        self._append_audit(
-            p,
-            action="study_snapshot_written",
-            study_id=study_id,
-            payload={
-                "study_name": study_name,
-                "status": safe_meta.get("status"),
-                "version": version,
-                "ui_label": audit_label,
-                **actor_payload,
-            },
-        )
+            self._append_audit(
+                p,
+                action="study_snapshot_written",
+                study_id=study_id,
+                payload={
+                    "study_name": study_name,
+                    "status": safe_meta.get("status"),
+                    "version": version,
+                    "ui_label": audit_label,
+                    **actor_payload,
+                },
+            )
 
         self.save(
             p.dataset_path,
@@ -406,9 +529,9 @@ class DataladStudyRepo:
 
         return {
             "dataset_path": str(p.dataset_path),
-            "metadata_path": str(p.metadata_json),
-            "content_path": str(p.content_json),
-            "template_path": str(version_dir / "schema.json"),
+            "metadata_path": self._logical_path(p.dataset_path, p.metadata_json),
+            "content_path": self._logical_path(p.dataset_path, p.content_json),
+            "template_path": self._logical_path(p.dataset_path, version_dir / "schema.json"),
             "version": version,
         }
 
@@ -451,29 +574,30 @@ class DataladStudyRepo:
             "study_data": _deepcopy_json(study_data or {}),
         }
 
-        _json_dump(p.metadata_json, metadata)
-        _json_dump(p.content_json, content)
+        with dataset_lock(LockSpec(dataset_path=p.dataset_path)):
+            _json_dump(p.metadata_json, metadata)
+            _json_dump(p.content_json, content)
 
-        v1_dir = p.templates_dir / "v001"
-        v1_dir.mkdir(parents=True, exist_ok=True)
-        _json_dump(v1_dir / "schema.json", self._snapshot_schema(study_data or {}, study_id, version=1))
+            v1_dir = p.templates_dir / "v001"
+            v1_dir.mkdir(parents=True, exist_ok=True)
+            _json_dump(v1_dir / "schema.json", self._snapshot_schema(study_data or {}, study_id, version=1))
 
-        actor_payload = self._build_actor_payload(
-            actor=actor,
-            actor_name=actor_name,
-            user_id=user_id if user_id is not None else created_by,
-        )
+            actor_payload = self._build_actor_payload(
+                actor=actor,
+                actor_name=actor_name,
+                user_id=user_id if user_id is not None else created_by,
+            )
 
-        self._append_audit(
-            p,
-            action="study_created",
-            study_id=study_id,
-            payload={
-                "study_name": study_name,
-                "ui_label": audit_label,
-                **actor_payload,
-            },
-        )
+            self._append_audit(
+                p,
+                action="study_created",
+                study_id=study_id,
+                payload={
+                    "study_name": study_name,
+                    "ui_label": audit_label,
+                    **actor_payload,
+                },
+            )
 
         self.save(p.dataset_path, f"case-e: create_study study={study_id}")
         return {"metadata": metadata, "content": content}
@@ -532,35 +656,35 @@ class DataladStudyRepo:
         content["study_id"] = int(study_id)
         content["study_data"] = _deepcopy_json(study_data or {})
 
-        _json_dump(p.metadata_json, metadata)
-        _json_dump(p.content_json, content)
-
         latest_version = self.latest_template_version(p)
         latest_schema_path = p.templates_dir / f"v{latest_version:03d}" / "schema.json"
         old_schema = self.previous_template_schema(p.dataset_path, latest_version)
-
         new_schema = self._snapshot_schema(content["study_data"], study_id, version=latest_version)
-        _json_dump(latest_schema_path, new_schema)
 
-        diffs = self._compute_json_diff(
-            old_content.get("study_data", {}) if isinstance(old_content, dict) else {},
-            content["study_data"],
-        )
+        with dataset_lock(LockSpec(dataset_path=p.dataset_path)):
+            _json_dump(p.metadata_json, metadata)
+            _json_dump(p.content_json, content)
+            _json_dump(latest_schema_path, new_schema)
 
-        actor_payload = self._build_actor_payload(actor=actor, actor_name=actor_name, user_id=user_id)
+            diffs = self._compute_json_diff(
+                old_content.get("study_data", {}) if isinstance(old_content, dict) else {},
+                content["study_data"],
+            )
 
-        self._append_audit(
-            p,
-            action="study_edited",
-            study_id=study_id,
-            payload={
-                "ui_label": audit_label,
-                "diff_kind": "study_template",
-                "diff_payload": diffs,
-                "old_template_schema": old_schema,
-                **actor_payload,
-            },
-        )
+            actor_payload = self._build_actor_payload(actor=actor, actor_name=actor_name, user_id=user_id)
+
+            self._append_audit(
+                p,
+                action="study_edited",
+                study_id=study_id,
+                payload={
+                    "ui_label": audit_label,
+                    "diff_kind": "study_template",
+                    "diff_payload": diffs,
+                    "old_template_schema": old_schema,
+                    **actor_payload,
+                },
+            )
 
         self.save(p.dataset_path, f"case-e: update_study study={study_id}")
 
@@ -645,6 +769,7 @@ class DataladStudyRepo:
             if m:
                 max_id = max(max_id, int(m.group(1)))
         return max_id + 1
+
     def _next_entry_id_from_rows(self, rows: List[Dict[str, Any]]) -> int:
         max_id = 0
         for row in rows or []:
@@ -666,90 +791,79 @@ class DataladStudyRepo:
         actor_name: Optional[str] = "System clone forward",
         audit_label: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """
-        Efficiently clone many entries into a new form version with a single dataset save.
-
-        Each clone item must contain:
-          - subject_index
-          - visit_index
-          - group_index
-          - data
-          - skipped_required_flags
-          - optionally: subject_raw / visit_raw / group_raw
-        """
         p = self.ensure_dataset(study_id, study_name)
 
-        existing_rows = self.list_entries(study_id, study_name)
-        next_entry_id = self._next_entry_id_from_rows(existing_rows)
+        with dataset_lock(LockSpec(dataset_path=p.dataset_path)):
+            existing_rows = self.list_entries(study_id, study_name)
+            next_entry_id = self._next_entry_id_from_rows(existing_rows)
+            written_ids: List[int] = []
 
-        written_ids: List[int] = []
+            for item in clones or []:
+                entry_id = next_entry_id
+                next_entry_id += 1
 
-        for item in clones or []:
-            entry_id = next_entry_id
-            next_entry_id += 1
+                subject_index = int(item["subject_index"])
+                visit_index = int(item["visit_index"])
+                group_index = int(item["group_index"])
 
-            subject_index = int(item["subject_index"])
-            visit_index = int(item["visit_index"])
-            group_index = int(item["group_index"])
-
-            entry = {
-                "id": entry_id,
-                "study_id": int(study_id),
-                "subject_index": subject_index,
-                "visit_index": visit_index,
-                "group_index": group_index,
-                "form_version": int(target_version),
-                "data": _deepcopy_json(item.get("data") or {}),
-                "skipped_required_flags": _deepcopy_json(item.get("skipped_required_flags") or []),
-                "created_at": local_now().isoformat(),
-                "updated_at": local_now().isoformat(),
-                "cloned_from_version": int(source_version),
-            }
-
-            path = self._entry_path(
-                p,
-                form_version=target_version,
-                subject_index=subject_index,
-                visit_index=visit_index,
-                group_index=group_index,
-                entry_id=entry_id,
-            )
-            _json_dump(path, entry)
-
-            labels = self._resolve_subject_visit_group_labels(
-                p,
-                subject_index=subject_index,
-                visit_index=visit_index,
-                group_index=group_index,
-                subject_raw=item.get("subject_raw"),
-                visit_raw=item.get("visit_raw"),
-                group_raw=item.get("group_raw"),
-            )
-            actor_payload = self._build_actor_payload(
-                actor=actor,
-                actor_name=actor_name,
-                user_id=None,
-            )
-
-            self._append_audit(
-                p,
-                action="entry_cloned_forward",
-                study_id=study_id,
-                payload={
-                    "entry_id": entry_id,
+                entry = {
+                    "id": entry_id,
+                    "study_id": int(study_id),
                     "subject_index": subject_index,
                     "visit_index": visit_index,
                     "group_index": group_index,
-                    "from_version": int(source_version),
-                    "to_version": int(target_version),
-                    "ui_label": audit_label or f"Clone entries forward v{source_version}→v{target_version}",
-                    **labels,
-                    **actor_payload,
-                },
-                subject_index=subject_index,
-            )
+                    "form_version": int(target_version),
+                    "data": _deepcopy_json(item.get("data") or {}),
+                    "skipped_required_flags": _deepcopy_json(item.get("skipped_required_flags") or []),
+                    "created_at": local_now().isoformat(),
+                    "updated_at": local_now().isoformat(),
+                    "cloned_from_version": int(source_version),
+                }
 
-            written_ids.append(entry_id)
+                path = self._entry_path(
+                    p,
+                    form_version=target_version,
+                    subject_index=subject_index,
+                    visit_index=visit_index,
+                    group_index=group_index,
+                    entry_id=entry_id,
+                )
+                _json_dump(path, entry)
+
+                labels = self._resolve_subject_visit_group_labels(
+                    p,
+                    subject_index=subject_index,
+                    visit_index=visit_index,
+                    group_index=group_index,
+                    subject_raw=item.get("subject_raw"),
+                    visit_raw=item.get("visit_raw"),
+                    group_raw=item.get("group_raw"),
+                )
+                actor_payload = self._build_actor_payload(
+                    actor=actor,
+                    actor_name=actor_name,
+                    user_id=None,
+                )
+
+                self._append_audit(
+                    p,
+                    action="entry_cloned_forward",
+                    study_id=study_id,
+                    payload={
+                        "entry_id": entry_id,
+                        "subject_index": subject_index,
+                        "visit_index": visit_index,
+                        "group_index": group_index,
+                        "from_version": int(source_version),
+                        "to_version": int(target_version),
+                        "ui_label": audit_label or f"Clone entries forward v{source_version}→v{target_version}",
+                        **labels,
+                        **actor_payload,
+                    },
+                    subject_index=subject_index,
+                )
+
+                written_ids.append(entry_id)
 
         if written_ids:
             self.save(
@@ -782,58 +896,60 @@ class DataladStudyRepo:
         actor_name: Optional[str] = None,
     ) -> Dict[str, Any]:
         p = self.ensure_dataset(study_id, study_name)
-        entry_id = self._next_entry_id(p)
 
-        entry = {
-            "id": entry_id,
-            "study_id": study_id,
-            "subject_index": int(subject_index),
-            "visit_index": int(visit_index),
-            "group_index": int(group_index),
-            "form_version": int(form_version),
-            "data": _deepcopy_json(data or {}),
-            "skipped_required_flags": _deepcopy_json(skipped_required_flags or []),
-            "created_at": local_now().isoformat(),
-            "updated_at": local_now().isoformat(),
-        }
+        with dataset_lock(LockSpec(dataset_path=p.dataset_path)):
+            entry_id = self._next_entry_id(p)
 
-        path = self._entry_path(
-            p,
-            form_version=form_version,
-            subject_index=subject_index,
-            visit_index=visit_index,
-            group_index=group_index,
-            entry_id=entry_id,
-        )
-        _json_dump(path, entry)
+            entry = {
+                "id": entry_id,
+                "study_id": study_id,
+                "subject_index": int(subject_index),
+                "visit_index": int(visit_index),
+                "group_index": int(group_index),
+                "form_version": int(form_version),
+                "data": _deepcopy_json(data or {}),
+                "skipped_required_flags": _deepcopy_json(skipped_required_flags or []),
+                "created_at": local_now().isoformat(),
+                "updated_at": local_now().isoformat(),
+            }
 
-        labels = self._resolve_subject_visit_group_labels(
-            p,
-            subject_index=subject_index,
-            visit_index=visit_index,
-            group_index=group_index,
-            subject_raw=subject_raw,
-            visit_raw=visit_raw,
-            group_raw=group_raw,
-        )
-        actor_payload = self._build_actor_payload(actor=actor, actor_name=actor_name, user_id=user_id)
+            path = self._entry_path(
+                p,
+                form_version=form_version,
+                subject_index=subject_index,
+                visit_index=visit_index,
+                group_index=group_index,
+                entry_id=entry_id,
+            )
+            _json_dump(path, entry)
 
-        self._append_audit(
-            p,
-            action="entry_upserted",
-            study_id=study_id,
-            payload={
-                "entry_id": entry_id,
-                "subject_index": subject_index,
-                "visit_index": visit_index,
-                "group_index": group_index,
-                "form_version": form_version,
-                "ui_label": audit_label,
-                **labels,
-                **actor_payload,
-            },
-            subject_index=subject_index,
-        )
+            labels = self._resolve_subject_visit_group_labels(
+                p,
+                subject_index=subject_index,
+                visit_index=visit_index,
+                group_index=group_index,
+                subject_raw=subject_raw,
+                visit_raw=visit_raw,
+                group_raw=group_raw,
+            )
+            actor_payload = self._build_actor_payload(actor=actor, actor_name=actor_name, user_id=user_id)
+
+            self._append_audit(
+                p,
+                action="entry_upserted",
+                study_id=study_id,
+                payload={
+                    "entry_id": entry_id,
+                    "subject_index": subject_index,
+                    "visit_index": visit_index,
+                    "group_index": group_index,
+                    "form_version": form_version,
+                    "ui_label": audit_label,
+                    **labels,
+                    **actor_payload,
+                },
+                subject_index=subject_index,
+            )
 
         self.save(p.dataset_path, f"case-e: upsert_entry study={study_id} entry={entry_id}")
         return entry
@@ -861,48 +977,49 @@ class DataladStudyRepo:
         if target is None:
             raise FileNotFoundError("Entry not found")
 
-        old_entry = _json_load(target, {})
-        new_entry = _deepcopy_json(old_entry)
-        new_entry.update({
-            "subject_index": int(payload["subject_index"]),
-            "visit_index": int(payload["visit_index"]),
-            "group_index": int(payload["group_index"]),
-            "data": _deepcopy_json(payload.get("data") or {}),
-            "skipped_required_flags": _deepcopy_json(payload.get("skipped_required_flags") or []),
-            "updated_at": local_now().isoformat(),
-        })
+        with dataset_lock(LockSpec(dataset_path=p.dataset_path)):
+            old_entry = _json_load(target, {})
+            new_entry = _deepcopy_json(old_entry)
+            new_entry.update({
+                "subject_index": int(payload["subject_index"]),
+                "visit_index": int(payload["visit_index"]),
+                "group_index": int(payload["group_index"]),
+                "data": _deepcopy_json(payload.get("data") or {}),
+                "skipped_required_flags": _deepcopy_json(payload.get("skipped_required_flags") or []),
+                "updated_at": local_now().isoformat(),
+            })
 
-        diffs = self._compute_json_diff(old_entry.get("data", {}), new_entry.get("data", {}))
-        _json_dump(target, new_entry)
+            diffs = self._compute_json_diff(old_entry.get("data", {}), new_entry.get("data", {}))
+            _json_dump(target, new_entry)
 
-        labels = self._resolve_subject_visit_group_labels(
-            p,
-            subject_index=new_entry["subject_index"],
-            visit_index=new_entry["visit_index"],
-            group_index=new_entry["group_index"],
-            subject_raw=subject_raw,
-            visit_raw=visit_raw,
-            group_raw=group_raw,
-        )
-        actor_payload = self._build_actor_payload(actor=actor, actor_name=actor_name, user_id=user_id)
+            labels = self._resolve_subject_visit_group_labels(
+                p,
+                subject_index=new_entry["subject_index"],
+                visit_index=new_entry["visit_index"],
+                group_index=new_entry["group_index"],
+                subject_raw=subject_raw,
+                visit_raw=visit_raw,
+                group_raw=group_raw,
+            )
+            actor_payload = self._build_actor_payload(actor=actor, actor_name=actor_name, user_id=user_id)
 
-        self._append_audit(
-            p,
-            action="entry_upserted",
-            study_id=study_id,
-            payload={
-                "entry_id": entry_id,
-                "subject_index": new_entry["subject_index"],
-                "visit_index": new_entry["visit_index"],
-                "group_index": new_entry["group_index"],
-                "ui_label": audit_label,
-                "diff_kind": "entry_data",
-                "diff_payload": diffs,
-                **labels,
-                **actor_payload,
-            },
-            subject_index=new_entry["subject_index"],
-        )
+            self._append_audit(
+                p,
+                action="entry_upserted",
+                study_id=study_id,
+                payload={
+                    "entry_id": entry_id,
+                    "subject_index": new_entry["subject_index"],
+                    "visit_index": new_entry["visit_index"],
+                    "group_index": new_entry["group_index"],
+                    "ui_label": audit_label,
+                    "diff_kind": "entry_data",
+                    "diff_payload": diffs,
+                    **labels,
+                    **actor_payload,
+                },
+                subject_index=new_entry["subject_index"],
+            )
 
         self.save(p.dataset_path, f"case-e: update_entry study={study_id} entry={entry_id}")
         return new_entry
@@ -915,11 +1032,8 @@ class DataladStudyRepo:
             if row:
                 out.append(row)
         return out
+
     def _entry_sort_key(self, row: Dict[str, Any]) -> tuple:
-        """
-        Stable ordering for entries belonging to the same logical slot.
-        Later updated_at wins; if equal, later created_at wins; if equal, larger id wins.
-        """
         updated_at = str(row.get("updated_at") or "")
         created_at = str(row.get("created_at") or "")
         entry_id = int(row.get("id") or 0)
@@ -938,10 +1052,6 @@ class DataladStudyRepo:
         group_index: int,
         form_version: int,
     ) -> List[Dict[str, Any]]:
-        """
-        Returns all raw entries for the same logical slot.
-        This does NOT merge them. It only finds them.
-        """
         p = self.paths(study_id, study_name)
         out: List[Dict[str, Any]] = []
 
@@ -979,9 +1089,6 @@ class DataladStudyRepo:
         group_index: int,
         form_version: int,
     ) -> Optional[Dict[str, Any]]:
-        """
-        Returns the latest raw entry for a logical slot, or None if slot is empty.
-        """
         rows = self.find_entries_for_slot(
             study_id=study_id,
             study_name=study_name,
@@ -993,13 +1100,6 @@ class DataladStudyRepo:
         return rows[-1] if rows else None
 
     def compute_entry_revision_token(self, entry: Optional[Dict[str, Any]]) -> str:
-        """
-        Computes a deterministic revision token for optimistic concurrency checks.
-
-        Empty slot also gets a stable token so we can detect:
-        - slot was empty when user opened it
-        - someone else created data before this user saved
-        """
         if not entry:
             payload = {
                 "empty": True,
@@ -1031,10 +1131,6 @@ class DataladStudyRepo:
         group_index: int,
         form_version: int,
     ) -> Dict[str, Any]:
-        """
-        Returns the current/latest state for one logical slot together with a revision token.
-        This is the object your add-data screen should use when opening a cell.
-        """
         latest = self.get_latest_entry_for_slot(
             study_id=study_id,
             study_name=study_name,
@@ -1095,12 +1191,6 @@ class DataladStudyRepo:
         form_version: int,
         expected_revision_token: Optional[str],
     ) -> Dict[str, Any]:
-        """
-        Checks whether the slot is still in the same state as when the client opened it.
-
-        Returns latest slot state if OK.
-        Raises ValueError if changed.
-        """
         latest_state = self.get_current_slot_state(
             study_id=study_id,
             study_name=study_name,
@@ -1117,6 +1207,7 @@ class DataladStudyRepo:
             raise ValueError("Slot state changed")
 
         return latest_state
+
     def version_has_entries(self, study_id: int, study_name: str, version: int) -> bool:
         p = self.paths(study_id, study_name)
         version_dir = p.entries_dir / f"v{int(version):03d}"
@@ -1127,10 +1218,6 @@ class DataladStudyRepo:
         return False
 
     def list_latest_entries_by_slot(self, study_id: int, study_name: str) -> List[Dict[str, Any]]:
-        """
-        Returns only the latest entry for each logical slot:
-        (subject_index, visit_index, group_index, form_version)
-        """
         rows = self.list_entries(study_id, study_name)
         latest_by_slot: Dict[tuple, Dict[str, Any]] = {}
 
@@ -1182,50 +1269,52 @@ class DataladStudyRepo:
         actor_name: Optional[str] = None,
     ) -> Dict[str, Any]:
         p = self.ensure_dataset(study_id, study_name)
-        file_id = self._next_file_id(p)
-        ext = Path(filename).suffix
-        dest = p.files_dir / f"file_{file_id:09d}{ext}"
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(source_path, dest)
 
-        record = {
-            "id": file_id,
-            "study_id": study_id,
-            "file_name": filename,
-            "file_path": str(dest.relative_to(p.dataset_path)),
-            "description": description or "",
-            "storage_option": "bids",
-            "subject_index": subject_index,
-            "visit_index": visit_index,
-            "group_index": group_index,
-            "created_at": local_now().isoformat(),
-        }
-        _json_dump(p.files_dir / f"file_{file_id:09d}.json", record)
+        with dataset_lock(LockSpec(dataset_path=p.dataset_path)):
+            file_id = self._next_file_id(p)
+            ext = Path(filename).suffix
+            dest = p.files_dir / f"file_{file_id:09d}{ext}"
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source_path, dest)
 
-        labels = self._resolve_subject_visit_group_labels(
-            p,
-            subject_index=subject_index,
-            visit_index=visit_index,
-            group_index=group_index,
-        )
-        actor_payload = self._build_actor_payload(actor=actor, actor_name=actor_name, user_id=user_id)
-
-        self._append_audit(
-            p,
-            action="file_added",
-            study_id=study_id,
-            payload={
-                "file_id": file_id,
+            record = {
+                "id": file_id,
+                "study_id": study_id,
                 "file_name": filename,
-                "ui_label": audit_label,
+                "file_path": self._logical_path(p.dataset_path, dest),
+                "description": description or "",
+                "storage_option": "bids",
                 "subject_index": subject_index,
                 "visit_index": visit_index,
                 "group_index": group_index,
-                **labels,
-                **actor_payload,
-            },
-            subject_index=subject_index,
-        )
+                "created_at": local_now().isoformat(),
+            }
+            _json_dump(p.files_dir / f"file_{file_id:09d}.json", record)
+
+            labels = self._resolve_subject_visit_group_labels(
+                p,
+                subject_index=subject_index,
+                visit_index=visit_index,
+                group_index=group_index,
+            )
+            actor_payload = self._build_actor_payload(actor=actor, actor_name=actor_name, user_id=user_id)
+
+            self._append_audit(
+                p,
+                action="file_added",
+                study_id=study_id,
+                payload={
+                    "file_id": file_id,
+                    "file_name": filename,
+                    "ui_label": audit_label,
+                    "subject_index": subject_index,
+                    "visit_index": visit_index,
+                    "group_index": group_index,
+                    **labels,
+                    **actor_payload,
+                },
+                subject_index=subject_index,
+            )
 
         self.save(p.dataset_path, f"case-e: upload_file study={study_id} file={file_id}")
         return record
@@ -1246,48 +1335,50 @@ class DataladStudyRepo:
         actor_name: Optional[str] = None,
     ) -> Dict[str, Any]:
         p = self.ensure_dataset(study_id, study_name)
-        file_id = self._next_file_id(p)
-        name = os.path.basename(url) or "link"
 
-        record = {
-            "id": file_id,
-            "study_id": study_id,
-            "file_name": name,
-            "file_path": url,
-            "description": description or "",
-            "storage_option": "url",
-            "subject_index": subject_index,
-            "visit_index": visit_index,
-            "group_index": group_index,
-            "created_at": local_now().isoformat(),
-        }
-        _json_dump(p.files_dir / f"file_{file_id:09d}.json", record)
+        with dataset_lock(LockSpec(dataset_path=p.dataset_path)):
+            file_id = self._next_file_id(p)
+            name = os.path.basename(url) or "link"
 
-        labels = self._resolve_subject_visit_group_labels(
-            p,
-            subject_index=subject_index,
-            visit_index=visit_index,
-            group_index=group_index,
-        )
-        actor_payload = self._build_actor_payload(actor=actor, actor_name=actor_name, user_id=user_id)
-
-        self._append_audit(
-            p,
-            action="file_added",
-            study_id=study_id,
-            payload={
-                "file_id": file_id,
-                "url": url,
+            record = {
+                "id": file_id,
+                "study_id": study_id,
                 "file_name": name,
-                "ui_label": audit_label,
+                "file_path": url,
+                "description": description or "",
+                "storage_option": "url",
                 "subject_index": subject_index,
                 "visit_index": visit_index,
                 "group_index": group_index,
-                **labels,
-                **actor_payload,
-            },
-            subject_index=subject_index,
-        )
+                "created_at": local_now().isoformat(),
+            }
+            _json_dump(p.files_dir / f"file_{file_id:09d}.json", record)
+
+            labels = self._resolve_subject_visit_group_labels(
+                p,
+                subject_index=subject_index,
+                visit_index=visit_index,
+                group_index=group_index,
+            )
+            actor_payload = self._build_actor_payload(actor=actor, actor_name=actor_name, user_id=user_id)
+
+            self._append_audit(
+                p,
+                action="file_added",
+                study_id=study_id,
+                payload={
+                    "file_id": file_id,
+                    "url": url,
+                    "file_name": name,
+                    "ui_label": audit_label,
+                    "subject_index": subject_index,
+                    "visit_index": visit_index,
+                    "group_index": group_index,
+                    **labels,
+                    **actor_payload,
+                },
+                subject_index=subject_index,
+            )
 
         self.save(p.dataset_path, f"case-e: create_url_file study={study_id} file={file_id}")
         return record
@@ -1325,24 +1416,26 @@ class DataladStudyRepo:
             "created_by": created_by,
             "created_at": local_now().isoformat(),
         }
-        _json_dump(p.access_dir / f"user_{int(user_id):09d}.json", row)
 
-        actor_payload = self._build_actor_payload(
-            actor=actor,
-            actor_name=actor_name,
-            user_id=created_by,
-        )
+        with dataset_lock(LockSpec(dataset_path=p.dataset_path)):
+            _json_dump(p.access_dir / f"user_{int(user_id):09d}.json", row)
 
-        self._append_audit(
-            p,
-            action="access_changed",
-            study_id=study_id,
-            payload={
-                "target_user_id": user_id,
-                "permissions": row["permissions"],
-                **actor_payload,
-            },
-        )
+            actor_payload = self._build_actor_payload(
+                actor=actor,
+                actor_name=actor_name,
+                user_id=created_by,
+            )
+
+            self._append_audit(
+                p,
+                action="access_changed",
+                study_id=study_id,
+                payload={
+                    "target_user_id": user_id,
+                    "permissions": row["permissions"],
+                    **actor_payload,
+                },
+            )
 
         self.save(p.dataset_path, f"case-e: access_change study={study_id} user={user_id}")
         return row
@@ -1360,23 +1453,25 @@ class DataladStudyRepo:
         p = self.paths(study_id, study_name)
         f = p.access_dir / f"user_{int(user_id):09d}.json"
         if f.exists():
-            f.unlink()
+            with dataset_lock(LockSpec(dataset_path=p.dataset_path)):
+                if f.exists():
+                    f.unlink()
 
-            actor_payload = self._build_actor_payload(
-                actor=actor,
-                actor_name=actor_name,
-                user_id=acting_user_id,
-            )
+                actor_payload = self._build_actor_payload(
+                    actor=actor,
+                    actor_name=actor_name,
+                    user_id=acting_user_id,
+                )
 
-            self._append_audit(
-                p,
-                action="access_revoked",
-                study_id=study_id,
-                payload={
-                    "target_user_id": user_id,
-                    **actor_payload,
-                },
-            )
+                self._append_audit(
+                    p,
+                    action="access_revoked",
+                    study_id=study_id,
+                    payload={
+                        "target_user_id": user_id,
+                        **actor_payload,
+                    },
+                )
 
             self.save(p.dataset_path, f"case-e: revoke_access study={study_id} user={user_id}")
 
@@ -1420,33 +1515,35 @@ class DataladStudyRepo:
             "allowed_section_ids": allowed_section_ids or [],
             "created_at": local_now().isoformat(),
         }
-        _json_dump(p.shares_dir / f"{token}.json", row)
 
-        labels = self._resolve_subject_visit_group_labels(
-            p,
-            subject_index=subject_index,
-            visit_index=visit_index,
-            group_index=group_index,
-        )
-        actor_payload = self._build_actor_payload(actor=actor, actor_name=actor_name, user_id=user_id)
+        with dataset_lock(LockSpec(dataset_path=p.dataset_path)):
+            _json_dump(p.shares_dir / f"{token}.json", row)
 
-        self._append_audit(
-            p,
-            action="share_link_created",
-            study_id=study_id,
-            payload={
-                "permission": permission,
-                "max_uses": max_uses,
-                "expires_at": expires_at,
-                "allowed_section_ids": allowed_section_ids or [],
-                "subject_index": subject_index,
-                "visit_index": visit_index,
-                "group_index": group_index,
-                **labels,
-                **actor_payload,
-            },
-            subject_index=subject_index,
-        )
+            labels = self._resolve_subject_visit_group_labels(
+                p,
+                subject_index=subject_index,
+                visit_index=visit_index,
+                group_index=group_index,
+            )
+            actor_payload = self._build_actor_payload(actor=actor, actor_name=actor_name, user_id=user_id)
+
+            self._append_audit(
+                p,
+                action="share_link_created",
+                study_id=study_id,
+                payload={
+                    "permission": permission,
+                    "max_uses": max_uses,
+                    "expires_at": expires_at,
+                    "allowed_section_ids": allowed_section_ids or [],
+                    "subject_index": subject_index,
+                    "visit_index": visit_index,
+                    "group_index": group_index,
+                    **labels,
+                    **actor_payload,
+                },
+                subject_index=subject_index,
+            )
 
         self.save(p.dataset_path, f"case-e: share_link_created study={study_id}")
         return row
@@ -1460,7 +1557,8 @@ class DataladStudyRepo:
 
     def update_share_link(self, *, study_id: int, study_name: str, token: str, row: Dict[str, Any]) -> None:
         p = self.paths(study_id, study_name)
-        _json_dump(p.shares_dir / f"{token}.json", row)
+        with dataset_lock(LockSpec(dataset_path=p.dataset_path)):
+            _json_dump(p.shares_dir / f"{token}.json", row)
         self.save(p.dataset_path, f"case-e: shared_link_used study={study_id}")
 
     # ------------------------------------------------------------------
@@ -1486,8 +1584,6 @@ class DataladStudyRepo:
         while canonical_dir.name != "canonical" and canonical_dir.parent != canonical_dir:
             canonical_dir = canonical_dir.parent
         dataset_path = canonical_dir.parent
-        study_id = 0
-        study_name = "unknown"
         return StudyPaths(
             dataset_path=dataset_path,
             canonical_dir=canonical_dir,

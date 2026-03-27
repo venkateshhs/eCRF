@@ -16,7 +16,13 @@ pytz
 requests
 tzdata
 pyinstaller
-
+datalad
+git-annex
+PyYAML
+python-dateutil
+jinja2
+aiofiles
+psycopg2-binary
 # npm install --save-dev sass sass-loader
 # npm install dayjs # added for datepicker
 # pip install dump-things-service

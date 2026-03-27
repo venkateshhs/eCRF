@@ -20,7 +20,7 @@ except Exception:  # pragma: no cover
 @dataclass
 class DataladJob:
     dataset_path: Path
-    op: str  # "save" | "push" | "ensure_ria"
+    op: str  # "save" | "push"
     message: Optional[str] = None
     to: Optional[str] = None
     attempt: int = 0
@@ -38,6 +38,7 @@ class DataladWorker:
     def start(self) -> None:
         if self._t and self._t.is_alive():
             return
+        self._stop.clear()
         self._t = threading.Thread(target=self._run, name="datalad-worker", daemon=True)
         self._t.start()
         self.log("DataLad worker started")
@@ -52,53 +53,73 @@ class DataladWorker:
         self._q.put(job)
 
     def enqueue_save(self, dataset_path: Path, message: str) -> None:
-        self.enqueue(DataladJob(dataset_path=dataset_path, op="save", message=message))
+        self.enqueue(DataladJob(dataset_path=Path(dataset_path), op="save", message=message))
 
     def enqueue_push(self, dataset_path: Path, to: str) -> None:
-        self.enqueue(DataladJob(dataset_path=dataset_path, op="push", to=to))
+        self.enqueue(DataladJob(dataset_path=Path(dataset_path), op="push", to=to))
 
     def _run(self) -> None:
-        while not self._stop.is_set():
+        while True:
+            if self._stop.is_set() and self._q.empty():
+                break
+
             try:
                 job = self._q.get(timeout=0.5)
             except queue.Empty:
                 continue
+
             try:
                 self._execute(job)
             except Exception as e:
                 job.attempt += 1
-                if job.attempt < job.max_attempts:
+                if job.attempt < job.max_attempts and not self._stop.is_set():
                     backoff = min(2 ** job.attempt, 30)
-                    self.log(f"Job failed ({job.op}) attempt={job.attempt}, retry in {backoff}s: {e}")
+                    self.log(
+                        f"Job failed ({job.op}) attempt={job.attempt}, retry in {backoff}s: {e}"
+                    )
                     time.sleep(backoff)
                     self._q.put(job)
                 else:
-                    self.log(f"Job permanently failed ({job.op}) after {job.attempt} attempts: {e}")
+                    self.log(
+                        f"Job permanently failed ({job.op}) after {job.attempt} attempts: {e}"
+                    )
             finally:
                 self._q.task_done()
+
+    def _set_repo_identity(self, ds) -> None:
+        try:
+            ds.repo.set_config("user.name", self.cfg.git_name, where="local")
+            ds.repo.set_config("user.email", self.cfg.git_email, where="local")
+            if self.cfg.gpgsign:
+                ds.repo.set_config("commit.gpgsign", "true", where="local")
+                if self.cfg.gpg_keyid:
+                    ds.repo.set_config("user.signingkey", self.cfg.gpg_keyid, where="local")
+        except Exception:
+            # best effort only
+            pass
+
+    def _push_dataset(self, ds, to: str) -> None:
+        push_kwargs = {"to": to}
+
+        data_mode = getattr(self.cfg, "push_data_mode", "auto-if-wanted")
+        if data_mode and data_mode != "nothing":
+            push_kwargs["data"] = data_mode
+
+        ds.push(**push_kwargs)
+        self.log(f"Pushed dataset: {ds.path} to={to} data_mode={data_mode}")
 
     def _execute(self, job: DataladJob) -> None:
         if Dataset is None:
             raise RuntimeError("DataLad not installed in this environment")
 
-        ds_path = job.dataset_path
+        ds_path = Path(job.dataset_path)
+
         with dataset_lock(LockSpec(dataset_path=ds_path, timeout_s=300.0)):
             ds = Dataset(str(ds_path))
             if not ds.is_installed():
-                # dataset creation is handled elsewhere; fail loudly for operator attention
                 raise RuntimeError(f"Dataset not installed at {ds_path}")
 
-            # Ensure repo identity (avoids common warnings)
-            try:
-                ds.repo.set_config("user.name", self.cfg.git_name, where="local")
-                ds.repo.set_config("user.email", self.cfg.git_email, where="local")
-                if self.cfg.gpgsign:
-                    ds.repo.set_config("commit.gpgsign", "true", where="local")
-                    if self.cfg.gpg_keyid:
-                        ds.repo.set_config("user.signingkey", self.cfg.gpg_keyid, where="local")
-            except Exception:
-                # best effort; do not fail job
-                pass
+            self._set_repo_identity(ds)
 
             if job.op == "save":
                 msg = job.message or "case-e: save"
@@ -106,15 +127,12 @@ class DataladWorker:
                 self.log(f"Saved dataset: {ds_path} msg={msg}")
 
                 if self.cfg.push_on_save and self.cfg.ria_name:
-                    # push data auto-if-wanted; you may tune to "all"
-                    ds.push(to=self.cfg.ria_name, data="auto-if-wanted")
-                    self.log(f"Pushed dataset: {ds_path} to={self.cfg.ria_name}")
+                    self._push_dataset(ds, to=self.cfg.ria_name)
 
             elif job.op == "push":
                 if not job.to:
                     raise ValueError("push requires 'to' sibling name")
-                ds.push(to=job.to, data="auto-if-wanted")
-                self.log(f"Pushed dataset: {ds_path} to={job.to}")
+                self._push_dataset(ds, to=job.to)
 
             else:
                 raise ValueError(f"Unknown job op: {job.op}")

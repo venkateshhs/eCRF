@@ -1,41 +1,55 @@
-# eCRF_backend/db_bootstrap.py
 from __future__ import annotations
-
-import os
 
 from sqlalchemy.orm import Session
 
-from .database import Base, engine, SessionLocal
 from . import models
-from .logger import logger
 from .auth import hash_password
+from .database import Base, SessionLocal, engine
+from .logger import logger
+from .settings import get_settings
 
-
-def _hash_password(password: str) -> str:
-    return hash_password(password)
+settings = get_settings()
 
 
 def ensure_tables() -> None:
+    if not settings.db_auto_create:
+        logger.info("Database auto-create disabled; skipping Base.metadata.create_all()")
+        return
     Base.metadata.create_all(bind=engine)
     logger.info("Database tables ensured")
 
 
 def ensure_admin_user() -> None:
-    username = os.environ.get("ECRF_ADMIN_USERNAME", "admin").strip()
-    email = os.environ.get("ECRF_ADMIN_EMAIL", "admin@case-e.com").strip()
-    password = os.environ.get("ECRF_ADMIN_PASSWORD", "Admin123!").strip()
+    if not settings.bootstrap_admin:
+        logger.info("Bootstrap admin disabled; skipping admin user creation")
+        return
 
-    first_name = os.environ.get("ECRF_ADMIN_FIRST_NAME", "Admin").strip()
-    last_name = os.environ.get("ECRF_ADMIN_LAST_NAME", "User").strip()
-    role = os.environ.get("ECRF_ADMIN_ROLE", "Administrator").strip()
+    if settings.is_production and not settings.admin_password:
+        raise RuntimeError(
+            "ECRF_BOOTSTRAP_ADMIN=1 in production requires ECRF_ADMIN_PASSWORD to be set."
+        )
+
+    username = settings.admin_username
+    email = settings.admin_email
+    password = settings.admin_password or "Admin123!"
+    first_name = settings.admin_first_name
+    last_name = settings.admin_last_name
+    role = settings.admin_role
+
+    if settings.is_production and password == "Admin123!":
+        raise RuntimeError("Default bootstrap admin password is not allowed in production.")
 
     db: Session = SessionLocal()
     try:
         existing = db.query(models.User).filter(models.User.username == username).first()
+
         if existing:
             logger.info("Bootstrap admin already exists: %s", username)
-
-            profile = db.query(models.UserProfile).filter(models.UserProfile.user_id == existing.id).first()
+            profile = (
+                db.query(models.UserProfile)
+                .filter(models.UserProfile.user_id == existing.id)
+                .first()
+            )
             changed = False
 
             if profile is None:
@@ -48,29 +62,28 @@ def ensure_admin_user() -> None:
                 db.add(profile)
                 changed = True
             else:
-                if not profile.first_name:
-                    profile.first_name = first_name or "Admin"
+                if not profile.first_name and first_name:
+                    profile.first_name = first_name
                     changed = True
-                if not profile.last_name:
-                    profile.last_name = last_name or "User"
+                if not profile.last_name and last_name:
+                    profile.last_name = last_name
                     changed = True
-                if not profile.role:
-                    profile.role = role or "Administrator"
+                if not profile.role and role:
+                    profile.role = role
                     changed = True
 
             if changed:
                 db.commit()
-                logger.info("Bootstrap admin profile repaired: %s", username)
+                logger.info("Bootstrap admin profile synced for: %s", username)
             return
 
         user = models.User(
             username=username,
             email=email,
-            password=_hash_password(password),
+            password=hash_password(password),
         )
         db.add(user)
-        db.commit()
-        db.refresh(user)
+        db.flush()
 
         profile = models.UserProfile(
             user_id=user.id,
@@ -81,11 +94,9 @@ def ensure_admin_user() -> None:
         db.add(profile)
         db.commit()
 
-        logger.info("Bootstrap admin created: username=%s email=%s", username, email)
-
+        logger.info("Bootstrap admin created: %s", username)
     except Exception:
         db.rollback()
-        logger.exception("Failed to bootstrap admin user")
         raise
     finally:
         db.close()

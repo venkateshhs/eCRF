@@ -17,12 +17,21 @@ from . import schemas, models
 from .users import get_current_user
 from .datalad_repo import DataladStudyRepo, _deepcopy_json, local_now
 from .versions import VersionManager
+from .settings import get_settings
 
 router = APIRouter(prefix="/forms", tags=["forms"])
 repo = DataladStudyRepo()
 
-TEMPLATE_DIR = Path(os.environ.get("ECRF_TEMPLATES_DIR", "")) if os.environ.get("ECRF_TEMPLATES_DIR") \
-    else (Path(__file__).resolve().parent / "templates")
+settings = get_settings()
+TEMPLATE_DIR = (
+    Path(os.environ.get("ECRF_TEMPLATES_DIR", "")).expanduser().resolve()
+    if os.environ.get("ECRF_TEMPLATES_DIR")
+    else (
+        settings.templates_dir
+        if settings.templates_dir is not None
+        else (Path(__file__).resolve().parent / "templates")
+    )
+)
 
 ALLOWED_STUDY_STATUS = {"DRAFT", "PUBLISHED", "ARCHIVED"}
 
@@ -156,6 +165,13 @@ def _latest_template_or_500(db: Session, study_id: int) -> models.StudyTemplateV
     if row is None:
         raise HTTPException(status_code=500, detail="Template version not found")
     return row
+
+
+def _resolve_form_version_or_400(db: Session, study_id: int, version: Optional[int]) -> int:
+    try:
+        return VersionManager.assert_latest_is_used(db, study_id, version)
+    except ValueError as ve:
+        raise HTTPException(status_code=400, detail=str(ve))
 
 
 def _write_published_snapshot_to_datalad(
@@ -541,6 +557,7 @@ def get_template_version(
         "created_at": row.created_at,
     }
 
+
 @router.get("/studies/{study_id}/slot-data", response_model=schemas.StudyDataSlotStateOut)
 def get_slot_data(
     study_id: int,
@@ -561,16 +578,23 @@ def get_slot_data(
         raise HTTPException(status_code=400, detail="Data entry is only available for published studies")
 
     if version is None:
-        form_version = repo.latest_writable_version(study_id, meta.study_name)
+        latest_tv = _latest_template_or_500(db, study_id)
+        form_version = int(latest_tv.version)
     else:
         try:
             form_version = int(version)
         except Exception:
             raise HTTPException(status_code=400, detail="Invalid version")
 
-        try:
-            repo.get_template(study_id, meta.study_name, form_version)
-        except FileNotFoundError:
+        row = (
+            db.query(models.StudyTemplateVersion)
+            .filter(
+                models.StudyTemplateVersion.study_id == study_id,
+                models.StudyTemplateVersion.version == form_version,
+            )
+            .first()
+        )
+        if not row:
             raise HTTPException(status_code=404, detail=f"Template version {form_version} not found")
 
     slot_state = repo.get_current_slot_state(
@@ -583,6 +607,7 @@ def get_slot_data(
     )
 
     return slot_state
+
 
 @router.put("/studies/{study_id}", response_model=schemas.StudyFull)
 def update_study(
@@ -806,6 +831,7 @@ def create_url_file(
         audit_label=audit_label,
     )
 
+
 @router.post(
     "/studies/{study_id}/data",
     response_model=schemas.StudyDataEntryOut,
@@ -835,13 +861,10 @@ def save_study_data(
     if (meta.status or "PUBLISHED").upper().strip() != "PUBLISHED":
         raise HTTPException(status_code=400, detail="Data entry is only allowed for published studies")
 
-    try:
-        form_version = VersionManager.assert_latest_is_used(db, study_id, version)
-    except ValueError as ve:
-        raise HTTPException(status_code=400, detail=str(ve))
+    form_version = _resolve_form_version_or_400(db, study_id, version)
 
     try:
-        latest_slot_state = repo.assert_slot_revision_unchanged(
+        repo.assert_slot_revision_unchanged(
             study_id=study_id,
             study_name=meta.study_name,
             subject_index=payload.subject_index,
@@ -885,6 +908,8 @@ def save_study_data(
         user_id=current_user.id,
         audit_label=audit_label,
     )
+
+
 @router.put("/studies/{study_id}/data_entries/{entry_id}", response_model=schemas.StudyDataEntryOut)
 def update_study_data_entry(
     study_id: int,
@@ -905,7 +930,6 @@ def update_study_data_entry(
     if (meta.status or "PUBLISHED").upper().strip() != "PUBLISHED":
         raise HTTPException(status_code=400, detail="Data entry is only allowed for published studies")
 
-    # entry update keeps the entry's own form version if possible
     target_entry = None
     for e in repo.list_entries(study_id, meta.study_name):
         try:
@@ -921,7 +945,7 @@ def update_study_data_entry(
     form_version = int(target_entry.get("form_version") or 1)
 
     try:
-        latest_slot_state = repo.assert_slot_revision_unchanged(
+        repo.assert_slot_revision_unchanged(
             study_id=study_id,
             study_name=meta.study_name,
             subject_index=payload.subject_index,
@@ -968,6 +992,7 @@ def update_study_data_entry(
         audit_label=audit_label,
     )
 
+
 @router.get("/studies/{study_id}/data_entries", response_model=schemas.PaginatedStudyDataEntries)
 def list_study_data_entries(
     study_id: int,
@@ -985,7 +1010,6 @@ def list_study_data_entries(
     _assert_has_study_permission(db, meta, user, required="view")
 
     entries = repo.list_latest_entries_by_slot(study_id, meta.study_name) if current_only else repo.list_entries(study_id, meta.study_name)
-    total = len(entries)
 
     if not all:
         if subject_indexes:
@@ -998,7 +1022,8 @@ def list_study_data_entries(
             if visit_idx_list:
                 entries = [e for e in entries if int(e.get("visit_index", -1)) in visit_idx_list]
 
-    return {"total": total, "entries": entries}
+    return {"total": len(entries), "entries": entries}
+
 
 @router.post("/studies/{study_id}/access", response_model=schemas.StudyAccessGrantOut, status_code=201)
 def grant_study_access(
@@ -1139,14 +1164,18 @@ def create_share_link(
     for m_idx, sec in enumerate(selected_models):
         if not isinstance(sec, dict):
             continue
-        if bool(assignments[m_idx][v_idx][g_idx]) if (
+        assigned = False
+        if (
             isinstance(assignments, list)
             and m_idx < len(assignments)
             and isinstance(assignments[m_idx], list)
             and v_idx < len(assignments[m_idx])
             and isinstance(assignments[m_idx][v_idx], list)
             and g_idx < len(assignments[m_idx][v_idx])
-        ) else False:
+        ):
+            assigned = bool(assignments[m_idx][v_idx][g_idx])
+
+        if assigned:
             sec_id = str(sec.get("_id") or sec.get("id") or "").strip()
             if sec_id:
                 assigned_section_ids.add(sec_id)
@@ -1252,10 +1281,7 @@ def shared_upsert_data(
     if (meta.status or "PUBLISHED").upper().strip() != "PUBLISHED":
         raise HTTPException(status_code=400, detail="Shared data entry is only allowed for published studies")
 
-    try:
-        form_version = VersionManager.assert_latest_is_used(db, access.study_id, version)
-    except ValueError as ve:
-        raise HTTPException(status_code=400, detail=str(ve))
+    form_version = _resolve_form_version_or_400(db, access.study_id, version)
 
     content_row = _get_content_row_or_404(db, access.study_id)
     study_data = content_row.study_data or {}

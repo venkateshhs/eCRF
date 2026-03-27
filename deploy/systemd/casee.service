@@ -1,0 +1,27 @@
+[Unit]
+Description=case-e FastAPI backend
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+User=casee
+Group=casee
+WorkingDirectory=/opt/casee
+EnvironmentFile=/opt/casee/.env
+ExecStart=/opt/casee/deploy/run_backend.sh
+Restart=always
+RestartSec=3
+TimeoutStartSec=120
+TimeoutStopSec=30
+KillSignal=SIGTERM
+
+# modest hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ReadWritePaths=/opt/casee /srv/casee
+UMask=0027
+
+[Install]
+WantedBy=multi-user.target
