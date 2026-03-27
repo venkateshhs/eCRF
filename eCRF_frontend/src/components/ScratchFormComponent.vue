@@ -484,9 +484,7 @@
           <button @click.prevent="addNewSection" class="btn-option">
             + Add Section
           </button>
-          <button @click.prevent="confirmClearForm" class="btn-option">
-            Clear All
-          </button>
+
           <button
             @click.prevent="openLogicAndCalculations"
             class="btn-option"
@@ -501,6 +499,8 @@
           >
             Create Visit Schedule
           </button>
+
+
           <!-- Additional options (Download/Upload) -->
           <div class="additional-options" @click.stop>
             <button
@@ -519,11 +519,20 @@
               role="menu"
               aria-label="Additional options"
             >
+              <button class="options-item" role="menuitem" @click.prevent="openImportCsvDialog">
+                Import CSV / Excel Template
+              </button>
+
               <button class="options-item" role="menuitem" @click.prevent="onDownloadTemplate">
                 Download Template
               </button>
+
               <button class="options-item" role="menuitem" @click.prevent="onUploadTemplate">
                 Upload Template
+              </button>
+
+              <button class="options-item danger" role="menuitem" @click.prevent="confirmClearForm">
+                Clear All
               </button>
             </div>
           </div>
@@ -632,6 +641,15 @@
         </div>
       </div>
     </div>
+    <!-- Import CSV / Excel Dialog -->
+    <div v-if="showImportCsvDialog" class="modal-overlay import-overlay">
+      <div class="modal-container">
+        <ImportCsvTemplateDialog
+          @close="closeImportCsvDialog"
+          @import-fields="handleImportedCsvFields"
+        />
+      </div>
+    </div>
 
     <!-- Upload Dialog -->
     <div v-if="showUploadDialog" class="modal-overlay">
@@ -720,9 +738,11 @@ import FieldLinearScale from "@/components/fields/FieldLinearScale.vue";
 import FieldFileUpload from "@/components/fields/FieldFileUpload.vue";
 import { normalizeConstraints, coerceDefaultForType } from "@/utils/constraints";
 import LogicCalculationsRoute from "./LogicCalculationsRoute.vue";
+import ImportCsvTemplateDialog from "./ImportCsvTemplateDialog.vue";
 export default {
   name: "ScratchFormComponent",
   components: {
+    ImportCsvTemplateDialog,
     ShaclComponents,
     ProtocolMatrix,
     LogicCalculationsRoute,
@@ -831,6 +851,8 @@ export default {
       // Template takeover target controls
       modelAddToExisting: false,
       modelTargetSectionIndex: 0,
+
+      showImportCsvDialog: false,
 
       dragState: {
         kind: null,
@@ -1028,6 +1050,80 @@ export default {
   },
 
   methods: {
+  openImportCsvDialog() {
+  this.closeAdditionalOptions();
+  this.showImportCsvDialog = true;
+},
+
+closeImportCsvDialog() {
+  this.showImportCsvDialog = false;
+},
+
+handleImportedCsvFields(importedFields) {
+  this.ensureCurrentFormExists();
+
+  const fields = Array.isArray(importedFields) ? importedFields : [];
+  if (!fields.length) {
+    this.openGenericDialog("No fields were generated from the selected file.");
+    return;
+  }
+
+  if (!this.currentForm.sections.length) {
+    this.addNewSection();
+  }
+
+  const sec = this.currentForm.sections[this.activeSection];
+  if (!sec) {
+    this.openGenericDialog("No active section available.");
+    return;
+  }
+
+  if (sec.collapsed) {
+    sec.collapsed = false;
+  }
+
+  const existingNames = new Set((sec.fields || []).map(f => String(f?.name || "")));
+  let added = 0;
+
+  fields.forEach((field, idx) => {
+    let candidateName = String(field?.name || `imported_field_${Date.now()}_${idx}`).trim();
+    if (!candidateName) {
+      candidateName = `imported_field_${Date.now()}_${idx}`;
+    }
+
+    let uniqueName = candidateName;
+    let counter = 2;
+    while (existingNames.has(uniqueName)) {
+      uniqueName = `${candidateName}_${counter}`;
+      counter += 1;
+    }
+    existingNames.add(uniqueName);
+
+    sec.fields.push({
+      ...JSON.parse(JSON.stringify(field)),
+      _id: field?._id || this.uuidForLogic(),
+      name: uniqueName,
+      constraints: {
+        visibilityLogic: {
+          action: "show",
+          match: "all",
+          rules: []
+        },
+        ...(JSON.parse(JSON.stringify(field?.constraints || {})))
+      }
+    });
+
+    added += 1;
+  });
+
+  this.showImportCsvDialog = false;
+
+  if (!this.hydratingScratch) {
+    this.$store.commit("setStudyCreationDirty", true);
+  }
+
+  this.openGenericDialog(`${added} field(s) imported into "${sec.title}".`);
+},
     uuidForLogic() {
       if (typeof crypto !== "undefined" && crypto.randomUUID) return crypto.randomUUID();
       return `id_${Date.now()}_${Math.random().toString(16).slice(2)}`;
@@ -3217,7 +3313,9 @@ input, textarea, select {
   cursor: pointer;
   flex: 1;
 }
-
+.options-item.danger {
+  color: #b91c1c;
+}
 .protocol-btn::after { content: ' →'; }
 
 .btn-primary {
@@ -3354,5 +3452,28 @@ input, textarea, select {
 
   /* optional: nicer alignment */
   transform: translateY(1px);
+}
+.modal-overlay.import-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+
+  background: rgba(0, 0, 0, 0.45); /* 🔥 THIS was missing */
+  backdrop-filter: blur(2px);
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  z-index: 2000;
+}
+
+.modal-container {
+  width: 100%;
+  display: flex;
+  justify-content: center;
+  align-items: center;
 }
 </style>
