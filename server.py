@@ -195,7 +195,6 @@ def _ask_user_for_data_dir() -> Path | None:
 
 
 def _load_or_init_data_dir() -> Path:
-    # explicit env wins
     env_dir = (os.environ.get("ECRF_DATA_DIR") or "").strip()
     if env_dir:
         data_dir = Path(env_dir).expanduser().resolve()
@@ -249,11 +248,16 @@ def _configure_local_environment() -> Path:
     _load_dotenv_if_present()
 
     data_dir = _load_or_init_data_dir()
-    bids_root = Path(os.environ.get("BIDS_ROOT", "")).expanduser().resolve() if os.environ.get("BIDS_ROOT") else (data_dir / "bids_datasets").resolve()
+    bids_root = (
+        Path(os.environ.get("BIDS_ROOT", "")).expanduser().resolve()
+        if os.environ.get("BIDS_ROOT")
+        else (data_dir / "bids_datasets").resolve()
+    )
     db_path = (data_dir / "ecrf.db").resolve()
 
+    # Force local launcher behavior when running python server.py / packaged app
     os.environ["ECRF_DATA_DIR"] = str(data_dir)
-    os.environ.setdefault("BIDS_ROOT", str(bids_root))
+    os.environ["BIDS_ROOT"] = str(bids_root)
 
     os.environ["ECRF_ENV"] = "development"
     os.environ["ECRF_PROFILE"] = "local"
@@ -261,10 +265,12 @@ def _configure_local_environment() -> Path:
     os.environ["ECRF_DB_AUTO_CREATE"] = "1"
     os.environ["ECRF_ALLOW_SQLITE_IN_PRODUCTION"] = "0"
 
+    # Auth defaults for local mode
     os.environ.setdefault("ECRF_SECRET_KEY", "case-e-local-dev-secret")
     os.environ.setdefault("ECRF_JWT_ALGORITHM", "HS256")
     os.environ.setdefault("ECRF_PASSWORD_HASHING_ENABLED", "1")
 
+    # Local bootstrap admin
     os.environ.setdefault("ECRF_BOOTSTRAP_ADMIN", "1")
     os.environ.setdefault("ECRF_ADMIN_USERNAME", "admin")
     os.environ.setdefault("ECRF_ADMIN_EMAIL", "admin@case-e.local")
@@ -273,34 +279,35 @@ def _configure_local_environment() -> Path:
     os.environ.setdefault("ECRF_ADMIN_LAST_NAME", "User")
     os.environ.setdefault("ECRF_ADMIN_ROLE", "Administrator")
 
+    # Local network / browser
     os.environ["ECRF_BIND_HOST"] = "127.0.0.1"
     os.environ["ECRF_OPEN_BROWSER"] = "1"
     os.environ["ECRF_PORT"] = os.environ.get("ECRF_PORT", "8000")
 
-    # Local DataLad mode
-    os.environ.setdefault("BIDS_DATALAD_ENABLED", "1")
-    os.environ.setdefault("ECRF_DATALAD_MODE", "shadow")
-    os.environ.setdefault("ECRF_DATALAD_SYNC_MODE", "sync")
-    os.environ.setdefault("ECRF_DATALAD_GIT_NAME", "case-e local")
-    os.environ.setdefault("ECRF_DATALAD_GIT_EMAIL", "case-e@localhost")
-    os.environ.setdefault("ECRF_DATALAD_PUSH_ON_SAVE", "0")
-    os.environ.setdefault("ECRF_DATALAD_PUSH_DATA_MODE", "auto-if-wanted")
-    os.environ.setdefault("ECRF_DATALAD_RIA_NAME", "ria")
-    os.environ.setdefault("ECRF_DATALAD_REQUIRE_RIA_FOR_WRITES", "0")
-    os.environ.setdefault("ECRF_DATALAD_GPGSIGN", "0")
-    os.environ.setdefault("ECRF_DATALAD_LOCK_TIMEOUT_SECONDS", "120")
+    # Force local DataLad mode
+    os.environ["BIDS_DATALAD_ENABLED"] = "1"
+    os.environ["ECRF_DATALAD_MODE"] = "shadow"
+    os.environ["ECRF_DATALAD_SYNC_MODE"] = "sync"
+    os.environ["ECRF_DATALAD_GIT_NAME"] = "case-e local"
+    os.environ["ECRF_DATALAD_GIT_EMAIL"] = "case-e@localhost"
+    os.environ["ECRF_DATALAD_PUSH_ON_SAVE"] = "0"
+    os.environ["ECRF_DATALAD_PUSH_DATA_MODE"] = "auto-if-wanted"
+    os.environ["ECRF_DATALAD_RIA_NAME"] = "ria"
+    os.environ["ECRF_DATALAD_REQUIRE_RIA_FOR_WRITES"] = "0"
+    os.environ["ECRF_DATALAD_GPGSIGN"] = "0"
+    os.environ["ECRF_DATALAD_LOCK_TIMEOUT_SECONDS"] = "120"
 
-    # templates
+    # Critical: local launcher must not inherit hosted SSH RIA config
+    os.environ.pop("ECRF_DATALAD_RIA_URL", None)
+
+    # Templates
     tpl_dir = find_backend_templates()
     if tpl_dir:
-        os.environ.setdefault("ECRF_TEMPLATES_DIR", str(tpl_dir))
+        os.environ["ECRF_TEMPLATES_DIR"] = str(tpl_dir)
 
-    # make sure folders exist
-    try:
-        data_dir.mkdir(parents=True, exist_ok=True)
-        bids_root.mkdir(parents=True, exist_ok=True)
-    except Exception:
-        pass
+    # Make sure folders exist
+    data_dir.mkdir(parents=True, exist_ok=True)
+    bids_root.mkdir(parents=True, exist_ok=True)
 
     return data_dir
 
@@ -337,7 +344,10 @@ def make_root_app() -> FastAPI:
     print(f"[eCRF] EXE_DIR                        = {EXE_DIR}")
     print(f"[eCRF] MEIPASS                        = {MEIPASS}")
     print(f"[eCRF] SEARCH_BASES                   = {[str(p) for p in SEARCH_BASES]}")
-    print(f"[eCRF] FRONTEND_DIST                  = {FRONTEND_DIST} (exists={FRONTEND_DIST.exists() if FRONTEND_DIST else False})")
+    print(
+        f"[eCRF] FRONTEND_DIST                  = {FRONTEND_DIST} "
+        f"(exists={FRONTEND_DIST.exists() if FRONTEND_DIST else False})"
+    )
     print(f"[eCRF] ECRF_ENV                       = {os.environ.get('ECRF_ENV')}")
     print(f"[eCRF] ECRF_PROFILE                   = {os.environ.get('ECRF_PROFILE')}")
     print(f"[eCRF] ECRF_DATA_DIR                  = {os.environ.get('ECRF_DATA_DIR')}")
@@ -349,7 +359,11 @@ def make_root_app() -> FastAPI:
     print(f"[eCRF] ECRF_DATALAD_SYNC_MODE         = {os.environ.get('ECRF_DATALAD_SYNC_MODE')}")
     print(f"[eCRF] ECRF_DATALAD_PUSH_ON_SAVE      = {os.environ.get('ECRF_DATALAD_PUSH_ON_SAVE')}")
     print(f"[eCRF] ECRF_DATALAD_PUSH_DATA_MODE    = {os.environ.get('ECRF_DATALAD_PUSH_DATA_MODE')}")
-    print(f"[eCRF] ECRF_DATALAD_REQUIRE_RIA_WRITES= {os.environ.get('ECRF_DATALAD_REQUIRE_RIA_FOR_WRITES')}")
+    print(f"[eCRF] ECRF_DATALAD_RIA_URL           = {os.environ.get('ECRF_DATALAD_RIA_URL')}")
+    print(
+        f"[eCRF] ECRF_DATALAD_REQUIRE_RIA_WRITES= "
+        f"{os.environ.get('ECRF_DATALAD_REQUIRE_RIA_FOR_WRITES')}"
+    )
 
     if FRONTEND_DIST and FRONTEND_DIST.exists():
         app.mount("/", StaticFiles(directory=str(FRONTEND_DIST), html=True), name="spa")
@@ -367,6 +381,7 @@ def make_root_app() -> FastAPI:
                 "/redoc",
                 "/template_schema.yaml",
                 "/datalad",
+                "/audit",
             )
             if request.method != "GET" or any(path.startswith(p) for p in api_prefixes):
                 return await call_next(request)
@@ -419,11 +434,8 @@ def open_browser(url: str):
 # ---------------------------------------------------------------------
 
 def main():
-    try:
-        Path(os.environ["ECRF_DATA_DIR"]).mkdir(parents=True, exist_ok=True)
-        Path(os.environ["BIDS_ROOT"]).mkdir(parents=True, exist_ok=True)
-    except Exception:
-        pass
+    Path(os.environ["ECRF_DATA_DIR"]).mkdir(parents=True, exist_ok=True)
+    Path(os.environ["BIDS_ROOT"]).mkdir(parents=True, exist_ok=True)
 
     app = make_root_app()
 
@@ -439,7 +451,7 @@ def main():
 
     print(f"\n==== eCRF starting on {url} ====\n")
 
-    if (os.environ.get("ECRF_OPEN_BROWSER", "1").strip().lower() in {"1", "true", "yes", "on"}):
+    if os.environ.get("ECRF_OPEN_BROWSER", "1").strip().lower() in {"1", "true", "yes", "on"}:
         open_browser(url)
 
     import uvicorn
