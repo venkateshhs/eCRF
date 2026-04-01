@@ -1164,7 +1164,7 @@ export default {
         }
       }
 
-      const N = subjectCount.value;
+      const N = Number(subjectCount.value || 0);
       const prefix =
         (studyData.value.title || "ST")
           .replace(/[^A-Za-z\s]/g, "")
@@ -1172,24 +1172,46 @@ export default {
           .split(/\s+/)
           .map((w) => w[0]?.toUpperCase() || "")
           .join("") || "ST";
-      const groupNames = groupData.value.map((g) => g.name || g.label || "Unnamed");
 
-      if (isEditing.value && subjectData.value.length > 0) {
+      const groupNames = groupData.value.map((g) => g.name || g.label || "Unnamed");
+      const hasExistingSubjects = Array.isArray(subjectData.value) && subjectData.value.length > 0;
+
+      // IMPORTANT FIX:
+      // Preserve already-created/manual-assigned subjects in BOTH create mode and edit mode.
+      // Only resize when subject count changes.
+      if (hasExistingSubjects) {
         const currentCount = subjectData.value.length;
+
         if (N > currentCount) {
-          const additionalSubjects = Array(N - currentCount)
-            .fill()
-            .map((_, idx) => ({
-              id: `SUBJ-${prefix}-${String(currentCount + idx + 1).padStart(3, "0")}`,
-              group:
-                assignmentMethod.value === "Random" && groupNames.length > 0
-                  ? groupNames[Math.floor(Math.random() * groupNames.length)]
-                  : "",
-            }));
+          let additionalSubjects = [];
+
+          if (assignmentMethod.value === "Random" && groupNames.length > 0) {
+            additionalSubjects = Array(N - currentCount)
+              .fill()
+              .map((_, idx) => ({
+                id: `SUBJ-${prefix}-${String(currentCount + idx + 1).padStart(3, "0")}`,
+                group: groupNames[Math.floor(Math.random() * groupNames.length)],
+              }));
+          } else {
+            additionalSubjects = Array(N - currentCount)
+              .fill()
+              .map((_, idx) => ({
+                id: `SUBJ-${prefix}-${String(currentCount + idx + 1).padStart(3, "0")}`,
+                group: "",
+              }));
+          }
+
           subjectData.value = [...subjectData.value, ...additionalSubjects];
         } else if (N < currentCount) {
           subjectData.value = subjectData.value.slice(0, N);
         }
+
+        // keep ids consistent in case title/prefix changed
+        subjectData.value = subjectData.value.map((s, idx) => ({
+          ...s,
+          id: s?.id || `SUBJ-${prefix}-${String(idx + 1).padStart(3, "0")}`,
+          group: s?.group || "",
+        }));
       } else {
         let assignedGroups = [];
         if (assignmentMethod.value === "Random" && groupNames.length > 0) {
