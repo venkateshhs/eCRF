@@ -24,6 +24,15 @@ jobs:
           git config --global user.name "github-actions[bot]"
           git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
+      - name: Remove workflow files
+        run: |
+          rm -rf .github/workflows
+
+      - name: Commit workflow removal if needed
+        run: |
+          git add -A
+          git diff --cached --quiet || git commit -m "Exclude workflow files from sync"
+
       - name: Push source main to destination main
         env:
           DEST_TOKEN: ${{ secrets.DEST_REPO_PAT }}
@@ -36,6 +45,6 @@ jobs:
           fi
 
           git remote remove destination 2>/dev/null || true
-          git remote add destination https://x-access-token:${DEST_TOKEN}@github.com/Biomarker-Development-at-INM7/eCRF.git
+          git remote add destination "https://x-access-token:${DEST_TOKEN}@github.com/Biomarker-Development-at-INM7/eCRF.git"
 
-          git push --force destination main:main
+          git push --force destination HEAD:main
