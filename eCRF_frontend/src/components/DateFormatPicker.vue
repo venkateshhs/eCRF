@@ -17,7 +17,6 @@
       :disabled="isReadonly"
       input-class="dfp-input"
       class="dfp-picker"
-      @update:model-value="emitChange"
       v-bind="$attrs"
     />
     <!-- overlay to guarantee no edits when readonly -->
@@ -260,33 +259,167 @@ export default {
 .dfp-wrapper {
   position: relative;
   width: 100%;
+  min-width: 0;
 }
 
 .dfp-picker {
   width: 100%;
+  min-width: 0;
 }
 
-.dfp-input {
+/* Let the datepicker root fill available width */
+:deep(.dp__main) {
   width: 100%;
-  padding: 8px;
-  border: 1px solid #d1d5db;
-  border-radius: 6px;
-  box-sizing: border-box;
-  font-size: 14px;
-  color: #1f2937;
+  min-width: 0;
+  font-family: inherit;
+}
+
+/* Input wrapper */
+:deep(.dp__input_wrap) {
+  position: relative;
+  width: 100%;
+  min-width: 0;
+}
+
+/* Main input */
+:deep(.dp__input),
+:deep(.dfp-input) {
+  width: 100% !important;
+  min-height: 44px !important;
+  height: 44px !important;
+  box-sizing: border-box !important;
+
+  padding-top: 8px !important;
+  padding-right: 12px !important;
+  padding-bottom: 8px !important;
+  padding-left: 42px !important; /* room for calendar icon */
+
+  border: 1px solid #d1d5db !important;
+  border-radius: 8px !important;
+  background: #ffffff !important;
+  color: #1f2937 !important;
+
+  font-family: inherit !important;
+  font-size: 14px !important;
+  line-height: 1.4 !important;
+
+  outline: none !important;
+  box-shadow: none !important;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease !important;
+}
+
+/* Placeholder */
+:deep(.dp__input::placeholder),
+:deep(.dfp-input::placeholder) {
+  color: #9ca3af !important;
+  opacity: 1 !important;
+}
+
+/* Hover/focus */
+:deep(.dp__input:hover),
+:deep(.dfp-input:hover) {
+  border-color: #cbd5e1 !important;
+}
+
+:deep(.dp__input:focus),
+:deep(.dfp-input:focus) {
+  border-color: #93c5fd !important;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.12) !important;
+}
+
+/* Calendar / clear icons */
+:deep(.dp__input_icon) {
+  left: 12px !important;
+  color: #6b7280 !important;
+  width: 18px !important;
+  height: 18px !important;
+}
+
+:deep(.dp__clear_icon) {
+  right: 12px !important;
+  color: #6b7280 !important;
+}
+
+/* If vue-datepicker adds icon padding classes, keep them sane */
+:deep(.dp__input_icon_pad) {
+  padding-inline-start: 42px !important;
+}
+
+/* Mobile mode should still show a normal input */
+:deep(.dp__main[data-dp-mobile="true"] .dp__input),
+:deep(.dp__main[data-dp-mobile="true"] .dfp-input) {
+  min-height: 44px !important;
+  height: 44px !important;
+  padding-left: 42px !important;
+}
+
+/* Menu / popup */
+:deep(.dp__menu) {
+  font-family: inherit;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  overflow: hidden;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.12);
+}
+
+:deep(.dp__calendar) {
+  padding: 6px;
+}
+
+:deep(.dp__month_year_row) {
+  padding: 8px 10px;
+}
+
+:deep(.dp__calendar_header_item) {
+  font-size: 12px;
+  font-weight: 600;
+  color: #6b7280;
+}
+
+:deep(.dp__cell_inner) {
+  border-radius: 8px;
+}
+
+:deep(.dp__today) {
+  border-color: #93c5fd;
+}
+
+:deep(.dp__active_date),
+:deep(.dp__range_start),
+:deep(.dp__range_end) {
+  background: #2563eb !important;
+  color: #ffffff !important;
+}
+
+/* Disabled / readonly */
+:deep(.dp__disabled),
+:deep(.dp__input:disabled),
+:deep(.dfp-input:disabled) {
+  background: #f9fafb !important;
+  color: #9ca3af !important;
+  cursor: not-allowed !important;
 }
 
 .dfp-overlay {
   position: absolute;
   inset: 0;
+  z-index: 3;
   background: transparent;
   pointer-events: all;
-  z-index: 3;
   cursor: not-allowed;
 }
 
-.dfp-wrapper.readonly .dfp-input {
-  opacity: 0.6;
-  cursor: not-allowed;
+.dfp-wrapper.readonly :deep(.dp__input),
+.dfp-wrapper.readonly :deep(.dfp-input) {
+  background: #f9fafb !important;
+  color: #6b7280 !important;
+  opacity: 1 !important;
+  cursor: not-allowed !important;
+}
+
+/* Prevent odd clipping from parent flex/grid contexts */
+:deep(.dp__menu_wrapper),
+:deep(.dp__outer_menu_wrap) {
+  z-index: 9999;
 }
 </style>
