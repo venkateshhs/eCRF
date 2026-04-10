@@ -997,12 +997,12 @@ export default {
   },
 
   async mounted() {
-    document.addEventListener("click", this.onGlobalClick);
-    window.addEventListener("beforeunload", this.beforeUnloadHandler);
-    this.hydratingScratch = true;
+      document.addEventListener("click", this.onGlobalClick);
+      window.addEventListener("beforeunload", this.beforeUnloadHandler);
+      this.hydratingScratch = true;
 
-    if (this.studyDetails.study_metadata?.id) {
       const stored = localStorage.getItem("scratchForms");
+
       if (stored) {
         try {
           const parsed = JSON.parse(stored);
@@ -1017,43 +1017,39 @@ export default {
         this.forms = [{ sections: [] }];
         localStorage.setItem("scratchForms", JSON.stringify(this.forms));
       }
-    } else {
-      localStorage.removeItem("scratchForms");
-      this.forms = [{ sections: [] }];
-    }
 
-    // FIX: ensure current slot always exists after hydration too
-    this.ensureCurrentFormExists();
+      // FIX: ensure current slot always exists after hydration too
+      this.ensureCurrentFormExists();
 
-    this.visits = Array.isArray(this.studyDetails.visits)
-      ? JSON.parse(JSON.stringify(this.studyDetails.visits))
-      : [];
-    this.groups = Array.isArray(this.studyDetails.groups)
-      ? JSON.parse(JSON.stringify(this.studyDetails.groups))
-      : [];
-    this.adjustAssignments();
+      this.visits = Array.isArray(this.studyDetails.visits)
+        ? JSON.parse(JSON.stringify(this.studyDetails.visits))
+        : [];
+      this.groups = Array.isArray(this.studyDetails.groups)
+        ? JSON.parse(JSON.stringify(this.studyDetails.groups))
+        : [];
+      this.adjustAssignments();
 
-    try {
-      const res = await axios.get("/forms/available-fields");
-      this.generalFields = res.data.map((f, idx) => ({
-        ...f,
-        name: f.name || `${f.type}_${idx}`,
-        description: f.helpText || f.placeholder || "",
-        options: (f.type === "select" || f.type === "radio")
-          ? (Array.isArray(f.options) && f.options.length ? f.options : ["Option 1"])
-          : (f.options || []),
-        constraints: f.constraints || {}
-      }));
-    } catch (e) {
-      console.error("Failed to load custom fields", e);
-    }
+      try {
+        const res = await axios.get("/forms/available-fields");
+        this.generalFields = res.data.map((f, idx) => ({
+          ...f,
+          name: f.name || `${f.type}_${idx}`,
+          description: f.helpText || f.placeholder || "",
+          options: (f.type === "select" || f.type === "radio")
+            ? (Array.isArray(f.options) && f.options.length ? f.options : ["Option 1"])
+            : (f.options || []),
+          constraints: f.constraints || {}
+        }));
+      } catch (e) {
+        console.error("Failed to load custom fields", e);
+      }
 
-    await this.loadDataModels();
+      await this.loadDataModels();
 
-    this.$nextTick(() => {
-      this.hydratingScratch = false;
-    });
-  },
+      this.$nextTick(() => {
+        this.hydratingScratch = false;
+      });
+    },
 
   beforeUnmount() {
     document.removeEventListener("click", this.onGlobalClick);

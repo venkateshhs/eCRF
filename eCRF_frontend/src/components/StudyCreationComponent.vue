@@ -1551,6 +1551,7 @@ export default {
 
       if (!editId.value && !returningFromScratch) {
         store.commit("resetStudyDetails");
+        localStorage.removeItem("scratchForms");
       }
 
       await loadYaml("/study_schema.yaml", studySchema);
