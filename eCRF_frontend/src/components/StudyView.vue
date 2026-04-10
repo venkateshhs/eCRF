@@ -478,11 +478,11 @@
           </div>
 
           <!-- GRANT FORM -->
-          <div v-if="canManageAccess" class="subsection">
+            <div v-if="canManageAccess" class="subsection">
             <h3 class="sub-title">Grant Access</h3>
 
-            <div class="grant-grid">
-              <div class="field">
+            <div class="grant-grid access-grant-grid">
+              <div class="field grant-user-field">
                 <label class="label">Select User</label>
                 <select v-model="selectedUserId" class="input input-select">
                   <option value="" disabled>Select a user…</option>
@@ -493,16 +493,33 @@
                 <div class="help" v-if="!allUsers.length">No users found to grant.</div>
               </div>
 
-              <div class="field">
-                <label class="label">Permission</label>
-                <select v-model="permissionPreset" class="input input-select" disabled>
-                  <option value="data-entry">Add data only</option>
-                </select>
-                <div class="help">Adds the user with ability to submit data to this study; no editing.</div>
+              <div class="field grant-perm-field">
+                <label class="label">Permissions</label>
+                <div class="perm-row">
+                  <label class="chk">
+                    <input type="checkbox" v-model="permView" />
+                    <span>View</span>
+                  </label>
+                  <label class="chk">
+                    <input type="checkbox" v-model="permAdd" />
+                    <span>Add Data</span>
+                  </label>
+                  <label class="chk">
+                    <input type="checkbox" v-model="permEdit" />
+                    <span>Edit Study</span>
+                  </label>
+                </div>
+                <div class="help">
+                  Choose exactly what this user can do for this study.
+                </div>
               </div>
 
-              <div class="actions">
-                <button class="btn-primary" :disabled="!selectedUserId || granting" @click="grantAccess">
+              <div class="actions grant-actions">
+                <button
+                  class="btn-primary"
+                  :disabled="!selectedUserId || granting"
+                  @click="grantAccess"
+                >
                   {{ granting ? 'Granting…' : 'Grant Access' }}
                 </button>
               </div>
@@ -721,7 +738,9 @@ export default {
       accessList: [],
       allUsers: [],
       selectedUserId: "",
-      permissionPreset: "data-entry",
+      permView: true,
+      permAdd: true,
+      permEdit: false,
       granting: false,
       revokeBusy: {},
 
@@ -917,11 +936,13 @@ export default {
       return u.name || u.full_name || firstLast || u.username || u.email || `User#${u.id}`;
     },
     prettyGrantRole(role) {
-      if (!role) return "Investigator";
-      const r = String(role).toLowerCase();
-      if (r.includes("investigator")) return "Investigator";
-      if (r.includes("principal") || r === "pi") return "PI";
-      if (r.includes("admin")) return "Admin";
+      if (!role) return "—";
+      const r = String(role).toLowerCase().trim();
+
+      if (r === "principal investigator" || r === "pi") return "Principal Investigator";
+      if (r === "administrator" || r === "admin") return "Administrator";
+      if (r === "investigator") return "Investigator";
+      if (r === "no access") return "No Access";
       return role;
     },
 
@@ -1151,15 +1172,39 @@ export default {
     },
     async grantAccess() {
       if (!this.selectedUserId) return;
+
       this.granting = true;
       const token = this.token;
+
       try {
-        const payload = { user_id: Number(this.selectedUserId), role: "Investigator", permissions: { view: true, add_data: true, edit_study: false } };
-        await axios.post(`/forms/studies/${this.studyId}/access`, payload, { headers: { Authorization: `Bearer ${token}` } });
-        this.selectedUserId = ""; await this.fetchAccessList();
-      } catch (e) { console.error("grantAccess failed:", e?.response?.data || e.message); }
-      finally { this.granting = false; }
+        const payload = {
+          user_id: Number(this.selectedUserId),
+          permissions: {
+            view: !!this.permView,
+            add_data: !!this.permAdd,
+            edit_study: !!this.permEdit,
+          },
+        };
+
+        await axios.post(
+          `/forms/studies/${this.studyId}/access`,
+          payload,
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+
+        this.selectedUserId = "";
+        this.permView = true;
+        this.permAdd = true;
+        this.permEdit = false;
+
+        await this.fetchAccessList();
+      } catch (e) {
+        console.error("grantAccess failed:", e?.response?.data || e.message);
+      } finally {
+        this.granting = false;
+      }
     },
+
     async revokeAccess(g) {
       if (!g || g.user_id == null) return;
       const token = this.token;
@@ -1672,5 +1717,48 @@ export default {
 .btn-danger[disabled] {
   opacity: 0.6;
   cursor: not-allowed;
+}
+.access-grant-grid {
+  grid-template-columns: minmax(260px, 1.2fr) minmax(280px, 1fr) auto;
+}
+
+.grant-user-field,
+.grant-perm-field {
+  min-width: 0;
+}
+
+.grant-actions {
+  align-self: end;
+}
+
+.perm-row {
+  display: flex;
+  gap: 18px;
+  flex-wrap: wrap;
+  min-height: 40px;
+  align-items: center;
+}
+
+.chk {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  user-select: none;
+  color: #111827;
+  font-size: 14px;
+}
+
+.chk input {
+  transform: translateY(1px);
+}
+
+@media (max-width: 900px) {
+  .access-grant-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .grant-actions {
+    align-self: start;
+  }
 }
 </style>
