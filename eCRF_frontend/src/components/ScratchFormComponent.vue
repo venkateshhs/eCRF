@@ -2185,25 +2185,31 @@ handleImportedCsvFields(importedFields) {
         return;
       }
 
-      if (this.studyDetails.study_metadata?.id && Array.isArray(this.studyDetails.assignments)) {
-        const old = this.studyDetails.assignments;
-        const fresh = [];
-        for (let mi = 0; mi < m; mi++) {
-          fresh[mi] = [];
-          for (let vi = 0; vi < v; vi++) {
-            fresh[mi][vi] = [];
-            for (let gi = 0; gi < g; gi++) {
-              const ov = old[mi]?.[vi]?.[gi];
-              fresh[mi][vi][gi] = typeof ov === "boolean" ? ov : false;
-            }
+      // IMPORTANT FIX:
+      // Prefer current local assignments first, then fallback to store assignments.
+      const old =
+        Array.isArray(this.assignments) && this.assignments.length
+          ? this.assignments
+          : (Array.isArray(this.studyDetails.assignments) ? this.studyDetails.assignments : []);
+
+      const fresh = [];
+      for (let mi = 0; mi < m; mi++) {
+        fresh[mi] = [];
+        for (let vi = 0; vi < v; vi++) {
+          fresh[mi][vi] = [];
+          for (let gi = 0; gi < g; gi++) {
+            const ov = old[mi]?.[vi]?.[gi];
+            fresh[mi][vi][gi] = typeof ov === "boolean" ? ov : false;
           }
         }
-        this.assignments = fresh;
-      } else {
-        this.assignments = Array.from({ length: m }, () =>
-          Array.from({ length: v }, () => Array.from({ length: g }, () => false))
-        );
       }
+
+      this.assignments = fresh;
+
+      this.$store.commit("setStudyDetails", {
+        ...this.studyDetails,
+        assignments: JSON.parse(JSON.stringify(this.assignments))
+      });
     },
 
     handleProtocolClick() { this.showLogic = false;this.showMatrix = true; },
