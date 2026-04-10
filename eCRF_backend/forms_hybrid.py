@@ -176,25 +176,19 @@ def _get_content_row_or_404(db: Session, study_id: int) -> models.StudyContent:
     return row
 
 
-def _get_latest_template_version_row(db: Session, study_id: int) -> Optional[models.StudyTemplateVersion]:
-    return (
-        db.query(models.StudyTemplateVersion)
-        .filter(models.StudyTemplateVersion.study_id == study_id)
-        .order_by(models.StudyTemplateVersion.version.desc())
-        .first()
-    )
+
 
 
 def _ensure_initial_version_if_missing(db: Session, study_id: int, study_data: Dict[str, Any]) -> models.StudyTemplateVersion:
     VersionManager.ensure_initial_version(db, study_id, study_data or {})
-    row = _get_latest_template_version_row(db, study_id)
+    row = VersionManager.latest(db, study_id)
     if row is None:
         raise HTTPException(status_code=500, detail="Failed to initialize template version")
     return row
 
 
 def _latest_template_or_500(db: Session, study_id: int) -> models.StudyTemplateVersion:
-    row = _get_latest_template_version_row(db, study_id)
+    row = VersionManager.latest(db, study_id)
     if row is None:
         raise HTTPException(status_code=500, detail="Template version not found")
     return row
@@ -205,6 +199,24 @@ def _resolve_form_version_or_400(db: Session, study_id: int, version: Optional[i
         return VersionManager.assert_latest_is_used(db, study_id, version)
     except ValueError as ve:
         raise HTTPException(status_code=400, detail=str(ve))
+
+
+def _parse_modalities_json(modalities_json: Optional[str]) -> List[str]:
+    try:
+        modalities = json.loads(modalities_json or "[]")
+        if not isinstance(modalities, list):
+            return []
+        out: List[str] = []
+        seen = set()
+        for item in modalities:
+            s = str(item or "").strip()
+            if not s or s in seen:
+                continue
+            seen.add(s)
+            out.append(s)
+        return out
+    except Exception:
+        return []
 
 
 def _write_published_snapshot_to_datalad(
@@ -828,9 +840,17 @@ def upload_file(
     _assert_has_study_permission(db, meta, user, required="add_data")
     _assert_not_locked_by_other(meta, user)
 
+    modalities = _parse_modalities_json(modalities_json)
+    latest_tv = _latest_template_or_500(db, study_id)
+    form_version = int(latest_tv.version)
+
     tmp_path = None
     try:
-        with tempfile.NamedTemporaryFile(delete=False, prefix=f"ecrf_study{study_id}_", suffix=f"_{uploaded_file.filename}") as tmp:
+        with tempfile.NamedTemporaryFile(
+            delete=False,
+            prefix=f"ecrf_study{study_id}_",
+            suffix=f"_{uploaded_file.filename}",
+        ) as tmp:
             shutil.copyfileobj(uploaded_file.file, tmp)
             tmp_path = tmp.name
 
@@ -843,6 +863,8 @@ def upload_file(
             subject_index=subject_index,
             visit_index=visit_index,
             group_index=group_index,
+            modalities=modalities,
+            form_version=form_version,
             actor=_actor_identifier(user),
             actor_name=_display_name(user),
             user_id=user.id,
@@ -864,6 +886,7 @@ def create_url_file(
     subject_index: Optional[int] = Form(None),
     visit_index: Optional[int] = Form(None),
     group_index: Optional[int] = Form(None),
+    modalities_json: Optional[str] = Form("[]"),
     audit_label: Optional[str] = Form(None),
     db: Session = Depends(get_db),
     user=Depends(get_current_user),
@@ -875,6 +898,10 @@ def create_url_file(
     _assert_has_study_permission(db, meta, user, required="add_data")
     _assert_not_locked_by_other(meta, user)
 
+    modalities = _parse_modalities_json(modalities_json)
+    latest_tv = _latest_template_or_500(db, study_id)
+    form_version = int(latest_tv.version)
+
     return repo.save_url_file(
         study_id=study_id,
         study_name=meta.study_name,
@@ -883,6 +910,8 @@ def create_url_file(
         subject_index=subject_index,
         visit_index=visit_index,
         group_index=group_index,
+        modalities=modalities,
+        form_version=form_version,
         actor=_actor_identifier(user),
         actor_name=_display_name(user),
         user_id=user.id,
@@ -894,6 +923,7 @@ def shared_upload_file(
     token: str,
     uploaded_file: UploadFile = File(...),
     description: str = Form(""),
+    modalities_json: Optional[str] = Form("[]"),
     audit_label: Optional[str] = Form(None),
     db: Session = Depends(get_db),
 ):
@@ -918,6 +948,10 @@ def shared_upload_file(
     if (meta.status or "PUBLISHED").upper().strip() != "PUBLISHED":
         raise HTTPException(status_code=400, detail="Shared file upload is only allowed for published studies")
 
+    modalities = _parse_modalities_json(modalities_json)
+    latest_tv = _latest_template_or_500(db, access.study_id)
+    form_version = int(latest_tv.version)
+
     tmp_path = None
     try:
         safe_suffix = f"_{os.path.basename(uploaded_file.filename or 'upload.bin')}"
@@ -938,6 +972,8 @@ def shared_upload_file(
             subject_index=access.subject_index,
             visit_index=access.visit_index,
             group_index=access.group_index,
+            modalities=modalities,
+            form_version=form_version,
             actor="shared-link",
             actor_name="Shared link upload",
             user_id=None,
@@ -1409,6 +1445,7 @@ def access_shared_form(
     meta = db.query(models.StudyMetadata).filter(models.StudyMetadata.id == access.study_id).first()
     if not meta:
         raise HTTPException(404, "Study not found")
+
     try:
         repo.update_share_link(
             study_id=access.study_id,
@@ -1430,6 +1467,7 @@ def access_shared_form(
         )
     except Exception:
         pass
+
     content_row = _get_content_row_or_404(db, access.study_id)
     filtered_study_data = _filter_shared_study_data_by_sections(
         content_row.study_data or {},

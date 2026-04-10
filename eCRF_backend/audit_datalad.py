@@ -55,8 +55,30 @@ def _paths_for_study(study_id: int, study_name: str):
     }
 
 
-def _subject_dir(subject_index: int) -> str:
+def _subject_dir_prefix(subject_index: int) -> str:
     return f"subject_{int(subject_index):05d}"
+
+
+def _resolve_subject_events_file(subjects_root: Path, subject_index: int) -> Path:
+    """
+    Supports both old and new folder naming:
+      - subject_00000/events.jsonl
+      - subject_00000_SUBJ-MC-001/events.jsonl
+    """
+    prefix = _subject_dir_prefix(subject_index)
+
+    exact = subjects_root / prefix / "events.jsonl"
+    if exact.exists() and exact.is_file():
+        return exact
+
+    matches = sorted(subjects_root.glob(f"{prefix}*"))
+    for subdir in matches:
+        if subdir.is_dir():
+            events_file = subdir / "events.jsonl"
+            if events_file.exists() and events_file.is_file():
+                return events_file
+
+    return subjects_root / prefix / "events.jsonl"
 
 
 def _safe_iso_to_dt(value: Any) -> datetime:
@@ -147,6 +169,7 @@ def _human_action(action: str) -> str:
         "study_edited": "Study edited",
         "study_snapshot_written": "Published snapshot written",
         "entry_upserted": "Data entry saved",
+        "entry_cloned_forward": "Data cloned forward",
         "file_added": "File added",
         "share_link_created": "Share link created",
         "access_changed": "Access changed",
@@ -241,7 +264,7 @@ def _find_event_record(
 
     candidates: List[Path] = []
     if subject_index is not None:
-        candidates.append(paths["subjects_root"] / _subject_dir(subject_index) / "events.jsonl")
+        candidates.append(_resolve_subject_events_file(paths["subjects_root"], subject_index))
     candidates.append(paths["study_dir"] / "events.jsonl")
 
     for events_file in candidates:
@@ -280,10 +303,8 @@ def get_subject_events(
 ):
     meta = _ensure_can_view_study(db, current_user, study_id)
     paths = _paths_for_study(study_id, meta.study_name)
-    return _read_events_from_jsonl(
-        paths["subjects_root"] / _subject_dir(subject_index) / "events.jsonl",
-        limit,
-    )
+    events_file = _resolve_subject_events_file(paths["subjects_root"], subject_index)
+    return _read_events_from_jsonl(events_file, limit)
 
 
 @router.get("/studies/{study_id}/subjects/{subject_index}/history")
@@ -296,10 +317,8 @@ def get_subject_history(
 ):
     meta = _ensure_can_view_study(db, current_user, study_id)
     paths = _paths_for_study(study_id, meta.study_name)
-    events = _read_events_from_jsonl(
-        paths["subjects_root"] / _subject_dir(subject_index) / "events.jsonl",
-        limit,
-    )
+    events_file = _resolve_subject_events_file(paths["subjects_root"], subject_index)
+    events = _read_events_from_jsonl(events_file, limit)
     return {
         "study_id": study_id,
         "subject_index": subject_index,

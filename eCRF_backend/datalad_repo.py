@@ -47,6 +47,20 @@ def _slugify(value: str) -> str:
     return s[:120] or "study"
 
 
+def _safe_path_part(value: Optional[str], default: str = "unknown") -> str:
+    s = str(value or "").strip()
+    if not s:
+        return default
+    s = re.sub(r"\s+", "_", s)
+    s = re.sub(r"[^A-Za-z0-9._\-]+", "_", s)
+    s = re.sub(r"_+", "_", s).strip("._-")
+    return s or default
+
+
+def _normalize_modality(value: Optional[str]) -> str:
+    return _safe_path_part(str(value or "").lower(), default="misc")
+
+
 def _deepcopy_json(obj: Any) -> Any:
     try:
         return json.loads(json.dumps(obj, ensure_ascii=False))
@@ -520,6 +534,73 @@ class DataladStudyRepo:
             return content.get("study_data") or {}
         return {}
 
+    def _resolve_subject_label(self, study_data: Dict[str, Any], subject_index: Optional[int]) -> str:
+        if subject_index is None:
+            return "study"
+
+        subjects = study_data.get("subjects") if isinstance(study_data.get("subjects"), list) else []
+        try:
+            idx = int(subject_index)
+        except Exception:
+            idx = 0
+
+        if 0 <= idx < len(subjects):
+            subj = subjects[idx] or {}
+            raw = (
+                subj.get("id")
+                or subj.get("subject_id")
+                or subj.get("label")
+                or subj.get("name")
+                or f"subject_{idx + 1:03d}"
+            )
+            return _safe_path_part(raw, default=f"subject_{idx + 1:03d}")
+
+        return f"subject_{idx + 1:03d}"
+
+    def _resolve_visit_label(self, study_data: Dict[str, Any], visit_index: Optional[int]) -> Optional[str]:
+        if visit_index is None:
+            return None
+
+        visits = study_data.get("visits") if isinstance(study_data.get("visits"), list) else []
+        try:
+            idx = int(visit_index)
+        except Exception:
+            idx = 0
+
+        if 0 <= idx < len(visits):
+            visit = visits[idx] or {}
+            raw = (
+                visit.get("name")
+                or visit.get("label")
+                or visit.get("id")
+                or f"visit_{idx + 1:02d}"
+            )
+            return _safe_path_part(raw, default=f"visit_{idx + 1:02d}")
+
+        return f"visit_{idx + 1:02d}"
+
+    def _resolve_group_label(self, study_data: Dict[str, Any], group_index: Optional[int]) -> Optional[str]:
+        if group_index is None:
+            return None
+
+        groups = study_data.get("groups") if isinstance(study_data.get("groups"), list) else []
+        try:
+            idx = int(group_index)
+        except Exception:
+            idx = 0
+
+        if 0 <= idx < len(groups):
+            grp = groups[idx] or {}
+            raw = (
+                grp.get("name")
+                or grp.get("label")
+                or grp.get("id")
+                or f"group_{idx + 1:02d}"
+            )
+            return _safe_path_part(raw, default=f"group_{idx + 1:02d}")
+
+        return f"group_{idx + 1:02d}"
+
     def _resolve_subject_visit_group_labels(
         self,
         p: StudyPaths,
@@ -533,48 +614,25 @@ class DataladStudyRepo:
     ) -> Dict[str, Any]:
         study_data = self._load_study_content_data(p)
 
-        subjects = study_data.get("subjects") if isinstance(study_data.get("subjects"), list) else []
-        visits = study_data.get("visits") if isinstance(study_data.get("visits"), list) else []
-        groups = study_data.get("groups") if isinstance(study_data.get("groups"), list) else []
-
         resolved_subject_raw = subject_raw
         resolved_visit_raw = visit_raw
         resolved_group_raw = group_raw
 
         try:
-            if resolved_subject_raw in (None, "") and subject_index is not None and 0 <= int(subject_index) < len(subjects):
-                subj = subjects[int(subject_index)] or {}
-                resolved_subject_raw = str(
-                    subj.get("id")
-                    or subj.get("subject_id")
-                    or subj.get("label")
-                    or subj.get("name")
-                    or f"Subject {subject_index}"
-                ).strip()
+            if resolved_subject_raw in (None, "") and subject_index is not None:
+                resolved_subject_raw = self._resolve_subject_label(study_data, subject_index)
         except Exception:
             pass
 
         try:
-            if resolved_visit_raw in (None, "") and visit_index is not None and 0 <= int(visit_index) < len(visits):
-                visit = visits[int(visit_index)] or {}
-                resolved_visit_raw = str(
-                    visit.get("name")
-                    or visit.get("id")
-                    or visit.get("label")
-                    or f"Visit {visit_index}"
-                ).strip()
+            if resolved_visit_raw in (None, "") and visit_index is not None:
+                resolved_visit_raw = self._resolve_visit_label(study_data, visit_index)
         except Exception:
             pass
 
         try:
-            if resolved_group_raw in (None, "") and group_index is not None and 0 <= int(group_index) < len(groups):
-                grp = groups[int(group_index)] or {}
-                resolved_group_raw = str(
-                    grp.get("name")
-                    or grp.get("id")
-                    or grp.get("label")
-                    or f"Group {group_index}"
-                ).strip()
+            if resolved_group_raw in (None, "") and group_index is not None:
+                resolved_group_raw = self._resolve_group_label(study_data, group_index)
         except Exception:
             pass
 
@@ -603,6 +661,42 @@ class DataladStudyRepo:
         elif user_id is not None:
             payload["actor"] = f"User#{int(user_id)}"
         return payload
+
+    def _resolve_primary_modality_label(self, modalities: Optional[List[str]]) -> str:
+        if isinstance(modalities, list):
+            for item in modalities:
+                if str(item or "").strip():
+                    return _normalize_modality(item)
+        return "misc"
+
+    def _resolve_file_storage_dir(
+        self,
+        p: StudyPaths,
+        *,
+        subject_index: Optional[int] = None,
+        visit_index: Optional[int] = None,
+        group_index: Optional[int] = None,
+        modalities: Optional[List[str]] = None,
+        form_version: Optional[int] = None,
+    ) -> Path:
+        if subject_index is None and visit_index is None:
+            return p.files_dir / "metadata"
+
+        study_data = self._load_study_content_data(p)
+        version = int(form_version or 1)
+
+        subject_label = self._resolve_subject_label(study_data, subject_index)
+        visit_label = self._resolve_visit_label(study_data, visit_index)
+        group_label = self._resolve_group_label(study_data, group_index)
+        modality_label = self._resolve_primary_modality_label(modalities)
+
+        base = p.files_dir / f"v{version:03d}" / f"sub-{subject_label}"
+        if visit_label:
+            base = base / f"ses-{visit_label}"
+        if group_label:
+            base = base / f"grp-{group_label}"
+
+        return base / modality_label
 
     # ------------------------------------------------------------------
     # published snapshot methods used by forms_hybrid
@@ -1046,12 +1140,17 @@ class DataladStudyRepo:
         group_index: int,
         entry_id: int,
     ) -> Path:
+        study_data = self._load_study_content_data(p)
+        subject_label = self._resolve_subject_label(study_data, subject_index)
+        visit_label = self._resolve_visit_label(study_data, visit_index) or f"visit_{int(visit_index) + 1:02d}"
+        group_label = self._resolve_group_label(study_data, group_index) or f"group_{int(group_index) + 1:02d}"
+
         return (
             p.entries_dir
             / f"v{int(form_version):03d}"
-            / f"subject_{int(subject_index):05d}"
-            / f"visit_{int(visit_index):05d}"
-            / f"group_{int(group_index):05d}"
+            / f"subject_{int(subject_index):05d}_{subject_label}"
+            / f"visit_{int(visit_index):05d}_{visit_label}"
+            / f"group_{int(group_index):05d}_{group_label}"
             / f"entry_{int(entry_id):09d}.json"
         )
 
@@ -1283,7 +1382,25 @@ class DataladStudyRepo:
             })
 
             diffs = self._compute_json_diff(old_entry.get("data", {}), new_entry.get("data", {}))
-            _json_dump(target, new_entry)
+
+            new_path = self._entry_path(
+                p,
+                form_version=int(new_entry.get("form_version") or 1),
+                subject_index=int(new_entry["subject_index"]),
+                visit_index=int(new_entry["visit_index"]),
+                group_index=int(new_entry["group_index"]),
+                entry_id=int(entry_id),
+            )
+
+            if new_path.resolve() != target.resolve():
+                new_path.parent.mkdir(parents=True, exist_ok=True)
+                _json_dump(new_path, new_entry)
+                try:
+                    target.unlink()
+                except Exception:
+                    pass
+            else:
+                _json_dump(target, new_entry)
 
             labels = self._resolve_subject_visit_group_labels(
                 p,
@@ -1546,20 +1663,22 @@ class DataladStudyRepo:
         return max_id + 1
 
     def save_uploaded_file(
-            self,
-            *,
-            study_id: int,
-            study_name: str,
-            filename: str,
-            source_path: str,
-            description: str = "",
-            subject_index: Optional[int] = None,
-            visit_index: Optional[int] = None,
-            group_index: Optional[int] = None,
-            actor: str,
-            audit_label: Optional[str] = None,
-            user_id: Optional[int] = None,
-            actor_name: Optional[str] = None,
+        self,
+        *,
+        study_id: int,
+        study_name: str,
+        filename: str,
+        source_path: str,
+        description: str = "",
+        subject_index: Optional[int] = None,
+        visit_index: Optional[int] = None,
+        group_index: Optional[int] = None,
+        modalities: Optional[List[str]] = None,
+        form_version: Optional[int] = None,
+        actor: str,
+        audit_label: Optional[str] = None,
+        user_id: Optional[int] = None,
+        actor_name: Optional[str] = None,
     ) -> Dict[str, Any]:
         p = self.ensure_dataset(study_id, study_name)
 
@@ -1568,7 +1687,16 @@ class DataladStudyRepo:
 
             original_name = _safe_filename(filename)
             stored_name = f"{file_id:09d}_{original_name}"
-            dest = p.files_dir / stored_name
+
+            target_dir = self._resolve_file_storage_dir(
+                p,
+                subject_index=subject_index,
+                visit_index=visit_index,
+                group_index=group_index,
+                modalities=modalities,
+                form_version=form_version,
+            )
+            dest = target_dir / stored_name
 
             dest.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(source_path, dest)
@@ -1576,13 +1704,15 @@ class DataladStudyRepo:
             record = {
                 "id": file_id,
                 "study_id": study_id,
-                "file_name": original_name,  # original file name for UI/download
-                "file_path": self._logical_path(p.dataset_path, dest),  # actual stored path
+                "file_name": original_name,
+                "file_path": self._logical_path(p.dataset_path, dest),
                 "description": description or "",
                 "storage_option": "bids",
                 "subject_index": subject_index,
                 "visit_index": visit_index,
                 "group_index": group_index,
+                "modalities": modalities or [],
+                "form_version": int(form_version) if form_version is not None else None,
                 "created_at": local_now().isoformat(),
             }
             _json_dump(p.files_dir / f"file_{file_id:09d}.json", record)
@@ -1603,6 +1733,9 @@ class DataladStudyRepo:
                     "file_id": file_id,
                     "file_name": original_name,
                     "stored_file_name": stored_name,
+                    "stored_path": self._logical_path(p.dataset_path, dest),
+                    "modalities": modalities or [],
+                    "form_version": int(form_version) if form_version is not None else None,
                     "ui_label": audit_label,
                     "subject_index": subject_index,
                     "visit_index": visit_index,
@@ -1626,6 +1759,8 @@ class DataladStudyRepo:
         subject_index: Optional[int] = None,
         visit_index: Optional[int] = None,
         group_index: Optional[int] = None,
+        modalities: Optional[List[str]] = None,
+        form_version: Optional[int] = None,
         actor: str,
         audit_label: Optional[str] = None,
         user_id: Optional[int] = None,
@@ -1635,7 +1770,17 @@ class DataladStudyRepo:
 
         with dataset_lock(LockSpec(dataset_path=p.dataset_path)):
             file_id = self._next_file_id(p)
-            name = os.path.basename(url) or "link"
+            name = _safe_filename(os.path.basename(url) or "link")
+
+            target_dir = self._resolve_file_storage_dir(
+                p,
+                subject_index=subject_index,
+                visit_index=visit_index,
+                group_index=group_index,
+                modalities=modalities,
+                form_version=form_version,
+            )
+            target_dir.mkdir(parents=True, exist_ok=True)
 
             record = {
                 "id": file_id,
@@ -1647,6 +1792,8 @@ class DataladStudyRepo:
                 "subject_index": subject_index,
                 "visit_index": visit_index,
                 "group_index": group_index,
+                "modalities": modalities or [],
+                "form_version": int(form_version) if form_version is not None else None,
                 "created_at": local_now().isoformat(),
             }
             _json_dump(p.files_dir / f"file_{file_id:09d}.json", record)
@@ -1667,6 +1814,8 @@ class DataladStudyRepo:
                     "file_id": file_id,
                     "url": url,
                     "file_name": name,
+                    "modalities": modalities or [],
+                    "form_version": int(form_version) if form_version is not None else None,
                     "ui_label": audit_label,
                     "subject_index": subject_index,
                     "visit_index": visit_index,
@@ -1689,6 +1838,7 @@ class DataladStudyRepo:
                 if row:
                     out.append(row)
         return out
+
     def get_file_record(
         self,
         *,
@@ -1740,7 +1890,6 @@ class DataladStudyRepo:
 
         abs_path = (p.dataset_path / rel_path).resolve()
 
-        # safety: make sure resolved path stays inside this dataset
         dataset_root = p.dataset_path.resolve()
         try:
             abs_path.relative_to(dataset_root)
@@ -1934,7 +2083,10 @@ class DataladStudyRepo:
     def _subject_audit_dir(self, p: StudyPaths, subject_index: Optional[int]) -> Optional[Path]:
         if subject_index is None:
             return None
-        subdir = p.audit_subject_dir / f"subject_{int(subject_index):05d}"
+
+        study_data = self._load_study_content_data(p)
+        subject_label = self._resolve_subject_label(study_data, subject_index)
+        subdir = p.audit_subject_dir / f"subject_{int(subject_index):05d}_{subject_label}"
         subdir.mkdir(parents=True, exist_ok=True)
         return subdir
 
