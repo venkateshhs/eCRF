@@ -796,6 +796,9 @@ export default {
         return false;
       }
     }
+    function isReturningFromScratch() {
+      return route.name === "CreateStudy" && route.query.step != null;
+    }
 
     function validateStepOnly(stepId) {
       if (stepId === 1) return validateStudy({ advance: false });
@@ -1431,28 +1434,42 @@ export default {
       async (newVal, oldVal) => {
         if (newVal === oldVal) return;
 
+        const returningFromScratch = isReturningFromScratch();
+
         if (!newVal) {
-          store.commit("resetStudyDetails");
-          const base = {};
-          (studySchema.value || []).forEach((f) => (base[f.field] = ""));
-          studyData.value = base;
-          groupData.value = [];
-          subjectData.value = [];
-          visitData.value = [];
-          subjectCount.value = 1;
-          assignmentMethod.value = "Random";
-          assignments.value = [];
-          skipSubjectCreationNow.value = false;
-          step.value = 1;
-          draftStudyId.value = null;
-          markSavedSnapshot();
+          if (!returningFromScratch) {
+            store.commit("resetStudyDetails");
+
+            const base = {};
+            (studySchema.value || []).forEach((f) => (base[f.field] = ""));
+            studyData.value = base;
+            groupData.value = [];
+            subjectData.value = [];
+            visitData.value = [];
+            subjectCount.value = 1;
+            assignmentMethod.value = "Random";
+            assignments.value = [];
+            skipSubjectCreationNow.value = false;
+            step.value = 1;
+            draftStudyId.value = null;
+
+            markSavedSnapshot();
+          } else {
+            populateRefsFromStore();
+            applyInitialStepFromQuery();
+            // IMPORTANT: do NOT mark saved here
+          }
           return;
         }
 
         await ensureStoreDetailsLoadedForEdit();
         populateRefsFromStore();
         applyInitialStepFromQuery();
-        markSavedSnapshot();
+
+        // IMPORTANT: only mark saved on real edit-load, not on return from ScratchForm
+        if (!returningFromScratch) {
+          markSavedSnapshot();
+        }
       }
     );
 
@@ -1530,7 +1547,11 @@ export default {
     );
 
     onMounted(async () => {
-      if (!editId.value) store.commit("resetStudyDetails");
+      const returningFromScratch = isReturningFromScratch();
+
+      if (!editId.value && !returningFromScratch) {
+        store.commit("resetStudyDetails");
+      }
 
       await loadYaml("/study_schema.yaml", studySchema);
       await loadYaml("/group_schema.yaml", groupSchema);
@@ -1538,16 +1559,31 @@ export default {
 
       await ensureStoreDetailsLoadedForEdit();
 
-      if (isEditing.value) {
+      const hasStoreDetails =
+        !!store.state.studyDetails &&
+        (
+          (store.state.studyDetails.study && Object.keys(store.state.studyDetails.study).length) ||
+          (Array.isArray(store.state.studyDetails.groups) && store.state.studyDetails.groups.length) ||
+          (Array.isArray(store.state.studyDetails.visits) && store.state.studyDetails.visits.length) ||
+          store.state.studyDetails.subjectCount != null
+        );
+
+      if (isEditing.value || hasStoreDetails) {
         populateRefsFromStore();
         applyInitialStepFromQuery();
       } else {
         const base = {};
         (studySchema.value || []).forEach((f) => (base[f.field] = ""));
         studyData.value = base;
+        applyInitialStepFromQuery();
       }
 
-      markSavedSnapshot();
+      // IMPORTANT FIX:
+      // Do not clear dirty/snapshot when simply returning from ScratchForm.
+      if (!returningFromScratch) {
+        markSavedSnapshot();
+      }
+
       window.addEventListener("beforeunload", beforeUnloadHandler);
     });
 

@@ -771,6 +771,17 @@ export default {
     return;
   }
 
+  // IMPORTANT FIX:
+  // Going back from Forms builder to Study Creation step 1 is internal step navigation,
+  // not an exit from study creation, so do NOT show unsaved dialog.
+  const isBackToStudyCreationStep5 =
+    to?.name === "CreateStudy" && String(to?.query?.step || "") === "1";
+
+  if (isBackToStudyCreationStep5) {
+    next();
+    return;
+  }
+
   // If dialog already open, block duplicate navigation attempts
   if (this.showUnsavedDialog) {
     next(false);
@@ -2045,29 +2056,38 @@ handleImportedCsvFields(importedFields) {
         this.showLogic = false;
         return;
       }
-      // If ProtocolMatrix is open, let ProtocolMatrix own the unsaved dialog logic
+
+      // If ProtocolMatrix is open, just go back to study creation step 5
       if (this.showMatrix) {
-        this.$router.back();
+        const q = { ...this.$route.query, step: "5" };
+        this.scratchAllowInternalNav = true;
+        this.$router
+          .push({
+            name: "CreateStudy",
+            params: this.$route.params?.id ? { id: this.$route.params.id } : {},
+            query: q
+          })
+          .finally(() => {
+            this.scratchAllowInternalNav = false;
+          });
         return;
       }
 
-      // If internal navigation is already allowed (after save / explicit discard), just go back
-      if (this.scratchAllowInternalNav) {
-        this.$router.back();
-        return;
-      }
+      // IMPORTANT FIX:
+      // Back from ScratchForm should always return to Study Creation step 1,
+      // both for new study creation and edit mode.
+      const q = { ...this.$route.query, step: "1" };
 
-      // Use the SAME global dirty flag
-      const isDirty = !!this.$store.state.studyCreationDirty;
-
-      if (!isDirty) {
-        this.$router.back();
-        return;
-      }
-
-      // Open scratch unsaved dialog and remember the action
-      this.unsavedPendingAction = () => this.$router.back();
-      this.showUnsavedDialog = true;
+      this.scratchAllowInternalNav = true;
+      this.$router
+        .push({
+          name: "CreateStudy",
+          params: this.$route.params?.id ? { id: this.$route.params.id } : {},
+          query: q
+        })
+        .finally(() => {
+          this.scratchAllowInternalNav = false;
+        });
     },
 
     prettyModelTitle(s) { return this.$formatLabel ? this.$formatLabel(s) : String(s || ""); },
