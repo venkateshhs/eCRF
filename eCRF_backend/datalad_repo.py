@@ -17,7 +17,7 @@ from .datalad_config import get_datalad_config
 from .datalad_lock import dataset_lock, LockSpec
 from .datalad_runtime import get_datalad_worker
 from .settings import get_settings
-
+import tempfile
 try:
     from datalad.api import Dataset  # type: ignore
 except Exception:
@@ -35,6 +35,10 @@ ALLOWED_STUDY_STATUS = {"DRAFT", "PUBLISHED", "ARCHIVED"}
 def local_now() -> datetime:
     return datetime.now(timezone.utc)
 
+def _safe_filename(name: str) -> str:
+    name = os.path.basename(name)  # remove paths
+    name = re.sub(r"[^\w.\- ]", "_", name)  # clean weird chars
+    return name.strip() or "file"
 
 def _slugify(value: str) -> str:
     s = (value or "").strip()
@@ -169,18 +173,46 @@ class DataladStudyRepo:
     def _ensure_ria_sibling_if_needed(self, dataset_path: Path) -> None:
         cfg = self._cfg()
         if not cfg.ria_url:
+            logger.info(
+                "[DataladStudyRepo._ensure_ria_sibling_if_needed] No RIA URL configured; skipping sibling setup for dataset=%s",
+                dataset_path,
+            )
             return
 
         if Dataset is None:
+            logger.error(
+                "[DataladStudyRepo._ensure_ria_sibling_if_needed] DataLad is not installed; cannot configure RIA sibling for dataset=%s",
+                dataset_path,
+            )
             raise RuntimeError("DataLad is not installed")
+
+        logger.info(
+            "[DataladStudyRepo._ensure_ria_sibling_if_needed] Checking RIA sibling for dataset=%s ria_name=%s ria_url=%s",
+            dataset_path,
+            cfg.ria_name,
+            cfg.ria_url,
+        )
 
         ds = Dataset(str(dataset_path))
         if not ds.is_installed():
+            logger.error(
+                "[DataladStudyRepo._ensure_ria_sibling_if_needed] Dataset not installed at dataset=%s",
+                dataset_path,
+            )
             raise RuntimeError(f"Dataset not installed at {dataset_path}")
 
         try:
             siblings = ds.siblings(result_renderer="disabled")
+            logger.info(
+                "[DataladStudyRepo._ensure_ria_sibling_if_needed] Existing siblings loaded for dataset=%s count=%s",
+                dataset_path,
+                len(siblings or []),
+            )
         except Exception:
+            logger.exception(
+                "[DataladStudyRepo._ensure_ria_sibling_if_needed] Failed to list siblings for dataset=%s",
+                dataset_path,
+            )
             siblings = []
 
         existing_names = set()
@@ -191,21 +223,47 @@ class DataladStudyRepo:
                     existing_names.add(str(name))
 
         if cfg.ria_name in existing_names:
+            logger.info(
+                "[DataladStudyRepo._ensure_ria_sibling_if_needed] RIA sibling already exists for dataset=%s sibling=%s",
+                dataset_path,
+                cfg.ria_name,
+            )
             return
 
         if create_sibling_ria is None:
+            logger.error(
+                "[DataladStudyRepo._ensure_ria_sibling_if_needed] create_sibling_ria is unavailable for dataset=%s",
+                dataset_path,
+            )
             raise RuntimeError(
                 "DataLad create_sibling_ria is not available but a RIA sibling is required."
             )
 
-        create_sibling_ria(
-            dataset=str(dataset_path),
-            url=cfg.ria_url,
-            name=cfg.ria_name,
-            new_store_ok=True,
-            result_renderer="disabled",
-        )
-        logger.info("Configured RIA sibling for dataset=%s sibling=%s", dataset_path, cfg.ria_name)
+        try:
+            logger.info(
+                "[DataladStudyRepo._ensure_ria_sibling_if_needed] Creating RIA sibling for dataset=%s sibling=%s",
+                dataset_path,
+                cfg.ria_name,
+            )
+            create_sibling_ria(
+                dataset=str(dataset_path),
+                url=cfg.ria_url,
+                name=cfg.ria_name,
+                new_store_ok=True,
+                result_renderer="disabled",
+            )
+            logger.info(
+                "[DataladStudyRepo._ensure_ria_sibling_if_needed] Configured RIA sibling for dataset=%s sibling=%s",
+                dataset_path,
+                cfg.ria_name,
+            )
+        except Exception:
+            logger.exception(
+                "[DataladStudyRepo._ensure_ria_sibling_if_needed] Failed to create RIA sibling for dataset=%s sibling=%s",
+                dataset_path,
+                cfg.ria_name,
+            )
+            raise
 
     def _logical_path(self, dataset_path: Path, absolute_path: Path) -> str:
         return str(Path(absolute_path).resolve().relative_to(dataset_path.resolve()))
@@ -240,18 +298,79 @@ class DataladStudyRepo:
     def ensure_dataset(self, study_id: int, study_name: str) -> StudyPaths:
         self._validate_storage_ready()
         p = self.paths(study_id, study_name)
+
+        logger.info(
+            "[DataladStudyRepo.ensure_dataset] Start study_id=%s study_name=%s dataset_path=%s",
+            study_id,
+            study_name,
+            p.dataset_path,
+        )
+
         p.dataset_path.mkdir(parents=True, exist_ok=True)
+        logger.info(
+            "[DataladStudyRepo.ensure_dataset] Ensured dataset directory exists dataset_path=%s",
+            p.dataset_path,
+        )
 
         if Dataset is None:
+            logger.error(
+                "[DataladStudyRepo.ensure_dataset] DataLad is not installed for dataset_path=%s",
+                p.dataset_path,
+            )
             raise RuntimeError("DataLad is not installed")
 
+        logger.info(
+            "[DataladStudyRepo.ensure_dataset] About to acquire dataset lock dataset_path=%s",
+            p.dataset_path,
+        )
         with dataset_lock(LockSpec(dataset_path=p.dataset_path)):
+            logger.info(
+                "[DataladStudyRepo.ensure_dataset] Acquired dataset lock dataset_path=%s",
+                p.dataset_path,
+            )
+
             ds = Dataset(str(p.dataset_path))
-            if not ds.is_installed():
-                ds.create(force=True, cfg_proc="text2git")
+            logger.info(
+                "[DataladStudyRepo.ensure_dataset] Dataset object created dataset_path=%s",
+                p.dataset_path,
+            )
+
+            installed = ds.is_installed()
+            logger.info(
+                "[DataladStudyRepo.ensure_dataset] Dataset install status dataset_path=%s installed=%s",
+                p.dataset_path,
+                installed,
+            )
+
+            if not installed:
+                try:
+                    logger.info(
+                        "[DataladStudyRepo.ensure_dataset] Creating dataset dataset_path=%s cfg_proc=text2git",
+                        p.dataset_path,
+                    )
+                    ds.create(force=True, cfg_proc="text2git")
+                    logger.info(
+                        "[DataladStudyRepo.ensure_dataset] Dataset created dataset_path=%s",
+                        p.dataset_path,
+                    )
+                except Exception:
+                    logger.exception(
+                        "[DataladStudyRepo.ensure_dataset] Dataset creation failed dataset_path=%s",
+                        p.dataset_path,
+                    )
+                    raise
 
             self._set_repo_identity(ds)
+            logger.info(
+                "[DataladStudyRepo.ensure_dataset] Repo identity configured dataset_path=%s",
+                p.dataset_path,
+            )
+
             _ensure_gitignore(p.dataset_path)
+            logger.info(
+                "[DataladStudyRepo.ensure_dataset] .gitignore ensured dataset_path=%s",
+                p.dataset_path,
+            )
 
             for d in [
                 p.canonical_dir,
@@ -266,9 +385,22 @@ class DataladStudyRepo:
                 p.access_dir,
             ]:
                 d.mkdir(parents=True, exist_ok=True)
+                logger.info(
+                    "[DataladStudyRepo.ensure_dataset] Ensured directory exists path=%s",
+                    d,
+                )
 
             self._ensure_ria_sibling_if_needed(p.dataset_path)
+            logger.info(
+                "[DataladStudyRepo.ensure_dataset] RIA sibling check complete dataset_path=%s",
+                p.dataset_path,
+            )
 
+        logger.info(
+            "[DataladStudyRepo.ensure_dataset] Completed study_id=%s dataset_path=%s",
+            study_id,
+            p.dataset_path,
+        )
         return p
 
     def next_study_id(self) -> int:
@@ -289,37 +421,87 @@ class DataladStudyRepo:
 
     def save(self, ds_path: Path, message: str) -> None:
         if Dataset is None:
+            logger.error(
+                "[DataladStudyRepo.save] DataLad is not installed ds_path=%s message=%s",
+                ds_path,
+                message,
+            )
             raise RuntimeError("DataLad is not installed")
 
         cfg = self._cfg()
         ds_path = Path(ds_path).expanduser().resolve()
         worker = get_datalad_worker()
 
+        logger.info(
+            "[DataladStudyRepo.save] Start ds_path=%s message=%s sync_mode=%s push_on_save=%s ria_name=%s",
+            ds_path,
+            message,
+            cfg.sync_mode,
+            cfg.push_on_save,
+            cfg.ria_name,
+        )
+
         if cfg.sync_mode == "async" and worker is not None:
             worker.enqueue_save(ds_path, message)
-            logger.info("Enqueued dataset save: %s msg=%s", ds_path, message)
+            logger.info("[DataladStudyRepo.save] Enqueued dataset save ds_path=%s msg=%s", ds_path, message)
             return
 
+        logger.info(
+            "[DataladStudyRepo.save] About to acquire dataset lock ds_path=%s message=%s",
+            ds_path,
+            message,
+        )
         with dataset_lock(LockSpec(dataset_path=ds_path)):
+            logger.info(
+                "[DataladStudyRepo.save] Acquired dataset lock ds_path=%s message=%s",
+                ds_path,
+                message,
+            )
+
             ds = Dataset(str(ds_path))
+            logger.info("[DataladStudyRepo.save] Dataset object created ds_path=%s", ds_path)
+
             if not ds.is_installed():
+                logger.error("[DataladStudyRepo.save] Dataset not installed ds_path=%s", ds_path)
                 raise RuntimeError(f"Dataset not installed at {ds_path}")
 
             self._set_repo_identity(ds)
-            ds.save(message=message)
-            logger.info("Saved dataset: %s msg=%s", ds_path, message)
+            logger.info("[DataladStudyRepo.save] Repo identity configured ds_path=%s", ds_path)
+
+            try:
+                logger.info("[DataladStudyRepo.save] Calling ds.save ds_path=%s message=%s", ds_path, message)
+                ds.save(message=message)
+                logger.info("[DataladStudyRepo.save] Saved dataset ds_path=%s msg=%s", ds_path, message)
+            except Exception:
+                logger.exception("[DataladStudyRepo.save] ds.save failed ds_path=%s msg=%s", ds_path, message)
+                raise
 
             if cfg.push_on_save and cfg.ria_name:
                 push_kwargs = {"to": cfg.ria_name}
                 if cfg.push_data_mode != "nothing":
                     push_kwargs["data"] = cfg.push_data_mode
-                ds.push(**push_kwargs)
-                logger.info(
-                    "Pushed dataset: %s to=%s data_mode=%s",
-                    ds_path,
-                    cfg.ria_name,
-                    cfg.push_data_mode,
-                )
+                try:
+                    logger.info(
+                        "[DataladStudyRepo.save] Pushing dataset ds_path=%s to=%s data_mode=%s",
+                        ds_path,
+                        cfg.ria_name,
+                        cfg.push_data_mode,
+                    )
+                    ds.push(**push_kwargs)
+                    logger.info(
+                        "[DataladStudyRepo.save] Pushed dataset ds_path=%s to=%s data_mode=%s",
+                        ds_path,
+                        cfg.ria_name,
+                        cfg.push_data_mode,
+                    )
+                except Exception:
+                    logger.exception(
+                        "[DataladStudyRepo.save] ds.push failed ds_path=%s to=%s data_mode=%s",
+                        ds_path,
+                        cfg.ria_name,
+                        cfg.push_data_mode,
+                    )
+                    raise
 
     def previous_study_content(self, ds_path: Path) -> Dict[str, Any]:
         return _git_show_json(ds_path, "HEAD~1", "canonical/study_content.json", default={}) or {}
@@ -447,7 +629,20 @@ class DataladStudyRepo:
         commit_message: Optional[str] = None,
         **kwargs,
     ) -> Dict[str, Any]:
+        logger.info(
+            "[DataladStudyRepo.create_or_replace_published_snapshot] Start study_id=%s study_name=%s audit_label=%s",
+            study_id,
+            study_name,
+            audit_label,
+        )
+
         p = self.ensure_dataset(study_id, study_name)
+        logger.info(
+            "[DataladStudyRepo.create_or_replace_published_snapshot] Dataset ready study_id=%s dataset_path=%s",
+            study_id,
+            p.dataset_path,
+        )
+
         now_iso = local_now().isoformat()
 
         if metadata is not None:
@@ -487,9 +682,39 @@ class DataladStudyRepo:
         safe_content["study_id"] = int(study_id)
         safe_content.setdefault("study_data", _deepcopy_json(study_data or {}))
 
+        logger.info(
+            "[DataladStudyRepo.create_or_replace_published_snapshot] Prepared payloads study_id=%s meta_keys=%s content_keys=%s schema_keys=%s",
+            study_id,
+            sorted(list(safe_meta.keys())),
+            sorted(list(safe_content.keys())),
+            sorted(list(safe_schema.keys())) if isinstance(safe_schema, dict) else type(safe_schema).__name__,
+        )
+
+        logger.info(
+            "[DataladStudyRepo.create_or_replace_published_snapshot] About to acquire dataset lock study_id=%s dataset_path=%s",
+            study_id,
+            p.dataset_path,
+        )
         with dataset_lock(LockSpec(dataset_path=p.dataset_path)):
+            logger.info(
+                "[DataladStudyRepo.create_or_replace_published_snapshot] Acquired dataset lock study_id=%s dataset_path=%s",
+                study_id,
+                p.dataset_path,
+            )
+
             _json_dump(p.metadata_json, safe_meta)
+            logger.info(
+                "[DataladStudyRepo.create_or_replace_published_snapshot] Wrote metadata study_id=%s path=%s",
+                study_id,
+                p.metadata_json,
+            )
+
             _json_dump(p.content_json, safe_content)
+            logger.info(
+                "[DataladStudyRepo.create_or_replace_published_snapshot] Wrote content study_id=%s path=%s",
+                study_id,
+                p.content_json,
+            )
 
             version = 1
             if isinstance(safe_schema, dict):
@@ -498,15 +723,36 @@ class DataladStudyRepo:
                 except Exception:
                     version = 1
             version = max(1, version)
+            logger.info(
+                "[DataladStudyRepo.create_or_replace_published_snapshot] Resolved template version study_id=%s version=%s",
+                study_id,
+                version,
+            )
 
             version_dir = p.templates_dir / f"v{version:03d}"
             version_dir.mkdir(parents=True, exist_ok=True)
+            logger.info(
+                "[DataladStudyRepo.create_or_replace_published_snapshot] Ensured version dir study_id=%s path=%s",
+                study_id,
+                version_dir,
+            )
+
             _json_dump(version_dir / "schema.json", safe_schema)
+            logger.info(
+                "[DataladStudyRepo.create_or_replace_published_snapshot] Wrote template schema study_id=%s path=%s",
+                study_id,
+                version_dir / "schema.json",
+            )
 
             actor_payload = self._build_actor_payload(
                 actor=actor,
                 actor_name=actor_name,
                 user_id=user_id if user_id is not None else created_by,
+            )
+            logger.info(
+                "[DataladStudyRepo.create_or_replace_published_snapshot] Built actor payload study_id=%s actor_payload=%s",
+                study_id,
+                actor_payload,
             )
 
             self._append_audit(
@@ -521,19 +767,41 @@ class DataladStudyRepo:
                     **actor_payload,
                 },
             )
+            logger.info(
+                "[DataladStudyRepo.create_or_replace_published_snapshot] Appended audit study_id=%s action=study_snapshot_written",
+                study_id,
+            )
 
+        final_commit_message = commit_message or f"case-e: published snapshot study={study_id} version={version}"
+        logger.info(
+            "[DataladStudyRepo.create_or_replace_published_snapshot] About to save dataset study_id=%s dataset_path=%s message=%s",
+            study_id,
+            p.dataset_path,
+            final_commit_message,
+        )
         self.save(
             p.dataset_path,
-            commit_message or f"case-e: published snapshot study={study_id} version={version}",
+            final_commit_message,
+        )
+        logger.info(
+            "[DataladStudyRepo.create_or_replace_published_snapshot] Dataset save complete study_id=%s dataset_path=%s",
+            study_id,
+            p.dataset_path,
         )
 
-        return {
+        result = {
             "dataset_path": str(p.dataset_path),
             "metadata_path": self._logical_path(p.dataset_path, p.metadata_json),
             "content_path": self._logical_path(p.dataset_path, p.content_json),
             "template_path": self._logical_path(p.dataset_path, version_dir / "schema.json"),
             "version": version,
         }
+        logger.info(
+            "[DataladStudyRepo.create_or_replace_published_snapshot] Completed study_id=%s result=%s",
+            study_id,
+            result,
+        )
+        return result
 
     # ------------------------------------------------------------------
     # study CRUD
@@ -699,6 +967,31 @@ class DataladStudyRepo:
         ds = self.study_dataset_path(study_id, study_name)
         if ds.exists():
             shutil.rmtree(ds, ignore_errors=True)
+
+    def build_full_study_zip(
+        self,
+        *,
+        study_id: int,
+        study_name: str,
+    ) -> tuple[Path, str]:
+        ds_path = self.study_dataset_path(study_id, study_name)
+
+        if not ds_path.exists() or not ds_path.is_dir():
+            raise FileNotFoundError("Study dataset folder not found")
+
+        safe_study_name = _slugify(study_name)
+        zip_basename = f"study_{int(study_id)}_{safe_study_name}"
+        tmp_dir = Path(tempfile.mkdtemp(prefix=f"casee_study_zip_{study_id}_"))
+        zip_base_path = tmp_dir / zip_basename
+
+        archive_path = shutil.make_archive(
+            base_name=str(zip_base_path),
+            format="zip",
+            root_dir=str(ds_path.parent),
+            base_dir=ds_path.name,
+        )
+
+        return Path(archive_path), f"{zip_basename}.zip"
 
     # ------------------------------------------------------------------
     # templates
@@ -1253,35 +1546,38 @@ class DataladStudyRepo:
         return max_id + 1
 
     def save_uploaded_file(
-        self,
-        *,
-        study_id: int,
-        study_name: str,
-        filename: str,
-        source_path: str,
-        description: str = "",
-        subject_index: Optional[int] = None,
-        visit_index: Optional[int] = None,
-        group_index: Optional[int] = None,
-        actor: str,
-        audit_label: Optional[str] = None,
-        user_id: Optional[int] = None,
-        actor_name: Optional[str] = None,
+            self,
+            *,
+            study_id: int,
+            study_name: str,
+            filename: str,
+            source_path: str,
+            description: str = "",
+            subject_index: Optional[int] = None,
+            visit_index: Optional[int] = None,
+            group_index: Optional[int] = None,
+            actor: str,
+            audit_label: Optional[str] = None,
+            user_id: Optional[int] = None,
+            actor_name: Optional[str] = None,
     ) -> Dict[str, Any]:
         p = self.ensure_dataset(study_id, study_name)
 
         with dataset_lock(LockSpec(dataset_path=p.dataset_path)):
             file_id = self._next_file_id(p)
-            ext = Path(filename).suffix
-            dest = p.files_dir / f"file_{file_id:09d}{ext}"
+
+            original_name = _safe_filename(filename)
+            stored_name = f"{file_id:09d}_{original_name}"
+            dest = p.files_dir / stored_name
+
             dest.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(source_path, dest)
 
             record = {
                 "id": file_id,
                 "study_id": study_id,
-                "file_name": filename,
-                "file_path": self._logical_path(p.dataset_path, dest),
+                "file_name": original_name,  # original file name for UI/download
+                "file_path": self._logical_path(p.dataset_path, dest),  # actual stored path
                 "description": description or "",
                 "storage_option": "bids",
                 "subject_index": subject_index,
@@ -1305,7 +1601,8 @@ class DataladStudyRepo:
                 study_id=study_id,
                 payload={
                     "file_id": file_id,
-                    "file_name": filename,
+                    "file_name": original_name,
+                    "stored_file_name": stored_name,
                     "ui_label": audit_label,
                     "subject_index": subject_index,
                     "visit_index": visit_index,
@@ -1392,6 +1689,75 @@ class DataladStudyRepo:
                 if row:
                     out.append(row)
         return out
+    def get_file_record(
+        self,
+        *,
+        study_id: int,
+        study_name: str,
+        file_id: int,
+    ) -> Dict[str, Any]:
+        p = self.paths(study_id, study_name)
+        rec_path = p.files_dir / f"file_{int(file_id):09d}.json"
+        row = _json_load(rec_path)
+
+        if not row:
+            raise FileNotFoundError("File record not found")
+
+        return row
+
+    def get_file_for_download(
+        self,
+        *,
+        study_id: int,
+        study_name: str,
+        file_id: int,
+    ) -> Dict[str, Any]:
+        p = self.paths(study_id, study_name)
+        row = self.get_file_record(
+            study_id=study_id,
+            study_name=study_name,
+            file_id=file_id,
+        )
+
+        storage_option = str(row.get("storage_option") or "").strip().lower()
+
+        if storage_option == "url":
+            url = row.get("file_path")
+            if not url:
+                raise FileNotFoundError("URL file path not found")
+
+            return {
+                "id": row.get("id"),
+                "study_id": row.get("study_id"),
+                "file_name": row.get("file_name") or "link",
+                "storage_option": "url",
+                "url": url,
+            }
+
+        rel_path = row.get("file_path")
+        if not rel_path:
+            raise FileNotFoundError("Stored file path not found")
+
+        abs_path = (p.dataset_path / rel_path).resolve()
+
+        # safety: make sure resolved path stays inside this dataset
+        dataset_root = p.dataset_path.resolve()
+        try:
+            abs_path.relative_to(dataset_root)
+        except Exception:
+            raise ValueError("Invalid file path outside study dataset")
+
+        if not abs_path.exists() or not abs_path.is_file():
+            raise FileNotFoundError("Stored file not found on disk")
+
+        return {
+            "id": row.get("id"),
+            "study_id": row.get("study_id"),
+            "file_name": row.get("file_name") or abs_path.name,
+            "storage_option": storage_option or "bids",
+            "absolute_path": abs_path,
+            "record": row,
+        }
 
     # ------------------------------------------------------------------
     # access / shares

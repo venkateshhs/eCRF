@@ -7,7 +7,7 @@
       <button class="btn-minimal back-btn" @click="goBackToDashboard" aria-label="Back to Dashboard">Back</button>
       <div class="title-wrap">
         <h1 class="sv-title">{{ studyMeta.study_name || 'Study' }}</h1>
-        <p class="sv-subtitle" v-if="studyMeta.study_description">{{ studyMeta.study_description }}</p>
+        <p class="sv-subtitle" v-if="hasValue(studyMeta.study_description)">{{ studyMeta.study_description }}</p>
       </div>
       <div class="header-spacer" aria-hidden="true"></div>
     </header>
@@ -28,7 +28,7 @@
         role="tablist"
         aria-orientation="vertical"
       >
-        <!--  Collapse/Expand icon only for View Data tab -->
+        <!-- Collapse/Expand icon only for View Data tab -->
         <div class="v-tabs-tools" v-if="activeTab === 'viewdata'">
           <button
             class="btn-minimal icon-only"
@@ -296,7 +296,7 @@
           </div>
         </div>
 
-        <!--  EDIT STUDY TAB -->
+        <!-- EDIT STUDY TAB -->
         <div v-else-if="activeTab === 'edit'">
           <h2 class="panel-title center">Edit Study</h2>
 
@@ -321,15 +321,15 @@
             Tip: This will open the individual steps in edit mode with a dedicated Save button.
           </div>
           <div v-if="canManageAccess" class="edit-danger-zone">
-          <button
-            class="btn-danger"
-            type="button"
-            @click="openDeleteStudyDialog"
-            :disabled="deleteConfirm.busy"
-          >
-            Delete Study
-          </button>
-        </div>
+            <button
+              class="btn-danger"
+              type="button"
+              @click="openDeleteStudyDialog"
+              :disabled="deleteConfirm.busy"
+            >
+              Delete Study
+            </button>
+          </div>
         </div>
 
         <!-- DOCUMENTS -->
@@ -350,6 +350,17 @@
               <div class="doc-path" :title="docPathTooltip(doc)">
                 <span class="label">On disk:</span>
                 <span class="file-path">{{ docRelativePath(doc) }}</span>
+              </div>
+
+              <div v-if="canDownloadStudyAttachment" class="doc-actions">
+                <button
+                  class="btn-minimal"
+                  type="button"
+                  :disabled="isDownloadBusy(doc)"
+                  @click="downloadAttachedFile(doc)"
+                >
+                  {{ isDownloadBusy(doc) ? "Downloading…" : "Download" }}
+                </button>
               </div>
             </div>
           </div>
@@ -478,7 +489,7 @@
           </div>
 
           <!-- GRANT FORM -->
-            <div v-if="canManageAccess" class="subsection">
+          <div v-if="canManageAccess" class="subsection">
             <h3 class="sub-title">Grant Access</h3>
 
             <div class="grant-grid access-grant-grid">
@@ -536,7 +547,7 @@
           </div>
         </div>
 
-        <!--  VIEW DATA: embedded (NO routing) -->
+        <!-- VIEW DATA: embedded (NO routing) -->
         <div v-else-if="activeTab === 'viewdata'" class="viewdata-host">
           <StudyDataDashboard
             :study-id="studyId"
@@ -572,19 +583,34 @@
               </p>
 
               <div class="bids-actions export-actions">
-                <button class="btn-primary" type="button" @click="exportStudyTemplate">
-                  Export Study Template
-                </button>
+                  <button class="btn-primary" type="button" @click="exportStudyTemplate">
+                    Export Study Template
+                  </button>
 
-                <button
-                  class="btn-primary"
-                  type="button"
-                  :disabled="downloadingZip"
-                  @click="downloadStudyZip"
-                >
-                  {{ downloadingZip ? "Downloading…" : "Download Study (ZIP)" }}
-                </button>
-              </div>
+                  <!-- Only owner/admin -->
+                  <template v-if="canDownloadFullStudy">
+                    <button
+                      class="btn-primary"
+                      type="button"
+                      :disabled="downloadingMergeZip"
+                      @click="downloadStudyZip"
+                    >
+                      {{ downloadingMergeZip ? "Downloading…" : "Download Study For Merge" }}
+                    </button>
+
+                    <button
+                      class="btn-primary"
+                      type="button"
+                      :disabled="downloadingFullStudyZip"
+                      @click="downloadFullStudyZip"
+                    >
+                      {{ downloadingFullStudyZip ? "Downloading…" : "Download Study" }}
+                    </button>
+                  </template>
+                  <div v-else class="muted" style="margin-top: 10px;">
+                  Only the study owner or an administrator can download the full study.
+                </div>
+                </div>
             </div>
 
             <!-- Existing dataset (kept as-is) -->
@@ -621,34 +647,34 @@
         </div>
       </section>
     </div>
-        <!-- Delete study confirm dialog -->
-        <div
-          v-if="deleteConfirm.visible"
-          class="modal-backdrop"
-          role="dialog"
-          aria-modal="true"
-          @click.self="cancelDeleteStudy"
-        >
-          <div class="modal" tabindex="-1">
-            <h3 class="modal-title">Delete study?</h3>
-            <p class="modal-text">
-              This will permanently delete
-              <span class="strong">{{ studyMeta.study_name || "this study" }}</span>
-              from both the database and the study filesystem.
-            </p>
-            <p class="modal-text" style="margin-top:-6px;">
-              This action cannot be undone.
-            </p>
-            <div class="modal-actions">
-              <button class="btn-minimal" @click="cancelDeleteStudy" :disabled="deleteConfirm.busy">
-                Cancel
-              </button>
-              <button class="btn-primary danger" @click="confirmDeleteStudy" :disabled="deleteConfirm.busy">
-                {{ deleteConfirm.busy ? "Deleting…" : "Delete Study" }}
-              </button>
-            </div>
-          </div>
+    <!-- Delete study confirm dialog -->
+    <div
+      v-if="deleteConfirm.visible"
+      class="modal-backdrop"
+      role="dialog"
+      aria-modal="true"
+      @click.self="cancelDeleteStudy"
+    >
+      <div class="modal" tabindex="-1">
+        <h3 class="modal-title">Delete study?</h3>
+        <p class="modal-text">
+          This will permanently delete
+          <span class="strong">{{ studyMeta.study_name || "this study" }}</span>
+          from both the database and the study filesystem.
+        </p>
+        <p class="modal-text" style="margin-top:-6px;">
+          This action cannot be undone.
+        </p>
+        <div class="modal-actions">
+          <button class="btn-minimal" @click="cancelDeleteStudy" :disabled="deleteConfirm.busy">
+            Cancel
+          </button>
+          <button class="btn-primary danger" @click="confirmDeleteStudy" :disabled="deleteConfirm.busy">
+            {{ deleteConfirm.busy ? "Deleting…" : "Delete Study" }}
+          </button>
         </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -668,9 +694,9 @@ export default {
   data() {
     return {
       deleteConfirm: {
-      visible: false,
-      busy: false,
-    },
+        visible: false,
+        busy: false,
+      },
       studyId: this.$route.params.id,
 
       // meta/content
@@ -683,6 +709,7 @@ export default {
         created_by_email: "",
         created_at: "",
         updated_at: "",
+        permissions: null,
       },
       studyData: {},
       me: null,
@@ -699,7 +726,7 @@ export default {
         versions: true,
       },
 
-      //  View Data embedding state
+      // View Data embedding state
       dataSidebarCollapsed: false,
       dashboardFullscreen: false,
 
@@ -720,19 +747,20 @@ export default {
 
       //  7-step edit launcher (kept)
       editSteps: [
-      { displayStep: 1, routeStep: 1, label: "1) Study details", desc: "Title, description, basics" },
-      { displayStep: 2, routeStep: 2, label: "2) Groups", desc: "Treatment arms, groups, labels" },
-      { displayStep: 3, routeStep: 3, label: "3) Subject setup", desc: "Subject count and assignment method" },
-      { displayStep: 4, routeStep: 4, label: "4) Group assignment", desc: "Assign subjects to groups" },
-      { displayStep: 5, routeStep: 5, label: "5) Visits", desc: "Visit definitions, windows, order" },
-      { displayStep: 6, routeStep: 6, label: "6) Forms", desc: "Forms, sections, fields (templates)" },
-    ],
+        { displayStep: 1, routeStep: 1, label: "1) Study details", desc: "Title, description, basics" },
+        { displayStep: 2, routeStep: 2, label: "2) Groups", desc: "Treatment arms, groups, labels" },
+        { displayStep: 3, routeStep: 3, label: "3) Subject setup", desc: "Subject count and assignment method" },
+        { displayStep: 4, routeStep: 4, label: "4) Group assignment", desc: "Assign subjects to groups" },
+        { displayStep: 5, routeStep: 5, label: "5) Visits", desc: "Visit definitions, windows, order" },
+        { displayStep: 6, routeStep: 6, label: "6) Forms", desc: "Forms, sections, fields (templates)" },
+      ],
 
       // files
       allFiles: [],
       attachTempValue: [],
       pendingFiles: [],
       uploading: false,
+      fileDownloadBusy: {},
 
       // access management
       accessList: [],
@@ -756,7 +784,8 @@ export default {
       openingBids: false,
 
 
-      downloadingZip: false,
+      downloadingMergeZip: false,
+      downloadingFullStudyZip: false,
     };
   },
   computed: {
@@ -764,6 +793,9 @@ export default {
     studyPerms() {
       const p = this.studyMeta?.permissions;
       return p && typeof p === "object" ? p : null;
+    },
+    canDownloadFullStudy() {
+      return this.isAdmin || this.isOwner;
     },
     hasEditStudyPermission() {
       const p = this.studyPerms;
@@ -815,6 +847,17 @@ export default {
 
     canManageAccess() { return this.isAdmin || this.isOwner; },
     canSeeBidsButton() { return this.isAdmin || this.isOwner; },
+
+    // download attached study file access:
+    // owner/admin OR grant with all 3 permissions
+    canDownloadStudyAttachment() {
+      if (this.isAdmin || this.isOwner) return true;
+
+      const p = this.studyPerms;
+      if (!p) return false;
+
+      return p.view === true && p.add_data === true && p.edit_study === true;
+    },
 
     // per-subject table
     subjectAssignments() {
@@ -919,14 +962,64 @@ export default {
         this.$router.push("/login");
         return;
       }
-      this.downloadingZip = true;
+
+      this.downloadingMergeZip = true;
       try {
         await downloadStudyBundle({ studyId: this.studyId, token });
       } catch (e) {
-        console.error("Failed to download study bundle:", e);
-        alert("Failed to download study bundle.");
+        console.error("Failed to download study bundle for merge:", e);
+        alert("Failed to download study bundle for merge.");
       } finally {
-        this.downloadingZip = false;
+        this.downloadingMergeZip = false;
+      }
+    },
+
+    async downloadFullStudyZip() {
+      const token = this.token;
+      if (!token) {
+        alert("Please log in again.");
+        this.$router.push("/login");
+        return;
+      }
+
+      this.downloadingFullStudyZip = true;
+      try {
+        const response = await axios.get(
+          `/forms/studies/${this.studyId}/download`,
+          {
+            headers: { Authorization: `Bearer ${token}` },
+            responseType: "blob",
+          }
+        );
+
+        const blob = new Blob([response.data], { type: "application/zip" });
+        const url = window.URL.createObjectURL(blob);
+
+        const disposition = response.headers?.["content-disposition"] || "";
+        let filename = `study_${this.studyId}.zip`;
+
+        const utf8Match = disposition.match(/filename\*=UTF-8''([^;]+)/i);
+        const asciiMatch = disposition.match(/filename="?([^"]+)"?/i);
+
+        if (utf8Match && utf8Match[1]) {
+          filename = decodeURIComponent(utf8Match[1]);
+        } else if (asciiMatch && asciiMatch[1]) {
+          filename = asciiMatch[1];
+        }
+
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+
+        window.URL.revokeObjectURL(url);
+      } catch (e) {
+        console.error("Failed to download full study:", e?.response?.data || e.message);
+        alert("Failed to download full study.");
+      } finally {
+        this.downloadingFullStudyZip = false;
       }
     },
 
@@ -962,6 +1055,64 @@ export default {
       return `Location on disk (relative to backend working directory): ${this.docRelativePath(file)}`;
     },
 
+    fileDownloadKey(doc) {
+      if (!doc) return "";
+      return String(doc.id || doc.file_id || doc.file_name || doc.name || Math.random());
+    },
+
+    isDownloadBusy(doc) {
+      const key = this.fileDownloadKey(doc);
+      return !!this.fileDownloadBusy[key];
+    },
+
+    async downloadAttachedFile(doc) {
+      if (!doc) return;
+
+      const key = this.fileDownloadKey(doc);
+      this.fileDownloadBusy = {
+        ...this.fileDownloadBusy,
+        [key]: true,
+      };
+
+      try {
+        const token = this.token;
+        if (!token) {
+          this.$router.push("/login");
+          return;
+        }
+
+        const response = await axios.get(
+          `/forms/studies/${this.studyId}/files/${doc.id}/download`,
+          {
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
+            responseType: "blob",
+          }
+        );
+
+        const blob = new Blob([response.data]);
+        const url = window.URL.createObjectURL(blob);
+
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = doc.file_name || "download";
+
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+
+        window.URL.revokeObjectURL(url);
+      } catch (err) {
+        console.error("Download failed:", err?.response?.data || err.message);
+        alert("Failed to download file");
+      } finally {
+        const next = { ...this.fileDownloadBusy };
+        delete next[key];
+        this.fileDownloadBusy = next;
+      }
+    },
+
     scrollToTop() {
       try {
         window.scrollTo({ top: 0, left: 0, behavior: "auto" });
@@ -984,8 +1135,8 @@ export default {
       if (n === 0) return "0 B";
       if (!n && n !== 0) return "";
       const units = ["B","KB","MB","GB","TB"];
-      const i = Math.floor(Math.log(n)/Math.log(1024));
-      return `${(n/Math.pow(1024, i)).toFixed(1)} ${units[i]}`;
+      const i = Math.floor(Math.log(n) / Math.log(1024));
+      return `${(n / Math.pow(1024, i)).toFixed(1)} ${units[i]}`;
     },
     prettyLabel(key) {
       if (!key) return "";
@@ -1129,13 +1280,21 @@ export default {
         this.versionDiffs = diffs;
       } catch (e) {
         console.error("fetchVersionsAndDiffs failed:", e?.response?.data || e.message);
-        this.versions = []; this.versionSchemas = {}; this.versionDiffs = {};
-      } finally { this.versionsLoading = false; }
+        this.versions = [];
+        this.versionSchemas = {};
+        this.versionDiffs = {};
+      } finally {
+        this.versionsLoading = false;
+      }
     },
 
-    async ensureAccessData() { await Promise.all([this.fetchAccessList(), this.fetchAllUsers()]); },
+    async ensureAccessData() {
+      await Promise.all([this.fetchAccessList(), this.fetchAllUsers()]);
+    },
+
     async fetchAccessList() {
-      const token = this.token; if (!token) return;
+      const token = this.token;
+      if (!token) return;
       try {
         const { data } = await axios.get(`/forms/studies/${this.studyId}/access`, { headers: { Authorization: `Bearer ${token}` } });
         const list = Array.isArray(data) ? data : (data?.items || []);
@@ -1160,7 +1319,8 @@ export default {
       }
     },
     async fetchAllUsers() {
-      const token = this.token; if (!token) return;
+      const token = this.token;
+      if (!token) return;
       try {
         const { data } = await axios.get(`/users/admin/users`, { headers: { Authorization: `Bearer ${token}` } });
         const arr = Array.isArray(data) ? data : (data?.items || []);
@@ -1212,8 +1372,13 @@ export default {
       try {
         await axios.delete(`/forms/studies/${this.studyId}/access/${g.user_id}`, { headers: { Authorization: `Bearer ${token}` } });
         await this.fetchAccessList();
-      } catch (e) { console.error("revokeAccess failed:", e?.response?.data || e.message); }
-      finally { const next = { ...this.revokeBusy }; delete next[g.user_id]; this.revokeBusy = next; }
+      } catch (e) {
+        console.error("revokeAccess failed:", e?.response?.data || e.message);
+      } finally {
+        const next = { ...this.revokeBusy };
+        delete next[g.user_id];
+        this.revokeBusy = next;
+      }
     },
 
     // shared loader (kept)
@@ -1455,12 +1620,12 @@ export default {
 /* IMPORTANT: do NOT apply font-family to * (breaks FontAwesome icons).
    Keep typography scoped to the page container only. */
 .study-view-layout {
- letter-spacing: 0.1px;
+  letter-spacing: 0.1px;
 }
 
 .study-view-layout { display: flex; flex-direction: column; gap: 16px; padding: 24px; background: #f9fafb; min-height: 100%; }
 
-/*  Fullscreen overlay for View Data */
+/* Fullscreen overlay for View Data */
 .study-view-layout.sv-dashboard-fullscreen {
   position: fixed;
   inset: 0;
@@ -1481,10 +1646,10 @@ export default {
 /* Card layout */
 .card { display: grid; grid-template-columns: 240px 1fr; background: #fff; border: 1px solid #ececec; border-radius: 14px; box-shadow: 0 6px 18px rgba(0,0,0,0.04); overflow: hidden; }
 
-/*  When viewdata and sidebar collapsed */
+/* When viewdata and sidebar collapsed */
 .card.sv-sidebar-collapsed { grid-template-columns: 52px 1fr; }
 
-/*  When fullscreen, no sidebar column */
+/* When fullscreen, no sidebar column */
 .card.sv-dashboard-fullscreen { grid-template-columns: 1fr; border-radius: 0; border: none; box-shadow: none; height: 100vh; }
 
 /* Vertical tabs */
@@ -1577,6 +1742,12 @@ export default {
 .doc-path .label { flex: 0 0 auto; color: #6b7280; }
 .doc-path .file-path { flex: 1 1 auto; word-break: break-word; overflow-wrap: anywhere; white-space: normal; }
 
+.doc-actions {
+  margin-top: 12px;
+  display: flex;
+  justify-content: flex-start;
+}
+
 /* Attach */
 .attach-row { margin-bottom: 10px; }
 .pending-list { display: grid; grid-template-columns: 1fr; gap: 10px; }
@@ -1603,6 +1774,7 @@ export default {
 .center { text-align: center; }
 .strong { font-weight: 600; }
 .muted { color: #6b7280; }
+.monospace { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
 
 /* Access table */
 .table-wrap { overflow: auto; border: 1px solid #f1f1f1; border-radius: 12px; background: #fff; }
@@ -1650,7 +1822,7 @@ export default {
 .vc-summary-line { display: block; margin-top: 2px; }
 .diff-scroll { overflow: auto; border: 1px solid #f1f1f1; border-radius: 10px; padding: 12px; background: #fff; }
 
-.bids-location .file-path {word-break: break-all; }
+.bids-location .file-path { word-break: break-all; }
 .bids-actions { margin-top: 8px; }
 
 /* edit steps grid */

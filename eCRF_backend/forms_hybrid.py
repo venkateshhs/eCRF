@@ -10,6 +10,8 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException, Depends, Query, UploadFile, File, Form, Body, Request, status
+from fastapi.responses import FileResponse, RedirectResponse
+
 from sqlalchemy.orm import Session
 
 from .database import get_db
@@ -115,6 +117,23 @@ def _assert_has_study_permission(db: Session, meta: models.StudyMetadata, user, 
     if not perms.get(required, False):
         raise HTTPException(status_code=403, detail="Not authorized")
     return perms
+
+def _assert_can_download_study_file(db: Session, meta: models.StudyMetadata, user) -> Dict[str, bool]:
+    """
+    Allow file download only for:
+    - owner
+    - admin
+    - users who have all 3 permissions: view, add_data, edit_study
+    """
+    perms = _effective_study_permissions(db, meta, user)
+
+    if _is_admin(user) or int(meta.created_by) == int(user.id):
+        return perms
+
+    if perms.get("view") and perms.get("add_data") and perms.get("edit_study"):
+        return perms
+
+    raise HTTPException(status_code=403, detail="Not authorized to download files")
 
 def _assert_not_locked_by_other(meta: models.StudyMetadata, user) -> None:
     """
@@ -761,6 +780,33 @@ def read_files_for_study(
     _assert_has_study_permission(db, meta, user, required="view")
     return repo.list_files(study_id, meta.study_name)
 
+@router.get("/studies/{study_id}/download")
+def download_full_study(
+    study_id: int,
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    meta = db.query(models.StudyMetadata).filter(models.StudyMetadata.id == study_id).first()
+    if not meta:
+        raise HTTPException(status_code=404, detail="Study not found")
+    # Only owner or admin can download study
+    _assert_owner_or_admin(meta, user)
+
+    try:
+        zip_path, zip_name = repo.build_full_study_zip(
+            study_id=study_id,
+            study_name=meta.study_name,
+        )
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to build study zip: {str(e)}")
+
+    return FileResponse(
+        path=str(zip_path),
+        filename=zip_name,
+        media_type="application/zip",
+    )
 
 @router.post("/studies/{study_id}/files", response_model=schemas.FileOut)
 def upload_file(
@@ -843,6 +889,100 @@ def create_url_file(
         audit_label=audit_label,
     )
 
+@router.post("/shared/{token}/files", response_model=schemas.FileOut)
+def shared_upload_file(
+    token: str,
+    uploaded_file: UploadFile = File(...),
+    description: str = Form(""),
+    audit_label: Optional[str] = Form(None),
+    db: Session = Depends(get_db),
+):
+    access = db.query(models.SharedFormAccess).filter_by(token=token).first()
+    if not access:
+        raise HTTPException(status_code=404, detail="Link not found")
+
+    if access.expires_at < datetime.utcnow():
+        raise HTTPException(status_code=403, detail="Link expired")
+
+    if access.permission != "add":
+        raise HTTPException(status_code=403, detail="Not allowed")
+
+    meta = db.query(models.StudyMetadata).filter(models.StudyMetadata.id == access.study_id).first()
+    if not meta:
+        raise HTTPException(status_code=404, detail="Study not found")
+
+    # Locking disabled for now.
+    # if bool(meta.is_locked):
+    #     raise HTTPException(status_code=423, detail="Study is currently locked for editing")
+
+    if (meta.status or "PUBLISHED").upper().strip() != "PUBLISHED":
+        raise HTTPException(status_code=400, detail="Shared file upload is only allowed for published studies")
+
+    tmp_path = None
+    try:
+        safe_suffix = f"_{os.path.basename(uploaded_file.filename or 'upload.bin')}"
+        with tempfile.NamedTemporaryFile(
+            delete=False,
+            prefix=f"ecrf_shared_study{access.study_id}_",
+            suffix=safe_suffix,
+        ) as tmp:
+            shutil.copyfileobj(uploaded_file.file, tmp)
+            tmp_path = tmp.name
+
+        return repo.save_uploaded_file(
+            study_id=access.study_id,
+            study_name=meta.study_name,
+            filename=uploaded_file.filename or "upload.bin",
+            source_path=tmp_path,
+            description=description,
+            subject_index=access.subject_index,
+            visit_index=access.visit_index,
+            group_index=access.group_index,
+            actor="shared-link",
+            actor_name="Shared link upload",
+            user_id=None,
+            audit_label=audit_label,
+        )
+    finally:
+        try:
+            if tmp_path and os.path.exists(tmp_path):
+                os.remove(tmp_path)
+        except Exception:
+            pass
+
+@router.get("/studies/{study_id}/files/{file_id}/download")
+def download_study_file(
+    study_id: int,
+    file_id: int,
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    meta = db.query(models.StudyMetadata).filter(models.StudyMetadata.id == study_id).first()
+    if not meta:
+        raise HTTPException(status_code=404, detail="Study not found")
+
+    _assert_can_download_study_file(db, meta, user)
+
+    try:
+        file_info = repo.get_file_for_download(
+            study_id=study_id,
+            study_name=meta.study_name,
+            file_id=file_id,
+        )
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    if file_info["storage_option"] == "url":
+        # optional behavior: for URL-based files, redirect instead of file download
+        return RedirectResponse(url=file_info["url"])
+
+    return FileResponse(
+        path=str(file_info["absolute_path"]),
+        filename=file_info["file_name"],
+        media_type="application/octet-stream",
+    )
 
 @router.post(
     "/studies/{study_id}/data",
@@ -1074,6 +1214,15 @@ def grant_study_access(
 
     db.commit()
     db.refresh(grant)
+    repo.save_access_grant(
+        study_id=study_id,
+        study_name=meta.study_name,
+        user_id=payload.user_id,
+        permissions=grant.permissions or {"view": True, "add_data": True, "edit_study": False},
+        created_by=user.id,
+        actor=_actor_identifier(user),
+        actor_name=_display_name(user),
+    )
 
     return schemas.StudyAccessGrantOut(
         user_id=grantee.id,
@@ -1144,6 +1293,14 @@ def revoke_study_access(
 
     db.delete(grant)
     db.commit()
+    repo.revoke_access_grant(
+        study_id=study_id,
+        study_name=meta.study_name,
+        user_id=user_id,
+        actor=_actor_identifier(current_user),
+        actor_name=_display_name(current_user),
+        acting_user_id=current_user.id,
+    )
     return
 
 
@@ -1210,6 +1367,21 @@ def create_share_link(
     db.add(access)
     db.commit()
     db.refresh(access)
+    repo.save_share_link(
+        study_id=payload.study_id,
+        study_name=meta.study_name,
+        token=token,
+        subject_index=payload.subject_index,
+        visit_index=payload.visit_index,
+        group_index=payload.group_index,
+        permission=payload.permission,
+        max_uses=payload.max_uses,
+        expires_at=expires_at.isoformat(),
+        allowed_section_ids=allowed_section_ids,
+        actor=_actor_identifier(current_user),
+        actor_name=_display_name(current_user),
+        user_id=current_user.id,
+    )
 
     frontend_base = os.getenv("FRONTEND_BASE_URL", "").rstrip("/")
     if not frontend_base:
@@ -1237,7 +1409,27 @@ def access_shared_form(
     meta = db.query(models.StudyMetadata).filter(models.StudyMetadata.id == access.study_id).first()
     if not meta:
         raise HTTPException(404, "Study not found")
-
+    try:
+        repo.update_share_link(
+            study_id=access.study_id,
+            study_name=meta.study_name,
+            token=token,
+            row={
+                "token": access.token,
+                "study_id": access.study_id,
+                "subject_index": access.subject_index,
+                "visit_index": access.visit_index,
+                "group_index": access.group_index,
+                "permission": access.permission,
+                "max_uses": access.max_uses,
+                "used_count": access.used_count,
+                "expires_at": access.expires_at.isoformat() if access.expires_at else None,
+                "allowed_section_ids": access.allowed_section_ids or [],
+                "created_at": access.created_at.isoformat() if getattr(access, "created_at", None) else None,
+            },
+        )
+    except Exception:
+        pass
     content_row = _get_content_row_or_404(db, access.study_id)
     filtered_study_data = _filter_shared_study_data_by_sections(
         content_row.study_data or {},
