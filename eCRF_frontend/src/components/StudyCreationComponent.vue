@@ -116,16 +116,26 @@
       </div>
 
       <div class="form-actions">
-        <button type="button" @click="backFromStep1" class="btn-option">Back</button>
+          <button type="button" @click="backFromStep1" class="btn-option">Back</button>
 
-        <button v-if="isEditing" type="button" class="btn-option" @click="saveThisStepAndBackToStudy">
-          Save and Leave
-        </button>
+          <button
+            v-if="!isEditing"
+            type="button"
+            class="btn-option"
+            @click="onUnsavedSaveAndExit"
+            :disabled="unsavedBusy"
+          >
+            {{ unsavedBusy ? "Saving…" : "Save Draft and Leave" }}
+          </button>
 
-        <button type="button" @click="validateStudy()" class="btn-option">
-          Next
-        </button>
-      </div>
+          <button v-if="isEditing" type="button" class="btn-option" @click="saveThisStepAndBackToStudy">
+            Save and Leave
+          </button>
+
+          <button type="button" @click="validateStudy()" class="btn-option">
+            Next
+          </button>
+        </div>
     </div>
 
     <!-- STEP 2 -->
@@ -135,14 +145,24 @@
       <GroupForm :schema="groupSchema" v-model="groupData" />
 
       <div class="form-actions">
-        <button @click="step = 1" class="btn-option">Back</button>
+          <button @click="step = 1" class="btn-option">Back</button>
 
-        <button v-if="isEditing" type="button" class="btn-option" @click="saveThisStepAndBackToStudy">
-          Save and Leave
-        </button>
+          <button
+            v-if="!isEditing"
+            type="button"
+            class="btn-option"
+            @click="onUnsavedSaveAndExit"
+            :disabled="unsavedBusy"
+          >
+            {{ unsavedBusy ? "Saving…" : "Save Draft and Leave" }}
+          </button>
 
-        <button @click="checkGroups()" class="btn-option">Next</button>
-      </div>
+          <button v-if="isEditing" type="button" class="btn-option" @click="saveThisStepAndBackToStudy">
+            Save and Leave
+          </button>
+
+          <button @click="checkGroups()" class="btn-option">Next</button>
+        </div>
     </div>
 
     <!-- STEP 3 -->
@@ -166,16 +186,26 @@
       <SubjectForm v-model:subjectCount="subjectCount" v-model:assignmentMethod="assignmentMethod" @changed="onSubjectSetupChanged"/>
 
       <div class="form-actions">
-        <button @click="step = 2" class="btn-option">Back</button>
+          <button @click="step = 2" class="btn-option">Back</button>
 
-        <button v-if="isEditing" type="button" class="btn-option" @click="saveThisStepAndBackToStudy">
-          Save and Leave
-        </button>
+          <button
+            v-if="!isEditing"
+            type="button"
+            class="btn-option"
+            @click="onUnsavedSaveAndExit"
+            :disabled="unsavedBusy"
+          >
+            {{ unsavedBusy ? "Saving…" : "Save Draft and Leave" }}
+          </button>
 
-        <button @click="checkSubjectsSetup()" class="btn-option">
-          Next
-        </button>
-      </div>
+          <button v-if="isEditing" type="button" class="btn-option" @click="saveThisStepAndBackToStudy">
+            Save and Leave
+          </button>
+
+          <button @click="checkSubjectsSetup()" class="btn-option">
+            Next
+          </button>
+        </div>
     </div>
 
     <!-- STEP 4 -->
@@ -185,14 +215,24 @@
       <SubjectAssignmentForm :subjects="subjectData" :groupData="groupData" v-model:subjects="subjectData" @changed="onSubjectSetupChanged"/>
 
       <div class="form-actions">
-        <button @click="step = 3" class="btn-option">Back</button>
+          <button @click="step = 3" class="btn-option">Back</button>
 
-        <button v-if="isEditing" type="button" class="btn-option" @click="saveThisStepAndBackToStudy">
-          Save and Leave
-        </button>
+          <button
+            v-if="!isEditing"
+            type="button"
+            class="btn-option"
+            @click="onUnsavedSaveAndExit"
+            :disabled="unsavedBusy"
+          >
+            {{ unsavedBusy ? "Saving…" : "Save Draft and Leave" }}
+          </button>
 
-        <button @click="checkSubjectsAssigned()" class="btn-option">Next</button>
-      </div>
+          <button v-if="isEditing" type="button" class="btn-option" @click="saveThisStepAndBackToStudy">
+            Save and Leave
+          </button>
+
+          <button @click="checkSubjectsAssigned()" class="btn-option">Next</button>
+        </div>
     </div>
 
     <!-- STEP 5 -->
@@ -202,14 +242,24 @@
       <VisitForm :schema="visitSchema" v-model="visitData" />
 
       <div class="form-actions">
-        <button @click="goBackFromVisits" class="btn-option">Back</button>
+          <button @click="goBackFromVisits" class="btn-option">Back</button>
 
-        <button v-if="isEditing" type="button" class="btn-option" @click="saveThisStepAndBackToStudy">
-          Save and Leave
-        </button>
+          <button
+            v-if="!isEditing"
+            type="button"
+            class="btn-option"
+            @click="onUnsavedSaveAndExit"
+            :disabled="unsavedBusy"
+          >
+            {{ unsavedBusy ? "Saving…" : "Save Draft and Leave" }}
+          </button>
 
-        <button @click="goToFinish()" class="btn-option">Forms</button>
-      </div>
+          <button v-if="isEditing" type="button" class="btn-option" @click="saveThisStepAndBackToStudy">
+            Save and Leave
+          </button>
+
+          <button @click="goToFinish()" class="btn-option">Forms</button>
+        </div>
     </div>
   </div>
 

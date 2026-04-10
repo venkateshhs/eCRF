@@ -492,6 +492,13 @@
           >
             Logic & Calculations
           </button>
+           <button
+            @click.prevent="onUnsavedSaveAndExit"
+            class="btn-option"
+            :disabled="unsavedBusy"
+          >
+            {{ unsavedBusy ? "Saving…" : "Save Draft and Leave" }}
+          </button>
 
           <button
             @click.prevent="handleProtocolClick"
