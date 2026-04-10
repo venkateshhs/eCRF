@@ -116,24 +116,38 @@ def _assert_has_study_permission(db: Session, meta: models.StudyMetadata, user, 
         raise HTTPException(status_code=403, detail="Not authorized")
     return perms
 
-
 def _assert_not_locked_by_other(meta: models.StudyMetadata, user) -> None:
-    if _is_admin(user):
-        return
-    if bool(getattr(meta, "is_locked", False)) and getattr(meta, "locked_by", None) not in (None, user.id):
-        raise HTTPException(
-            status_code=423,
-            detail=f"Study is currently being edited by user_id={meta.locked_by}",
-        )
+    """
+    Block actions when another user currently holds the study edit lock.
 
+    Allowed:
+    - study is not locked
+    - study is locked by the same user
+
+    Blocked:
+    - study is locked by a different user
+    """
+    # Locking mechanism is stopped for now.
+    # if bool(getattr(meta, "is_locked", False)) and getattr(meta, "locked_by", None) not in (None, user.id):
+    #     raise HTTPException(
+    #         status_code=423,
+    #         detail=f"Study is currently being edited by user_id={meta.locked_by}",
+    #     )
+    return
 
 def _require_lock_holder(meta: models.StudyMetadata, user) -> None:
-    if _is_admin(user):
-        return
-    if not bool(getattr(meta, "is_locked", False)):
-        raise HTTPException(status_code=409, detail="Study is not locked for editing")
-    if getattr(meta, "locked_by", None) != user.id:
-        raise HTTPException(status_code=423, detail="You do not hold the study edit lock")
+    """
+    Require that the study is actively locked and that the current user holds the lock.
+
+    Nobody bypasses this check.
+    """
+    # if not bool(getattr(meta, "is_locked", False)):
+    #     raise HTTPException(status_code=409, detail="Study is not locked for editing")
+    #
+    # if getattr(meta, "locked_by", None) != user.id:
+    #     raise HTTPException(status_code=423, detail="You do not hold the study edit lock")
+    return
+
 
 
 def _get_content_row_or_404(db: Session, study_id: int) -> models.StudyContent:
@@ -441,13 +455,13 @@ def get_study_lock_status(
         raise HTTPException(status_code=404, detail="Study not found")
 
     _assert_has_study_permission(db, meta, user, required="view")
+    # Locking disabled for now: always report unlocked.
     return {
         "study_id": meta.id,
-        "is_locked": bool(meta.is_locked),
-        "locked_by": meta.locked_by,
-        "locked_at": meta.locked_at,
+        "is_locked": False,
+        "locked_by": None,
+        "locked_at": None,
     }
-
 
 @router.post("/studies/{study_id}/lock")
 def lock_study_for_edit(
@@ -461,22 +475,14 @@ def lock_study_for_edit(
 
     _assert_has_study_permission(db, meta, user, required="edit_study")
 
-    if bool(meta.is_locked) and meta.locked_by not in (None, user.id) and not _is_admin(user):
-        raise HTTPException(status_code=423, detail=f"Study is already locked by user_id={meta.locked_by}")
-
-    meta.is_locked = True
-    meta.locked_by = user.id
-    meta.locked_at = local_now()
-    db.commit()
-    db.refresh(meta)
-
+    # Locking disabled for now.
+    # Do not write any lock state to the DB.
     return {
         "study_id": meta.id,
-        "is_locked": True,
-        "locked_by": meta.locked_by,
-        "locked_at": meta.locked_at,
+        "is_locked": False,
+        "locked_by": None,
+        "locked_at": None,
     }
-
 
 @router.post("/studies/{study_id}/unlock")
 def unlock_study_for_edit(
@@ -490,9 +496,8 @@ def unlock_study_for_edit(
 
     _assert_has_study_permission(db, meta, user, required="edit_study")
 
-    if not _is_admin(user) and meta.locked_by not in (None, user.id):
-        raise HTTPException(status_code=423, detail="You do not hold the study edit lock")
-
+    # Locking disabled for now.
+    # Best-effort cleanup of any stale legacy lock values.
     meta.is_locked = False
     meta.locked_by = None
     meta.locked_at = None
@@ -623,7 +628,9 @@ def update_study(
         raise HTTPException(status_code=404, detail="Study not found")
 
     _assert_has_study_permission(db, meta, user, required="edit_study")
-    _require_lock_holder(meta, user)
+
+    # Locking disabled for now.
+    # _require_lock_holder(meta, user)
 
     content_row = _get_content_row_or_404(db, study_id)
     old_sd = _deepcopy_json(content_row.study_data or {})
@@ -668,6 +675,8 @@ def update_study(
             audit_label=audit_label,
         )
 
+    # Locking disabled for now.
+    # Keep DB lock fields cleared in case of stale values from older runs.
     meta.is_locked = False
     meta.locked_by = None
     meta.locked_at = None
@@ -698,7 +707,9 @@ def publish_study(
         raise HTTPException(status_code=404, detail="Study not found")
 
     _assert_has_study_permission(db, meta, user, required="edit_study")
-    _require_lock_holder(meta, user)
+
+    # Locking disabled for now.
+    # _require_lock_holder(meta, user)
 
     content_row = _get_content_row_or_404(db, study_id)
     latest_tv = _ensure_initial_version_if_missing(db, study_id, content_row.study_data or {})
@@ -718,6 +729,8 @@ def publish_study(
         audit_label=audit_label,
     )
 
+    # Locking disabled for now.
+    # Keep DB lock fields cleared in case of stale values from older runs.
     meta.is_locked = False
     meta.locked_by = None
     meta.locked_at = None
@@ -734,7 +747,6 @@ def publish_study(
             "study_data": content_row.study_data or {},
         },
     }
-
 
 @router.get("/studies/{study_id}/files", response_model=List[schemas.FileOut])
 def read_files_for_study(
@@ -1274,9 +1286,9 @@ def shared_upsert_data(
     meta = db.query(models.StudyMetadata).filter(models.StudyMetadata.id == access.study_id).first()
     if not meta:
         raise HTTPException(404, "Study not found")
-
-    if bool(meta.is_locked):
-        raise HTTPException(status_code=423, detail="Study is currently locked for editing")
+    # Locking disabled for now.
+    # if bool(meta.is_locked):
+    #     raise HTTPException(status_code=423, detail="Study is currently locked for editing")
 
     if (meta.status or "PUBLISHED").upper().strip() != "PUBLISHED":
         raise HTTPException(status_code=400, detail="Shared data entry is only allowed for published studies")
