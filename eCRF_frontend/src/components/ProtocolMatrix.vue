@@ -210,12 +210,37 @@
     </div>
 
     <!-- 4. Custom Dialog for Notifications (errors/general) -->
-    <CustomDialog
-      v-if="!showLogicalIssuesDialog"
-      :message="dialogMessage"
-      :isVisible="showDialog"
-      @close="closeDialog"
-    />
+    <div v-if="showDialog && !showLogicalIssuesDialog" class="modal-overlay">
+      <div class="modal validation-modal pretty-error-modal">
+        <h3 class="validation-title">
+          <i :class="icons.infoCircle" class="li-icon"></i> Please fix the following
+        </h3>
+
+        <div class="pretty-error-content">
+          <template v-if="dialogListItems.length">
+            <ol class="pretty-error-list">
+              <li
+                v-for="(item, idx) in dialogListItems"
+                :key="`dialog-item-${idx}`"
+                class="pretty-error-item"
+              >
+                {{ item }}
+              </li>
+            </ol>
+          </template>
+
+          <template v-else>
+            <p class="validation-text">{{ dialogMessage }}</p>
+          </template>
+        </div>
+
+        <div class="modal-actions">
+          <button class="btn-primary" @click="closeDialog">
+            <i :class="icons.check" class="mr-6"></i> OK
+          </button>
+        </div>
+      </div>
+    </div>
 
     <!-- 4a. Logical inconsistencies dialog -->
     <div v-if="showLogicalIssuesDialog" class="modal-overlay">
@@ -423,13 +448,12 @@ import { useRouter, onBeforeRouteLeave } from "vue-router";
 import { useStore } from "vuex";
 import axios from "axios";
 import FormPreview from "@/components/FormPreview.vue";
-import CustomDialog from "@/components/CustomDialog.vue";
 import TemplateDiffView, { deepClone, computeTemplateDiff } from "@/components/TemplateDiffView.vue";
 import icons from "@/assets/styles/icons";
 
 export default {
   name: "ProtocolMatrix",
-  components: { FormPreview, CustomDialog, TemplateDiffView },
+  components: { FormPreview, TemplateDiffView },
   props: {
     visits: { type: Array, required: true },
     groups: { type: Array, required: true },
@@ -492,7 +516,21 @@ export default {
     const lastSavedSnapshot = ref(null);
 
     const globalDirty = computed(() => !!store.state.studyCreationDirty);
+    const dialogListItems = computed(() => {
+      const text = String(dialogMessage.value || "").trim();
+      if (!text) return [];
 
+      const lines = text
+        .split("\n")
+        .map(line => line.trim())
+        .filter(Boolean);
+
+      const numberedItems = lines
+        .filter(line => /^\d+\.\s+/.test(line))
+        .map(line => line.replace(/^\d+\.\s+/, "").trim());
+
+      return numberedItems;
+    });
     // Display lists
     const visitList = computed(() =>
       props.visits.length ? props.visits : [{ name: "All Visits" }]
@@ -580,7 +618,7 @@ export default {
             const sourceMeta = registry.get(sourceKey);
             if (!sourceMeta) {
               errors.push(
-                `Visibility rule error in ${fieldRefLabel(targetMeta)}: source field with id "${sourceKey}" was not found.`
+                `Visibility rule error in ${fieldRefLabel(targetMeta)}: the source field used in its visibility logic could not be found. It may have been deleted or renamed.`
               );
               return;
             }
@@ -1538,6 +1576,7 @@ export default {
       showInfo,
       showDialog,
       dialogMessage,
+      dialogListItems,
       closeDialog,
 
       // success dialog
@@ -1938,5 +1977,29 @@ export default {
     flex-direction: row;
     justify-content: flex-start;
   }
+}
+.pretty-error-modal {
+  max-width: 900px;
+}
+
+.pretty-error-content {
+  margin-top: 10px;
+}
+
+.pretty-error-list {
+  margin: 0;
+  padding-left: 20px;
+  max-height: 52vh;
+  overflow-y: auto;
+}
+
+.pretty-error-item {
+  margin-bottom: 10px;
+  padding: 10px 12px;
+  border: 1px solid $border-color;
+  border-radius: 10px;
+  background: #f8fafc;
+  color: #344054;
+  line-height: 1.45;
 }
 </style>
