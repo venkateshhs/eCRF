@@ -957,6 +957,21 @@ export default {
   },
 
   methods: {
+  normalizeSkipFlagsShape(rawFlags) {
+      const skeleton = this.makeSkipSkeleton();
+
+      if (!Array.isArray(rawFlags)) return skeleton;
+
+      return skeleton.map((sectionRow, mIdx) => {
+        const incomingRow = rawFlags[mIdx];
+
+        if (!Array.isArray(incomingRow)) {
+          return [...sectionRow];
+        }
+
+        return sectionRow.map((_, fIdx) => !!incomingRow[fIdx]);
+      });
+    },
   async commitImportPreview() {
   try {
     this.importCommitting = true;
@@ -1002,7 +1017,8 @@ export default {
         this.runCalculationsForCell(s, v, g, null, null);
 
         const dictData = this.arrayToDict(this.entryData[s][v][g]);
-        const rawSkipFlags = this.skipFlags[s][v][g];
+        const rawSkipFlags = this.normalizeSkipFlagsShape(this.skipFlags[s][v][g]);
+        this.skipFlags[s][v][g] = rawSkipFlags;
 
         const payload = {
           study_id: this.study?.metadata?.id,
@@ -2330,9 +2346,7 @@ applyImportedRowFromDialog(payload) {
       this.entryIds[s][v][g] = best.id;
 
       const storedSkips = best.skipped_required_flags || best.skips;
-      this.skipFlags[s][v][g] = Array.isArray(storedSkips)
-        ? storedSkips
-        : this.makeSkipSkeleton();
+      this.skipFlags[s][v][g] = this.normalizeSkipFlagsShape(storedSkips);
 
       this.hydrateCache.set(cacheKey, {
         dataArr: this.entryData[s][v][g],
@@ -3026,9 +3040,7 @@ applyImportedRowFromDialog(payload) {
       this.ensureSlot(s, v, g);
 
       const arr = this.dictToArray(slot?.data || {});
-      const skips = Array.isArray(slot?.skipped_required_flags)
-        ? slot.skipped_required_flags
-        : this.makeSkipSkeleton();
+      const skips = this.normalizeSkipFlagsShape(slot?.skipped_required_flags);
 
       this.entryData[s][v][g] = arr;
       this.skipFlags[s][v][g] = skips;
@@ -3625,8 +3637,13 @@ applyImportedRowFromDialog(payload) {
   this.ensureSlot(s, v, g);
 
   const dictData = this.arrayToDict(this.entryData[s][v][g]);
-  const rawSkipFlags = this.skipFlags[s][v][g];
-  const flagsPayload = this.isShared ? this.flagsArrayToDict(rawSkipFlags) : rawSkipFlags;
+
+  const rawSkipFlags = this.normalizeSkipFlagsShape(this.skipFlags[s][v][g]);
+  this.skipFlags[s][v][g] = rawSkipFlags;
+
+  const flagsPayload = this.isShared
+      ? this.flagsArrayToDict(rawSkipFlags)
+      : rawSkipFlags;
 
   const hasAnySkip = !!(
     Array.isArray(rawSkipFlags) && rawSkipFlags.some((row) => Array.isArray(row) && row.some((x) => !!x))
