@@ -3168,6 +3168,12 @@ applyImportedRowFromDialog(payload) {
         g = this.currentGroupIndex;
       this.ensureSlot(s, v, g);
 
+      // Hidden conditional fields must not be validated
+      if (!this.isFieldVisible(mIdx, fIdx)) {
+        this.clearError(mIdx, fIdx);
+        return true;
+      }
+
       const def =
         this.selectedModels[mIdx].fields[fIdx] || {};
       const cons = def.constraints || {};
@@ -3387,7 +3393,14 @@ applyImportedRowFromDialog(payload) {
 
       let ok = true;
       this.assignedModelIndices.forEach((mIdx) => {
+        if (!this.hasVisibleFieldsInSection(mIdx)) return;
+
         this.selectedModels[mIdx].fields.forEach((_, fIdx) => {
+          if (!this.isFieldVisible(mIdx, fIdx)) {
+            this.clearError(mIdx, fIdx);
+            return;
+          }
+
           const r = this.validateField(mIdx, fIdx);
           ok = ok && r;
         });
@@ -3402,12 +3415,16 @@ applyImportedRowFromDialog(payload) {
       this.ensureSlot(s, v, g);
       const items = [];
       this.assignedModelIndices.forEach((mIdx) => {
-        const section = this.selectedModels[mIdx];
-        (section.fields || []).forEach((f, fIdx) => {
-          const c = f?.constraints || {};
-          if (!c.required) return;
-          if (this.skipFlags[s]?.[v]?.[g]?.[mIdx]?.[fIdx]) return;
-          const val = this.entryData[s][v][g][mIdx][fIdx];
+      const section = this.selectedModels[mIdx];
+      if (!this.hasVisibleFieldsInSection(mIdx)) return;
+
+      (section.fields || []).forEach((f, fIdx) => {
+        const c = f?.constraints || {};
+        if (!c.required) return;
+        if (!this.isFieldVisible(mIdx, fIdx)) return;
+        if (this.skipFlags[s]?.[v]?.[g]?.[mIdx]?.[fIdx]) return;
+
+        const val = this.entryData[s][v][g][mIdx][fIdx];
           const empty =
             f.type === "checkbox"
               ? val !== true
