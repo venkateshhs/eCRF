@@ -15,6 +15,7 @@
       :auto-apply="true"
       :clearable="!isReadonly"
       :disabled="isReadonly"
+      :config="pickerConfig"
       input-class="dfp-input"
       class="dfp-picker"
       v-bind="$attrs"
@@ -47,6 +48,18 @@ export default {
   emits: ["update:modelValue"],
 
   computed: {
+    pickerConfig() {
+      return {
+        // Force desktop-style rendering by default so the field always remains visible.
+        // This avoids hosted/narrow-layout auto-switching to mobile mode.
+        mobileBreakpoint: 0,
+        allowPreventDefault: true,
+        closeOnScroll: false,
+        closeOnAutoApply: true,
+        tabOutClosesMenu: true,
+      };
+    },
+
     isYearPicker() {
       return this.mode === "date" && this.format.toLowerCase() === "yyyy";
     },
@@ -260,31 +273,46 @@ export default {
   position: relative;
   width: 100%;
   min-width: 0;
+  min-height: 44px;
+  display: block !important;
+  visibility: visible !important;
+  overflow: visible !important;
 }
 
 .dfp-picker {
   width: 100%;
   min-width: 0;
+  display: block !important;
 }
 
 /* Let the datepicker root fill available width */
 :deep(.dp__main) {
-  width: 100%;
-  min-width: 0;
+  width: 100% !important;
+  min-width: 0 !important;
+  min-height: 44px !important;
+  display: block !important;
+  visibility: visible !important;
+  opacity: 1 !important;
   font-family: inherit;
 }
 
 /* Input wrapper */
 :deep(.dp__input_wrap) {
   position: relative;
-  width: 100%;
-  min-width: 0;
+  width: 100% !important;
+  min-width: 0 !important;
+  min-height: 44px !important;
+  display: block !important;
+  visibility: visible !important;
+  opacity: 1 !important;
 }
 
 /* Main input */
 :deep(.dp__input),
 :deep(.dfp-input) {
+  display: block !important;
   width: 100% !important;
+  min-width: 0 !important;
   min-height: 44px !important;
   height: 44px !important;
   box-sizing: border-box !important;
@@ -306,6 +334,9 @@ export default {
   outline: none !important;
   box-shadow: none !important;
   transition: border-color 0.2s ease, box-shadow 0.2s ease !important;
+
+  visibility: visible !important;
+  opacity: 1 !important;
 }
 
 /* Placeholder */
@@ -345,12 +376,35 @@ export default {
   padding-inline-start: 42px !important;
 }
 
-/* Mobile mode should still show a normal input */
+/* Even if the library marks mobile mode, keep a normal visible input */
+:deep(.dp__main[data-dp-mobile="true"]) {
+  display: block !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  min-height: 44px !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+}
+
+:deep(.dp__main[data-dp-mobile="true"] .dp__input_wrap) {
+  display: block !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  min-height: 44px !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+}
+
 :deep(.dp__main[data-dp-mobile="true"] .dp__input),
 :deep(.dp__main[data-dp-mobile="true"] .dfp-input) {
+  display: block !important;
+  width: 100% !important;
+  min-width: 0 !important;
   min-height: 44px !important;
   height: 44px !important;
   padding-left: 42px !important;
+  visibility: visible !important;
+  opacity: 1 !important;
 }
 
 /* Menu / popup */
