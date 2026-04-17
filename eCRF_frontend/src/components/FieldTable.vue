@@ -165,7 +165,6 @@
                   :key="`${rowIndex}-${col.id || colIdx}`"
                 >
                   <div class="table-cell-box">
-
                     <div class="table-cell-control">
                       <input
                         v-if="col.type === 'text'"
@@ -246,7 +245,8 @@
                         readonly
                       />
                     </div>
-                    <div class="cell-help" v-if="col.constraints?.helpText">
+
+                    <div v-if="col.constraints?.helpText" class="cell-help">
                       {{ col.constraints.helpText }}
                     </div>
                   </div>
@@ -309,10 +309,6 @@
 
               <td v-for="(col, colIdx) in resolvedColumns" :key="`${rowIndex}-${col.id || colIdx}`">
                 <div class="table-cell-box">
-                  <div class="cell-help" v-if="col.constraints?.helpText">
-                    {{ col.constraints.helpText }}
-                  </div>
-
                   <div class="table-cell-control">
                     <input
                       v-if="col.type === 'text'"
@@ -404,6 +400,10 @@
                       :readonly="readonly"
                       @blur="validateCellAt(rowIndex, colIdx)"
                     />
+                  </div>
+
+                  <div v-if="col.constraints?.helpText" class="cell-help">
+                    {{ col.constraints.helpText }}
                   </div>
 
                   <div v-if="getCellError(rowIndex, colIdx)" class="table-cell-error">
@@ -1374,7 +1374,7 @@ export default {
       for (let r = 0; r < rowCount; r += 1) {
         const row = {};
         columns.forEach((col) => {
-          row[col.key] = this.defaultValueForType(col.type, col.constraints || {}, col.options || []);
+          row[col.key] = this.defaultValueForType(col.type, col.constraints || {});
         });
         rows.push(row);
       }
@@ -1440,17 +1440,21 @@ export default {
   }
 };
 </script>
-
 <style scoped lang="scss">
 .field-table-root {
   width: 100%;
+  overflow: visible;
 }
 
+/* =========================
+   CONFIGURE MODE
+   ========================= */
 .table-configurator {
   width: min(92vw, 980px);
   max-width: 980px;
   min-width: 0;
   margin: 0 auto;
+  overflow: visible;
 }
 
 .tc-header {
@@ -1500,7 +1504,7 @@ export default {
 .tc-group input,
 .tc-group select {
   width: 100%;
-  min-height: 42px;
+  min-height: 44px;
   padding: 10px 12px;
   border: 1px solid #d1d5db;
   border-radius: 8px;
@@ -1542,6 +1546,7 @@ export default {
   margin-top: 20px;
   padding-top: 16px;
   border-top: 1px solid #e5e7eb;
+  overflow: visible;
 }
 
 .tc-section-header {
@@ -1658,6 +1663,9 @@ export default {
   cursor: pointer;
 }
 
+/* =========================
+   NESTED CONSTRAINTS MODAL
+   ========================= */
 .nested-modal-overlay {
   position: fixed;
   inset: 0;
@@ -1705,6 +1713,9 @@ export default {
   max-width: 100%;
 }
 
+/* =========================
+   TABLE SHELL
+   ========================= */
 .table-runtime-shell {
   width: 100%;
 }
@@ -1715,6 +1726,8 @@ export default {
   border: 1px solid #d1d5db;
   border-radius: 10px;
   background: #fff;
+  position: relative;
+  width: 100%;
 }
 
 .preview-wrap {
@@ -1722,74 +1735,110 @@ export default {
 }
 
 .table-runtime {
-  width: 100%;
-  min-width: 980px;
+  width: max-content;
+  min-width: 100%;
   border-collapse: collapse;
+  table-layout: auto;
 }
 
 .table-runtime th,
 .table-runtime td {
   border: 1px solid #e5e7eb;
-  padding: 10px;
-  vertical-align: top;
+  padding: 10px 14px;
   text-align: left;
-}
-
-.table-head-title {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  font-weight: 600;
-  color: #111827;
-}
-
-.required-star {
-  color: #dc2626;
-  font-weight: 700;
-  line-height: 1;
+  vertical-align: top;
+  box-sizing: border-box;
+  white-space: normal;
 }
 
 .rowno-col {
   width: 56px;
+  min-width: 56px;
+  max-width: 56px;
   text-align: center;
 }
 
 .row-actions-col,
 .row-actions-cell {
-  width: 120px;
-  min-width: 120px;
+  width: 128px;
+  min-width: 128px;
+  max-width: 128px;
+  vertical-align: top;
 }
 
 .table-cell-box {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-start;
   min-width: 220px;
+  width: 100%;
   overflow: visible;
-}
-
-.cell-help {
-  font-style: italic;
-  color: #6b7280;
-  margin-top: 6px;
-  font-size: 12px;
-  line-height: 1.35;
 }
 
 .table-cell-control {
+  width: 100%;
   min-width: 220px;
   display: flex;
-  align-items: center;
-  justify-content: center;
+  align-items: flex-start;
+  justify-content: flex-start;
   overflow: visible;
-}
-.table-cell-box {
-  min-width: 220px;
-  overflow: visible;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
+  position: relative;
 }
 
 .table-cell-control > * {
   width: 100%;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.cell-help {
+  margin-top: 6px;
+  font-style: italic;
+  color: #6b7280;
+  font-size: 12px;
+  line-height: 1.35;
+  text-align: left;
+}
+
+.table-cell-error {
+  margin-top: 6px;
+  color: #dc2626;
+  font-size: 12px;
+  line-height: 1.35;
+  text-align: left;
+  word-break: break-word;
+}
+
+/* =========================
+   STANDARD INPUTS
+   ========================= */
+.table-cell-control :deep(input[type="text"]),
+.table-cell-control :deep(input[type="number"]),
+.table-cell-control :deep(textarea),
+.table-cell-control :deep(select) {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  margin: 0;
+  box-sizing: border-box;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  background: #fff;
+  color: #111827;
+}
+
+.table-cell-control :deep(input[type="text"]),
+.table-cell-control :deep(input[type="number"]),
+.table-cell-control :deep(select) {
+  min-height: 44px;
+  padding: 10px 12px;
+}
+
+.table-cell-control :deep(textarea) {
+  min-height: 88px;
+  padding: 10px 12px;
+  resize: vertical;
 }
 
 .table-cell-control :deep(input::placeholder),
@@ -1798,6 +1847,9 @@ export default {
   opacity: 1;
 }
 
+/* =========================
+   CUSTOM COMPONENT WRAPPERS
+   ========================= */
 .table-cell-control :deep(.field-checkbox),
 .table-cell-control :deep(.field-radio-group),
 .table-cell-control :deep(.radio-group),
@@ -1807,64 +1859,102 @@ export default {
 .table-cell-control :deep(.date-format-picker),
 .table-cell-control :deep(.field-time),
 .table-cell-control :deep(.time-field),
-.table-cell-control :deep(.date-picker-wrapper) {
-  width: 100%;
-}
-
-.table-cell-control :deep(input[type="text"]),
-.table-cell-control :deep(input[type="number"]),
-.table-cell-control :deep(textarea) {
+.table-cell-control :deep(.date-picker-wrapper),
+.table-cell-control :deep(.ftm-wrap),
+.table-cell-control :deep(.dfp-wrapper) {
   width: 100%;
   min-width: 0;
-  padding: 10px 12px;
-  border: 1px solid #d1d5db;
-  border-radius: 8px;
-  margin: 0;
-  background: #fff;
+  max-width: 100%;
+  overflow: visible !important;
   box-sizing: border-box;
-  min-height: 42px;
-  color: #111827;
 }
 
-.table-cell-control :deep(textarea) {
-  min-height: 88px;
-  resize: vertical;
-}
-
+/* keep regular field controls aligned at top */
+.table-cell-control :deep(.field-select),
+.table-cell-control :deep(.select-wrapper),
+.table-cell-control :deep(.dfp-wrapper),
+.table-cell-control :deep(.ftm-wrap),
+.table-cell-control :deep(.field-checkbox),
 .table-cell-control :deep(.field-radio-group),
 .table-cell-control :deep(.radio-group),
-.table-cell-control :deep(.radio-options),
+.table-cell-control :deep(.radio-options) {
+  align-self: flex-start;
+}
+
+/* Date/time/select input sizing */
+.table-cell-control :deep(.date-format-picker input),
+.table-cell-control :deep(.field-time input),
+.table-cell-control :deep(.time-field input),
+.table-cell-control :deep(.field-select select),
+.table-cell-control :deep(.select-wrapper select),
+.table-cell-control :deep(input[type="date"]),
+.table-cell-control :deep(input[type="time"]),
+.table-cell-control :deep(.ftm-input),
+.table-cell-control :deep(.dp__input),
+.table-cell-control :deep(.dfp-input) {
+  width: 100% !important;
+  min-width: 0 !important;
+  max-width: 100% !important;
+  min-height: 44px;
+  box-sizing: border-box !important;
+}
+
+/* Select shouldn't overflow its cell */
 .table-cell-control :deep(.field-select),
 .table-cell-control :deep(.select-wrapper) {
-  width: 100%;
+  position: relative;
+  z-index: 1;
 }
 
-.table-cell-control :deep(label) {
-  white-space: normal;
+/* Radio/checkbox shouldn't distort column width */
+.table-cell-control :deep(.field-radio-group),
+.table-cell-control :deep(.radio-group),
+.table-cell-control :deep(.radio-options) {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
-.table-cell-control :deep(.date-format-picker),
+.table-cell-control :deep(.field-checkbox) {
+  display: inline-flex;
+  align-items: center;
+}
+
+/* =========================
+   POPUP LAYERS
+   ========================= */
+
+/* Time popover can remain inside table if overflow is visible */
+.table-cell-control :deep(.ftm-pop) {
+  z-index: 9999 !important;
+}
+
+/* For date picker, the menu should not be clipped */
+.table-runtime-wrap :deep(.dp__menu),
+.table-runtime-wrap :deep(.dp__menu_wrapper),
+.table-runtime-wrap :deep(.dp__outer_menu_wrap) {
+  z-index: 9999 !important;
+}
+
+/* If vue datepicker is still visually clipped by ancestor stacking,
+   this keeps its wrapper above neighboring cells */
+.table-cell-control :deep(.dfp-wrapper),
+.table-cell-control :deep(.date-picker-wrapper),
+.table-cell-control :deep(.date-format-picker) {
+  position: relative;
+  z-index: 30;
+}
+
+.table-cell-control :deep(.ftm-wrap),
 .table-cell-control :deep(.field-time),
-.table-cell-control :deep(.time-field),
-.table-cell-control :deep(.date-picker-wrapper) {
-  width: 100%;
-  min-width: 200px;
-  overflow: visible;
+.table-cell-control :deep(.time-field) {
+  position: relative;
+  z-index: 30;
 }
 
-.table-cell-control :deep(input[type="date"]),
-.table-cell-control :deep(input[type="time"]) {
-  width: 100%;
-  min-width: 200px;
-}
-
-.table-cell-error {
-  margin-top: 6px;
-  color: #dc2626;
-  font-size: 12px;
-  line-height: 1.35;
-}
-
+/* =========================
+   ACTIONS
+   ========================= */
 .table-actions {
   margin-top: 12px;
   display: flex;
@@ -1886,6 +1976,9 @@ export default {
   cursor: not-allowed;
 }
 
+/* =========================
+   RESPONSIVE
+   ========================= */
 @media (max-width: 900px) {
   .tc-grid,
   .tc-column-grid {
@@ -1901,5 +1994,14 @@ export default {
     width: min(96vw, 980px);
     padding: 16px;
   }
+
+  .table-runtime {
+    min-width: 980px;
+  }
+}
+.required-star {
+  color: #dc2626;
+  font-weight: 700;
+  line-height: 1;
 }
 </style>

@@ -122,13 +122,14 @@ export default {
 }
 .fsel-input {
   width: 100%;
-  padding: 8px;
+  padding: 10px 12px;
   border: 1px solid #d1d5db;
   border-radius: 6px;
   box-sizing: border-box;
   font-size: 14px;
   color: #1f2937;
   font-weight: 400; /* force normal */
+  min-height: 44px;
 }
 .fsel-input:disabled {
   cursor: not-allowed;

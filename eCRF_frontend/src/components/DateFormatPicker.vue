@@ -7,7 +7,7 @@
       :placeholder="placeholder || resolvedFormat"
       :min-date="dateMinResolved"
       :max-date="dateMaxResolved"
-      :teleport="false"
+      :teleport="true"
       :enable-time-picker="mode === 'time'"
       :time-picker="mode === 'time'"
       :month-picker="mode === 'date' && isMonthPicker"
@@ -43,6 +43,7 @@ export default {
     mode: { type: String, default: "date" }, // supported runtime use here is date
     readonly: { type: Boolean, default: false },
     disabled: { type: Boolean, default: false },
+    mobileBreakpoint: { type: Number, default: 0 },
   },
 
   emits: ["update:modelValue"],
@@ -50,9 +51,9 @@ export default {
   computed: {
     pickerConfig() {
       return {
-        // Force desktop-style rendering by default so the field always remains visible.
-        // This avoids hosted/narrow-layout auto-switching to mobile mode.
-        mobileBreakpoint: 0,
+        mobileBreakpoint: Number.isFinite(this.mobileBreakpoint)
+          ? this.mobileBreakpoint
+          : 0,
         allowPreventDefault: true,
         closeOnScroll: false,
         closeOnAutoApply: true,
@@ -117,11 +118,6 @@ export default {
   },
 
   methods: {
-    emitChange(v) {
-      if (this.isReadonly) return;
-      this.$emit("update:modelValue", this.normalizeOutputValue(v));
-    },
-
     normalizeIncomingModelValue(v) {
       if (v == null || v === "") return "";
       if (typeof v === "number") return String(v);
@@ -283,6 +279,7 @@ export default {
   width: 100%;
   min-width: 0;
   display: block !important;
+  overflow: visible !important;
 }
 
 /* Let the datepicker root fill available width */
@@ -293,6 +290,7 @@ export default {
   display: block !important;
   visibility: visible !important;
   opacity: 1 !important;
+  overflow: visible !important;
   font-family: inherit;
 }
 
@@ -305,6 +303,7 @@ export default {
   display: block !important;
   visibility: visible !important;
   opacity: 1 !important;
+  overflow: visible !important;
 }
 
 /* Main input */
@@ -316,37 +315,30 @@ export default {
   min-height: 44px !important;
   height: 44px !important;
   box-sizing: border-box !important;
-
   padding-top: 8px !important;
   padding-right: 12px !important;
   padding-bottom: 8px !important;
-  padding-left: 42px !important; /* room for calendar icon */
-
+  padding-left: 42px !important;
   border: 1px solid #d1d5db !important;
   border-radius: 8px !important;
   background: #ffffff !important;
   color: #1f2937 !important;
-
   font-family: inherit !important;
   font-size: 14px !important;
   line-height: 1.4 !important;
-
   outline: none !important;
   box-shadow: none !important;
   transition: border-color 0.2s ease, box-shadow 0.2s ease !important;
-
   visibility: visible !important;
   opacity: 1 !important;
 }
 
-/* Placeholder */
 :deep(.dp__input::placeholder),
 :deep(.dfp-input::placeholder) {
   color: #9ca3af !important;
   opacity: 1 !important;
 }
 
-/* Hover/focus */
 :deep(.dp__input:hover),
 :deep(.dfp-input:hover) {
   border-color: #cbd5e1 !important;
@@ -358,7 +350,6 @@ export default {
   box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.12) !important;
 }
 
-/* Calendar / clear icons */
 :deep(.dp__input_icon) {
   left: 12px !important;
   color: #6b7280 !important;
@@ -371,12 +362,10 @@ export default {
   color: #6b7280 !important;
 }
 
-/* If vue-datepicker adds icon padding classes, keep them sane */
 :deep(.dp__input_icon_pad) {
   padding-inline-start: 42px !important;
 }
 
-/* Even if the library marks mobile mode, keep a normal visible input */
 :deep(.dp__main[data-dp-mobile="true"]) {
   display: block !important;
   width: 100% !important;
@@ -407,13 +396,13 @@ export default {
   opacity: 1 !important;
 }
 
-/* Menu / popup */
 :deep(.dp__menu) {
   font-family: inherit;
   border: 1px solid #e5e7eb;
   border-radius: 10px;
   overflow: hidden;
   box-shadow: 0 12px 30px rgba(0, 0, 0, 0.12);
+  z-index: 99999 !important;
 }
 
 :deep(.dp__calendar) {
@@ -445,7 +434,6 @@ export default {
   color: #ffffff !important;
 }
 
-/* Disabled / readonly */
 :deep(.dp__disabled),
 :deep(.dp__input:disabled),
 :deep(.dfp-input:disabled) {
@@ -471,9 +459,9 @@ export default {
   cursor: not-allowed !important;
 }
 
-/* Prevent odd clipping from parent flex/grid contexts */
 :deep(.dp__menu_wrapper),
 :deep(.dp__outer_menu_wrap) {
-  z-index: 9999;
+  z-index: 99999 !important;
+  overflow: visible !important;
 }
 </style>

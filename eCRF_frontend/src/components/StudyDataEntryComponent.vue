@@ -4780,6 +4780,7 @@ select {
   font-size: 14px;
   color: #1f2937;
   background: #fff;
+  min-height: 44px;
 }
 input:focus,
 textarea:focus,
