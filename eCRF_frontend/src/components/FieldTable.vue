@@ -148,8 +148,10 @@
                   v-for="(col, colIdx) in localConfig.columns"
                   :key="col.id || colIdx"
                 >
-                  <div class="table-head-title">{{ col.label || 'Untitled column' }}</div>
-                  <div class="table-head-type">{{ prettyType(col.type) }}</div>
+                  <div class="table-head-title">
+                    <span>{{ col.label || 'Untitled column' }}</span>
+                    <span v-if="col.constraints?.required" class="required-star">*</span>
+                  </div>
                 </th>
               </tr>
             </thead>
@@ -163,6 +165,7 @@
                   :key="`${rowIndex}-${col.id || colIdx}`"
                 >
                   <div class="table-cell-box">
+
                     <div class="table-cell-control">
                       <input
                         v-if="col.type === 'text'"
@@ -194,46 +197,57 @@
                         v-else-if="col.type === 'date'"
                         :modelValue="row[getPreviewColKey(col, colIdx)]"
                         :format="col.constraints?.dateFormat || 'dd.MM.yyyy'"
-                        :placeholder="col.constraints?.placeholder || ''"
+                        :placeholder="col.constraints?.placeholder || (col.constraints?.dateFormat || 'dd.MM.yyyy')"
                         :min-date="col.constraints?.minDate || null"
                         :max-date="col.constraints?.maxDate || null"
+                        :readonly="true"
                       />
 
                       <FieldTime
                         v-else-if="col.type === 'time'"
                         :modelValue="row[getPreviewColKey(col, colIdx)]"
+                        :placeholder="col.constraints?.placeholder || (col.constraints?.timeFormat || 'HH:mm')"
                         v-bind="col.constraints || {}"
-                        :hourCycle="col.constraints?.hourCycle || '24'"
-                        :placeholder="col.constraints?.placeholder || ''"
+                        :readonly="true"
                       />
 
-                      <select
+                      <FieldSelect
                         v-else-if="col.type === 'select'"
-                        :value="row[getPreviewColKey(col, colIdx)] || '__preview_empty__'"
-                        disabled
-                      >
-                        <option value="__preview_empty__">Select…</option>
-                        <option v-for="opt in (col.options || [])" :key="opt" :value="opt">{{ opt }}</option>
-                      </select>
+                        :modelValue="row[getPreviewColKey(col, colIdx)]"
+                        :options="col.options || []"
+                        :multiple="!!col.constraints?.allowMultiple"
+                        :readonly="true"
+                        :default-value="col.constraints?.defaultValue"
+                        :placeholder="'Select…'"
+                      />
 
                       <FieldRadioGroup
                         v-else-if="col.type === 'radio'"
                         :name="`preview_radio_${rowIndex}_${col.id || colIdx}`"
                         :options="col.options || []"
                         :modelValue="row[getPreviewColKey(col, colIdx)]"
+                        :default-value="col.constraints?.defaultValue"
+                        v-bind="col.constraints || {}"
+                        :disabled="true"
                       />
 
                       <FieldCheckbox
                         v-else-if="col.type === 'checkbox'"
                         :modelValue="row[getPreviewColKey(col, colIdx)]"
+                        v-bind="col.constraints || {}"
+                        :disabled="true"
                       />
 
                       <input
                         v-else
                         type="text"
                         :value="row[getPreviewColKey(col, colIdx)]"
+                        :placeholder="col.constraints?.placeholder || ''"
                         readonly
                       />
+                    </div>
+                    <div class="cell-help" v-if="col.constraints?.helpText">
+                      {{ col.constraints.helpText }}
                     </div>
                   </div>
                 </td>
@@ -280,9 +294,12 @@
             <tr>
               <th v-if="resolvedTableConfig.showRowNumbers" class="rowno-col">#</th>
               <th v-for="(col, colIdx) in resolvedColumns" :key="col.id || colIdx">
-                <div class="table-head-title">{{ col.label }}</div>
-                <div class="table-head-type">{{ prettyType(col.type) }}</div>
+                <div class="table-head-title">
+                  <span>{{ col.label }}</span>
+                  <span v-if="col.constraints?.required" class="required-star">*</span>
+                </div>
               </th>
+              <th v-if="!readonly" class="row-actions-col">Actions</th>
             </tr>
           </thead>
 
@@ -292,6 +309,10 @@
 
               <td v-for="(col, colIdx) in resolvedColumns" :key="`${rowIndex}-${col.id || colIdx}`">
                 <div class="table-cell-box">
+                  <div class="cell-help" v-if="col.constraints?.helpText">
+                    {{ col.constraints.helpText }}
+                  </div>
+
                   <div class="table-cell-control">
                     <input
                       v-if="col.type === 'text'"
@@ -326,9 +347,10 @@
                       v-else-if="col.type === 'date'"
                       v-model="internalRows[rowIndex][getRuntimeColKey(col, colIdx)]"
                       :format="col.constraints?.dateFormat || 'dd.MM.yyyy'"
-                      :placeholder="col.constraints?.placeholder || ''"
+                      :placeholder="col.constraints?.placeholder || (col.constraints?.dateFormat || 'dd.MM.yyyy')"
                       :min-date="col.constraints?.minDate || null"
                       :max-date="col.constraints?.maxDate || null"
+                      :readonly="readonly || !!col.constraints?.readonly"
                       @change="validateCellAt(rowIndex, colIdx)"
                       @blur="validateCellAt(rowIndex, colIdx)"
                     />
@@ -336,34 +358,41 @@
                     <FieldTime
                       v-else-if="col.type === 'time'"
                       v-model="internalRows[rowIndex][getRuntimeColKey(col, colIdx)]"
+                      :placeholder="col.constraints?.placeholder || (col.constraints?.timeFormat || 'HH:mm')"
                       v-bind="col.constraints || {}"
-                      :hourCycle="col.constraints?.hourCycle || '24'"
-                      :placeholder="col.constraints?.placeholder || ''"
+                      :readonly="readonly || !!col.constraints?.readonly"
                       @change="validateCellAt(rowIndex, colIdx)"
                       @blur="validateCellAt(rowIndex, colIdx)"
                     />
 
-                    <select
+                    <FieldSelect
                       v-else-if="col.type === 'select'"
                       v-model="internalRows[rowIndex][getRuntimeColKey(col, colIdx)]"
-                      :disabled="readonly || !!col.constraints?.readonly"
-                      @change="validateCellAt(rowIndex, colIdx)"
-                    >
-                      <option value="" disabled>Select…</option>
-                      <option v-for="opt in (col.options || [])" :key="opt" :value="opt">{{ opt }}</option>
-                    </select>
+                      :options="col.options || []"
+                      :multiple="!!col.constraints?.allowMultiple"
+                      :readonly="readonly || !!col.constraints?.readonly"
+                      :default-value="col.constraints?.defaultValue"
+                      :placeholder="'Select…'"
+                      @update:modelValue="validateCellAt(rowIndex, colIdx)"
+                    />
 
                     <FieldRadioGroup
                       v-else-if="col.type === 'radio'"
                       :name="`table_radio_${rowIndex}_${col.id || colIdx}`"
                       :options="col.options || []"
                       v-model="internalRows[rowIndex][getRuntimeColKey(col, colIdx)]"
+                      :default-value="col.constraints?.defaultValue"
+                      v-bind="col.constraints || {}"
+                      :disabled="readonly || !!col.constraints?.readonly"
+                      @change="validateCellAt(rowIndex, colIdx)"
                       @update:modelValue="validateCellAt(rowIndex, colIdx)"
                     />
 
                     <FieldCheckbox
                       v-else-if="col.type === 'checkbox'"
                       v-model="internalRows[rowIndex][getRuntimeColKey(col, colIdx)]"
+                      v-bind="col.constraints || {}"
+                      :disabled="readonly || !!col.constraints?.readonly"
                       @update:modelValue="validateCellAt(rowIndex, colIdx)"
                     />
 
@@ -371,6 +400,7 @@
                       v-else
                       type="text"
                       v-model="internalRows[rowIndex][getRuntimeColKey(col, colIdx)]"
+                      :placeholder="col.constraints?.placeholder || ''"
                       :readonly="readonly"
                       @blur="validateCellAt(rowIndex, colIdx)"
                     />
@@ -380,6 +410,18 @@
                     {{ getCellError(rowIndex, colIdx) }}
                   </div>
                 </div>
+              </td>
+
+              <td v-if="!readonly" class="row-actions-cell">
+                <button
+                  type="button"
+                  class="btn-row-delete"
+                  :disabled="internalRows.length <= 1"
+                  @click="deleteRuntimeRow(rowIndex)"
+                  title="Delete row"
+                >
+                  Delete Row
+                </button>
               </td>
             </tr>
           </tbody>
@@ -402,6 +444,7 @@ import DateFormatPicker from "@/components/DateFormatPicker.vue";
 import FieldCheckbox from "@/components/fields/FieldCheckbox.vue";
 import FieldRadioGroup from "@/components/fields/FieldRadioGroup.vue";
 import FieldTime from "@/components/fields/FieldTime.vue";
+import FieldSelect from "@/components/fields/FieldSelect.vue";
 import { normalizeConstraints } from "@/utils/constraints";
 import { createAjv, validateFieldValue } from "@/utils/jsonschemaValidation";
 
@@ -412,7 +455,8 @@ export default {
     DateFormatPicker,
     FieldCheckbox,
     FieldRadioGroup,
-    FieldTime
+    FieldTime,
+    FieldSelect
   },
   props: {
     mode: {
@@ -629,6 +673,9 @@ export default {
     }
   },
   methods: {
+    validateForSubmit() {
+      return this.validateAllCells();
+    },
     buildInitialConfig(src) {
       const initialColumns =
         Array.isArray(src?.tableConfig?.columns) && src.tableConfig.columns.length
@@ -702,12 +749,20 @@ export default {
       return col.key || this.buildColumnKey(col.label, idx);
     },
 
-    defaultValueForType(type) {
+    defaultValueForType(type, constraints = {}) {
+      if (Object.prototype.hasOwnProperty.call(constraints || {}, "defaultValue")) {
+        return constraints.defaultValue;
+      }
+
       switch (type) {
         case "number":
           return null;
         case "checkbox":
           return false;
+        case "select":
+          return constraints?.allowMultiple ? [] : "";
+        case "radio":
+          return "";
         default:
           return "";
       }
@@ -721,7 +776,7 @@ export default {
 
       const row = {};
       columns.forEach((col) => {
-        row[col.key] = this.defaultValueForType(col.type);
+        row[col.key] = this.defaultValueForType(col.type, col.constraints || {});
       });
 
       this.previewData = [row];
@@ -747,7 +802,7 @@ export default {
           normalized[key] =
             row?.[key] !== undefined
               ? row[key]
-              : this.defaultValueForType(col.type);
+              : this.defaultValueForType(col.type, col.constraints || {});
         });
         result.push(normalized);
       });
@@ -759,7 +814,7 @@ export default {
       const row = {};
       (columns || []).forEach((col, idx) => {
         const key = col.key || this.buildColumnKey(col.label, idx);
-        row[key] = this.defaultValueForType(col.type);
+        row[key] = this.defaultValueForType(col.type, col.constraints || {});
       });
       return row;
     },
@@ -907,7 +962,7 @@ export default {
         constraints
       };
 
-      if (col.type !== "checkbox") {
+      if (col.type !== "file") {
         const { valid, message } = validateFieldValue(this.ajv, pseudoField, value);
         if (!valid) {
           this.setCellError(rowIndex, colIndex, message || `${label} is invalid.`);
@@ -956,9 +1011,15 @@ export default {
         }
       }
 
-      if ((col.type === "select" || col.type === "radio") && value) {
+      if ((col.type === "select" || col.type === "radio") && value != null && value !== "") {
         const opts = Array.isArray(col.options) ? col.options.map(String) : [];
-        if (!opts.includes(String(value))) {
+        if (Array.isArray(value)) {
+          const allValid = value.every((v) => opts.includes(String(v)));
+          if (!allValid) {
+            this.setCellError(rowIndex, colIndex, `${label} has an invalid option.`);
+            return false;
+          }
+        } else if (!opts.includes(String(value))) {
           this.setCellError(rowIndex, colIndex, `${label} has an invalid option.`);
           return false;
         }
@@ -1057,6 +1118,8 @@ export default {
           helpText: prev.helpText || "",
           required: !!prev.required,
           readonly: !!prev.readonly,
+          allowMultiple: !!prev.allowMultiple,
+          defaultValue: prev.defaultValue,
           visibilityLogic: prev.visibilityLogic || {
             enabled: false,
             match: "all",
@@ -1072,9 +1135,11 @@ export default {
           helpText: prev.helpText || "",
           required: !!prev.required,
           readonly: !!prev.readonly,
+          placeholder: prev.placeholder || "",
           dateFormat: prev.dateFormat || "dd.MM.yyyy",
           minDate: prev.minDate || null,
           maxDate: prev.maxDate || null,
+          defaultValue: prev.defaultValue,
           visibilityLogic: prev.visibilityLogic || {
             enabled: false,
             match: "all",
@@ -1090,7 +1155,9 @@ export default {
           helpText: prev.helpText || "",
           required: !!prev.required,
           readonly: !!prev.readonly,
+          placeholder: prev.placeholder || "",
           hourCycle: prev.hourCycle || "24",
+          defaultValue: prev.defaultValue,
           visibilityLogic: prev.visibilityLogic || {
             enabled: false,
             match: "all",
@@ -1106,12 +1173,14 @@ export default {
           helpText: prev.helpText || "",
           required: !!prev.required,
           readonly: !!prev.readonly,
+          placeholder: prev.placeholder || "",
           min: prev.min,
           max: prev.max,
           step: prev.step,
           integerOnly: !!prev.integerOnly,
           minDigits: prev.minDigits,
           maxDigits: prev.maxDigits,
+          defaultValue: prev.defaultValue,
           visibilityLogic: prev.visibilityLogic || {
             enabled: false,
             match: "all",
@@ -1127,6 +1196,7 @@ export default {
         required: !!prev.required,
         readonly: !!prev.readonly,
         placeholder: prev.placeholder || "",
+        defaultValue: prev.defaultValue,
         visibilityLogic: prev.visibilityLogic || {
           enabled: false,
           match: "all",
@@ -1238,6 +1308,7 @@ export default {
       }
 
       if (c.helpText) parts.push("Help text set");
+      if (Object.prototype.hasOwnProperty.call(c, "defaultValue")) parts.push("Default set");
 
       return parts.join(" • ");
     },
@@ -1303,7 +1374,7 @@ export default {
       for (let r = 0; r < rowCount; r += 1) {
         const row = {};
         columns.forEach((col) => {
-          row[col.key] = this.defaultValueForType(col.type);
+          row[col.key] = this.defaultValueForType(col.type, col.constraints || {}, col.options || []);
         });
         rows.push(row);
       }
@@ -1342,6 +1413,29 @@ export default {
       this.$nextTick(() => {
         this.validateAllCells();
       });
+    },
+
+    deleteRuntimeRow(rowIndex) {
+      if (this.internalRows.length <= 1) return;
+      this.internalRows.splice(rowIndex, 1);
+
+      const rebuilt = {};
+      this.internalRows.forEach((_, rIdx) => {
+        this.resolvedColumns.forEach((__, cIdx) => {
+          const msg = this.getCellError(
+            rIdx >= rowIndex ? rIdx + 1 : rIdx,
+            cIdx
+          );
+          if (msg) {
+            rebuilt[`${rIdx}-${cIdx}`] = msg;
+          }
+        });
+      });
+      this.cellErrors = rebuilt;
+
+      this.$nextTick(() => {
+        this.validateAllCells();
+      });
     }
   }
 };
@@ -1352,9 +1446,6 @@ export default {
   width: 100%;
 }
 
-/* =========================
-   CONFIGURE MODE
-   ========================= */
 .table-configurator {
   width: min(92vw, 980px);
   max-width: 980px;
@@ -1567,9 +1658,6 @@ export default {
   cursor: pointer;
 }
 
-/* =========================
-   NESTED CONSTRAINTS MODAL
-   ========================= */
 .nested-modal-overlay {
   position: fixed;
   inset: 0;
@@ -1617,9 +1705,6 @@ export default {
   max-width: 100%;
 }
 
-/* =========================
-   TABLE RUNTIME / PREVIEW
-   ========================= */
 .table-runtime-shell {
   width: 100%;
 }
@@ -1638,7 +1723,7 @@ export default {
 
 .table-runtime {
   width: 100%;
-  min-width: 900px;
+  min-width: 980px;
   border-collapse: collapse;
 }
 
@@ -1651,15 +1736,17 @@ export default {
 }
 
 .table-head-title {
+  display: flex;
+  align-items: center;
+  gap: 4px;
   font-weight: 600;
   color: #111827;
 }
 
-.table-head-type {
-  margin-top: 2px;
-  font-size: 11px;
-  color: #6b7280;
-  text-transform: capitalize;
+.required-star {
+  color: #dc2626;
+  font-weight: 700;
+  line-height: 1;
 }
 
 .rowno-col {
@@ -1667,22 +1754,66 @@ export default {
   text-align: center;
 }
 
+.row-actions-col,
+.row-actions-cell {
+  width: 120px;
+  min-width: 120px;
+}
+
 .table-cell-box {
   min-width: 220px;
   overflow: visible;
 }
 
+.cell-help {
+  font-style: italic;
+  color: #6b7280;
+  margin-top: 6px;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
 .table-cell-control {
   min-width: 220px;
   display: flex;
-  align-items: stretch;
+  align-items: center;
+  justify-content: center;
   overflow: visible;
+}
+.table-cell-box {
+  min-width: 220px;
+  overflow: visible;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.table-cell-control > * {
+  width: 100%;
+}
+
+.table-cell-control :deep(input::placeholder),
+.table-cell-control :deep(textarea::placeholder) {
+  color: #9ca3af;
+  opacity: 1;
+}
+
+.table-cell-control :deep(.field-checkbox),
+.table-cell-control :deep(.field-radio-group),
+.table-cell-control :deep(.radio-group),
+.table-cell-control :deep(.radio-options),
+.table-cell-control :deep(.field-select),
+.table-cell-control :deep(.select-wrapper),
+.table-cell-control :deep(.date-format-picker),
+.table-cell-control :deep(.field-time),
+.table-cell-control :deep(.time-field),
+.table-cell-control :deep(.date-picker-wrapper) {
+  width: 100%;
 }
 
 .table-cell-control :deep(input[type="text"]),
 .table-cell-control :deep(input[type="number"]),
-.table-cell-control :deep(textarea),
-.table-cell-control :deep(select) {
+.table-cell-control :deep(textarea) {
   width: 100%;
   min-width: 0;
   padding: 10px 12px;
@@ -1700,13 +1831,11 @@ export default {
   resize: vertical;
 }
 
-.table-cell-control :deep(select) {
-  appearance: auto;
-}
-
 .table-cell-control :deep(.field-radio-group),
 .table-cell-control :deep(.radio-group),
-.table-cell-control :deep(.radio-options) {
+.table-cell-control :deep(.radio-options),
+.table-cell-control :deep(.field-select),
+.table-cell-control :deep(.select-wrapper) {
   width: 100%;
 }
 
@@ -1742,9 +1871,21 @@ export default {
   justify-content: flex-start;
 }
 
-/* =========================
-   RESPONSIVE
-   ========================= */
+.btn-row-delete {
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  color: #b91c1c;
+  border-radius: 8px;
+  padding: 8px 10px;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.btn-row-delete:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 @media (max-width: 900px) {
   .tc-grid,
   .tc-column-grid {

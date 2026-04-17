@@ -320,6 +320,7 @@
                   <!-- TABLE -->
                   <FieldTable
                       v-else-if="field.type === 'table'"
+                      :ref="`tableField_${mIdx}_${fIdx}`"
                       :id="fieldId(mIdx, fIdx)"
                       v-model="entryData[currentSubjectIndex][currentVisitIndex][currentGroupIndex][mIdx][fIdx]"
                       :field="field"
@@ -970,9 +971,22 @@ export default {
   },
 
   methods: {
+  validateTableChild(mIdx, fIdx) {
+      const refName = `tableField_${mIdx}_${fIdx}`;
+      const comp = this.$refs?.[refName];
+
+      if (!comp) return true;
+
+      const instance = Array.isArray(comp) ? comp[0] : comp;
+      if (!instance || typeof instance.validateForSubmit !== "function") {
+        return true;
+      }
+
+      return instance.validateForSubmit();
+    },
   onTableValidationState(mIdx, fIdx, payload) {
       const key = this.errorKey(mIdx, fIdx);
-      const next = { ...this.tableValidationStates };
+      const next = { ...(this.tableValidationStates || {}) };
 
       next[key] = {
         valid: !!payload?.valid,
@@ -985,13 +999,19 @@ export default {
       if (payload?.valid) {
         this.clearError(mIdx, fIdx);
       } else {
-        this.setError(mIdx, fIdx, payload?.message || "Table contains invalid cells.");
+        this.setError(
+          mIdx,
+          fIdx,
+          payload?.message || "Table contains invalid cells."
+        );
       }
     },
 
-    getTableValidationState(mIdx, fIdx) {
-      return this.tableValidationStates[this.errorKey(mIdx, fIdx)] || null;
+  getTableValidationState(mIdx, fIdx) {
+      return this.tableValidationStates?.[this.errorKey(mIdx, fIdx)] || null;
     },
+
+
   normalizeSkipFlagsShape(rawFlags) {
       const skeleton = this.makeSkipSkeleton();
 
@@ -3174,7 +3194,7 @@ applyImportedRowFromDialog(payload) {
       this.visitLoading = false;
     },
 
-        backToSelection() {
+    backToSelection() {
       if (this.isShared) return;
       this.buildStatusCache();
       this.showSelection = true;
@@ -3273,7 +3293,9 @@ applyImportedRowFromDialog(payload) {
             return true;
           }
         }
+
         if (Array.isArray(val)) return val.length === 0;
+
         return (
           val == null ||
           (typeof val === "string" && val.trim() === "")
@@ -3293,29 +3315,40 @@ applyImportedRowFromDialog(payload) {
         return false;
       }
 
-      // TABLE: use validation state emitted by FieldTable.vue
       if (def.type === "table") {
-        const tableState = this.getTableValidationState
-          ? this.getTableValidationState(mIdx, fIdx)
-          : null;
+          const childOk = this.validateTableChild(mIdx, fIdx);
+          const tableState = this.getTableValidationState(mIdx, fIdx);
 
-        // If no table state exists yet, do not invent success.
-        // Required empty case is already handled above.
-        if (!tableState) {
+          if (!childOk) {
+            this.setError(
+              mIdx,
+              fIdx,
+              tableState?.message || `${label} contains invalid cells.`
+            );
+            return false;
+          }
+
+          // If child validation ran but parent still has no state, treat as invalid
+          if (!tableState) {
+            this.setError(
+              mIdx,
+              fIdx,
+              `${label} contains invalid cells.`
+            );
+            return false;
+          }
+
+          if (!tableState.valid) {
+            this.setError(
+              mIdx,
+              fIdx,
+              tableState.message || `${label} contains invalid cells.`
+            );
+            return false;
+          }
+
           return true;
         }
-
-        if (!tableState.valid) {
-          this.setError(
-            mIdx,
-            fIdx,
-            tableState.message || `${label} contains invalid cells.`
-          );
-          return false;
-        }
-
-        return true;
-      }
 
       if (def.type === "slider") {
         if (val == null || val === "") return true;
@@ -3333,7 +3366,10 @@ applyImportedRowFromDialog(payload) {
           const min = cons.percent ? 1 : (Number.isFinite(+cons.min) ? +cons.min : 1);
           const max = cons.percent ? 100 : (Number.isFinite(+cons.max) ? +cons.max : (cons.percent ? 100 : 5));
           const step = Number.isFinite(+cons.step) && +cons.step > 0 ? +cons.step : 1;
-          if (n < min || n > max) { this.setError(mIdx, fIdx, `${label} must be between ${min} and ${max}.`); return false; }
+          if (n < min || n > max) {
+            this.setError(mIdx, fIdx, `${label} must be between ${min} and ${max}.`);
+            return false;
+          }
           if (step >= 1) {
             const k = (n - min) / step;
             if (Math.abs(k - Math.round(k)) > 1e-9) {
@@ -3350,7 +3386,11 @@ applyImportedRowFromDialog(payload) {
           const min = Number.isFinite(+cons.min) ? Math.round(+cons.min) : 1;
           const max = Number.isFinite(+cons.max) ? Math.round(+cons.max) : 5;
           if (n < min || n > max || Math.round(n) !== n) {
-            this.setError(mIdx, fIdx, `${label} must be an integer between ${min} and ${max}.`);
+            this.setError(
+              mIdx,
+              fIdx,
+              `${label} must be an integer between ${min} and ${max}.`
+            );
             return false;
           }
           return true;
@@ -3421,14 +3461,22 @@ applyImportedRowFromDialog(payload) {
           if (cons.minDate) {
             const md = parse(cons.minDate);
             if (md && d < md) {
-              this.setError(mIdx, fIdx, `${def.label || def.name || "This field"} must be ≥ ${cons.minDate}.`);
+              this.setError(
+                mIdx,
+                fIdx,
+                `${def.label || def.name || "This field"} must be ≥ ${cons.minDate}.`
+              );
               return false;
             }
           }
           if (cons.maxDate) {
             const xd = parse(cons.maxDate);
             if (xd && d > xd) {
-              this.setError(mIdx, fIdx, `${def.label || def.name || "This field"} must be ≤ ${cons.maxDate}.`);
+              this.setError(
+                mIdx,
+                fIdx,
+                `${def.label || def.name || "This field"} must be ≤ ${cons.maxDate}.`
+              );
               return false;
             }
           }
@@ -3450,19 +3498,28 @@ applyImportedRowFromDialog(payload) {
           if (cons.minTime) {
             const m = toSec(cons.minTime);
             if (m != null && secs < m) {
-              this.setError(mIdx, fIdx, `${def.label || def.name || "This field"} must be ≥ ${cons.minTime}.`);
+              this.setError(
+                mIdx,
+                fIdx,
+                `${def.label || def.name || "This field"} must be ≥ ${cons.minTime}.`
+              );
               return false;
             }
           }
           if (cons.maxTime) {
             const x = toSec(cons.maxTime);
             if (x != null && secs > x) {
-              this.setError(mIdx, fIdx, `${def.label || def.name || "This field"} must be ≤ ${cons.maxTime}.`);
+              this.setError(
+                mIdx,
+                fIdx,
+                `${def.label || def.name || "This field"} must be ≤ ${cons.maxTime}.`
+              );
               return false;
             }
           }
         }
       }
+
       return true;
     },
 
@@ -3696,6 +3753,14 @@ applyImportedRowFromDialog(payload) {
   this.runAllCalculationsForCurrentCell();
 
   const ok = this.validateCurrentSection();
+  const tableFieldsInvalid = this.assignedModelIndices.some((mIdx) => {
+  const fields = this.selectedModels?.[mIdx]?.fields || [];
+  return fields.some((field, fIdx) => {
+    if (field?.type !== "table") return false;
+    if (!this.isFieldVisible(mIdx, fIdx)) return false;
+    return !this.validateField(mIdx, fIdx);
+        });
+    });
   const blocking = Object.entries(this.validationErrors).filter(([k, msg]) => {
     if (!msg) return false;
     const idx = this.parseKey(k);
@@ -3706,10 +3771,10 @@ applyImportedRowFromDialog(payload) {
     return !/ is required\.$/.test(msg);
   });
 
-  if (!ok && blocking.length) {
-    this.showDialogMessage("Please fix validation errors before saving.");
-    return;
-  }
+  if ((!ok && blocking.length) || tableFieldsInvalid) {
+      this.showDialogMessage("Please fix validation errors before saving.");
+      return;
+    }
 
   const requiredFailures = this.computeRequiredFailures();
   if (requiredFailures.length) {
