@@ -170,7 +170,13 @@ _STRUCTURAL_CONSTRAINT_KEYS = {
     "minDate",
     "maxDate",
 }
-
+_TABLE_STRUCTURAL_CONSTRAINT_KEYS = _STRUCTURAL_CONSTRAINT_KEYS | {
+    "minTime",
+    "maxTime",
+    "hourCycle",
+    "minDigits",
+    "maxDigits",
+}
 
 def _field_signature(f: Dict[str, Any]) -> Dict[str, Any]:
     name = f.get("name") or f.get("label") or f.get("key") or f.get("title")
@@ -196,6 +202,8 @@ def _field_signature(f: Dict[str, Any]) -> Dict[str, Any]:
                 else:
                     norm_opts.append(_norm_str(o))
             sig["options"] = norm_opts
+    if ftype == "table":
+        sig["table"] = _table_signature(f)
 
     return sig
 
@@ -206,6 +214,62 @@ def _model_signature(m: Dict[str, Any]) -> Dict[str, Any]:
     field_sigs = [_field_signature(f) for f in fields if isinstance(f, dict)]
     return {"title": title, "fields": field_sigs}
 
+def _table_column_signature(col: Dict[str, Any]) -> Dict[str, Any]:
+    label = _norm_str(col.get("label") or col.get("name") or col.get("key") or col.get("title"))
+    ctype = _norm_str(col.get("type") or "")
+
+    sig: Dict[str, Any] = {
+        "label": label,
+        "type": ctype,
+    }
+
+    cons = col.get("constraints") or {}
+    cons_sig = {
+        k: cons.get(k)
+        for k in sorted(_TABLE_STRUCTURAL_CONSTRAINT_KEYS)
+        if k in cons
+    }
+    if cons_sig:
+        sig["constraints"] = cons_sig
+
+    if ctype in ("select", "radio"):
+        opts = col.get("options") or []
+        if isinstance(opts, list):
+            norm_opts: List[str] = []
+            for o in opts:
+                if isinstance(o, dict):
+                    val = (
+                        o.get("value")
+                        or o.get("label")
+                        or o.get("name")
+                        or o.get("title")
+                        or str(o)
+                    )
+                    norm_opts.append(_norm_str(val))
+                else:
+                    norm_opts.append(_norm_str(o))
+            sig["options"] = norm_opts
+
+    return sig
+
+
+def _table_signature(f: Dict[str, Any]) -> Dict[str, Any]:
+    tc = f.get("tableConfig") or {}
+
+    columns = tc.get("columns") or []
+    col_sigs = [
+        _table_column_signature(col)
+        for col in columns
+        if isinstance(col, dict)
+    ]
+
+    return {
+        "mode": _norm_str(tc.get("mode") or "2d"),
+        "initialRows": int(tc.get("initialRows") or 1),
+        "allowAddRows": bool(tc.get("allowAddRows", True)),
+        "showRowNumbers": bool(tc.get("showRowNumbers", True)),
+        "columns": col_sigs,
+    }
 
 def _snapshot_structural_core(sd: Dict[str, Any]) -> Dict[str, Any]:
     model_sigs = [_model_signature(m) for m in _selected_models_list(sd)]
