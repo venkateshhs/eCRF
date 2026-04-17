@@ -309,7 +309,7 @@
                           <button
                             class="icon-button"
                             title="Settings"
-                            @click.stop.prevent="setActiveSection(si); openConstraintsDialog(si, fi)"
+                            @click.stop.prevent="onFieldSettingsClick(si, fi)"
                           ><i :class="icons.cog"></i></button>
 
                           <!-- MOVE: extreme right of each field (right of settings) -->
@@ -420,6 +420,14 @@
                           :readonly="!!field.constraints?.readonly"
                           :required="!!field.constraints?.required"
                           stage="builder"
+                        />
+                        <!-- TABLE (REAL RENDER) -->
+                        <FieldTable
+                          v-else-if="field.type === 'table'"
+                          mode="render"
+                          modelValue="field.value"
+                          :field="field"
+                          :readonly="true"
                         />
 
                         <!-- BUTTON -->
@@ -548,6 +556,18 @@
     </div>
 
     <!-- Model Dialog -->
+    <!-- Table Configurator Dialog -->
+    <div v-if="showTableConfigurator" class="modal-overlay">
+      <div class="modal table-config-modal">
+        <FieldTable
+          mode="configure"
+          :value="pendingTableField"
+          @save="handleTableConfiguratorSave"
+          @cancel="cancelTableConfigurator"
+          @showGenericDialog="openGenericDialog"
+        />
+      </div>
+    </div>
     <div v-if="showModelDialog" class="modal-overlay">
       <div class="modal model-dialog">
         <h3>Select Properties for {{ prettyModelTitle(currentModel.title) }}</h3>
@@ -746,6 +766,7 @@ import FieldFileUpload from "@/components/fields/FieldFileUpload.vue";
 import { normalizeConstraints, coerceDefaultForType } from "@/utils/constraints";
 import LogicCalculationsRoute from "./LogicCalculationsRoute.vue";
 import ImportCsvTemplateDialog from "./ImportCsvTemplateDialog.vue";
+import FieldTable from "@/components/FieldTable.vue";
 export default {
   name: "ScratchFormComponent",
   components: {
@@ -761,7 +782,8 @@ export default {
     FieldTime,
     FieldSlider,
     FieldLinearScale,
-    FieldFileUpload
+    FieldFileUpload,
+    FieldTable,
   },
   beforeRouteLeave(to, from, next) {
   // IMPORTANT:
@@ -850,6 +872,8 @@ export default {
       inputDialogMessage: "",
       inputDialogValue: "",
       inputDialogCallback: null,
+      showTableConfigurator: false,
+      pendingTableField: null,
 
       // Template search
       searchQuery: "",
@@ -1047,6 +1071,14 @@ export default {
             : (f.options || []),
           constraints: f.constraints || {}
         }));
+        this.generalFields.push({
+          name: "table",
+          label: "Table",
+          type: "table",
+          icon: "fas fa-table",
+          description: "2D tabular input with configurable columns and row expansion",
+          constraints: {}
+        });
       } catch (e) {
         console.error("Failed to load custom fields", e);
       }
@@ -1064,6 +1096,135 @@ export default {
   },
 
   methods: {
+  onFieldSettingsClick(si, fi) {
+      this.ensureCurrentFormExists();
+
+      const field = this.currentForm.sections?.[si]?.fields?.[fi];
+      if (!field) return;
+
+      //SPECIAL CASE: TABLE -> open table configurator
+      if (field.type === "table") {
+        this.pendingTableField = JSON.parse(JSON.stringify(field));
+        this.currentFieldIndices = { sectionIndex: si, fieldIndex: fi };
+        this.showTableConfigurator = true;
+        return;
+      }
+
+      this.openConstraintsDialog(si, fi);
+    },
+  openTableConfigurator(field) {
+  // IMPORTANT: reset edit indices for new table creation
+  this.currentFieldIndices = {};
+
+  this.pendingTableField = {
+    _id: this.uuidForLogic(),
+    label: field?.label || "Table",
+    name: `table_${Date.now()}`,
+    type: "table",
+    value: {
+      rows: []
+    },
+    constraints: {
+      helpText: "",
+      required: false,
+      readonly: false,
+      visibilityLogic: {
+        action: "show",
+        match: "all",
+        rules: []
+      }
+    },
+    tableConfig: {
+      version: 1,
+      mode: "2d",
+      initialRows: 1,
+      allowAddRows: true,
+      showRowNumbers: true,
+      columns: [
+        {
+          id: `col_${Date.now()}_1`,
+          key: "column_1",
+          label: "Column 1",
+          type: "text",
+          options: [],
+          constraints: {}
+        }
+      ]
+    }
+  };
+
+  this.showTableConfigurator = true;
+},
+
+    handleTableConfiguratorSave(result) {
+  if (!result?.ok) {
+    this.openGenericDialog(result?.error || "Invalid table configuration.");
+    return;
+  }
+
+  const builtField = JSON.parse(JSON.stringify(result.payload || {}));
+  if (!builtField) return;
+
+  this.ensureCurrentFormExists();
+
+  const { sectionIndex, fieldIndex } = this.currentFieldIndices || {};
+  const isEditingExisting =
+    Number.isInteger(sectionIndex) &&
+    Number.isInteger(fieldIndex) &&
+    !!this.currentForm.sections?.[sectionIndex]?.fields?.[fieldIndex] &&
+    this.currentForm.sections[sectionIndex].fields[fieldIndex]?.type === "table";
+
+  if (isEditingExisting) {
+    const existing = this.currentForm.sections[sectionIndex].fields[fieldIndex];
+
+    // Preserve stable identity/name unless intentionally changed later
+    builtField._id = existing._id || builtField._id || this.uuidForLogic();
+    builtField.name = existing.name || builtField.name || `table_${Date.now()}`;
+
+    this.currentForm.sections[sectionIndex].fields.splice(fieldIndex, 1, builtField);
+  } else {
+    if (!this.currentForm.sections.length) {
+      this.addNewSection();
+    }
+
+    const sec = this.currentForm.sections[this.activeSection];
+    if (!sec) {
+      this.openGenericDialog("No active section available.");
+      return;
+    }
+
+    if (sec.collapsed) {
+      sec.collapsed = false;
+    }
+
+    const baseName = String(builtField.name || `table_${Date.now()}`).trim() || `table_${Date.now()}`;
+    const existingNames = new Set((sec.fields || []).map(f => String(f?.name || "")));
+
+    let uniqueName = baseName;
+    let counter = 2;
+    while (existingNames.has(uniqueName)) {
+      uniqueName = `${baseName}_${counter}`;
+      counter += 1;
+    }
+
+    builtField.name = uniqueName;
+    builtField._id = builtField._id || this.uuidForLogic();
+
+    sec.fields.push(builtField);
+  }
+
+  this.showTableConfigurator = false;
+  this.pendingTableField = null;
+  this.currentFieldIndices = {};
+
+  if (!this.hydratingScratch) {
+    this.$store.commit("setStudyCreationDirty", true);
+  }
+},
+    cancelTableConfigurator() {
+      this.showTableConfigurator = false;
+      this.pendingTableField = null;
+    },
   openImportCsvDialog() {
   this.closeAdditionalOptions();
   this.showImportCsvDialog = true;
@@ -2393,7 +2554,10 @@ handleImportedCsvFields(importedFields) {
     addFieldToActiveSection(field) {
       // FIX: guard before mutation
       this.ensureCurrentFormExists();
-
+      if (field.type === "table") {
+        this.openTableConfigurator(field);
+        return;
+      }
       if (!this.currentForm.sections.length) this.addNewSection();
 
       const sec = this.currentForm.sections[this.activeSection];
@@ -3504,5 +3668,71 @@ input, textarea, select {
   display: flex;
   justify-content: center;
   align-items: center;
+}
+.table-config-modal {
+  width: min(96vw, 1060px);
+  max-height: 90vh;
+  overflow-y: auto;
+}
+
+.table-builder-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.table-builder-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.table-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: #eef2ff;
+  color: #374151;
+  font-size: 12px;
+  border: 1px solid #c7d2fe;
+}
+
+.table-preview-wrap {
+  overflow: auto;
+  border: 1px solid #d1d5db;
+  border-radius: 10px;
+  background: #fff;
+}
+
+.table-preview-table {
+  width: 100%;
+  min-width: 520px;
+  border-collapse: collapse;
+}
+
+.table-preview-table th,
+.table-preview-table td {
+  border: 1px solid #e5e7eb;
+  padding: 10px;
+  text-align: left;
+  vertical-align: top;
+}
+
+.table-head-title {
+  font-weight: 600;
+  color: #111827;
+}
+
+.table-head-type {
+  margin-top: 2px;
+  font-size: 11px;
+  color: #6b7280;
+  text-transform: capitalize;
+}
+
+.table-cell-placeholder {
+  color: #9ca3af;
+  font-size: 13px;
 }
 </style>

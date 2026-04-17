@@ -317,6 +317,16 @@
                     @update:modelValue="() => { clearError(mIdx, fIdx); validateField(mIdx, fIdx); onRuntimeFieldChanged(mIdx, fIdx); }"
                     @change="() => { validateField(mIdx, fIdx); onRuntimeFieldChanged(mIdx, fIdx); }"
                   />
+                  <!-- TABLE -->
+                  <FieldTable
+                      v-else-if="field.type === 'table'"
+                      :id="fieldId(mIdx, fIdx)"
+                      v-model="entryData[currentSubjectIndex][currentVisitIndex][currentGroupIndex][mIdx][fIdx]"
+                      :field="field"
+                      :readonly="isReadonlyField(field, mIdx, fIdx)"
+                      @update:modelValue="() => { clearError(mIdx, fIdx); validateField(mIdx, fIdx); onRuntimeFieldChanged(mIdx, fIdx); }"
+                      @validation-state="(payload) => onTableValidationState(mIdx, fIdx, payload)"
+                    />
 
                   <!-- FILE -->
                   <FieldFileUpload
@@ -509,6 +519,7 @@ import StudyLegendDialogs from "@/components/dataentry/StudyLegendDialogs.vue";
 import GroupAssignDialog from "@/components/dataentry/GroupAssignDialog.vue";
 import SkipRequiredDialog from "@/components/dataentry/SkipRequiredDialog.vue";
 import StudyDataImportDialog from "@/components/dataentry/StudyDataImportDialog.vue";
+import FieldTable from "@/components/FieldTable.vue";
 import {
   getCalculationRulesFromStudy,
   getCalculationFormulaForField,
@@ -530,6 +541,7 @@ export default {
     FieldSelect,
     FieldSlider,
     FieldLinearScale,
+    FieldTable,
     FieldFileUpload,
     SelectionMatrixView,
     AddSubjectsDialog,
@@ -643,6 +655,7 @@ export default {
 
       currentRevisionToken: "",
       slotLoading: false,
+      tableValidationStates: {},
     };
   },
 
@@ -957,6 +970,28 @@ export default {
   },
 
   methods: {
+  onTableValidationState(mIdx, fIdx, payload) {
+      const key = this.errorKey(mIdx, fIdx);
+      const next = { ...this.tableValidationStates };
+
+      next[key] = {
+        valid: !!payload?.valid,
+        message: payload?.message || "",
+        cellErrors: payload?.cellErrors || {},
+      };
+
+      this.tableValidationStates = next;
+
+      if (payload?.valid) {
+        this.clearError(mIdx, fIdx);
+      } else {
+        this.setError(mIdx, fIdx, payload?.message || "Table contains invalid cells.");
+      }
+    },
+
+    getTableValidationState(mIdx, fIdx) {
+      return this.tableValidationStates[this.errorKey(mIdx, fIdx)] || null;
+    },
   normalizeSkipFlagsShape(rawFlags) {
       const skeleton = this.makeSkipSkeleton();
 
@@ -2741,6 +2776,23 @@ applyImportedRowFromDialog(payload) {
       const allowMulti = !!c.allowMultiple;
       if (t === "slider") return null;
       if (t === "file") return c.allowMultipleFiles ? [] : null;
+      if (t === "table") {
+      if (
+          !ignoreDefaults &&
+          Object.prototype.hasOwnProperty.call(c, "defaultValue") &&
+          c.defaultValue != null
+        ) {
+          return c.defaultValue;
+        }
+        if (
+          !ignoreDefaults &&
+          Object.prototype.hasOwnProperty.call(f, "value") &&
+          f.value != null
+        ) {
+          return f.value;
+        }
+        return [];
+      }
       if (
         !ignoreDefaults &&
         Object.prototype.hasOwnProperty.call(
@@ -3186,6 +3238,12 @@ applyImportedRowFromDialog(payload) {
 
       const isEmpty = () => {
         if (def.type === "checkbox") return val !== true;
+
+        if (def.type === "table") {
+          const rows = val?.rows;
+          return !Array.isArray(rows) || rows.length === 0;
+        }
+
         if (def.type === "file") {
           if (allowMultiFiles) {
             const arr = Array.isArray(val) ? val : [];
@@ -3233,6 +3291,30 @@ applyImportedRowFromDialog(payload) {
       if (cons.required && isEmpty()) {
         this.setError(mIdx, fIdx, `${label} is required.`);
         return false;
+      }
+
+      // TABLE: use validation state emitted by FieldTable.vue
+      if (def.type === "table") {
+        const tableState = this.getTableValidationState
+          ? this.getTableValidationState(mIdx, fIdx)
+          : null;
+
+        // If no table state exists yet, do not invent success.
+        // Required empty case is already handled above.
+        if (!tableState) {
+          return true;
+        }
+
+        if (!tableState.valid) {
+          this.setError(
+            mIdx,
+            fIdx,
+            tableState.message || `${label} contains invalid cells.`
+          );
+          return false;
+        }
+
+        return true;
       }
 
       if (def.type === "slider") {
