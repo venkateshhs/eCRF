@@ -2557,18 +2557,25 @@ export default {
     addNewSection() {
       this.ensureCurrentFormExists();
 
+      const sections = this.forms[this.currentFormIndex].sections || [];
+
+      const insertAt =
+        sections.length === 0
+          ? 0
+          : Math.max(0, Math.min(this.activeSection + 1, sections.length));
+
       const sec = {
         _id: this.uuidForLogic(),
-        title: `Section ${this.currentForm.sections.length + 1}`,
+        title: `Section ${sections.length + 1}`,
         fields: [],
         collapsed: false,
         source: "manual"
       };
 
-      this.forms[this.currentFormIndex].sections.push(sec);
-      this.activeSection = this.currentForm.sections.length - 1;
+      sections.splice(insertAt, 0, sec);
+      this.activeSection = insertAt;
       this.adjustAssignments();
-      this.focusSection(this.activeSection);
+      this.focusSection(insertAt);
     },
 
     addNewSectionBelow(i) {
