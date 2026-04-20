@@ -1,15 +1,14 @@
 <template>
   <div class="create-form-container">
-    <!-- Header -->
-    <div v-if="!showMatrix && !showLogic" class="header-container">
-      <button @click="goBack" class="btn-back" title="Go Back">
-        Back
-      </button>
-    </div>
-
     <div class="scratch-form-content" :class="{ 'scratch-form-content-full': showMatrix || showLogic }">
       <!-- ───────── Available Fields ───────── -->
       <div v-if="!showMatrix && !showLogic" class="available-fields">
+        <div class="available-fields-topbar">
+          <button @click="goBack" class="btn-back" title="Go Back">
+            Back
+          </button>
+        </div>
+
         <h2>Available Fields</h2>
 
         <div class="tabs">
@@ -190,19 +189,37 @@
         <div class="sections-container">
           <!-- Sections View -->
           <div v-if="!showMatrix && !showLogic">
+            <div class="sections-topbar">
+              <div class="sections-topbar-actions">
+                <button
+                  class="icon-button"
+                  title="Expand all sections"
+                  @click.prevent="expandAllSections"
+                >
+                  <i :class="icons.toggleDown"></i>
+                </button>
+
+                <button
+                  class="icon-button"
+                  title="Collapse all sections"
+                  @click.prevent="collapseAllSections"
+                >
+                  <i :class="icons.toggleUp"></i>
+                </button>
+              </div>
+            </div>
+             <div v-if="!currentForm.sections || currentForm.sections.length === 0" class="empty-builder-state">
+                Add your first section to start building this form. You can add a section manually or choose fields from the left panel.
+              </div>
+
             <transition-group name="reorder" tag="div" class="sections-list">
               <div
                 v-for="(section, si) in currentForm.sections"
                 :key="getSectionUid(section)"
                 class="form-section"
-                :class="[
-                  { active: activeSection === si },
-                  getSectionDropClass(si)
-                ]"
+                :class="{ active: activeSection === si }"
                 @click="onSectionClick(si)"
                 :ref="'section-' + si"
-                @dragover.prevent="onSectionDragOver(si, $event)"
-                @drop.prevent="onSectionDrop(si)"
               >
                 <div class="section-header">
                   <h3>{{ section.title }}</h3>
@@ -228,16 +245,6 @@
                       title="Delete Section"
                       @click.stop.prevent="setActiveSection(si); confirmDeleteSection(si)"
                     ><i :class="icons.delete"></i></button>
-                    <span
-                      class="drag-handle drag-handle-right"
-                      draggable="true"
-                      title="Move section"
-                      @click.stop
-                      @dragstart.stop="onSectionDragStart(si, $event)"
-                      @dragend="onDragEnd"
-                    >
-                      <i :class="icons.move || 'fas fa-grip-vertical'"></i>
-                    </span>
 
                     <button
                       class="icon-button"
@@ -270,6 +277,7 @@
                           :for="field.name"
                         >
                           {{ field.label }}
+                          <span v-if="field.constraints?.required" class="required-asterisk">*</span>
                         </label>
                         <label
                           v-else-if="field.type === 'checkbox'"
@@ -277,6 +285,7 @@
                           :for="field.name"
                         >
                           {{ field.label }}
+                           <span v-if="field.constraints?.required" class="required-asterisk">*</span>
                           <FieldCheckbox
                             :id="field.name"
                             v-model="field.value"
@@ -478,13 +487,13 @@
             />
           </div>
           <div v-else-if="showLogic">
-          <LogicCalculationsRoute
-            :form="currentForm"
-            @back-to-builder="closeLogicAndCalculations"
-            @update-form-structure="applyLogicFormUpdate"
-            @update-logic="applyLogicPayload"
-          />
-        </div>
+            <LogicCalculationsRoute
+              :form="currentForm"
+              @back-to-builder="closeLogicAndCalculations"
+              @update-form-structure="applyLogicFormUpdate"
+              @update-logic="applyLogicPayload"
+            />
+          </div>
         </div>
 
         <!-- Form Actions -->
@@ -494,13 +503,21 @@
           </button>
 
           <button
+            @click.prevent="openRearrangeDialog()"
+            class="btn-option"
+            title="Rearrange sections and fields"
+          >
+            Rearrange
+          </button>
+
+          <button
             @click.prevent="openLogicAndCalculations"
             class="btn-option"
             title="Configure conditional logic and calculations"
           >
             Logic & Calculations
           </button>
-           <button
+          <button
             @click.prevent="onUnsavedSaveAndExit"
             class="btn-option"
             :disabled="unsavedBusy"
@@ -515,8 +532,6 @@
             Create Visit Schedule
           </button>
 
-
-          <!-- Additional options (Download/Upload) -->
           <div class="additional-options" @click.stop>
             <button
               ref="additionalOptionsBtn"
@@ -555,7 +570,6 @@
       </div>
     </div>
 
-    <!-- Model Dialog -->
     <!-- Table Configurator Dialog -->
     <div v-if="showTableConfigurator" class="modal-overlay">
       <div class="modal table-config-modal">
@@ -568,6 +582,8 @@
         />
       </div>
     </div>
+
+    <!-- Model Dialog -->
     <div v-if="showModelDialog" class="modal-overlay">
       <div class="modal model-dialog">
         <h3>Select Properties for {{ prettyModelTitle(currentModel.title) }}</h3>
@@ -647,16 +663,16 @@
 
     <!-- Constraints Dialog -->
     <div v-if="showConstraintsDialog" class="modal-overlay">
-    <FieldConstraintsDialog
-      :currentFieldType="currentFieldType"
-      :constraintsForm="constraintsForm"
-      :form="currentForm"
-      :currentFieldKey="currentEditingFieldKey"
-      :currentFieldLabel="currentEditingFieldLabel"
-      @updateConstraints="confirmConstraintsDialog"
-      @closeConstraintsDialog="cancelConstraintsDialog"
-      @showGenericDialog="openGenericDialog"
-    />
+      <FieldConstraintsDialog
+        :currentFieldType="currentFieldType"
+        :constraintsForm="constraintsForm"
+        :form="currentForm"
+        :currentFieldKey="currentEditingFieldKey"
+        :currentFieldLabel="currentEditingFieldLabel"
+        @updateConstraints="confirmConstraintsDialog"
+        @closeConstraintsDialog="cancelConstraintsDialog"
+        @showGenericDialog="openGenericDialog"
+      />
     </div>
 
     <!-- Preview Dialog -->
@@ -668,6 +684,17 @@
         </div>
       </div>
     </div>
+
+    <!-- Rearrange Structure Dialog -->
+    <div v-if="showRearrangeDialog" class="modal-overlay">
+      <RearrangeStructureDialog
+        :sections="currentForm.sections"
+        :initialFocus="rearrangeInitialFocus"
+        @close="closeRearrangeDialog"
+        @save="applyRearrangedStructure"
+      />
+    </div>
+
     <!-- Import CSV / Excel Dialog -->
     <div v-if="showImportCsvDialog" class="modal-overlay import-overlay">
       <div class="modal-container">
@@ -731,20 +758,19 @@
       </div>
     </div>
 
-    <!-- ───────── UNSAVED CHANGES DIALOG (ScratchFormComponent exit guard) ───────── -->
+    <!-- UNSAVED CHANGES DIALOG -->
     <div v-if="showUnsavedDialog" class="modal-overlay" @click.self="unsavedBusy ? null : onUnsavedKeepEditing()">
       <div class="modal">
         <p>{{ unsavedDialogMessage }}</p>
-       <div class="modal-actions" style="display:grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px;">
-      <button class="btn-option" @click="onUnsavedKeepEditing" :disabled="unsavedBusy">Keep editing</button>
-      <button class="btn-option" @click="confirmScratchExitWithoutSaving" :disabled="unsavedBusy">Exit without saving</button>
-      <button class="btn-primary" @click="onUnsavedSaveAndExit" :disabled="unsavedBusy">
-        {{ unsavedBusy ? "Saving…"  : "Save & Exit" }}
-      </button>
-    </div>
+        <div class="modal-actions" style="display:grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px;">
+          <button class="btn-option" @click="onUnsavedKeepEditing" :disabled="unsavedBusy">Keep editing</button>
+          <button class="btn-option" @click="confirmScratchExitWithoutSaving" :disabled="unsavedBusy">Exit without saving</button>
+          <button class="btn-primary" @click="onUnsavedSaveAndExit" :disabled="unsavedBusy">
+            {{ unsavedBusy ? "Saving…"  : "Save & Exit" }}
+          </button>
+        </div>
       </div>
     </div>
-
   </div>
 </template>
 
@@ -766,7 +792,9 @@ import FieldFileUpload from "@/components/fields/FieldFileUpload.vue";
 import { normalizeConstraints, coerceDefaultForType } from "@/utils/constraints";
 import LogicCalculationsRoute from "./LogicCalculationsRoute.vue";
 import ImportCsvTemplateDialog from "./ImportCsvTemplateDialog.vue";
+import RearrangeStructureDialog from "@/components/RearrangeStructureDialog.vue";
 import FieldTable from "@/components/FieldTable.vue";
+
 export default {
   name: "ScratchFormComponent",
   components: {
@@ -784,50 +812,52 @@ export default {
     FieldLinearScale,
     FieldFileUpload,
     FieldTable,
+    RearrangeStructureDialog,
   },
+
   beforeRouteLeave(to, from, next) {
   // IMPORTANT:
   // When ProtocolMatrix is open, let ProtocolMatrix handle unsaved guard/dialog.
   // This prevents double dialogs (one from Scratch + one from ProtocolMatrix).
-  if (this.showMatrix || this.showLogic) {
-    next();
-    return;
-  }
+    if (this.showMatrix || this.showLogic) {
+      next();
+      return;
+    }
 
   // Allow navigation if explicitly allowed (save/discard flows)
-  if (this.scratchAllowInternalNav) {
-    next();
-    return;
-  }
+    if (this.scratchAllowInternalNav) {
+      next();
+      return;
+    }
 
   // IMPORTANT FIX:
   // Going back from Forms builder to Study Creation step 1 is internal step navigation,
   // not an exit from study creation, so do NOT show unsaved dialog.
-  const isBackToStudyCreationStep5 =
-    to?.name === "CreateStudy" && String(to?.query?.step || "") === "1";
+    const isBackToStudyCreationStep5 =
+      to?.name === "CreateStudy" && String(to?.query?.step || "") === "1";
 
-  if (isBackToStudyCreationStep5) {
-    next();
-    return;
-  }
+    if (isBackToStudyCreationStep5) {
+      next();
+      return;
+    }
 
   // If dialog already open, block duplicate navigation attempts
-  if (this.showUnsavedDialog) {
-    next(false);
-    return;
-  }
+    if (this.showUnsavedDialog) {
+      next(false);
+      return;
+    }
 
-  const isDirty = !!this.$store.state.studyCreationDirty;
+    const isDirty = !!this.$store.state.studyCreationDirty;
 
-  if (!isDirty) {
-    next();
-    return;
-  }
+    if (!isDirty) {
+      next();
+      return;
+    }
 
   // Block route navigation and open the same dialog
-  this.openScratchUnsavedDialog(() => this.$router.push(to.fullPath));
-  next(false);
-},
+    this.openScratchUnsavedDialog(() => this.$router.push(to.fullPath));
+    next(false);
+  },
   data() {
     let initialForms = [];
     try {
@@ -923,7 +953,8 @@ export default {
       unsavedPendingAction: null,
       unsavedBusy: false,
 
-
+      showRearrangeDialog: false,
+      rearrangeInitialFocus: null,
     };
   },
 
@@ -1028,67 +1059,67 @@ export default {
   },
 
   async mounted() {
-      document.addEventListener("click", this.onGlobalClick);
-      window.addEventListener("beforeunload", this.beforeUnloadHandler);
-      this.hydratingScratch = true;
+    document.addEventListener("click", this.onGlobalClick);
+    window.addEventListener("beforeunload", this.beforeUnloadHandler);
+    this.hydratingScratch = true;
 
-      const stored = localStorage.getItem("scratchForms");
+    const stored = localStorage.getItem("scratchForms");
 
-      if (stored) {
-        try {
-          const parsed = JSON.parse(stored);
-          this.forms = (Array.isArray(parsed) && parsed.length) ? parsed : [{ sections: [] }];
-        } catch {
-          this.forms = [{ sections: [] }];
-        }
-      } else if (Array.isArray(this.studyDetails.forms) && this.studyDetails.forms.length) {
-        this.forms = JSON.parse(JSON.stringify(this.studyDetails.forms));
-        localStorage.setItem("scratchForms", JSON.stringify(this.forms));
-      } else {
+    if (stored) {
+      try {
+        const parsed = JSON.parse(stored);
+        this.forms = (Array.isArray(parsed) && parsed.length) ? parsed : [{ sections: [] }];
+      } catch {
         this.forms = [{ sections: [] }];
-        localStorage.setItem("scratchForms", JSON.stringify(this.forms));
       }
+    } else if (Array.isArray(this.studyDetails.forms) && this.studyDetails.forms.length) {
+      this.forms = JSON.parse(JSON.stringify(this.studyDetails.forms));
+      localStorage.setItem("scratchForms", JSON.stringify(this.forms));
+    } else {
+      this.forms = [{ sections: [] }];
+      localStorage.setItem("scratchForms", JSON.stringify(this.forms));
+    }
 
       // FIX: ensure current slot always exists after hydration too
-      this.ensureCurrentFormExists();
+    this.ensureCurrentFormExists();
 
-      this.visits = Array.isArray(this.studyDetails.visits)
-        ? JSON.parse(JSON.stringify(this.studyDetails.visits))
-        : [];
-      this.groups = Array.isArray(this.studyDetails.groups)
-        ? JSON.parse(JSON.stringify(this.studyDetails.groups))
-        : [];
-      this.adjustAssignments();
+    this.visits = Array.isArray(this.studyDetails.visits)
+      ? JSON.parse(JSON.stringify(this.studyDetails.visits))
+      : [];
+    this.groups = Array.isArray(this.studyDetails.groups)
+      ? JSON.parse(JSON.stringify(this.studyDetails.groups))
+      : [];
+    this.adjustAssignments();
 
-      try {
-        const res = await axios.get("/forms/available-fields");
-        this.generalFields = res.data.map((f, idx) => ({
-          ...f,
-          name: f.name || `${f.type}_${idx}`,
-          description: f.helpText || f.placeholder || "",
-          options: (f.type === "select" || f.type === "radio")
-            ? (Array.isArray(f.options) && f.options.length ? f.options : ["Option 1"])
-            : (f.options || []),
-          constraints: f.constraints || {}
-        }));
-        this.generalFields.push({
-          name: "table",
-          label: "Table",
-          type: "table",
-          icon: "fas fa-table",
-          description: "2D tabular input with configurable columns and row expansion",
-          constraints: {}
-        });
-      } catch (e) {
-        console.error("Failed to load custom fields", e);
-      }
-
-      await this.loadDataModels();
-
-      this.$nextTick(() => {
-        this.hydratingScratch = false;
+    try {
+      const res = await axios.get("/forms/available-fields");
+      this.generalFields = res.data.map((f, idx) => ({
+        ...f,
+        name: f.name || `${f.type}_${idx}`,
+        description: f.helpText || f.placeholder || "",
+        options: (f.type === "select" || f.type === "radio")
+          ? (Array.isArray(f.options) && f.options.length ? f.options : ["Option 1"])
+          : (f.options || []),
+        constraints: f.constraints || {}
+      }));
+      this.generalFields.push({
+        name: "table",
+        label: "Table",
+        type: "table",
+        icon: "fas fa-table",
+        description: "2D tabular input with configurable columns and row expansion",
+        constraints: {}
       });
-    },
+    } catch (e) {
+      console.error("Failed to load custom fields", e);
+    }
+
+    await this.loadDataModels();
+
+    this.$nextTick(() => {
+      this.hydratingScratch = false;
+    });
+  },
 
   beforeUnmount() {
     document.removeEventListener("click", this.onGlobalClick);
@@ -1096,7 +1127,74 @@ export default {
   },
 
   methods: {
-  onFieldSettingsClick(si, fi) {
+    openRearrangeDialog(focus = null) {
+      this.ensureCurrentFormExists();
+      this.ensurePersistentIdsForLogic();
+      this.rearrangeInitialFocus = focus || null;
+      this.showRearrangeDialog = true;
+    },
+
+    closeRearrangeDialog() {
+      this.showRearrangeDialog = false;
+      this.rearrangeInitialFocus = null;
+    },
+
+    applyRearrangedStructure(nextSections) {
+      this.ensureCurrentFormExists();
+
+      const safeSections = Array.isArray(nextSections)
+        ? JSON.parse(JSON.stringify(nextSections))
+        : [];
+
+      this.forms[this.currentFormIndex].sections = safeSections;
+      this.adjustAssignments();
+
+      try {
+        localStorage.setItem("scratchForms", JSON.stringify(this.forms));
+      } catch (e) {
+        console.error("Failed to persist rearranged structure", e);
+      }
+
+      this.$store.commit("setStudyDetails", {
+        ...this.studyDetails,
+        forms: JSON.parse(JSON.stringify(this.forms || []))
+      });
+
+      if (safeSections.length) {
+        this.activeSection = Math.max(0, Math.min(this.activeSection, safeSections.length - 1));
+        this.$nextTick(() => this.focusSection(this.activeSection));
+      } else {
+        this.activeSection = 0;
+      }
+
+      if (!this.hydratingScratch) {
+        this.$store.commit("setStudyCreationDirty", true);
+      }
+
+      this.closeRearrangeDialog();
+    },
+
+    expandAllSections() {
+      this.ensureCurrentFormExists();
+      (this.currentForm.sections || []).forEach(sec => {
+        sec.collapsed = false;
+      });
+      if (!this.hydratingScratch) {
+        this.$store.commit("setStudyCreationDirty", true);
+      }
+    },
+
+    collapseAllSections() {
+      this.ensureCurrentFormExists();
+      (this.currentForm.sections || []).forEach(sec => {
+        sec.collapsed = true;
+      });
+      if (!this.hydratingScratch) {
+        this.$store.commit("setStudyCreationDirty", true);
+      }
+    },
+
+    onFieldSettingsClick(si, fi) {
       this.ensureCurrentFormExists();
 
       const field = this.currentForm.sections?.[si]?.fields?.[fi];
@@ -1112,197 +1210,195 @@ export default {
 
       this.openConstraintsDialog(si, fi);
     },
-  openTableConfigurator(field) {
+    openTableConfigurator(field) {
   // IMPORTANT: reset edit indices for new table creation
-  this.currentFieldIndices = {};
+      this.currentFieldIndices = {};
 
-  this.pendingTableField = {
-    _id: this.uuidForLogic(),
-    label: field?.label || "Table",
-    name: `table_${Date.now()}`,
-    type: "table",
-    value: {
-      rows: []
-    },
-    constraints: {
-      helpText: "",
-      required: false,
-      readonly: false,
-      visibilityLogic: {
-        action: "show",
-        match: "all",
-        rules: []
-      }
-    },
-    tableConfig: {
-      version: 1,
-      mode: "2d",
-      initialRows: 1,
-      allowAddRows: true,
-      showRowNumbers: true,
-      columns: [
-        {
-          id: `col_${Date.now()}_1`,
-          key: "column_1",
-          label: "Column 1",
-          type: "text",
-          options: [],
-          constraints: {}
+      this.pendingTableField = {
+        _id: this.uuidForLogic(),
+        label: field?.label || "Table",
+        name: `table_${Date.now()}`,
+        type: "table",
+        value: { rows: [] },
+        constraints: {
+          helpText: "",
+          required: false,
+          readonly: false,
+          visibilityLogic: {
+            action: "show",
+            match: "all",
+            rules: []
+          }
+        },
+        tableConfig: {
+          version: 1,
+          mode: "2d",
+          initialRows: 1,
+          allowAddRows: true,
+          showRowNumbers: true,
+          columns: [
+            {
+              id: `col_${Date.now()}_1`,
+              key: "column_1",
+              label: "Column 1",
+              type: "text",
+              options: [],
+              constraints: {}
+            }
+          ]
         }
-      ]
-    }
-  };
+      };
 
-  this.showTableConfigurator = true;
-},
+      this.showTableConfigurator = true;
+    },
 
     handleTableConfiguratorSave(result) {
-  if (!result?.ok) {
-    this.openGenericDialog(result?.error || "Invalid table configuration.");
-    return;
-  }
+      if (!result?.ok) {
+        this.openGenericDialog(result?.error || "Invalid table configuration.");
+        return;
+      }
 
-  const builtField = JSON.parse(JSON.stringify(result.payload || {}));
-  if (!builtField) return;
+      const builtField = JSON.parse(JSON.stringify(result.payload || {}));
+      if (!builtField) return;
 
-  this.ensureCurrentFormExists();
+      this.ensureCurrentFormExists();
 
-  const { sectionIndex, fieldIndex } = this.currentFieldIndices || {};
-  const isEditingExisting =
-    Number.isInteger(sectionIndex) &&
-    Number.isInteger(fieldIndex) &&
-    !!this.currentForm.sections?.[sectionIndex]?.fields?.[fieldIndex] &&
-    this.currentForm.sections[sectionIndex].fields[fieldIndex]?.type === "table";
+      const { sectionIndex, fieldIndex } = this.currentFieldIndices || {};
+      const isEditingExisting =
+        Number.isInteger(sectionIndex) &&
+        Number.isInteger(fieldIndex) &&
+        !!this.currentForm.sections?.[sectionIndex]?.fields?.[fieldIndex] &&
+        this.currentForm.sections[sectionIndex].fields[fieldIndex]?.type === "table";
 
-  if (isEditingExisting) {
-    const existing = this.currentForm.sections[sectionIndex].fields[fieldIndex];
+      if (isEditingExisting) {
+        const existing = this.currentForm.sections[sectionIndex].fields[fieldIndex];
 
     // Preserve stable identity/name unless intentionally changed later
-    builtField._id = existing._id || builtField._id || this.uuidForLogic();
-    builtField.name = existing.name || builtField.name || `table_${Date.now()}`;
+        builtField._id = existing._id || builtField._id || this.uuidForLogic();
+        builtField.name = existing.name || builtField.name || `table_${Date.now()}`;
 
-    this.currentForm.sections[sectionIndex].fields.splice(fieldIndex, 1, builtField);
-  } else {
-    if (!this.currentForm.sections.length) {
-      this.addNewSection();
-    }
+        this.currentForm.sections[sectionIndex].fields.splice(fieldIndex, 1, builtField);
+      } else {
+        if (!this.currentForm.sections.length) {
+          this.addNewSection();
+        }
 
-    const sec = this.currentForm.sections[this.activeSection];
-    if (!sec) {
-      this.openGenericDialog("No active section available.");
-      return;
-    }
+        const sec = this.currentForm.sections[this.activeSection];
+        if (!sec) {
+          this.openGenericDialog("No active section available.");
+          return;
+        }
 
-    if (sec.collapsed) {
-      sec.collapsed = false;
-    }
+        if (sec.collapsed) sec.collapsed = false;
 
-    const baseName = String(builtField.name || `table_${Date.now()}`).trim() || `table_${Date.now()}`;
-    const existingNames = new Set((sec.fields || []).map(f => String(f?.name || "")));
+        const baseName = String(builtField.name || `table_${Date.now()}`).trim() || `table_${Date.now()}`;
+        const existingNames = new Set((sec.fields || []).map(f => String(f?.name || "")));
 
-    let uniqueName = baseName;
-    let counter = 2;
-    while (existingNames.has(uniqueName)) {
-      uniqueName = `${baseName}_${counter}`;
-      counter += 1;
-    }
+        let uniqueName = baseName;
+        let counter = 2;
+        while (existingNames.has(uniqueName)) {
+          uniqueName = `${baseName}_${counter}`;
+          counter += 1;
+        }
 
-    builtField.name = uniqueName;
-    builtField._id = builtField._id || this.uuidForLogic();
+        builtField.name = uniqueName;
+        builtField._id = builtField._id || this.uuidForLogic();
 
-    sec.fields.push(builtField);
-  }
+        sec.fields.push(builtField);
+      }
 
-  this.showTableConfigurator = false;
-  this.pendingTableField = null;
-  this.currentFieldIndices = {};
+      this.showTableConfigurator = false;
+      this.pendingTableField = null;
+      this.currentFieldIndices = {};
 
-  if (!this.hydratingScratch) {
-    this.$store.commit("setStudyCreationDirty", true);
-  }
-},
+      if (!this.hydratingScratch) {
+        this.$store.commit("setStudyCreationDirty", true);
+      }
+    },
+
     cancelTableConfigurator() {
       this.showTableConfigurator = false;
       this.pendingTableField = null;
     },
-  openImportCsvDialog() {
-  this.closeAdditionalOptions();
-  this.showImportCsvDialog = true;
-},
 
-closeImportCsvDialog() {
-  this.showImportCsvDialog = false;
-},
+    openImportCsvDialog() {
+      this.closeAdditionalOptions();
+      this.showImportCsvDialog = true;
+    },
 
-handleImportedCsvFields(importedFields) {
-  this.ensureCurrentFormExists();
+    closeImportCsvDialog() {
+      this.showImportCsvDialog = false;
+    },
 
-  const fields = Array.isArray(importedFields) ? importedFields : [];
-  if (!fields.length) {
-    this.openGenericDialog("No fields were generated from the selected file.");
-    return;
-  }
+    handleImportedCsvFields(importedFields) {
+      this.ensureCurrentFormExists();
 
-  if (!this.currentForm.sections.length) {
-    this.addNewSection();
-  }
-
-  const sec = this.currentForm.sections[this.activeSection];
-  if (!sec) {
-    this.openGenericDialog("No active section available.");
-    return;
-  }
-
-  if (sec.collapsed) {
-    sec.collapsed = false;
-  }
-
-  const existingNames = new Set((sec.fields || []).map(f => String(f?.name || "")));
-  let added = 0;
-
-  fields.forEach((field, idx) => {
-    let candidateName = String(field?.name || `imported_field_${Date.now()}_${idx}`).trim();
-    if (!candidateName) {
-      candidateName = `imported_field_${Date.now()}_${idx}`;
-    }
-
-    let uniqueName = candidateName;
-    let counter = 2;
-    while (existingNames.has(uniqueName)) {
-      uniqueName = `${candidateName}_${counter}`;
-      counter += 1;
-    }
-    existingNames.add(uniqueName);
-
-    sec.fields.push({
-      ...JSON.parse(JSON.stringify(field)),
-      _id: field?._id || this.uuidForLogic(),
-      name: uniqueName,
-      constraints: {
-        visibilityLogic: {
-          action: "show",
-          match: "all",
-          rules: []
-        },
-        ...(JSON.parse(JSON.stringify(field?.constraints || {})))
+      const fields = Array.isArray(importedFields) ? importedFields : [];
+      if (!fields.length) {
+        this.openGenericDialog("No fields were generated from the selected file.");
+        return;
       }
-    });
 
-    added += 1;
-  });
+      if (!this.currentForm.sections.length) {
+        this.addNewSection();
+      }
 
-  this.showImportCsvDialog = false;
+      const sec = this.currentForm.sections[this.activeSection];
+      if (!sec) {
+        this.openGenericDialog("No active section available.");
+        return;
+      }
 
-  if (!this.hydratingScratch) {
-    this.$store.commit("setStudyCreationDirty", true);
-  }
+      if (sec.collapsed) sec.collapsed = false;
 
-  this.openGenericDialog(`${added} field(s) imported into "${sec.title}".`);
-},
+      const existingNames = new Set((sec.fields || []).map(f => String(f?.name || "")));
+      let added = 0;
+
+      fields.forEach((field, idx) => {
+        let candidateName = String(field?.name || `imported_field_${Date.now()}_${idx}`).trim();
+        if (!candidateName) {
+          candidateName = `imported_field_${Date.now()}_${idx}`;
+        }
+
+        let uniqueName = candidateName;
+        let counter = 2;
+        while (existingNames.has(uniqueName)) {
+          uniqueName = `${candidateName}_${counter}`;
+          counter += 1;
+        }
+        existingNames.add(uniqueName);
+
+        sec.fields.push({
+          ...JSON.parse(JSON.stringify(field)),
+          _id: field?._id || this.uuidForLogic(),
+          name: uniqueName,
+          constraints: {
+            visibilityLogic: {
+              action: "show",
+              match: "all",
+              rules: []
+            },
+            ...(JSON.parse(JSON.stringify(field?.constraints || {})))
+          }
+        });
+
+        added += 1;
+      });
+
+      this.showImportCsvDialog = false;
+
+      if (!this.hydratingScratch) {
+        this.$store.commit("setStudyCreationDirty", true);
+      }
+
+      this.openGenericDialog(`${added} field(s) imported into "${sec.title}".`);
+    },
+
     uuidForLogic() {
       if (typeof crypto !== "undefined" && crypto.randomUUID) return crypto.randomUUID();
       return `id_${Date.now()}_${Math.random().toString(16).slice(2)}`;
     },
+
     getFieldLogicKey(field, sectionIndex, fieldIndex) {
       if (!field || typeof field !== "object") return "";
 
@@ -1315,79 +1411,59 @@ handleImportedCsvFields(importedFields) {
       // Last fallback
       return `section_${sectionIndex}_field_${fieldIndex}`;
     },
+
     applyLogicFormUpdate(updatedForm) {
-  this.ensureCurrentFormExists();
-  if (!updatedForm || typeof updatedForm !== "object") return;
+      this.ensureCurrentFormExists();
+      if (!updatedForm || typeof updatedForm !== "object") return;
 
-  console.log("[ScratchForm] applyLogicFormUpdate() BEFORE", {
-    currentFormIndex: this.currentFormIndex,
-    existingForm: JSON.parse(JSON.stringify(this.forms[this.currentFormIndex] || {})),
-    incomingUpdatedForm: JSON.parse(JSON.stringify(updatedForm || {}))
-  });
+      this.forms.splice(this.currentFormIndex, 1, JSON.parse(JSON.stringify(updatedForm)));
 
-  this.forms.splice(this.currentFormIndex, 1, JSON.parse(JSON.stringify(updatedForm)));
+      try {
+        localStorage.setItem("scratchForms", JSON.stringify(this.forms));
+      } catch (e) {
+        console.error("Failed to persist updated form from logic builder", e);
+      }
 
-  try {
-    localStorage.setItem("scratchForms", JSON.stringify(this.forms));
-  } catch (e) {
-    console.error("Failed to persist updated form from logic builder", e);
-  }
+      this.$store.commit("setStudyDetails", {
+        ...this.studyDetails,
+        forms: JSON.parse(JSON.stringify(this.forms || []))
+      });
 
-  this.$store.commit("setStudyDetails", {
-    ...this.studyDetails,
-    forms: JSON.parse(JSON.stringify(this.forms || []))
-  });
-
-  console.log("[ScratchForm] applyLogicFormUpdate() AFTER", {
-    savedForm: JSON.parse(JSON.stringify(this.forms[this.currentFormIndex] || {})),
-    savedLogic: JSON.parse(JSON.stringify(this.forms[this.currentFormIndex]?.logic || {})),
-    storeForms: JSON.parse(JSON.stringify(this.$store.state.studyDetails?.forms || []))
-  });
-
-  if (!this.hydratingScratch) {
-    this.$store.commit("setStudyCreationDirty", true);
-  }
-},
+      if (!this.hydratingScratch) {
+        this.$store.commit("setStudyCreationDirty", true);
+      }
+    },
 
     applyLogicPayload(logicPayload) {
-  this.ensureCurrentFormExists();
+      this.ensureCurrentFormExists();
 
-  console.log("[ScratchForm] applyLogicPayload() incoming", JSON.parse(JSON.stringify(logicPayload || {})));
+      if (!this.forms[this.currentFormIndex].logic || typeof this.forms[this.currentFormIndex].logic !== "object") {
+        this.forms[this.currentFormIndex].logic = { version: 1, calculations: [], conditions: [] };
+      }
 
-  if (!this.forms[this.currentFormIndex].logic || typeof this.forms[this.currentFormIndex].logic !== "object") {
-    this.forms[this.currentFormIndex].logic = { version: 1, calculations: [], conditions: [] };
-  }
+      this.forms[this.currentFormIndex].logic = {
+        version: 1,
+        calculations: Array.isArray(logicPayload?.calculations) ? logicPayload.calculations : [],
+        conditions: Array.isArray(logicPayload?.conditions) ? logicPayload.conditions : []
+      };
 
-  this.forms[this.currentFormIndex].logic = {
-    version: 1,
-    calculations: Array.isArray(logicPayload?.calculations) ? logicPayload.calculations : [],
-    conditions: Array.isArray(logicPayload?.conditions) ? logicPayload.conditions : []
-  };
+      try {
+        localStorage.setItem("scratchForms", JSON.stringify(this.forms));
+      } catch (e) {
+        console.error("Failed to persist logic payload", e);
+      }
 
-  console.log("[ScratchForm] applyLogicPayload() saved on form", {
-    currentFormIndex: this.currentFormIndex,
-    logic: JSON.parse(JSON.stringify(this.forms[this.currentFormIndex].logic || {}))
-  });
+      this.$store.commit("setStudyDetails", {
+        ...this.studyDetails,
+        forms: JSON.parse(JSON.stringify(this.forms || []))
+      });
 
-  try {
-    localStorage.setItem("scratchForms", JSON.stringify(this.forms));
-    console.log("[ScratchForm] localStorage scratchForms after applyLogicPayload", JSON.parse(localStorage.getItem("scratchForms") || "[]"));
-  } catch (e) {
-    console.error("Failed to persist logic payload", e);
-  }
+      if (!this.hydratingScratch) {
+        this.$store.commit("setStudyCreationDirty", true);
+      }
+    },
 
-  this.$store.commit("setStudyDetails", {
-    ...this.studyDetails,
-    forms: JSON.parse(JSON.stringify(this.forms || []))
-  });
-
-  console.log("[ScratchForm] store.studyDetails.forms synced after applyLogicPayload", JSON.parse(JSON.stringify(this.$store.state.studyDetails?.forms || [])));
-
-  if (!this.hydratingScratch) {
-    this.$store.commit("setStudyCreationDirty", true);
-  }
-},
-     onLogicUpdated(nextLogic) {
+    onLogicUpdated(nextLogic) {
       this.ensureCurrentFormExists();
 
       const safeLogic = {
@@ -1413,7 +1489,8 @@ handleImportedCsvFields(importedFields) {
         this.$store.commit("setStudyCreationDirty", true);
       }
     },
-     openLogicAndCalculations() {
+
+    openLogicAndCalculations() {
       this.ensurePersistentIdsForLogic();
 
       try {
@@ -1426,15 +1503,12 @@ handleImportedCsvFields(importedFields) {
       this.showLogic = true;
     },
 
-
-
     ensurePersistentIdsForLogic() {
       this.ensureCurrentFormExists();
 
       const form = this.forms[this.currentFormIndex];
       if (!form) return;
 
-      // sections + fields get persisted _id
       (form.sections || []).forEach(sec => {
         if (!sec._id) sec._id = this.uuidForLogic();
         if (!Array.isArray(sec.fields)) sec.fields = [];
@@ -1457,15 +1531,15 @@ handleImportedCsvFields(importedFields) {
       // Mark dirty because IDs/logic are structural metadata
       if (!this.hydratingScratch) this.$store.commit("setStudyCreationDirty", true);
     },
+
     beforeUnloadHandler(e) {
       const isDirty = !!this.$store.state.studyCreationDirty;
-
       if (!isDirty) return;
 
-      console.log("[ScratchForm] You have unsaved changes. Preventing accidental window/tab close.");
       e.preventDefault();
       e.returnValue = "";
     },
+
     openScratchUnsavedDialog(pendingAction) {
       this.unsavedPendingAction = typeof pendingAction === "function" ? pendingAction : null;
       this.showUnsavedDialog = true;
@@ -1579,10 +1653,7 @@ handleImportedCsvFields(importedFields) {
       return this.forms[this.currentFormIndex];
     },
 
-    /* ============================================================
-       SAVE & EXIT FIX: backend persistence so dashboard shows draft
-       ============================================================ */
-     buildScratchStudyPayload() {
+    buildScratchStudyPayload() {
       const details = this.studyDetails || {};
       const studyNode = JSON.parse(JSON.stringify(details.study || {}));
       const meta = details.study_metadata || {};
@@ -1607,14 +1678,14 @@ handleImportedCsvFields(importedFields) {
       }));
 
       const selectedModels = (this.currentForm.sections || []).map(sec => ({
-          _id: sec._id || this.uuidForLogic(),
-          title: sec.title,
-          fields: JSON.parse(JSON.stringify(sec.fields || [])).map(field => ({
-            ...field,
-            _id: field._id || this.uuidForLogic(),
-            constraints: field.constraints || {}
-          }))
-        }));
+        _id: sec._id || this.uuidForLogic(),
+        title: sec.title,
+        fields: JSON.parse(JSON.stringify(sec.fields || [])).map(field => ({
+          ...field,
+          _id: field._id || this.uuidForLogic(),
+          constraints: field.constraints || {}
+        }))
+      }));
 
       const studyName =
         studyNode.title ||
@@ -1637,11 +1708,7 @@ handleImportedCsvFields(importedFields) {
         description: studyDescription,
         study_description: studyDescription
       };
-      console.log("[ScratchForm] buildScratchStudyPayload()", {
-      normalizedForms: JSON.parse(JSON.stringify(normalizedForms || [])),
-      selectedModels: JSON.parse(JSON.stringify(selectedModels || [])),
-      currentForm: JSON.parse(JSON.stringify(this.currentForm || {}))
-    });
+
       return {
         study_metadata: {
           created_by: meta.created_by || this.currentUserId,
@@ -1680,19 +1747,19 @@ handleImportedCsvFields(importedFields) {
       this.ensureCurrentFormExists();
 
       const selectedFormsForStore = JSON.parse(JSON.stringify(this.forms || [])).map(form => ({
-      sections: (form.sections || []).map(sec => ({
-        ...sec,
-        fields: (sec.fields || []).map(field => ({
-          ...field,
-          constraints: field.constraints || {}
-        }))
-      })),
-      logic: {
-        version: form.logic?.version || 1,
-        calculations: Array.isArray(form.logic?.calculations) ? form.logic.calculations : [],
-        conditions: Array.isArray(form.logic?.conditions) ? form.logic.conditions : []
-      }
-    }));
+        sections: (form.sections || []).map(sec => ({
+          ...sec,
+          fields: (sec.fields || []).map(field => ({
+            ...field,
+            constraints: field.constraints || {}
+          }))
+        })),
+        logic: {
+          version: form.logic?.version || 1,
+          calculations: Array.isArray(form.logic?.calculations) ? form.logic.calculations : [],
+          conditions: Array.isArray(form.logic?.conditions) ? form.logic.conditions : []
+        }
+      }));
 
       this.$store.commit("setStudyDetails", {
         ...this.studyDetails,
@@ -1706,14 +1773,14 @@ handleImportedCsvFields(importedFields) {
       try {
         if (existingId) {
           await axios.put(
-              `/forms/studies/${existingId}`,
-              payload,
-              {
-                headers: this.authHeader,
+            `/forms/studies/${existingId}`,
+            payload,
+            {
+              headers: this.authHeader,
                 // audit_label: user clicked "Save & Exit" from ScratchForm (builder) while a study already exists (edit/update)
-                params: { audit_label: "Existing Study Updated" }
-              }
-            );
+              params: { audit_label: "Existing Study Updated" }
+            }
+          );
 
           this.$store.commit("setStudyDetails", {
             ...this.studyDetails,
@@ -1824,6 +1891,7 @@ handleImportedCsvFields(importedFields) {
       }
       return this.sectionUidMap.get(sectionObj);
     },
+
     getFieldUid(fieldObj) {
       if (!fieldObj || typeof fieldObj !== "object") return String(Math.random());
       if (!this.fieldUidMap.has(fieldObj)) {
@@ -1885,76 +1953,11 @@ handleImportedCsvFields(importedFields) {
       };
     },
 
-    getSectionDropClass(si) {
-      if (this.dragState.kind !== "section") return "";
-      if (this.dragState.overSection !== si) return "";
-      return this.dragState.position === "after" ? "drop-after" : "drop-before";
-    },
-
     getFieldDropClass(si, fi) {
       if (this.dragState.kind !== "field") return "";
       if (this.dragState.overSection !== si) return "";
       if (this.dragState.overField !== fi) return "";
       return this.dragState.position === "after" ? "drop-after" : "drop-before";
-    },
-
-    onSectionDragStart(si, evt) {
-      if (this.showMatrix) return;
-      this.dragState.kind = "section";
-      this.dragState.fromSection = si;
-      this.dragState.fromField = null;
-
-      try {
-        evt.dataTransfer.effectAllowed = "move";
-        evt.dataTransfer.setData("text/plain", "section");
-      } catch (err){console.error(err);}
-    },
-
-    onSectionDragOver(targetIndex, evt) {
-      if (this.dragState.kind !== "section") return;
-      const el = evt.currentTarget;
-      if (!el) return;
-      const rect = el.getBoundingClientRect();
-      const after = (evt.clientY - rect.top) > rect.height / 2;
-      this.dragState.overSection = targetIndex;
-      this.dragState.overField = null;
-      this.dragState.position = after ? "after" : "before";
-    },
-
-    onSectionDrop(targetIndex) {
-      if (this.dragState.kind !== "section") return;
-      this.ensureCurrentFormExists();
-
-      const sections = this.forms[this.currentFormIndex].sections || [];
-      const from = this.dragState.fromSection;
-      if (!Number.isInteger(from) || from < 0 || from >= sections.length) {
-        return this.onDragEnd();
-      }
-
-      const movingObj = sections[from];
-      let to = targetIndex + (this.dragState.position === "after" ? 1 : 0);
-      if (from < to) to -= 1;
-      to = Math.max(0, Math.min(to, sections.length - 1));
-
-      if (to !== from) {
-        sections.splice(from, 1);
-        sections.splice(to, 0, movingObj);
-
-        if (Array.isArray(this.assignments) && this.assignments.length) {
-          const a = this.assignments;
-          if (from >= 0 && from < a.length) {
-            const movedA = a.splice(from, 1)[0];
-            a.splice(to, 0, movedA);
-            this.assignments = a;
-            this.$store.commit("setStudyDetails", { ...this.studyDetails, assignments: this.assignments });
-          }
-        }
-      }
-
-      const newIdx = sections.indexOf(movingObj);
-      this.activeSection = newIdx >= 0 ? newIdx : 0;
-      this.$nextTick(() => this.focusSection(this.activeSection));
-      this.onDragEnd();
     },
 
     onFieldDragStart(si, fi, evt) {
@@ -1966,11 +1969,13 @@ handleImportedCsvFields(importedFields) {
       try {
         evt.dataTransfer.effectAllowed = "move";
         evt.dataTransfer.setData("text/plain", "field");
-      } catch (err){console.error(err);}
+      } catch (err) { console.error(err); }
     },
 
     onFieldDragOver(si, fi, evt) {
       if (this.dragState.kind !== "field") return;
+      if (this.dragState.fromSection !== si) return;
+
       const el = evt.currentTarget;
       if (!el) return;
       const rect = el.getBoundingClientRect();
@@ -1985,29 +1990,31 @@ handleImportedCsvFields(importedFields) {
       if (this.dragState.kind !== "field") return;
       this.ensureCurrentFormExists();
 
-      const form_s = this.dragState.fromSection;
+      const fromS = this.dragState.fromSection;
       const fromF = this.dragState.fromField;
       const toS = si;
 
+      if (fromS !== toS) {
+        this.onDragEnd();
+        return;
+      }
+
       const sections = this.forms[this.currentFormIndex].sections || [];
-      const fromSec = sections[form_s];
-      const toSec = sections[toS];
-      if (!fromSec || !toSec) return this.onDragEnd();
+      const sec = sections[fromS];
+      if (!sec) return this.onDragEnd();
 
-      const fromFields = fromSec.fields || [];
-      const toFields = toSec.fields || [];
-
-      if (!Number.isInteger(fromF) || fromF < 0 || fromF >= fromFields.length) {
+      const fields = sec.fields || [];
+      if (!Number.isInteger(fromF) || fromF < 0 || fromF >= fields.length) {
         return this.onDragEnd();
       }
 
       let insertAt = fi + (this.dragState.position === "after" ? 1 : 0);
 
-      const moved = fromFields.splice(fromF, 1)[0];
-      if (form_s === toS && insertAt > fromF) insertAt -= 1;
+      const moved = fields.splice(fromF, 1)[0];
+      if (insertAt > fromF) insertAt -= 1;
 
-      insertAt = Math.max(0, Math.min(insertAt, toFields.length));
-      toFields.splice(insertAt, 0, moved);
+      insertAt = Math.max(0, Math.min(insertAt, fields.length));
+      fields.splice(insertAt, 0, moved);
 
       this.activeSection = toS;
       this.$nextTick(() => this.focusSection(this.activeSection));
@@ -2016,6 +2023,8 @@ handleImportedCsvFields(importedFields) {
 
     onFieldDropEndOver(si) {
       if (this.dragState.kind !== "field") return;
+      if (this.dragState.fromSection !== si) return;
+
       this.dragState.overSection = si;
       this.dragState.overField = null;
       this.dragState.position = "end";
@@ -2025,36 +2034,39 @@ handleImportedCsvFields(importedFields) {
       if (this.dragState.kind !== "field") return;
       this.ensureCurrentFormExists();
 
-      const form_s = this.dragState.fromSection;
+      const fromS = this.dragState.fromSection;
       const fromF = this.dragState.fromField;
-      const toS = si;
+
+      if (fromS !== si) {
+        this.onDragEnd();
+        return;
+      }
 
       const sections = this.forms[this.currentFormIndex].sections || [];
-      const fromSec = sections[form_s];
-      const toSec = sections[toS];
-      if (!fromSec || !toSec) return this.onDragEnd();
+      const sec = sections[fromS];
+      if (!sec) return this.onDragEnd();
 
-      const fromFields = fromSec.fields || [];
-      const toFields = toSec.fields || [];
-
-      if (!Number.isInteger(fromF) || fromF < 0 || fromF >= fromFields.length) {
+      const fields = sec.fields || [];
+      if (!Number.isInteger(fromF) || fromF < 0 || fromF >= fields.length) {
         return this.onDragEnd();
       }
 
-      const moved = fromFields.splice(fromF, 1)[0];
-      let insertAt = toFields.length;
-      if (form_s === toS && insertAt > fromF) insertAt -= 1;
+      const moved = fields.splice(fromF, 1)[0];
+      let insertAt = fields.length;
+      if (insertAt > fromF) insertAt -= 1;
 
-      insertAt = Math.max(0, Math.min(insertAt, toFields.length));
-      toFields.splice(insertAt, 0, moved);
+      insertAt = Math.max(0, Math.min(insertAt, fields.length));
+      fields.splice(insertAt, 0, moved);
 
-      this.activeSection = toS;
+      this.activeSection = si;
       this.$nextTick(() => this.focusSection(this.activeSection));
       this.onDragEnd();
     },
 
     onFieldContainerOver(si) {
       if (this.dragState.kind !== "field") return;
+      if (this.dragState.fromSection !== si) return;
+
       this.dragState.overSection = si;
       this.dragState.overField = null;
       this.dragState.position = "end";
@@ -2062,6 +2074,10 @@ handleImportedCsvFields(importedFields) {
 
     onFieldContainerDrop(si) {
       if (this.dragState.kind !== "field") return;
+      if (this.dragState.fromSection !== si) {
+        this.onDragEnd();
+        return;
+      }
       this.onFieldDropEnd(si);
     },
 
@@ -2254,7 +2270,9 @@ handleImportedCsvFields(importedFields) {
         });
     },
 
-    prettyModelTitle(s) { return this.$formatLabel ? this.$formatLabel(s) : String(s || ""); },
+    prettyModelTitle(s) {
+      return this.$formatLabel ? this.$formatLabel(s) : String(s || "");
+    },
 
     modelIcon(title) {
       const key = String(title || "").toLowerCase().replace(/[^a-z0-9]/g, "");
@@ -2440,10 +2458,10 @@ handleImportedCsvFields(importedFields) {
           if (nm && existingNames.has(nm)) return;
           existingNames.add(nm);
           targetSec.fields.push({
-          ...JSON.parse(JSON.stringify(f)),
-          _id: f._id || this.uuidForLogic(),
-          constraints: JSON.parse(JSON.stringify(f.constraints || {}))
-        });
+            ...JSON.parse(JSON.stringify(f)),
+            _id: f._id || this.uuidForLogic(),
+            constraints: JSON.parse(JSON.stringify(f.constraints || {}))
+          });
           added += 1;
         });
 
@@ -2460,16 +2478,16 @@ handleImportedCsvFields(importedFields) {
 
       const insertAt = Math.min(this.activeSection + 1, this.currentForm.sections.length);
       const sec = {
-          _id: this.uuidForLogic(),
-          title: this.currentModel.title,
-          fields: chosen.map(f => ({
-            ...JSON.parse(JSON.stringify(f)),
-            _id: f._id || this.uuidForLogic(),
-            constraints: JSON.parse(JSON.stringify(f.constraints || {}))
-          })),
-          collapsed: false,
-          source: "template"
-        };
+        _id: this.uuidForLogic(),
+        title: this.currentModel.title,
+        fields: chosen.map(f => ({
+          ...JSON.parse(JSON.stringify(f)),
+          _id: f._id || this.uuidForLogic(),
+          constraints: JSON.parse(JSON.stringify(f.constraints || {}))
+        })),
+        collapsed: false,
+        source: "template"
+      };
 
       this.forms[this.currentFormIndex].sections.splice(insertAt, 0, sec);
       this.activeSection = insertAt;
@@ -2565,17 +2583,17 @@ handleImportedCsvFields(importedFields) {
       if (sec.collapsed) this.toggleSection(this.activeSection);
 
       const base = {
-      _id: this.uuidForLogic(),
-      name: `${(field.name || field.type)}_${Date.now()}`,
-      label: field.label,
-      type: field.type,
-      options: (field.type === "select" || field.type === "radio")
-        ? (Array.isArray(field.options) && field.options.length ? [...field.options] : ["Option 1"])
-        : (field.options || []),
-      placeholder: field.description || field.placeholder || "",
-      value: field.type === "checkbox" ? false : "",
-      constraints: JSON.parse(JSON.stringify(field.constraints || {}))
-    };
+        _id: this.uuidForLogic(),
+        name: `${(field.name || field.type)}_${Date.now()}`,
+        label: field.label,
+        type: field.type,
+        options: (field.type === "select" || field.type === "radio")
+          ? (Array.isArray(field.options) && field.options.length ? [...field.options] : ["Option 1"])
+          : (field.options || []),
+        placeholder: field.description || field.placeholder || "",
+        value: field.type === "checkbox" ? false : "",
+        constraints: JSON.parse(JSON.stringify(field.constraints || {}))
+      };
 
       if (base.type === "slider") {
         base.value = null;
@@ -2737,6 +2755,7 @@ handleImportedCsvFields(importedFields) {
 
       this.showConstraintsDialog = true;
     },
+
     confirmConstraintsDialog(c) {
       const { sectionIndex, fieldIndex } = this.currentFieldIndices;
       const f = this.currentForm.sections[sectionIndex]?.fields?.[fieldIndex];
@@ -3068,14 +3087,7 @@ handleImportedCsvFields(importedFields) {
   background-color: $light-background;
 }
 
-.header-container {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-bottom: 15px;
-}
-
- .btn-back {
+.btn-back {
   display: inline-flex;
   align-items: center;
   gap: 8px;
@@ -3103,23 +3115,27 @@ handleImportedCsvFields(importedFields) {
 
 .btn-back i {
   font-size: 14px;
- }
+}
 
 .scratch-form-content {
   display: flex;
   gap: 20px;
 }
 
-/* AVAILABLE FIELDS */
 .available-fields {
   width: 300px;
   background: white;
   padding: 20px;
   border: 1px solid $border-color;
   border-radius: 8px;
-  /* don't scroll whole sidebar */
   max-height: none;
   overflow: visible;
+}
+
+.available-fields-topbar {
+  display: flex;
+  align-items: center;
+  margin-bottom: 14px;
 }
 
 .available-fields-search {
@@ -3127,6 +3143,7 @@ handleImportedCsvFields(importedFields) {
   display: flex;
   justify-content: center;
 }
+
 .search-input {
   width: 94%;
   padding: 8px 10px;
@@ -3135,19 +3152,20 @@ handleImportedCsvFields(importedFields) {
   font-size: 14px;
   background: #fff;
 }
+
 .search-input:focus {
   outline: none;
   border-color: $primary-color;
   box-shadow: 0 0 0 3px rgba($primary-color, 0.1);
 }
 
-/* Wrap tabs to prevent overflow & SHACL breakage */
 .tabs {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
   margin-bottom: 12px;
 }
+
 .tabs button {
   padding: 8px;
   border: 1px solid $border-color;
@@ -3161,6 +3179,7 @@ handleImportedCsvFields(importedFields) {
   white-space: normal;
   word-wrap: break-word;
 }
+
 .tabs button.active {
   background: $primary-color;
   color: white;
@@ -3174,14 +3193,12 @@ handleImportedCsvFields(importedFields) {
   padding: 10px 0;
 }
 
-/* Scroll area for lists (template & OBI) only) */
 .tab-results {
   max-height: 60vh;
   overflow-y: auto;
-  padding-right: 4px; /* keep scrollbar off text */
+  padding-right: 4px;
 }
 
-/* TEMPLATE */
 .template-instruction {
   font-style: italic;
   margin-bottom: 10px;
@@ -3219,6 +3236,7 @@ handleImportedCsvFields(importedFields) {
   gap: 8px;
   margin-bottom: 8px;
 }
+
 .btn-add-selected {
   background: $primary-color;
   color: white;
@@ -3227,8 +3245,11 @@ handleImportedCsvFields(importedFields) {
   border: none;
   cursor: pointer;
 }
-.btn-add-selected:disabled { opacity: 0.5; cursor: not-allowed; }
-.obi-list { /* uses .tab-results scrolling */ }
+
+.btn-add-selected:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
 
 .obi-term-row {
   margin: 8px 0;
@@ -3236,22 +3257,23 @@ handleImportedCsvFields(importedFields) {
   background: #fafafa;
   border: 1px solid #e5e7eb;
   display: grid;
-  grid-template-rows: auto 1fr; /* two rows */
-  grid-template-columns: 1fr;   /* body spans full width in row 2 */
+  grid-template-rows: auto 1fr;
+  grid-template-columns: 1fr;
 }
 
-/* Row 1: tiny checkbox left */
 .obi-term-top {
   padding: 6px 8px 0 8px;
   display: flex;
   align-items: center;
   gap: 8px;
 }
+
 .obi-checkbox-small {
   width: 16px;
   height: 16px;
   accent-color: $primary-color;
 }
+
 .obi-selected-pill {
   background: #eef6ff;
   color: #0b62d6;
@@ -3261,16 +3283,17 @@ handleImportedCsvFields(importedFields) {
   font-size: 11px;
 }
 
-/* Row 2: full result */
 .obi-term-body {
   padding: 6px 10px 10px 10px;
   cursor: pointer;
 }
+
 .obi-term-label {
   font-weight: 600;
   color: #111827;
   word-break: break-word;
 }
+
 .obi-term-meta {
   font-size: 12px;
   color: #6b7280;
@@ -3284,6 +3307,7 @@ handleImportedCsvFields(importedFields) {
   white-space: normal;
   word-wrap: anywhere;
 }
+
 .obi-term-body mark,
 .template-button mark {
   background: #fff3cd;
@@ -3291,10 +3315,23 @@ handleImportedCsvFields(importedFields) {
   border-radius: 2px;
 }
 
-.obi-error { color: #b91c1c; margin-top: 6px; }
-.obi-empty, .obi-hint { font-size: 12px; color: #6b7280; margin-top: 6px; }
+.obi-error {
+  color: #b91c1c;
+  margin-top: 6px;
+}
 
-.obi-more { margin-top: 8px; display: flex; justify-content: center; }
+.obi-empty, .obi-hint {
+  font-size: 12px;
+  color: #6b7280;
+  margin-top: 6px;
+}
+
+.obi-more {
+  margin-top: 8px;
+  display: flex;
+  justify-content: center;
+}
+
 .btn-more {
   background: #eef2ff;
   border: 1px solid #c7d2fe;
@@ -3303,33 +3340,54 @@ handleImportedCsvFields(importedFields) {
   cursor: pointer;
   font-size: 12px;
 }
-.btn-more:disabled { opacity: 0.5; cursor: not-allowed; }
 
-.obi-count { font-size: 12px; color: #6b7280; }
+.btn-more:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
 
-/* FORM AREA */
+.obi-count {
+  font-size: 12px;
+  color: #6b7280;
+}
+
 .form-area {
   display: flex;
   flex-direction: column;
   flex: 1;
   background: white;
-  padding: 20px;
   border: 1px solid $border-color;
   border-radius: 8px;
-  min-width: 600px;
   height: calc(100vh - 60px);
 }
 
 .sections-container {
   flex: 1;
   overflow-y: auto;
-  padding-right: 10px;
   position: relative;
+  padding: 10px;
 }
 
-.sections-list { display: block; }
+.sections-topbar {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  margin-bottom: 12px;
+}
 
-.reorder-move { transition: transform 180ms ease; }
+.sections-topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.sections-list {
+  display: block;
+}
+
+.reorder-move {
+  transition: transform 180ms ease;
+}
 
 .form-section {
   padding: 15px;
@@ -3357,7 +3415,6 @@ handleImportedCsvFields(importedFields) {
   align-items: center;
 }
 
-/* Drag handles (right-aligned) */
 .drag-handle {
   display: inline-flex;
   align-items: center;
@@ -3370,16 +3427,26 @@ handleImportedCsvFields(importedFields) {
   color: #374151;
   background: rgba(0,0,0,0.04);
 }
-.drag-handle:hover { background: rgba(0,0,0,0.08); }
-.drag-handle:active { cursor: grabbing; }
 
-/* Keep it visually aligned with icon buttons */
+.drag-handle:hover {
+  background: rgba(0,0,0,0.08);
+}
+
+.drag-handle:active {
+  cursor: grabbing;
+}
+
 .drag-handle-right {
   margin-left: 2px;
 }
 
-.drop-before { box-shadow: 0 -3px 0 0 rgba($primary-color, 0.55) inset; }
-.drop-after  { box-shadow: 0  3px 0 0 rgba($primary-color, 0.55) inset; }
+.drop-before {
+  box-shadow: 0 -3px 0 0 rgba($primary-color, 0.55) inset;
+}
+
+.drop-after {
+  box-shadow: 0 3px 0 0 rgba($primary-color, 0.55) inset;
+}
 
 .section-content-wrapper {
   display: flex;
@@ -3387,7 +3454,12 @@ handleImportedCsvFields(importedFields) {
   gap: 10px;
 }
 
-.section-content { display:flex; flex-direction:column; gap:14px; }
+.section-content {
+  display:flex;
+  flex-direction:column;
+  gap:14px;
+}
+
 .form-group {
   background: #ffffff;
   border: 1px solid $border-color;
@@ -3397,8 +3469,19 @@ handleImportedCsvFields(importedFields) {
   transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.05s ease;
 }
 
-.field-header { display:flex; justify-content:space-between; align-items:flex-start; gap:8px; margin-bottom:8px; }
-.field-header > label { font-weight: 600; color: #111827; line-height: 1.25; }
+.field-header {
+  display:flex;
+  justify-content:space-between;
+  align-items:flex-start;
+  gap:8px;
+  margin-bottom:8px;
+}
+
+.field-header > label {
+  font-weight: 600;
+  color: #111827;
+  line-height: 1.25;
+}
 
 .icon-button {
   border:none;
@@ -3409,9 +3492,19 @@ handleImportedCsvFields(importedFields) {
   line-height:0;
   transition: background 0.15s ease, transform 0.02s ease;
 }
-.icon-button:hover { background: rgba(0,0,0,0.06); }
-.icon-button:active { transform: scale(0.98); }
-.icon-button i { font-size:14px; color:#374151; }
+
+.icon-button:hover {
+  background: rgba(0,0,0,0.06);
+}
+
+.icon-button:active {
+  transform: scale(0.98);
+}
+
+.icon-button i {
+  font-size:14px;
+  color:#374151;
+}
 
 input, textarea, select {
   width: 96%;
@@ -3422,7 +3515,11 @@ input, textarea, select {
   background: #fff;
 }
 
-.help-text { display:inline-block; margin-top:6px; color:#6b7280; }
+.help-text {
+  display:inline-block;
+  margin-top:6px;
+  color:#6b7280;
+}
 
 .field-drop-end {
   border: 1px dashed rgba($primary-color, 0.35);
@@ -3433,13 +3530,13 @@ input, textarea, select {
   text-align: center;
   background: rgba($primary-color, 0.04);
 }
+
 .field-drop-end.drop-active {
   border-color: rgba($primary-color, 0.7);
   background: rgba($primary-color, 0.08);
   color: #374151;
 }
 
-/* actions footer */
 .form-actions {
   position: sticky;
   bottom: 0;
@@ -3451,6 +3548,7 @@ input, textarea, select {
   gap: 15px;
   z-index: 10;
 }
+
 .additional-options {
   position: relative;
   flex: 0 0 auto;
@@ -3498,6 +3596,7 @@ input, textarea, select {
 .options-item:hover {
   background: rgba(0, 0, 0, 0.06);
 }
+
 .btn-option {
   background: $secondary-color;
   padding: $button-padding;
@@ -3506,10 +3605,14 @@ input, textarea, select {
   cursor: pointer;
   flex: 1;
 }
+
 .options-item.danger {
   color: #b91c1c;
 }
-.protocol-btn::after { content: ' →'; }
+
+.protocol-btn::after {
+  content: ' →';
+}
 
 .btn-primary {
   background: $primary-color;
@@ -3520,19 +3623,69 @@ input, textarea, select {
   flex: 1;
 }
 
-/* modals (unchanged) */
-.modal-overlay { position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:1000; }
-.modal { background:white; padding:20px; border-radius:8px; max-width:90%; max-height:90%; overflow-y:auto; }
-.modal.model-dialog { width:400px; max-height:80vh; padding:20px 16px; }
-.preview-modal { width:500px; height:80vh; display:flex; flex-direction:column; }
-.preview-header { display:flex; justify-content:space-between; align-items:center; background:#f2f3f4; padding:10px; }
-.preview-content { flex:1; background:white; padding:10px; overflow-y:auto; }
-.modal-actions { display:flex; justify-content:flex-end; gap:10px; margin-top:10px; }
-.input-dialog-field { width:100%; padding:8px; margin-top:5px; }
+.modal-overlay {
+  position:fixed;
+  inset:0;
+  background:rgba(0,0,0,0.5);
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  z-index:1000;
+}
+
+.modal {
+  background:white;
+  padding:20px;
+  border-radius:8px;
+  max-width:90%;
+  max-height:90%;
+  overflow-y:auto;
+}
+
+.modal.model-dialog {
+  width:400px;
+  max-height:80vh;
+  padding:20px 16px;
+}
+
+.preview-modal {
+  width:500px;
+  height:80vh;
+  display:flex;
+  flex-direction:column;
+}
+
+.preview-header {
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  background:#f2f3f4;
+  padding:10px;
+}
+
+.preview-content {
+  flex:1;
+  background:white;
+  padding:10px;
+  overflow-y:auto;
+}
+
+.modal-actions {
+  display:flex;
+  justify-content:flex-end;
+  gap:10px;
+  margin-top:10px;
+}
+
+.input-dialog-field {
+  width:100%;
+  padding:8px;
+  margin-top:5px;
+}
+
 .model-prop-list {
   margin-top: 10px;
   display: grid;
-  /* Responsive 2+ columns, never too narrow */
   grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
   gap: 8px 12px;
 }
@@ -3556,8 +3709,8 @@ input, textarea, select {
 
 .prop-info {
   flex: 1 1 auto;
-  min-width: 0;         /* allows natural wrapping, no per-letter layout */
-  text-align: left;     /* force left alignment even if a parent has text-align:right */
+  min-width: 0;
+  text-align: left;
 }
 
 .prop-label {
@@ -3577,26 +3730,30 @@ input, textarea, select {
   flex: 0 0 auto;
   margin-left: 6px;
 }
-/* Fix checkbox layout in "Select Properties" dialog */
+
 .model-prop-list .prop-checkbox {
-  width: auto;        /* undo global input width */
-  padding: 0;         /* no text-input padding */
-  margin-top: 0;      /* align vertically with label */
-  border: none;       /* remove text-input border */
+  width: auto;
+  padding: 0;
+  margin-top: 0;
+  border: none;
   border-radius: 0;
 }
-.model-prop-list .prop-cell { align-items: center; }
-.model-prop-list .prop-info { text-align: left; }
 
-/* --- Model dialog target block: tighten spacing + fix checkbox sizing --- */
+.model-prop-list .prop-cell {
+  align-items: center;
+}
+
+.model-prop-list .prop-info {
+  text-align: left;
+}
+
 .model-target {
   margin-top: 10px;
   padding-top: 10px;
   border-top: 1px solid #eef0f3;
-
   display: flex;
   flex-direction: column;
-  gap: 6px;            /* was too large → made checkbox look "floating" */
+  gap: 6px;
 }
 
 .model-target-selection {
@@ -3610,21 +3767,19 @@ input, textarea, select {
   padding: 0;
 }
 
-/* Keep the checkbox directly below the hint/dropdown and on one line */
 .model-target-check {
   display: flex;
   align-items: center;
   justify-content: flex-start;
   gap: 8px;
-
-  margin: 0;          /* remove any inherited spacing */
+  margin: 0;
   padding: 0;
-
-  white-space: nowrap;        /* "Add to existing section" single line */
+  white-space: nowrap;
   overflow: hidden;
-  text-overflow: ellipsis;    /* prevent wrap in narrow modal */
+  text-overflow: ellipsis;
   line-height: 1.1;
 }
+
 .scratch-form-content-full {
   margin-top: 0;
 }
@@ -3633,7 +3788,6 @@ input, textarea, select {
   height: calc(100vh - 40px);
 }
 
-/* Override global input styling that makes checkboxes huge/fuzzy */
 .model-target-check input[type="checkbox"] {
   width: auto !important;
   padding: 0 !important;
@@ -3642,24 +3796,20 @@ input, textarea, select {
   border-radius: 0 !important;
   background: transparent !important;
   box-shadow: none !important;
-
-  /* optional: nicer alignment */
   transform: translateY(1px);
 }
+
 .modal-overlay.import-overlay {
   position: fixed;
   top: 0;
   left: 0;
   width: 100%;
   height: 100%;
-
-  background: rgba(0, 0, 0, 0.45); /* 🔥 THIS was missing */
+  background: rgba(0, 0, 0, 0.45);
   backdrop-filter: blur(2px);
-
   display: flex;
   align-items: center;
   justify-content: center;
-
   z-index: 2000;
 }
 
@@ -3669,6 +3819,7 @@ input, textarea, select {
   justify-content: center;
   align-items: center;
 }
+
 .table-config-modal {
   width: min(96vw, 1060px);
   max-height: 90vh;
@@ -3734,5 +3885,26 @@ input, textarea, select {
 .table-cell-placeholder {
   color: #9ca3af;
   font-size: 13px;
+}
+
+.field-actions .icon-button,
+.section-header .icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.field-label-with-required {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-weight: 600;
+  color: #111827;
+  line-height: 1.25;
+}
+
+.required-asterisk {
+  color: #dc2626;
+  font-weight: 700;
+  line-height: 1;
 }
 </style>

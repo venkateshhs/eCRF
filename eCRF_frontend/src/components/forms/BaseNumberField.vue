@@ -7,8 +7,9 @@
       :id="id"
       type="number"
       :class="['form-input', { 'input-error': error }]"
-      :value="modelValue"
+      :value="inputValue"
       @input="onInput"
+      @blur="onBlur"
       :min="min"
       :max="max"
       :step="step"
@@ -27,20 +28,79 @@ export default {
   name: "BaseNumberField",
   props: {
     modelValue: { type: Number, default: null },
-    id:         { type: String, required: true },
-    label:      { type: String, required: true },
-    placeholder:{ type: String, default: "" },
-    min:        { type: Number, default: null },
-    max:        { type: Number, default: null },
-    step:       { type: [Number,String], default: 1 },
-    required:   { type: Boolean, default: false },
-    disabled:   { type: Boolean, default: false },
-    error:      { type: [String,Boolean], default: false },
+    id: { type: String, required: true },
+    label: { type: String, required: true },
+    placeholder: { type: String, default: "" },
+    min: { type: Number, default: null },
+    max: { type: Number, default: null },
+    step: { type: [Number, String], default: 1 },
+    required: { type: Boolean, default: false },
+    disabled: { type: Boolean, default: false },
+    error: { type: [String, Boolean], default: false },
   },
+
+  data() {
+    return {
+      inputValue: this.modelValue ?? "",
+    };
+  },
+
+  watch: {
+    modelValue: {
+      immediate: true,
+      handler(val) {
+        const normalized = val ?? "";
+        if (String(normalized) !== String(this.inputValue)) {
+          this.inputValue = normalized;
+        }
+      }
+    }
+  },
+
   methods: {
     onInput(e) {
-      const val = e.target.valueAsNumber
-      this.$emit('update:modelValue', isNaN(val) ? null : val)
+      const raw = e.target.value;
+      this.inputValue = raw;
+
+      // allow empty during typing
+      if (raw === "") {
+        this.$emit("update:modelValue", null);
+        return;
+      }
+
+      const num = Number(raw);
+      this.$emit("update:modelValue", Number.isNaN(num) ? null : num);
+    },
+
+    onBlur() {
+      // if left empty, enforce min if present, otherwise leave empty
+      if (this.inputValue === "" || this.inputValue == null) {
+        if (this.min != null) {
+          this.inputValue = this.min;
+          this.$emit("update:modelValue", this.min);
+        } else {
+          this.$emit("update:modelValue", null);
+        }
+        return;
+      }
+
+      let num = Number(this.inputValue);
+
+      if (Number.isNaN(num)) {
+        if (this.min != null) {
+          num = this.min;
+        } else {
+          this.inputValue = "";
+          this.$emit("update:modelValue", null);
+          return;
+        }
+      }
+
+      if (this.min != null && num < this.min) num = this.min;
+      if (this.max != null && num > this.max) num = this.max;
+
+      this.inputValue = num;
+      this.$emit("update:modelValue", num);
     }
   }
 };
