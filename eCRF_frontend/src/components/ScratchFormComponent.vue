@@ -587,11 +587,25 @@
     <div v-if="showModelDialog" class="modal-overlay">
       <div class="modal model-dialog">
         <h3>Select Properties for {{ prettyModelTitle(currentModel.title) }}</h3>
+        <div class="model-prop-toolbar">
+          <button
+          type="button"
+          class="btn-option btn-select-all"
+          @click="toggleSelectAllProps"
+        >
+          {{ allSelectablePropsSelected ? "Deselect All" : "Select All" }}
+        </button>
+        </div>
         <div class="model-prop-list">
           <div
             v-for="(prop, i) in currentModel.fields"
             :key="prop.name"
             class="prop-cell"
+            :class="{
+              selected: selectedProps[i],
+              disabled: modelAddToExisting && isPropAlreadyInTargetSection(prop)
+            }"
+            @click="togglePropSelection(i, prop)"
           >
             <div class="prop-info">
               <strong class="prop-label">
@@ -605,10 +619,12 @@
             <input
               type="checkbox"
               :id="'prop-check-' + i"
-              v-model="selectedProps[i]"
+              :checked="!!selectedProps[i]"
               class="prop-checkbox"
               :disabled="modelAddToExisting && isPropAlreadyInTargetSection(prop)"
               :title="(modelAddToExisting && isPropAlreadyInTargetSection(prop)) ? 'Already added in selected section' : ''"
+              @click.stop
+              @change="togglePropSelection(i, prop)"
             />
           </div>
         </div>
@@ -959,6 +975,19 @@ export default {
   },
 
   computed: {
+    allSelectablePropsSelected() {
+      if (!this.currentModel || !Array.isArray(this.currentModel.fields) || !this.currentModel.fields.length) {
+        return false;
+      }
+
+      const selectableIndexes = this.currentModel.fields
+        .map((prop, i) => ({ prop, i }))
+        .filter(({ prop }) => !(this.modelAddToExisting && this.isPropAlreadyInTargetSection(prop)));
+
+      if (!selectableIndexes.length) return false;
+
+      return selectableIndexes.every(({ i }) => !!this.selectedProps[i]);
+    },
     currentEditingFieldKey() {
       const { sectionIndex, fieldIndex } = this.currentFieldIndices || {};
       const field = this.currentForm.sections?.[sectionIndex]?.fields?.[fieldIndex];
@@ -1127,6 +1156,35 @@ export default {
   },
 
   methods: {
+    togglePropSelection(i, prop) {
+      if (this.modelAddToExisting && this.isPropAlreadyInTargetSection(prop)) return;
+
+      const next = [...this.selectedProps];
+      next[i] = !next[i];
+      this.selectedProps = next;
+    },
+
+    toggleSelectAllProps() {
+      if (!this.currentModel || !Array.isArray(this.currentModel.fields)) return;
+
+      const next = [...this.selectedProps];
+
+      if (this.allSelectablePropsSelected) {
+        this.currentModel.fields.forEach((prop, i) => {
+          if (this.modelAddToExisting && this.isPropAlreadyInTargetSection(prop)) return;
+          next[i] = false;
+        });
+      } else {
+        this.currentModel.fields.forEach((prop, i) => {
+          if (this.modelAddToExisting && this.isPropAlreadyInTargetSection(prop)) return;
+          next[i] = true;
+        });
+      }
+
+      this.selectedProps = next;
+    },
+
+
     openRearrangeDialog(focus = null) {
       this.ensureCurrentFormExists();
       this.ensurePersistentIdsForLogic();
@@ -3906,5 +3964,24 @@ input, textarea, select {
   color: #dc2626;
   font-weight: 700;
   line-height: 1;
+}
+.model-prop-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 8px;
+}
+
+.btn-select-all {
+  flex: 0 0 auto;
+}
+
+.prop-cell.selected {
+  border-color: $primary-color;
+  background: #eef4ff;
+}
+
+.prop-cell.disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
 }
 </style>
