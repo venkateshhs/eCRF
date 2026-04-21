@@ -451,7 +451,7 @@ function evaluateSingleVisibilityRule(rule, sourceValue, sourceField) {
   const compareValueTo = rule?.valueTo;
 
   if (operator === "empty") return isBlankValue(sourceValue);
-  if (operator === "not_empty") return !isBlankValue(sourceValue);
+  if (operator === "not_empty" || operator === "is_not_empty") return !isBlankValue(sourceValue);
 
   // choice fields
   if (sourceType === "select" || sourceType === "radio") {

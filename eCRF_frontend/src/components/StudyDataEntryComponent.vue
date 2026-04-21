@@ -85,16 +85,16 @@
     <!-- Selection (hidden in shared mode; shared preselects) -->
     <template v-if="showSelection && !isShared">
       <!-- Matrix view (hidden when Merge is open) -->
-          <div v-if="!isMergeMode" class="selection-import-bar">
-      <button
-        type="button"
-        class="import-btn"
-        @click="openImportDialogFromSelection"
-      >
-        <i :class="icons.upload || 'fas fa-file-import'"></i>
-        Import Data
-      </button>
-    </div>
+      <div v-if="!isMergeMode" class="selection-import-bar">
+        <button
+          type="button"
+          class="import-btn"
+          @click="openImportDialogFromSelection"
+        >
+          <i :class="icons.upload || 'fas fa-file-import'"></i>
+          Import Data
+        </button>
+      </div>
       <SelectionMatrixView
         v-if="!isMergeMode"
         :matrixReady="matrixReady"
@@ -172,19 +172,49 @@
                   :key="'f-' + mIdx + '-' + fIdx"
                   class="form-field"
                 >
-                  <label :for="fieldId(mIdx, fIdx)" class="field-label">
+                  <div class="field-label-row">
+                    <label :for="fieldId(mIdx, fIdx)" class="field-label">
                       <span>{{ field.label || field.name || field.title }}</span>
                       <span v-if="field.constraints?.required" class="required">*</span>
-                      <i
-                        v-if="hasConstraints(field)"
-                        class="fas fa-question-circle helper-icon"
-                        @click="openConstraintDialog(field)"
-                      ></i>
 
                       <em v-if="field.constraints?.helpText" class="help-inline">
                         {{ field.constraints.helpText }}
                       </em>
                     </label>
+
+                    <div class="field-label-actions">
+                      <button
+                        v-if="canShowPreviousVisitImport(field, mIdx, fIdx) && !isImportedFromPreviousVisit(mIdx, fIdx)"
+                        type="button"
+                        class="field-icon-btn"
+                        title="Import from previous visits"
+                        @click="openPreviousVisitImportDialog(mIdx, fIdx)"
+                      >
+                        <i :class="icons.copy || 'fas fa-copy'"></i>
+                      </button>
+
+                      <button
+                        v-if="canShowPreviousVisitImport(field, mIdx, fIdx) && isImportedFromPreviousVisit(mIdx, fIdx)"
+                        type="button"
+                        class="field-icon-btn field-icon-btn-active"
+                        :title="`Imported from ${importedPreviousVisitLabel(mIdx, fIdx)}. Click to make editable.`"
+                        @click="unlockImportedPreviousVisit(mIdx, fIdx)"
+                        :disabled="!canEdit"
+                      >
+                        <i :class="icons.lock || 'fas fa-lock'"></i>
+                      </button>
+
+                      <button
+                        v-if="hasConstraints(field)"
+                        type="button"
+                        class="field-icon-btn"
+                        title="Field constraints"
+                        @click="openConstraintDialog(field)"
+                      >
+                        <i class="fas fa-question-circle"></i>
+                      </button>
+                    </div>
+                  </div>
 
                   <!-- TEXT -->
                   <input
@@ -318,17 +348,18 @@
                     @update:modelValue="() => { clearError(mIdx, fIdx); validateField(mIdx, fIdx); onRuntimeFieldChanged(mIdx, fIdx); }"
                     @change="() => { validateField(mIdx, fIdx); onRuntimeFieldChanged(mIdx, fIdx); }"
                   />
+
                   <!-- TABLE -->
                   <FieldTable
-                      v-else-if="field.type === 'table'"
-                      :ref="`tableField_${mIdx}_${fIdx}`"
-                      :id="fieldId(mIdx, fIdx)"
-                      v-model="entryData[currentSubjectIndex][currentVisitIndex][currentGroupIndex][mIdx][fIdx]"
-                      :field="field"
-                      :readonly="isReadonlyField(field, mIdx, fIdx)"
-                      @update:modelValue="() => { clearError(mIdx, fIdx); validateField(mIdx, fIdx); onRuntimeFieldChanged(mIdx, fIdx); }"
-                      @validation-state="(payload) => onTableValidationState(mIdx, fIdx, payload)"
-                    />
+                    v-else-if="field.type === 'table'"
+                    :ref="`tableField_${mIdx}_${fIdx}`"
+                    :id="fieldId(mIdx, fIdx)"
+                    v-model="entryData[currentSubjectIndex][currentVisitIndex][currentGroupIndex][mIdx][fIdx]"
+                    :field="field"
+                    :readonly="isReadonlyField(field, mIdx, fIdx)"
+                    @update:modelValue="() => { clearError(mIdx, fIdx); validateField(mIdx, fIdx); onRuntimeFieldChanged(mIdx, fIdx); }"
+                    @validation-state="(payload) => onTableValidationState(mIdx, fIdx, payload)"
+                  />
 
                   <!-- FILE -->
                   <FieldFileUpload
@@ -364,6 +395,7 @@
                       title="Required validation skipped for this field"
                     >Skipped</span>
                   </div>
+
                   <div v-else-if="isFieldSkipped(mIdx, fIdx)" class="error-message">
                     <span class="skip-pill" title="Required validation skipped for this field">Skipped</span>
                   </div>
@@ -489,6 +521,14 @@
       @analyze="buildImportPreview"
       @commit="commitImportPreview"
     />
+
+    <PreviousVisitImportDialog
+      :visible="showPreviousVisitImportDialog"
+      :fieldLabel="previousVisitImportContext?.fieldLabel || ''"
+      :options="previousVisitImportOptions"
+      @close="closePreviousVisitImportDialog"
+      @select="applyPreviousVisitImport"
+    />
   </div>
 
   <div v-else class="loading">
@@ -521,6 +561,7 @@ import StudyLegendDialogs from "@/components/dataentry/StudyLegendDialogs.vue";
 import GroupAssignDialog from "@/components/dataentry/GroupAssignDialog.vue";
 import SkipRequiredDialog from "@/components/dataentry/SkipRequiredDialog.vue";
 import StudyDataImportDialog from "@/components/dataentry/StudyDataImportDialog.vue";
+import PreviousVisitImportDialog from "@/components/dataentry/PreviousVisitImportDialog.vue";
 import FieldTable from "@/components/FieldTable.vue";
 import {
   getCalculationRulesFromStudy,
@@ -555,6 +596,7 @@ export default {
     GroupAssignDialog,
     SkipRequiredDialog,
     StudyDataImportDialog,
+    PreviousVisitImportDialog,
   },
   data() {
     return {
@@ -658,6 +700,10 @@ export default {
       currentRevisionToken: "",
       slotLoading: false,
       tableValidationStates: {},
+      showPreviousVisitImportDialog: false,
+      previousVisitImportOptions: [],
+      previousVisitImportContext: null,
+      importedPreviousVisitLocks: {},
     };
   },
 
@@ -1588,6 +1634,7 @@ applyImportedRowFromDialog(payload) {
       const parsed = this.normalizeImportedValueForField(field, item.rawValue);
 
       this.setDeepValue(this.currentSubjectIndex, this.currentVisitIndex, this.currentGroupIndex, mIdx, fIdx, parsed);
+      this.unlockImportedPreviousVisit(mIdx, fIdx);
       this.setDeepSkip(this.currentSubjectIndex, this.currentVisitIndex, this.currentGroupIndex, mIdx, fIdx, false);
       this.clearError(mIdx, fIdx);
       this.clearCalcWarningFor(mIdx, fIdx);
@@ -1666,6 +1713,7 @@ applyImportedRowFromDialog(payload) {
           const parsed = this.normalizeImportedValueForField(field, item.rawValue);
 
           this.setDeepValue(s, v, g, mIdx, fIdx, parsed);
+          this.unlockImportedPreviousVisit(mIdx, fIdx);
           this.setDeepSkip(s, v, g, mIdx, fIdx, false);
           this.clearError(mIdx, fIdx);
           this.clearCalcWarningFor(mIdx, fIdx);
@@ -1759,7 +1807,199 @@ applyImportedRowFromDialog(payload) {
     },
 
     isReadonlyField(field, mIdx, fIdx) {
-      return !!field?.constraints?.readonly || !this.canEdit || this.isCalculatedRuntimeField(mIdx, fIdx);
+      return (
+        !!field?.constraints?.readonly ||
+        !this.canEdit ||
+        this.isCalculatedRuntimeField(mIdx, fIdx) ||
+        this.isImportedFromPreviousVisit(mIdx, fIdx)
+      );
+    },
+    slotFieldKey(s, v, g, m, f) {
+      return `${s}-${v}-${g}-${m}-${f}`;
+    },
+
+    currentSlotFieldKey(mIdx, fIdx) {
+      return this.slotFieldKey(
+        this.currentSubjectIndex,
+        this.currentVisitIndex,
+        this.currentGroupIndex,
+        mIdx,
+        fIdx
+      );
+    },
+
+    isImportSupportedField(field) {
+      const type = String(field?.type || "").toLowerCase();
+      return !["file", "table", "button"].includes(type);
+    },
+
+    canShowPreviousVisitImport(field, mIdx, fIdx) {
+      if (!this.canEdit) return false;
+      if (this.currentSubjectIndex == null || this.currentVisitIndex == null || this.currentGroupIndex == null) return false;
+      if (this.currentVisitIndex <= 0) return false;
+      if (!this.isImportSupportedField(field)) return false;
+      if (this.isCalculatedRuntimeField(mIdx, fIdx)) return false;
+      return true;
+    },
+
+    isImportedFromPreviousVisit(mIdx, fIdx) {
+      const key = this.currentSlotFieldKey(mIdx, fIdx);
+      return !!this.importedPreviousVisitLocks?.[key];
+    },
+
+    importedPreviousVisitLabel(mIdx, fIdx) {
+      const key = this.currentSlotFieldKey(mIdx, fIdx);
+      const meta = this.importedPreviousVisitLocks?.[key];
+      if (!meta) return "previous visit";
+      return meta.visitLabel || "previous visit";
+    },
+
+    unlockImportedPreviousVisit(mIdx, fIdx) {
+      const key = this.currentSlotFieldKey(mIdx, fIdx);
+      if (!this.importedPreviousVisitLocks[key]) return;
+
+      const next = { ...(this.importedPreviousVisitLocks || {}) };
+      delete next[key];
+      this.importedPreviousVisitLocks = next;
+    },
+
+    closePreviousVisitImportDialog() {
+      this.showPreviousVisitImportDialog = false;
+      this.previousVisitImportOptions = [];
+      this.previousVisitImportContext = null;
+    },
+
+    extractFieldValueFromEntry(entry, mIdx, fIdx) {
+      if (!entry) return undefined;
+
+      if (entry.data && !Array.isArray(entry.data) && typeof entry.data === "object") {
+        const section = this.selectedModels?.[mIdx];
+        if (!section) return undefined;
+
+        const sKey = this.sectionDictKey(section);
+        const secObj = entry.data[sKey] || {};
+        const field = section.fields?.[fIdx];
+
+        return this.getValueFromSectionDict(secObj, field, fIdx);
+      }
+
+      if (Array.isArray(entry.data)) {
+        return entry.data?.[mIdx]?.[fIdx];
+      }
+
+      return undefined;
+    },
+
+    hasReusablePreviousValue(field, value) {
+      const type = String(field?.type || "").toLowerCase();
+
+      if (!this.isImportSupportedField(field)) return false;
+
+      if (type === "checkbox") return typeof value === "boolean";
+      if (Array.isArray(value)) return value.length > 0;
+      if (typeof value === "number") return Number.isFinite(value);
+      if (typeof value === "string") return value.trim() !== "";
+      if (value == null) return false;
+
+      return true;
+    },
+
+    formatPreviousVisitDisplayValue(value) {
+      if (Array.isArray(value)) return value.join(", ");
+      if (typeof value === "boolean") return value ? "Checked" : "Unchecked";
+      if (value == null) return "";
+      return String(value);
+    },
+
+    buildPreviousVisitImportOptions(mIdx, fIdx) {
+      const s = this.currentSubjectIndex;
+      const g = this.currentGroupIndex;
+      const currentVisit = this.currentVisitIndex;
+      const field = this.selectedModels?.[mIdx]?.fields?.[fIdx];
+
+      if (s == null || g == null || currentVisit == null || !field) return [];
+
+      const out = [];
+
+      for (let visitIdx = currentVisit - 1; visitIdx >= 0; visitIdx--) {
+        const entry = this.getBestEntryFor(s, visitIdx, g);
+        if (!entry) continue;
+
+        const rawValue = this.extractFieldValueFromEntry(entry, mIdx, fIdx);
+        if (!this.hasReusablePreviousValue(field, rawValue)) continue;
+
+        const createdAt = entry?.updated_at || entry?.created_at || "";
+        let createdAtLabel = "";
+
+        if (createdAt) {
+          try {
+            createdAtLabel = new Date(createdAt).toLocaleString();
+          } catch {
+            createdAtLabel = "";
+          }
+        }
+
+        out.push({
+          key: `${visitIdx}-${entry.id || "noid"}`,
+          visitIndex: visitIdx,
+          visitLabel: this.visitList?.[visitIdx]?.name || `Visit ${visitIdx + 1}`,
+          rawValue,
+          displayValue: this.formatPreviousVisitDisplayValue(rawValue),
+          entryId: entry?.id || null,
+          createdAtLabel,
+          versionLabel: entry?.form_version ? `Version ${entry.form_version}` : "",
+        });
+      }
+
+      return out;
+    },
+
+    openPreviousVisitImportDialog(mIdx, fIdx) {
+      const field = this.selectedModels?.[mIdx]?.fields?.[fIdx];
+      if (!field) return;
+
+      const options = this.buildPreviousVisitImportOptions(mIdx, fIdx);
+
+      this.previousVisitImportContext = {
+        modelIndex: mIdx,
+        fieldIndex: fIdx,
+        fieldLabel: field.label || field.name || `Field ${fIdx + 1}`,
+      };
+
+      this.previousVisitImportOptions = options;
+      this.showPreviousVisitImportDialog = true;
+    },
+
+    applyPreviousVisitImport(option) {
+      const ctx = this.previousVisitImportContext;
+      if (!ctx || !option) return;
+
+      const s = this.currentSubjectIndex;
+      const v = this.currentVisitIndex;
+      const g = this.currentGroupIndex;
+      const mIdx = ctx.modelIndex;
+      const fIdx = ctx.fieldIndex;
+
+      this.ensureSlot(s, v, g);
+
+      this.setDeepValue(s, v, g, mIdx, fIdx, option.rawValue);
+      this.setDeepSkip(s, v, g, mIdx, fIdx, false);
+      this.clearError(mIdx, fIdx);
+      this.clearCalcWarningFor(mIdx, fIdx);
+
+      const key = this.slotFieldKey(s, v, g, mIdx, fIdx);
+      this.importedPreviousVisitLocks = {
+        ...(this.importedPreviousVisitLocks || {}),
+        [key]: {
+          sourceVisitIndex: option.visitIndex,
+          sourceEntryId: option.entryId,
+          visitLabel: option.visitLabel,
+        },
+      };
+
+      this.validateField(mIdx, fIdx);
+      this.onRuntimeFieldChanged(mIdx, fIdx);
+      this.closePreviousVisitImportDialog();
     },
 
     getFieldLookup() {
@@ -2868,6 +3108,7 @@ applyImportedRowFromDialog(payload) {
           });
           this.setDeepValue(s, v, g, mIdx, fIdx, next);
           this.setDeepSkip(s, v, g, mIdx, fIdx, false);
+          this.unlockImportedPreviousVisit(mIdx, fIdx);
           this.clearError(mIdx, fIdx);
           this.clearCalcWarningFor(mIdx, fIdx);
         });
@@ -4904,5 +5145,99 @@ select:focus {
 
 .import-btn:hover {
   background: #1d4ed8;
+}
+.previous-visit-import-row {
+  margin-top: 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.btn-import-previous,
+.btn-import-unlock {
+  border: 1px solid #d1d5db;
+  background: #f9fafb;
+  color: #374151;
+  border-radius: 6px;
+  padding: 4px 10px;
+  font-size: 12px;
+  cursor: pointer;
+  line-height: 1.2;
+}
+
+.btn-import-previous:hover,
+.btn-import-unlock:hover {
+  background: #f3f4f6;
+}
+
+.imported-lock-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.imported-lock-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: #eef2ff;
+  color: #3730a3;
+  border: 1px solid #c7d2fe;
+  font-size: 12px;
+  line-height: 1.2;
+}
+.field-label-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.field-label {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 0;
+}
+
+.field-label-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.field-icon-btn {
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  background: #fff;
+  color: #374151;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.field-icon-btn:hover:not(:disabled) {
+  background: #f3f4f6;
+}
+
+.field-icon-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.field-icon-btn-active {
+  background: #eef2ff;
+  border-color: #a5b4fc;
+  color: #3730a3;
 }
 </style>
