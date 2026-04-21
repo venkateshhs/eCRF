@@ -184,7 +184,7 @@
 
                     <div class="field-label-actions">
                       <button
-                        v-if="canShowPreviousVisitImport(field, mIdx, fIdx) && !isImportedFromPreviousVisit(mIdx, fIdx)"
+                        v-if="!isShared && canShowPreviousVisitImport(field, mIdx, fIdx) && !isImportedFromPreviousVisit(mIdx, fIdx)"
                         type="button"
                         class="field-icon-btn"
                         title="Import from previous visits"
@@ -194,7 +194,7 @@
                       </button>
 
                       <button
-                        v-if="canShowPreviousVisitImport(field, mIdx, fIdx) && isImportedFromPreviousVisit(mIdx, fIdx)"
+                        v-if="!isShared && canShowPreviousVisitImport(field, mIdx, fIdx) && isImportedFromPreviousVisit(mIdx, fIdx)"
                         type="button"
                         class="field-icon-btn field-icon-btn-active"
                         :title="`Imported from ${importedPreviousVisitLabel(mIdx, fIdx)}. Click to make editable.`"
