@@ -59,7 +59,13 @@
 
         <div class="row">
           <label>Help text</label>
-          <input type="text" v-model="local.helpText" placeholder="Shown below the control" />
+          <BaseTextarea
+            id="field-help-text"
+            label=""
+            v-model="local.helpText"
+            placeholder="Shown below the control"
+            :rows="2"
+          />
         </div>
 
         <div class="row" v-if="isTime">
@@ -744,6 +750,7 @@
 import { normalizeConstraints, coerceDefaultForType } from "@/utils/constraints";
 import DateFormatPicker from "@/components/DateFormatPicker.vue";
 import FieldTime from "@/components/fields/FieldTime.vue";
+import BaseTextarea from "@/components/forms/BaseTextarea.vue";
 
 const DATE_FORMATS = [
   "dd.MM.yyyy",
@@ -870,7 +877,7 @@ function buildInitialLocal(vm, constraintsForm, currentFieldType) {
 
 export default {
   name: "FieldConstraintsDialog",
-  components: { DateFormatPicker, FieldTime },
+  components: { DateFormatPicker, FieldTime, BaseTextarea },
   props: {
     currentFieldType: { type: String, default: "text" },
     constraintsForm: { type: Object, default: () => ({}) },

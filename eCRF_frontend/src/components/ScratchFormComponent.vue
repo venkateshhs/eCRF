@@ -3581,7 +3581,7 @@ input, textarea, select {
 }
 
 .help-text {
-  display:inline-block;
+  display:block;
   margin-top:6px;
   color:#6b7280;
 }

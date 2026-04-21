@@ -173,17 +173,18 @@
                   class="form-field"
                 >
                   <label :for="fieldId(mIdx, fIdx)" class="field-label">
-                    <span>{{ field.label || field.name || field.title }}</span>
-                    <span v-if="field.constraints?.required" class="required">*</span>
-                    <em v-if="field.constraints?.helpText" class="help-inline">
-                      {{ field.constraints.helpText }}
-                    </em>
-                    <i
-                      v-if="hasConstraints(field)"
-                      class="fas fa-question-circle helper-icon"
-                      @click="openConstraintDialog(field)"
-                    ></i>
-                  </label>
+                      <span>{{ field.label || field.name || field.title }}</span>
+                      <span v-if="field.constraints?.required" class="required">*</span>
+                      <i
+                        v-if="hasConstraints(field)"
+                        class="fas fa-question-circle helper-icon"
+                        @click="openConstraintDialog(field)"
+                      ></i>
+
+                      <em v-if="field.constraints?.helpText" class="help-inline">
+                        {{ field.constraints.helpText }}
+                      </em>
+                    </label>
 
                   <!-- TEXT -->
                   <input
@@ -4761,9 +4762,13 @@ hr {
   margin-left: 4px;
 }
 .help-inline {
+  display: block;
+  width: 100%;
+  margin-top: 4px;
+  margin-left: 0;
   font-style: italic;
   color: #6b7280;
-  margin-left: 8px;
+  white-space: pre-line;
 }
 
 /* Inputs */
