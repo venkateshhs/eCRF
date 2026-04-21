@@ -685,6 +685,7 @@
         :form="currentForm"
         :currentFieldKey="currentEditingFieldKey"
         :currentFieldLabel="currentEditingFieldLabel"
+        :fieldDefinition="currentEditingFieldDefinition"
         @updateConstraints="confirmConstraintsDialog"
         @closeConstraintsDialog="cancelConstraintsDialog"
         @showGenericDialog="openGenericDialog"
@@ -805,7 +806,6 @@ import FieldTime from "@/components/fields/FieldTime.vue";
 import FieldSlider from "@/components/fields/FieldSlider.vue";
 import FieldLinearScale from "@/components/fields/FieldLinearScale.vue";
 import FieldFileUpload from "@/components/fields/FieldFileUpload.vue";
-import { normalizeConstraints, coerceDefaultForType } from "@/utils/constraints";
 import LogicCalculationsRoute from "./LogicCalculationsRoute.vue";
 import ImportCsvTemplateDialog from "./ImportCsvTemplateDialog.vue";
 import RearrangeStructureDialog from "@/components/RearrangeStructureDialog.vue";
@@ -975,6 +975,11 @@ export default {
   },
 
   computed: {
+    currentEditingFieldDefinition() {
+      const { sectionIndex, fieldIndex } = this.currentFieldIndices || {};
+      const field = this.currentForm.sections?.[sectionIndex]?.fields?.[fieldIndex];
+      return field ? JSON.parse(JSON.stringify(field)) : {};
+    },
     allSelectablePropsSelected() {
       if (!this.currentModel || !Array.isArray(this.currentModel.fields) || !this.currentModel.fields.length) {
         return false;
@@ -2821,7 +2826,7 @@ export default {
       this.showConstraintsDialog = true;
     },
 
-    confirmConstraintsDialog(c) {
+    confirmConstraintsDialog(payload) {
       const { sectionIndex, fieldIndex } = this.currentFieldIndices;
       const f = this.currentForm.sections[sectionIndex]?.fields?.[fieldIndex];
       if (!f) {
@@ -2829,176 +2834,107 @@ export default {
         return;
       }
 
-      const originalType = f.type;
-      const prevConstraints = JSON.parse(JSON.stringify(f.constraints || {}));
-
-      // helper: keep any unknown / future advanced settings
-      const mergeConstraints = (normalized) => ({
-        ...prevConstraints,
-        ...normalized
-      });
-
-      if (originalType === "file") {
-        const cleaned = mergeConstraints({
-          helpText: c.helpText || "",
-          required: !!c.required,
-          readonly: !!c.readonly,
-          allowedFormats: Array.isArray(c.allowedFormats) ? c.allowedFormats : [],
-          maxSizeMB: (Number.isFinite(c.maxSizeMB) && c.maxSizeMB > 0) ? Number(c.maxSizeMB) : undefined,
-          storagePreference: (c.storagePreference === "url") ? "url" : "local",
-          modalities: Array.isArray(c.modalities) ? c.modalities.filter(Boolean).map(String) : [],
-          allowMultipleFiles: c.allowMultipleFiles !== false,
-          visibilityLogic: c.visibilityLogic || prevConstraints.visibilityLogic || {
-            enabled: false,
-            match: "all",
-            action: "show",
-            targetFieldKeys: [],
-            rules: []
-          }
-        });
-
-        if (!cleaned.modalities.length) {
-          const fallback = (String(f.label || "").trim()) || f.name;
-          cleaned.modalities = [fallback];
-        }
-
-        f.constraints = cleaned;
+      const nextField = payload?.field;
+      if (!nextField || typeof nextField !== "object") {
         this.showConstraintsDialog = false;
         return;
       }
 
-      if (originalType !== "slider") {
-        const norm = normalizeConstraints(originalType, c);
+      const preserved = {
+        _id: f._id,
+        name: f.name,
+        label: f.label,
+      };
 
-        if ((f.type === "select" || f.type === "radio") && Array.isArray(c.options)) {
-          const cleanedOptions = c.options.map(o => String(o || "").trim()).filter(Boolean);
-          f.options = cleanedOptions.length ? cleanedOptions : ["Option 1"];
-        }
+      const mergedField = {
+        ...f,
+        ...nextField,
+        ...preserved,
+        constraints: {
+          ...(nextField.constraints || {}),
+        },
+      };
 
-        if (f.type === "radio") {
-          if (norm.allowMultiple) {
-            if (!Array.isArray(f.value)) f.value = [];
-            f.value = f.value.filter(v => f.options.includes(v));
-            if (Object.prototype.hasOwnProperty.call(norm, "defaultValue")) {
-              const dv = Array.isArray(norm.defaultValue) ? norm.defaultValue : [];
-              f.value = dv.filter(v => f.options.includes(v));
-            }
+      if (!Array.isArray(mergedField.options)) {
+        mergedField.options = [];
+      }
+
+      if (mergedField.type !== "textarea") {
+        delete mergedField.rows;
+      } else {
+        mergedField.rows = Number.isFinite(Number(mergedField.rows))
+          ? Number(mergedField.rows)
+          : 4;
+      }
+
+      if (mergedField.type !== "table") {
+        delete mergedField.tableConfig;
+        if (!Array.isArray(mergedField.value)) {
+          if (mergedField.type === "checkbox") mergedField.value = false;
+          else if (mergedField.type === "slider") mergedField.value = null;
+          else if (mergedField.type === "file") {
+            mergedField.value = mergedField.constraints?.allowMultipleFiles ? [] : null;
           } else {
-            if (Array.isArray(f.value)) f.value = f.value[0] || "";
-            if (!f.options.includes(f.value)) f.value = "";
-            if (Object.prototype.hasOwnProperty.call(norm, "defaultValue")) {
-              const dv = typeof norm.defaultValue === "string" ? norm.defaultValue : "";
-              f.value = f.options.includes(dv) ? dv : "";
-            }
-          }
-        } else if (f.type === "select") {
-          if (Array.isArray(f.value)) f.value = f.value[0] || "";
-          if (!f.options.includes(f.value)) f.value = "";
-          if (Object.prototype.hasOwnProperty.call(norm, "defaultValue")) {
-            const dv = typeof norm.defaultValue === "string" ? norm.defaultValue : "";
-            f.value = f.options.includes(dv) ? dv : "";
+            mergedField.value = mergedField.value ?? "";
           }
         }
-
-        if (Object.prototype.hasOwnProperty.call(norm, "placeholder") && f.type !== "checkbox" && f.type !== "file") {
-          f.placeholder = norm.placeholder || "";
-        }
-
-        if (
-          f.type !== "radio" &&
-          f.type !== "select" &&
-          f.type !== "slider" &&
-          f.type !== "file" &&
-          Object.prototype.hasOwnProperty.call(norm, "defaultValue")
-        ) {
-          const coerced = coerceDefaultForType(f.type, norm.defaultValue);
-          if (coerced !== undefined) f.value = coerced;
-        }
-
-        if (f.type === "date" && (c.dateFormat || norm.dateFormat)) {
-          const fmt = c.dateFormat || norm.dateFormat;
-          f.placeholder = fmt;
-          norm.dateFormat = fmt;
-        }
-
-        f.constraints = mergeConstraints({
-          ...norm,
-          visibilityLogic: c.visibilityLogic || prevConstraints.visibilityLogic || {
-            enabled: false,
-            match: "all",
-            action: "show",
-            targetFieldKeys: [],
-            rules: []
-          }
-        });
-
-        if (
-          (f.value === "" || f.value === undefined || f.value === null) &&
-          Object.prototype.hasOwnProperty.call(f.constraints, "defaultValue") &&
-          f.type !== "file"
-        ) {
-          f.value = f.constraints.defaultValue;
-        }
-
-        this.showConstraintsDialog = false;
-        return;
       }
 
-      if (c.mode === "linear") {
-        let min = Number.isFinite(+c.min) ? Math.round(+c.min) : 1;
-        let max = Number.isFinite(+c.max) ? Math.round(+c.max) : 5;
-        if (max <= min) max = min + 1;
-        if (max - min + 1 > 10) max = min + 9;
-
-        f.constraints = mergeConstraints({
-          mode: "linear",
-          required: !!c.required,
-          readonly: !!c.readonly,
-          helpText: c.helpText || "",
-          min,
-          max,
-          leftLabel: c.leftLabel || "",
-          rightLabel: c.rightLabel || "",
-          visibilityLogic: c.visibilityLogic || prevConstraints.visibilityLogic || {
-            enabled: false,
-            match: "all",
-            action: "show",
-            targetFieldKeys: [],
-            rules: []
-          }
-        });
-
-        f.value = null;
-        this.showConstraintsDialog = false;
-        return;
+      if (mergedField.type === "select") {
+        mergedField.constraints = { ...(mergedField.constraints || {}) };
+        delete mergedField.constraints.allowMultiple;
+        if (!mergedField.options.includes(mergedField.value)) {
+          mergedField.value = "";
+        }
       }
 
-      let min = Number.isFinite(+c.min) ? +c.min : 1;
-      let max = Number.isFinite(+c.max) ? +c.max : (c.percent ? 100 : 5);
-      if (max <= min) max = min + 1;
-      let step = Number.isFinite(+c.step) && +c.step > 0 ? +c.step : 1;
-
-      f.constraints = mergeConstraints({
-        mode: "slider",
-        required: !!c.required,
-        readonly: !!c.readonly,
-        helpText: c.helpText || "",
-        percent: !!c.percent,
-        min,
-        max,
-        step,
-        marks: Array.isArray(c.marks) ? c.marks : [],
-        visibilityLogic: c.visibilityLogic || prevConstraints.visibilityLogic || {
-          enabled: false,
-          match: "all",
-          action: "show",
-          targetFieldKeys: [],
-          rules: []
+      if (mergedField.type === "radio") {
+        const allowMultiple = !!mergedField.constraints?.allowMultiple;
+        if (allowMultiple) {
+          if (!Array.isArray(mergedField.value)) {
+            mergedField.value = mergedField.value ? [mergedField.value] : [];
+          }
+          mergedField.value = mergedField.value.filter((v) => mergedField.options.includes(v));
+        } else {
+          if (Array.isArray(mergedField.value)) {
+            mergedField.value = mergedField.value[0] || "";
+          }
+          if (!mergedField.options.includes(mergedField.value)) {
+            mergedField.value = "";
+          }
         }
-      });
+      }
 
-      const v = Number(f.value);
-      f.value = Number.isFinite(v) && v >= min && v <= max ? v : null;
+      if (mergedField.type === "checkbox") {
+        mergedField.value = !!mergedField.value;
+      }
+
+      if (mergedField.type === "date") {
+        mergedField.placeholder =
+          mergedField.constraints?.dateFormat || mergedField.placeholder || "dd.MM.yyyy";
+      }
+
+      if (mergedField.type === "file") {
+        mergedField.icon = mergedField.icon || icons.paperclip;
+        const fallbackMod = String(mergedField.label || "").trim() || mergedField.name;
+        if (
+          !Array.isArray(mergedField.constraints?.modalities) ||
+          !mergedField.constraints.modalities.length
+        ) {
+          mergedField.constraints.modalities = [fallbackMod];
+        }
+        mergedField.value =
+          mergedField.constraints?.allowMultipleFiles !== false ? [] : null;
+      }
+
+      this.currentForm.sections[sectionIndex].fields.splice(fieldIndex, 1, mergedField);
+
+      if (Array.isArray(payload?.conversionWarnings) && payload.conversionWarnings.length) {
+        this.openGenericDialog(
+          `Field type updated. Please review the converted settings.\n\n${payload.conversionWarnings.join("\n")}`
+        );
+      }
+
       this.showConstraintsDialog = false;
     },
 

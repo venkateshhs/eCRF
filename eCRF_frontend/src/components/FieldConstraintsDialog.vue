@@ -40,6 +40,43 @@
             </label>
           </div>
         </div>
+        <div class="row">
+          <label>Field type</label>
+          <select v-model="localType" @change="onFieldTypeChange">
+            <option
+              v-for="opt in FIELD_TYPE_OPTIONS"
+              :key="opt.value"
+              :value="opt.value"
+            >
+              {{ opt.label }}
+            </option>
+          </select>
+        </div>
+        <div
+          v-if="conversionReport && (conversionReport.lossy || (conversionReport.warnings && conversionReport.warnings.length))"
+          class="row conversion-warning"
+        >
+          <label>Conversion warning</label>
+          <div class="conversion-warning-box">
+            <template v-if="conversionReport.warnings && conversionReport.warnings.length">
+              <ul>
+                <li v-for="(warn, i) in conversionReport.warnings" :key="i">
+                  {{ warn }}
+                </li>
+              </ul>
+            </template>
+            <template v-else>
+              <div>
+                Changing this field type may discard incompatible settings or values.
+              </div>
+            </template>
+
+            <label v-if="conversionReport.lossy" class="chk conversion-confirm">
+              <input type="checkbox" v-model="lossyConversionConfirmed" />
+              I understand and want to continue
+            </label>
+          </div>
+        </div>
 
         <div class="row">
           <label class="chk">
@@ -768,6 +805,11 @@
 <script>
 /* eslint-disable */
 import { normalizeConstraints, coerceDefaultForType } from "@/utils/constraints";
+import {
+  FIELD_TYPE_OPTIONS,
+  getFieldTypeConversionReport,
+  buildConvertedField,
+} from "@/utils/fieldTypeConversion";
 import DateFormatPicker from "@/components/DateFormatPicker.vue";
 import FieldTime from "@/components/fields/FieldTime.vue";
 import BaseTextarea from "@/components/forms/BaseTextarea.vue";
@@ -904,6 +946,7 @@ export default {
     form: { type: Object, default: () => ({ sections: [] }) },
     currentFieldKey: { type: String, default: "" },
     currentFieldLabel: { type: String, default: "" },
+    fieldDefinition: { type: Object, default: () => ({}) },
   },
 
   data() {
@@ -923,6 +966,11 @@ export default {
       customMod: "",
       allowedFormatsText: allowedFormats.join(", "),
 
+      localType: (this.currentFieldType || "text").toLowerCase(),
+      FIELD_TYPE_OPTIONS,
+      conversionReport: null,
+      lossyConversionConfirmed: false,
+
       local,
       localOptions: initialOptions.length ? initialOptions : ["Option 1"],
       optionsCount: Math.max(1, initialOptions.length || 1),
@@ -938,7 +986,7 @@ export default {
 
   computed: {
     type() {
-      return (this.currentFieldType || "text").toLowerCase();
+      return (this.localType || this.currentFieldType || "text").toLowerCase();
     },
     isTextLike() {
       return this.type === "text" || this.type === "textarea";
@@ -1110,6 +1158,9 @@ export default {
 
         this.allowedFormatsText = allowedFormats.join(", ");
         this.local = nextLocal;
+        this.localType = (this.currentFieldType || "text").toLowerCase();
+        this.conversionReport = null;
+        this.lossyConversionConfirmed = false;
 
         if (Array.isArray(nv?.options)) {
           const cleaned = nv.options.filter(Boolean).map(String);
@@ -1176,6 +1227,106 @@ export default {
   },
 
   methods: {
+    buildCurrentFieldSnapshot() {
+      return {
+        ...(this.fieldDefinition || {}),
+        type: this.currentFieldType,
+        placeholder: this.local?.placeholder ?? this.fieldDefinition?.placeholder ?? "",
+        rows: this.fieldDefinition?.rows,
+        value: this.fieldDefinition?.value,
+        options: Array.isArray(this.localOptions)
+          ? [...this.localOptions]
+          : Array.isArray(this.fieldDefinition?.options)
+          ? [...this.fieldDefinition.options]
+          : [],
+        constraints: {
+          ...(this.fieldDefinition?.constraints || {}),
+          ...(this.local || {}),
+          visibilityLogic: this.cleanedVisibilityLogic(),
+        },
+      };
+    },
+
+    applyConversionPreview(report) {
+      if (!report) return;
+
+      const existingVisibilityLogic = this.local?.visibilityLogic
+        ? JSON.parse(JSON.stringify(this.local.visibilityLogic))
+        : {
+            action: "show",
+            match: "all",
+            rules: [this.makeLogicRule()],
+          };
+
+      const existingRuleSectionKeys = Array.isArray(existingVisibilityLogic.rules)
+        ? existingVisibilityLogic.rules.map((r) => ({
+            sourceFieldKey: String(r?.sourceFieldKey || ""),
+            _sectionKey: String(r?._sectionKey || ""),
+          }))
+        : [];
+
+      this.local = {
+        ...this.local,
+        ...(report.nextConstraints || {}),
+        visibilityLogic: existingVisibilityLogic, // preserve advanced tab exactly
+      };
+
+      this.localOptions =
+        Array.isArray(report.nextOptions) && report.nextOptions.length
+          ? [...report.nextOptions]
+          : (report.nextType === "select" || report.nextType === "radio")
+          ? ["Option 1"]
+          : [];
+
+      this.optionsCount = this.localOptions.length || 1;
+
+      if ("nextPlaceholder" in report) {
+        this.local.placeholder = report.nextPlaceholder || "";
+      }
+
+      if (report.nextType === "textarea") {
+        this.local.rows = report.nextRows || this.fieldDefinition?.rows || 4;
+      } else {
+        delete this.local.rows;
+      }
+
+      this.$nextTick(() => {
+        const rules = this.local?.visibilityLogic?.rules;
+        if (!Array.isArray(rules)) return;
+
+        rules.forEach((rule) => {
+          const matched = existingRuleSectionKeys.find(
+            (x) => x.sourceFieldKey === String(rule?.sourceFieldKey || "")
+          );
+          if (matched && matched._sectionKey) {
+            rule._sectionKey = matched._sectionKey;
+          }
+        });
+      });
+    },
+
+    onFieldTypeChange() {
+      const nextType = String(this.localType || "").toLowerCase();
+      const prevType = String(this.currentFieldType || "").toLowerCase();
+
+      if (!nextType || nextType === prevType) {
+        this.conversionReport = null;
+        this.lossyConversionConfirmed = false;
+        return;
+      }
+
+      const snapshot = this.buildCurrentFieldSnapshot();
+
+      const report = getFieldTypeConversionReport({
+        field: snapshot,
+        fromType: prevType,
+        toType: nextType,
+      });
+
+      this.conversionReport = report;
+      this.lossyConversionConfirmed = false;
+      this.applyConversionPreview(report);
+    },
     syncRuleSectionKeys() {
       const rules = this.local?.visibilityLogic?.rules;
       if (!Array.isArray(rules)) return;
@@ -1616,8 +1767,47 @@ export default {
 
     save() {
       if (this.isSaveDisabled) return;
+      if (this.conversionReport?.lossy && !this.lossyConversionConfirmed) return;
 
       const visibilityLogic = this.cleanedVisibilityLogic();
+      const nextType = String(this.localType || this.currentFieldType || "text").toLowerCase();
+      const originalType = String(this.currentFieldType || "text").toLowerCase();
+
+      const snapshot = this.buildCurrentFieldSnapshot();
+
+      let fieldPayload;
+
+      if (nextType !== originalType) {
+        const converted = buildConvertedField({
+          field: snapshot,
+          fromType: originalType,
+          toType: nextType,
+        });
+
+        fieldPayload = converted.field;
+        fieldPayload.constraints = {
+          ...(fieldPayload.constraints || {}),
+          ...(this.local || {}),
+          visibilityLogic,
+        };
+
+        if (this.isChoice) {
+          const opts = this.localOptions.map((o) => String(o || "").trim()).filter(Boolean);
+          fieldPayload.options = opts.length ? Array.from(new Set(opts)) : ["Option 1"];
+        }
+
+        if (nextType === "select") {
+          delete fieldPayload.constraints.allowMultiple;
+        }
+
+        this.$emit("updateConstraints", {
+          type: fieldPayload.type,
+          field: fieldPayload,
+          changedType: true,
+          conversionWarnings: this.conversionReport?.warnings || [],
+        });
+        return;
+      }
 
       if (this.isFile) {
         const parsedFormats = String(this.allowedFormatsText || "")
@@ -1642,25 +1832,38 @@ export default {
           visibilityLogic,
         };
 
-        this.$emit("updateConstraints", cleaned);
+        this.$emit("updateConstraints", {
+          type: nextType,
+          field: {
+            ...this.fieldDefinition,
+            type: nextType,
+            constraints: cleaned,
+          },
+          changedType: false,
+          conversionWarnings: [],
+        });
         return;
       }
 
       if (!this.isSlider) {
         const cleaned = normalizeConstraints(this.type, { ...this.local });
 
+        let finalOptions = Array.isArray(this.fieldDefinition?.options)
+          ? [...this.fieldDefinition.options]
+          : [];
+
         if (this.isChoice) {
           const opts = this.localOptions.map((o) => String(o || "").trim()).filter(Boolean);
-          const finalOpts = opts.length ? Array.from(new Set(opts)) : ["Option 1"];
+          finalOptions = opts.length ? Array.from(new Set(opts)) : ["Option 1"];
 
           if (this.isRadio && this.local.allowMultiple) {
             const arr = Array.isArray(cleaned.defaultValue) ? cleaned.defaultValue : [];
-            cleaned.defaultValue = arr.filter((v) => finalOpts.includes(v));
+            cleaned.defaultValue = arr.filter((v) => finalOptions.includes(v));
           } else {
-            if (!finalOpts.includes(cleaned.defaultValue)) cleaned.defaultValue = "";
+            if (!finalOptions.includes(cleaned.defaultValue)) cleaned.defaultValue = "";
           }
 
-          cleaned.options = finalOpts;
+          cleaned.options = finalOptions;
           if (this.isSelect) delete cleaned.allowMultiple;
         }
 
@@ -1671,7 +1874,23 @@ export default {
         cleaned.hourCycle = this.local.hourCycle || "24";
         cleaned.visibilityLogic = visibilityLogic;
 
-        this.$emit("updateConstraints", cleaned);
+        const updatedField = {
+          ...this.fieldDefinition,
+          type: nextType,
+          constraints: cleaned,
+          placeholder:
+            Object.prototype.hasOwnProperty.call(cleaned, "placeholder")
+              ? cleaned.placeholder || ""
+              : this.fieldDefinition?.placeholder || "",
+          options: this.isChoice ? finalOptions : [],
+        };
+
+        this.$emit("updateConstraints", {
+          type: nextType,
+          field: updatedField,
+          changedType: false,
+          conversionWarnings: [],
+        });
         return;
       }
 
@@ -1705,7 +1924,16 @@ export default {
           visibilityLogic,
         };
 
-        this.$emit("updateConstraints", cleaned);
+        this.$emit("updateConstraints", {
+          type: nextType,
+          field: {
+            ...this.fieldDefinition,
+            type: nextType,
+            constraints: cleaned,
+          },
+          changedType: false,
+          conversionWarnings: [],
+        });
         return;
       }
 
@@ -1727,10 +1955,21 @@ export default {
         visibilityLogic,
       };
 
-      this.$emit("updateConstraints", cleaned);
+      this.$emit("updateConstraints", {
+        type: nextType,
+        field: {
+          ...this.fieldDefinition,
+          type: nextType,
+          constraints: cleaned,
+        },
+        changedType: false,
+        conversionWarnings: [],
+      });
     },
 
     clearToInitial() {
+      this.conversionReport = null;
+      this.lossyConversionConfirmed = false;
       const t = this.type;
 
       this.local.required = false;
@@ -2038,5 +2277,22 @@ select {
   display: flex;
   align-items: center;
   gap: 6px;
+}
+.conversion-warning-box {
+  background: #fff7ed;
+  border: 1px solid #fdba74;
+  color: #9a3412;
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 12px;
+}
+
+.conversion-warning-box ul {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.conversion-confirm {
+  margin-top: 8px;
 }
 </style>
