@@ -1,13 +1,11 @@
 <template>
   <div class="study-data-container" v-if="study">
-    <!-- Back Buttons (hidden for shared links AND while Merge panel is open) -->
+    <!-- Back Buttons -->
     <div class="back-buttons-container" v-if="!isShared">
-      <!-- Merge mode back button (same styling/position) -->
       <button v-if="isMergeMode" @click="closeMergeStudy" class="btn-back">
         Back to Selection
       </button>
 
-      <!-- Normal behavior -->
       <template v-else>
         <button v-if="showSelection" @click="goToDashboard" class="btn-back">
           Back to Dashboard
@@ -33,13 +31,11 @@
 
       <div class="details-panel">
         <div class="details-controls">
-          <!-- Hide details toggle while Merge panel is open (keeps UI clean) -->
           <button v-if="!isMergeMode" @click="toggleDetails" class="details-toggle-btn">
             <i :class="showDetails ? icons.toggleUp : icons.toggleDown"></i>
-            {{ showDetails ? 'Hide Study Details' : 'Show Study Details' }}
+            {{ showDetails ? "Hide Study Details" : "Show Study Details" }}
           </button>
 
-          <!-- Merge Study button placed in the same row (simple, no teleport/mount hacks) -->
           <button
             v-if="showSelection && !isShared && !isMergeMode"
             type="button"
@@ -49,7 +45,6 @@
             Import data from other device
           </button>
 
-          <!-- Share icon hidden for shared mode -->
           <button
             v-if="!showSelection && !isShared"
             class="share-icon"
@@ -69,6 +64,7 @@
               </li>
             </ul>
           </div>
+
           <div v-if="!showSelection" class="details-block">
             <strong>Visit Info:</strong>
             <ul>
@@ -79,22 +75,19 @@
           </div>
         </div>
       </div>
+
       <hr />
     </div>
 
-    <!-- Selection (hidden in shared mode; shared preselects) -->
+    <!-- Selection -->
     <template v-if="showSelection && !isShared">
-      <!-- Matrix view (hidden when Merge is open) -->
       <div v-if="!isMergeMode" class="selection-import-bar">
-        <button
-          type="button"
-          class="import-btn"
-          @click="openImportDialogFromSelection"
-        >
+        <button type="button" class="import-btn" @click="openImportDialogFromSelection">
           <i :class="icons.upload || 'fas fa-file-import'"></i>
           Import Data
         </button>
       </div>
+
       <SelectionMatrixView
         v-if="!isMergeMode"
         :matrixReady="matrixReady"
@@ -116,9 +109,7 @@
         @open-status-legend="openStatusLegend"
       />
 
-      <!-- Merge Study panel (replaces matrix within the same container) -->
       <section v-else class="merge-panel">
-        <!-- MergeStudy already has its own back button; no extra title/back here -->
         <MergeStudy :studyId="studyId" :returnTo="`/dashboard/studies/${studyId}/add-data`" />
       </section>
     </template>
@@ -130,8 +121,11 @@
           <strong>Study:</strong> {{ study.metadata.study_name }}
           <strong>Subject:</strong> {{ sd.subjects?.[currentSubjectIndex]?.id }}
           <strong>Visit:</strong> {{ visitList[currentVisitIndex].name }}
-          <span v-if="!isShared && selectedVersion" class="version-helper">Saving to Version {{ selectedVersion }}</span>
+          <span v-if="!isShared && selectedVersion" class="version-helper">
+            Saving to Version {{ selectedVersion }}
+          </span>
         </div>
+
         <div class="crumb-actions">
           <button
             v-if="canEdit"
@@ -144,271 +138,289 @@
             Import Data
           </button>
 
-          <button type="button" class="legend-btn" @click="openLegendDialog" :title="'Legend / What does * mean?'">
+          <button
+            type="button"
+            class="legend-btn"
+            @click="openLegendDialog"
+            title="Legend / What does * mean?"
+          >
             <i :class="icons.help || 'fas fa-question-circle'"></i>
           </button>
         </div>
       </div>
 
       <div class="entry-form-section">
-        <h2>
+        <h2 class="entry-title">
           Enter Data for Subject: {{ sd.subjects?.[currentSubjectIndex]?.id }},
           Visit: “{{ visitList[currentVisitIndex].name }}”
         </h2>
 
-        <!-- Only assigned sections are shown -->
-        <div v-if="assignedModelIndices.length">
+        <div v-if="assignedModelIndices.length" class="sections-stack">
           <template v-for="mIdx in assignedModelIndices" :key="'sec-wrap-' + mIdx">
-            <div
+            <section
               v-if="hasVisibleFieldsInSection(mIdx)"
               :key="'sec-' + mIdx"
-              class="section-block"
+              class="section-card"
             >
-              <h3>{{ selectedModels[mIdx].title }}</h3>
+              <div class="section-card-header">
+                <h3>{{ selectedModels[mIdx].title }}</h3>
+              </div>
 
-              <template v-for="(field, fIdx) in selectedModels[mIdx].fields" :key="'f-wrap-' + mIdx + '-' + fIdx">
-                <div
-                  v-if="isFieldVisible(mIdx, fIdx)"
-                  :key="'f-' + mIdx + '-' + fIdx"
-                  class="form-field"
+              <div class="section-card-body">
+                <template
+                  v-for="(field, fIdx) in selectedModels[mIdx].fields"
+                  :key="'f-wrap-' + mIdx + '-' + fIdx"
                 >
-                  <div class="field-label-row">
-                    <label :for="fieldId(mIdx, fIdx)" class="field-label">
-                      <span>{{ field.label || field.name || field.title }}</span>
-                      <span v-if="field.constraints?.required" class="required">*</span>
+                  <div
+                    v-if="isFieldVisible(mIdx, fIdx)"
+                    :key="'f-' + mIdx + '-' + fIdx"
+                    class="field-card"
+                  >
+                    <div class="field-card-header">
+                      <label :for="fieldId(mIdx, fIdx)" class="field-label">
+                        <span class="field-label-main">
+                          {{ field.label || field.name || field.title }}
+                        </span>
+                        <span v-if="field.constraints?.required" class="required">*</span>
+                      </label>
 
-                      <em v-if="field.constraints?.helpText" class="help-inline">
-                        {{ field.constraints.helpText }}
-                      </em>
-                    </label>
+                      <div class="field-label-actions">
+                        <button
+                          v-if="!isShared && canShowPreviousVisitImport(field, mIdx, fIdx) && !isImportedFromPreviousVisit(mIdx, fIdx)"
+                          type="button"
+                          class="field-icon-btn"
+                          title="Import from previous visits"
+                          @click="openPreviousVisitImportDialog(mIdx, fIdx)"
+                        >
+                          <i :class="icons.copy || 'fas fa-copy'"></i>
+                        </button>
 
-                    <div class="field-label-actions">
-                      <button
-                        v-if="!isShared && canShowPreviousVisitImport(field, mIdx, fIdx) && !isImportedFromPreviousVisit(mIdx, fIdx)"
-                        type="button"
-                        class="field-icon-btn"
-                        title="Import from previous visits"
-                        @click="openPreviousVisitImportDialog(mIdx, fIdx)"
+                        <button
+                          v-if="!isShared && canShowPreviousVisitImport(field, mIdx, fIdx) && isImportedFromPreviousVisit(mIdx, fIdx)"
+                          type="button"
+                          class="field-icon-btn field-icon-btn-active"
+                          :title="`Imported from ${importedPreviousVisitLabel(mIdx, fIdx)}. Click to make editable.`"
+                          @click="unlockImportedPreviousVisit(mIdx, fIdx)"
+                          :disabled="!canEdit"
+                        >
+                          <i :class="icons.lock || 'fas fa-lock'"></i>
+                        </button>
+
+                        <button
+                          v-if="hasConstraints(field)"
+                          type="button"
+                          class="field-icon-btn"
+                          title="Field constraints"
+                          @click="openConstraintDialog(field)"
+                        >
+                          <i class="fas fa-question-circle"></i>
+                        </button>
+                      </div>
+                    </div>
+
+                    <div v-if="field.constraints?.helpText" class="field-help-box">
+                      {{ field.constraints.helpText }}
+                    </div>
+
+                    <div class="field-card-body">
+                      <!-- TEXT -->
+                      <input
+                        v-if="field.type === 'text'"
+                        :id="fieldId(mIdx, fIdx)"
+                        type="text"
+                        v-model="entryData[currentSubjectIndex][currentVisitIndex][currentGroupIndex][mIdx][fIdx]"
+                        :placeholder="field.placeholder"
+                        :required="!!field.constraints?.required"
+                        :readonly="isReadonlyField(field, mIdx, fIdx)"
+                        :minlength="field.constraints?.minLength"
+                        :maxlength="field.constraints?.maxLength"
+                        :pattern="field.constraints?.pattern"
+                        @blur="onFieldBlur(mIdx, fIdx)"
+                        @input="() => { clearError(mIdx, fIdx); onRuntimeFieldChanged(mIdx, fIdx); }"
+                      />
+
+                      <!-- TEXTAREA -->
+                      <textarea
+                        v-else-if="field.type === 'textarea'"
+                        :id="fieldId(mIdx, fIdx)"
+                        v-model="entryData[currentSubjectIndex][currentVisitIndex][currentGroupIndex][mIdx][fIdx]"
+                        :placeholder="field.placeholder"
+                        :required="!!field.constraints?.required"
+                        :readonly="isReadonlyField(field, mIdx, fIdx)"
+                        :minlength="field.constraints?.minLength"
+                        :maxlength="field.constraints?.maxLength"
+                        :pattern="field.constraints?.pattern"
+                        rows="4"
+                        @blur="onFieldBlur(mIdx, fIdx)"
+                        @input="() => { clearError(mIdx, fIdx); onRuntimeFieldChanged(mIdx, fIdx); }"
+                      ></textarea>
+
+                      <!-- NUMBER -->
+                      <input
+                        v-else-if="field.type === 'number'"
+                        :id="fieldId(mIdx, fIdx)"
+                        type="number"
+                        v-model.number="entryData[currentSubjectIndex][currentVisitIndex][currentGroupIndex][mIdx][fIdx]"
+                        :placeholder="field.placeholder"
+                        :required="!!field.constraints?.required"
+                        :readonly="isReadonlyField(field, mIdx, fIdx)"
+                        :min="field.constraints?.min"
+                        :max="field.constraints?.max"
+                        :step="field.constraints?.step"
+                        @blur="() => { validateField(mIdx, fIdx); onRuntimeFieldChanged(mIdx, fIdx); }"
+                        @input="() => { clearError(mIdx, fIdx); onRuntimeFieldChanged(mIdx, fIdx); }"
+                      />
+
+                      <!-- CHECKBOX -->
+                      <FieldCheckbox
+                        v-else-if="field.type === 'checkbox'"
+                        :id="fieldId(mIdx, fIdx)"
+                        v-model="entryData[currentSubjectIndex][currentVisitIndex][currentGroupIndex][mIdx][fIdx]"
+                        v-bind="selectedModels[mIdx].fields[fIdx].constraints"
+                        :disabled="isReadonlyField(field, mIdx, fIdx)"
+                        @update:modelValue="() => { clearError(mIdx, fIdx); validateField(mIdx, fIdx); onRuntimeFieldChanged(mIdx, fIdx); }"
+                      />
+
+                      <!-- RADIO -->
+                      <FieldRadioGroup
+                        v-else-if="field.type === 'radio'"
+                        :id="fieldId(mIdx, fIdx)"
+                        :name="fieldId(mIdx, fIdx)"
+                        :options="field.options || []"
+                        v-model="entryData[currentSubjectIndex][currentVisitIndex][currentGroupIndex][mIdx][fIdx]"
+                        :default-value="field.constraints?.defaultValue"
+                        v-bind="selectedModels[mIdx].fields[fIdx].constraints"
+                        :disabled="isReadonlyField(field, mIdx, fIdx)"
+                        @change="() => { validateField(mIdx, fIdx); onRuntimeFieldChanged(mIdx, fIdx); }"
+                        @update:modelValue="() => { clearError(mIdx, fIdx); validateField(mIdx, fIdx); onRuntimeFieldChanged(mIdx, fIdx); }"
+                      />
+
+                      <!-- DATE -->
+                      <DateFormatPicker
+                        v-else-if="field.type === 'date'"
+                        :id="fieldId(mIdx, fIdx)"
+                        v-model="entryData[currentSubjectIndex][currentVisitIndex][currentGroupIndex][mIdx][fIdx]"
+                        :format="field.constraints?.dateFormat || 'dd.MM.yyyy'"
+                        :placeholder="field.placeholder || (field.constraints?.dateFormat || 'dd.MM.yyyy')"
+                        :min-date="field.constraints?.minDate || null"
+                        :max-date="field.constraints?.maxDate || null"
+                        :readonly="isReadonlyField(field, mIdx, fIdx)"
+                        @change="() => { validateField(mIdx, fIdx); onRuntimeFieldChanged(mIdx, fIdx); }"
+                        @blur="() => { validateField(mIdx, fIdx); onRuntimeFieldChanged(mIdx, fIdx); }"
+                      />
+
+                      <!-- TIME -->
+                      <FieldTime
+                        v-else-if="field.type === 'time'"
+                        :id="fieldId(mIdx, fIdx)"
+                        v-model="entryData[currentSubjectIndex][currentVisitIndex][currentGroupIndex][mIdx][fIdx]"
+                        :placeholder="field.placeholder || (field.constraints?.timeFormat || 'HH:mm')"
+                        v-bind="selectedModels[mIdx].fields[fIdx].constraints"
+                        :readonly="isReadonlyField(field, mIdx, fIdx)"
+                        @change="() => { validateField(mIdx, fIdx); onRuntimeFieldChanged(mIdx, fIdx); }"
+                        @blur="() => { validateField(mIdx, fIdx); onRuntimeFieldChanged(mIdx, fIdx); }"
+                      />
+
+                      <!-- SELECT -->
+                      <FieldSelect
+                        v-else-if="field.type === 'select'"
+                        :id="fieldId(mIdx, fIdx)"
+                        v-model="entryData[currentSubjectIndex][currentVisitIndex][currentGroupIndex][mIdx][fIdx]"
+                        :options="field.options || []"
+                        :multiple="!!field.constraints?.allowMultiple"
+                        :readonly="isReadonlyField(field, mIdx, fIdx)"
+                        :default-value="field.constraints?.defaultValue"
+                        :placeholder="'Select…'"
+                        @update:modelValue="() => { validateField(mIdx, fIdx); onRuntimeFieldChanged(mIdx, fIdx); }"
+                      />
+
+                      <!-- SLIDER -->
+                      <FieldSlider
+                        v-else-if="field.type === 'slider' && (field.constraints?.mode || 'slider') === 'slider'"
+                        :id="fieldId(mIdx, fIdx)"
+                        v-model="entryData[currentSubjectIndex][currentVisitIndex][currentGroupIndex][mIdx][fIdx]"
+                        v-bind="getSliderProps(field)"
+                        :disabled="isReadonlyField(field, mIdx, fIdx)"
+                        @update:modelValue="() => { clearError(mIdx, fIdx); validateField(mIdx, fIdx); onRuntimeFieldChanged(mIdx, fIdx); }"
+                        @change="() => { validateField(mIdx, fIdx); onRuntimeFieldChanged(mIdx, fIdx); }"
+                      />
+
+                      <!-- LINEAR -->
+                      <FieldLinearScale
+                        v-else-if="field.type === 'slider' && field.constraints?.mode === 'linear'"
+                        :id="fieldId(mIdx, fIdx)"
+                        v-model="entryData[currentSubjectIndex][currentVisitIndex][currentGroupIndex][mIdx][fIdx]"
+                        v-bind="getLinearProps(field)"
+                        :disabled="isReadonlyField(field, mIdx, fIdx)"
+                        @update:modelValue="() => { clearError(mIdx, fIdx); validateField(mIdx, fIdx); onRuntimeFieldChanged(mIdx, fIdx); }"
+                        @change="() => { validateField(mIdx, fIdx); onRuntimeFieldChanged(mIdx, fIdx); }"
+                      />
+
+                      <!-- TABLE -->
+                      <FieldTable
+                        v-else-if="field.type === 'table'"
+                        :ref="`tableField_${mIdx}_${fIdx}`"
+                        :id="fieldId(mIdx, fIdx)"
+                        v-model="entryData[currentSubjectIndex][currentVisitIndex][currentGroupIndex][mIdx][fIdx]"
+                        :field="field"
+                        :readonly="isReadonlyField(field, mIdx, fIdx)"
+                        @update:modelValue="() => { clearError(mIdx, fIdx); validateField(mIdx, fIdx); onRuntimeFieldChanged(mIdx, fIdx); }"
+                        @validation-state="(payload) => onTableValidationState(mIdx, fIdx, payload)"
+                      />
+
+                      <!-- FILE -->
+                      <FieldFileUpload
+                        v-else-if="field.type === 'file'"
+                        :id="fieldId(mIdx, fIdx)"
+                        :value="entryData[currentSubjectIndex][currentVisitIndex][currentGroupIndex][mIdx][fIdx]"
+                        :constraints="field.constraints || {}"
+                        :readonly="isReadonlyField(field, mIdx, fIdx)"
+                        :required="!!field.constraints?.required"
+                        stage="runtime"
+                        @input="(meta) => setEntryValue(mIdx, fIdx, meta)"
+                        @file-selected="(file) => onRawFileSelected(mIdx, fIdx, file)"
+                      />
+
+                      <!-- FALLBACK -->
+                      <input
+                        v-else
+                        :id="fieldId(mIdx, fIdx)"
+                        type="text"
+                        v-model="entryData[currentSubjectIndex][currentVisitIndex][currentGroupIndex][mIdx][fIdx]"
+                        :placeholder="field.placeholder"
+                        :required="!!field.constraints?.required"
+                        :readonly="isReadonlyField(field, mIdx, fIdx)"
+                        @blur="onFieldBlur(mIdx, fIdx)"
+                        @input="() => { clearError(mIdx, fIdx); onRuntimeFieldChanged(mIdx, fIdx); }"
+                      />
+                    </div>
+
+                    <div v-if="fieldErrors(mIdx, fIdx)" class="error-message">
+                      {{ fieldErrors(mIdx, fIdx) }}
+                      <span
+                        v-if="isFieldSkipped(mIdx, fIdx)"
+                        class="skip-pill"
+                        title="Required validation skipped for this field"
                       >
-                        <i :class="icons.copy || 'fas fa-copy'"></i>
-                      </button>
+                        Skipped
+                      </span>
+                    </div>
 
-                      <button
-                        v-if="!isShared && canShowPreviousVisitImport(field, mIdx, fIdx) && isImportedFromPreviousVisit(mIdx, fIdx)"
-                        type="button"
-                        class="field-icon-btn field-icon-btn-active"
-                        :title="`Imported from ${importedPreviousVisitLabel(mIdx, fIdx)}. Click to make editable.`"
-                        @click="unlockImportedPreviousVisit(mIdx, fIdx)"
-                        :disabled="!canEdit"
-                      >
-                        <i :class="icons.lock || 'fas fa-lock'"></i>
-                      </button>
+                    <div v-else-if="isFieldSkipped(mIdx, fIdx)" class="error-message">
+                      <span class="skip-pill" title="Required validation skipped for this field">
+                        Skipped
+                      </span>
+                    </div>
 
-                      <button
-                        v-if="hasConstraints(field)"
-                        type="button"
-                        class="field-icon-btn"
-                        title="Field constraints"
-                        @click="openConstraintDialog(field)"
-                      >
-                        <i class="fas fa-question-circle"></i>
-                      </button>
+                    <div v-if="fieldCalcWarning(mIdx, fIdx)" class="calc-warning-message">
+                      {{ fieldCalcWarning(mIdx, fIdx) }}
                     </div>
                   </div>
-
-                  <!-- TEXT -->
-                  <input
-                    v-if="field.type === 'text'"
-                    :id="fieldId(mIdx, fIdx)"
-                    type="text"
-                    v-model="entryData[currentSubjectIndex][currentVisitIndex][currentGroupIndex][mIdx][fIdx]"
-                    :placeholder="field.placeholder"
-                    :required="!!field.constraints?.required"
-                    :readonly="isReadonlyField(field, mIdx, fIdx)"
-                    :minlength="field.constraints?.minLength"
-                    :maxlength="field.constraints?.maxLength"
-                    :pattern="field.constraints?.pattern"
-                    @blur="onFieldBlur(mIdx, fIdx)"
-                    @input="() => { clearError(mIdx, fIdx); onRuntimeFieldChanged(mIdx, fIdx); }"
-                  />
-
-                  <!-- TEXTAREA -->
-                  <textarea
-                    v-else-if="field.type === 'textarea'"
-                    :id="fieldId(mIdx, fIdx)"
-                    v-model="entryData[currentSubjectIndex][currentVisitIndex][currentGroupIndex][mIdx][fIdx]"
-                    :placeholder="field.placeholder"
-                    :required="!!field.constraints?.required"
-                    :readonly="isReadonlyField(field, mIdx, fIdx)"
-                    :minlength="field.constraints?.minLength"
-                    :maxlength="field.constraints?.maxLength"
-                    :pattern="field.constraints?.pattern"
-                    rows="4"
-                    @blur="onFieldBlur(mIdx, fIdx)"
-                    @input="() => { clearError(mIdx, fIdx); onRuntimeFieldChanged(mIdx, fIdx); }"
-                  ></textarea>
-
-                  <!-- NUMBER -->
-                  <input
-                    v-else-if="field.type === 'number'"
-                    :id="fieldId(mIdx, fIdx)"
-                    type="number"
-                    v-model.number="entryData[currentSubjectIndex][currentVisitIndex][currentGroupIndex][mIdx][fIdx]"
-                    :placeholder="field.placeholder"
-                    :required="!!field.constraints?.required"
-                    :readonly="isReadonlyField(field, mIdx, fIdx)"
-                    :min="field.constraints?.min"
-                    :max="field.constraints?.max"
-                    :step="field.constraints?.step"
-                    @blur="() => { validateField(mIdx, fIdx); onRuntimeFieldChanged(mIdx, fIdx); }"
-                    @input="() => { clearError(mIdx, fIdx); onRuntimeFieldChanged(mIdx, fIdx); }"
-                  />
-
-                  <!-- CHECKBOX -->
-                  <FieldCheckbox
-                    v-else-if="field.type === 'checkbox'"
-                    :id="fieldId(mIdx, fIdx)"
-                    v-model="entryData[currentSubjectIndex][currentVisitIndex][currentGroupIndex][mIdx][fIdx]"
-                    v-bind="selectedModels[mIdx].fields[fIdx].constraints"
-                    :disabled="isReadonlyField(field, mIdx, fIdx)"
-                    @update:modelValue="() => { clearError(mIdx, fIdx); validateField(mIdx, fIdx); onRuntimeFieldChanged(mIdx, fIdx); }"
-                  />
-
-                  <!-- RADIO -->
-                  <FieldRadioGroup
-                    v-else-if="field.type === 'radio'"
-                    :id="fieldId(mIdx, fIdx)"
-                    :name="fieldId(mIdx, fIdx)"
-                    :options="field.options || []"
-                    v-model="entryData[currentSubjectIndex][currentVisitIndex][currentGroupIndex][mIdx][fIdx]"
-                    :default-value="field.constraints?.defaultValue"
-                    v-bind="selectedModels[mIdx].fields[fIdx].constraints"
-                    :disabled="isReadonlyField(field, mIdx, fIdx)"
-                    @change="() => { validateField(mIdx, fIdx); onRuntimeFieldChanged(mIdx, fIdx); }"
-                    @update:modelValue="() => { clearError(mIdx, fIdx); validateField(mIdx, fIdx); onRuntimeFieldChanged(mIdx, fIdx); }"
-                  />
-
-                  <!-- DATE -->
-                  <DateFormatPicker
-                    v-else-if="field.type === 'date'"
-                    :id="fieldId(mIdx, fIdx)"
-                    v-model="entryData[currentSubjectIndex][currentVisitIndex][currentGroupIndex][mIdx][fIdx]"
-                    :format="field.constraints?.dateFormat || 'dd.MM.yyyy'"
-                    :placeholder="field.placeholder || (field.constraints?.dateFormat || 'dd.MM.yyyy')"
-                    :min-date="field.constraints?.minDate || null"
-                    :max-date="field.constraints?.maxDate || null"
-                    :readonly="isReadonlyField(field, mIdx, fIdx)"
-                    @change="() => { validateField(mIdx, fIdx); onRuntimeFieldChanged(mIdx, fIdx); }"
-                    @blur="() => { validateField(mIdx, fIdx); onRuntimeFieldChanged(mIdx, fIdx); }"
-                  />
-
-                  <!-- TIME -->
-                  <FieldTime
-                    v-else-if="field.type === 'time'"
-                    :id="fieldId(mIdx, fIdx)"
-                    v-model="entryData[currentSubjectIndex][currentVisitIndex][currentGroupIndex][mIdx][fIdx]"
-                    :placeholder="field.placeholder || (field.constraints?.timeFormat || 'HH:mm')"
-                    v-bind="selectedModels[mIdx].fields[fIdx].constraints"
-                    :readonly="isReadonlyField(field, mIdx, fIdx)"
-                    @change="() => { validateField(mIdx, fIdx); onRuntimeFieldChanged(mIdx, fIdx); }"
-                    @blur="() => { validateField(mIdx, fIdx); onRuntimeFieldChanged(mIdx, fIdx); }"
-                  />
-
-                  <!-- SELECT -->
-                  <FieldSelect
-                    v-else-if="field.type === 'select'"
-                    :id="fieldId(mIdx, fIdx)"
-                    v-model="entryData[currentSubjectIndex][currentVisitIndex][currentGroupIndex][mIdx][fIdx]"
-                    :options="field.options || []"
-                    :multiple="!!field.constraints?.allowMultiple"
-                    :readonly="isReadonlyField(field, mIdx, fIdx)"
-                    :default-value="field.constraints?.defaultValue"
-                    :placeholder="'Select…'"
-                    @update:modelValue="() => { validateField(mIdx, fIdx); onRuntimeFieldChanged(mIdx, fIdx); }"
-                  />
-
-                  <!-- SLIDER -->
-                  <FieldSlider
-                    v-else-if="field.type === 'slider' && (field.constraints?.mode || 'slider') === 'slider'"
-                    :id="fieldId(mIdx, fIdx)"
-                    v-model="entryData[currentSubjectIndex][currentVisitIndex][currentGroupIndex][mIdx][fIdx]"
-                    v-bind="getSliderProps(field)"
-                    :disabled="isReadonlyField(field, mIdx, fIdx)"
-                    @update:modelValue="() => { clearError(mIdx, fIdx); validateField(mIdx, fIdx); onRuntimeFieldChanged(mIdx, fIdx); }"
-                    @change="() => { validateField(mIdx, fIdx); onRuntimeFieldChanged(mIdx, fIdx); }"
-                  />
-
-                  <!-- LINEAR SCALE -->
-                  <FieldLinearScale
-                    v-else-if="field.type === 'slider' && field.constraints?.mode === 'linear'"
-                    :id="fieldId(mIdx, fIdx)"
-                    v-model="entryData[currentSubjectIndex][currentVisitIndex][currentGroupIndex][mIdx][fIdx]"
-                    v-bind="getLinearProps(field)"
-                    :disabled="isReadonlyField(field, mIdx, fIdx)"
-                    @update:modelValue="() => { clearError(mIdx, fIdx); validateField(mIdx, fIdx); onRuntimeFieldChanged(mIdx, fIdx); }"
-                    @change="() => { validateField(mIdx, fIdx); onRuntimeFieldChanged(mIdx, fIdx); }"
-                  />
-
-                  <!-- TABLE -->
-                  <FieldTable
-                    v-else-if="field.type === 'table'"
-                    :ref="`tableField_${mIdx}_${fIdx}`"
-                    :id="fieldId(mIdx, fIdx)"
-                    v-model="entryData[currentSubjectIndex][currentVisitIndex][currentGroupIndex][mIdx][fIdx]"
-                    :field="field"
-                    :readonly="isReadonlyField(field, mIdx, fIdx)"
-                    @update:modelValue="() => { clearError(mIdx, fIdx); validateField(mIdx, fIdx); onRuntimeFieldChanged(mIdx, fIdx); }"
-                    @validation-state="(payload) => onTableValidationState(mIdx, fIdx, payload)"
-                  />
-
-                  <!-- FILE -->
-                  <FieldFileUpload
-                    v-else-if="field.type === 'file'"
-                    :id="fieldId(mIdx, fIdx)"
-                    :value="entryData[currentSubjectIndex][currentVisitIndex][currentGroupIndex][mIdx][fIdx]"
-                    :constraints="field.constraints || {}"
-                    :readonly="isReadonlyField(field, mIdx, fIdx)"
-                    :required="!!field.constraints?.required"
-                    stage="runtime"
-                    @input="(meta) => setEntryValue(mIdx, fIdx, meta)"
-                    @file-selected="(file) => onRawFileSelected(mIdx, fIdx, file)"
-                  />
-
-                  <!-- FALLBACK -->
-                  <input
-                    v-else
-                    :id="fieldId(mIdx, fIdx)"
-                    type="text"
-                    v-model="entryData[currentSubjectIndex][currentVisitIndex][currentGroupIndex][mIdx][fIdx]"
-                    :placeholder="field.placeholder"
-                    :required="!!field.constraints?.required"
-                    :readonly="isReadonlyField(field, mIdx, fIdx)"
-                    @blur="onFieldBlur(mIdx, fIdx)"
-                    @input="() => { clearError(mIdx, fIdx); onRuntimeFieldChanged(mIdx, fIdx); }"
-                  />
-
-                  <div v-if="fieldErrors(mIdx, fIdx)" class="error-message">
-                    {{ fieldErrors(mIdx, fIdx) }}
-                    <span
-                      v-if="isFieldSkipped(mIdx, fIdx)"
-                      class="skip-pill"
-                      title="Required validation skipped for this field"
-                    >Skipped</span>
-                  </div>
-
-                  <div v-else-if="isFieldSkipped(mIdx, fIdx)" class="error-message">
-                    <span class="skip-pill" title="Required validation skipped for this field">Skipped</span>
-                  </div>
-
-                  <div v-if="fieldCalcWarning(mIdx, fIdx)" class="calc-warning-message">
-                    {{ fieldCalcWarning(mIdx, fIdx) }}
-                  </div>
-                </div>
-              </template>
-            </div>
+                </template>
+              </div>
+            </section>
           </template>
 
-          <!-- Actions -->
           <div class="form-actions">
             <button
               @click="submitData"
@@ -418,7 +430,14 @@
             >
               Save Data
             </button>
-            <button type="button" class="btn-clear" @click="clearCurrentSection" title="Clear all inputs" :disabled="!canEdit">
+
+            <button
+              type="button"
+              class="btn-clear"
+              @click="clearCurrentSection"
+              title="Clear all inputs"
+              :disabled="!canEdit"
+            >
               Clear
             </button>
           </div>
@@ -465,7 +484,6 @@
       @close-status-legend="closeStatusLegend"
     />
 
-    <!-- Add Subjects dialog (moved to its own component) -->
     <AddSubjectsDialog
       v-if="showSubjectDialog"
       :subjectCount="subjectCountDraft"
@@ -496,7 +514,11 @@
       @update:groupAssignDrafts="groupAssignDrafts = $event"
     />
 
-    <CustomDialog :message="dialogMessage" :isVisible="showDialog" @close="closeDialog" />
+    <CustomDialog
+      :message="dialogMessage"
+      :isVisible="showDialog"
+      @close="closeDialog"
+    />
 
     <SkipRequiredDialog
       :visible="showSkipDialog"
@@ -507,6 +529,7 @@
       @cancel="cancelSkipSelection"
       @jump="jumpToField"
     />
+
     <StudyDataImportDialog
       v-if="showImportDialog"
       :visible="showImportDialog"
@@ -4769,6 +4792,7 @@ applyImportedRowFromDialog(payload) {
 .import-btn:hover {
   background: #1d4ed8;
 }
+
 .study-data-container {
   max-width: none;
   margin: 24px auto;
@@ -4782,18 +4806,17 @@ applyImportedRowFromDialog(payload) {
 .back-buttons-container {
   margin-bottom: 16px;
 }
+
 .btn-back {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-
   background: #fff;
   border: 1px solid #ddd;
   border-radius: 8px;
   padding: 10px 14px;
-
   cursor: pointer;
-  color: $text-color;
+  color: #374151;
   font-size: 14px;
   line-height: 1;
   transition: background 0.15s ease, border-color 0.15s ease, transform 0.02s ease;
@@ -4816,30 +4839,36 @@ applyImportedRowFromDialog(payload) {
 .study-header-container {
   margin-bottom: 24px;
 }
+
 .study-header {
   text-align: center;
   margin-bottom: 16px;
 }
+
 .study-name {
   font-size: 24px;
   font-weight: 600;
   color: #1f2937;
   margin-bottom: 8px;
 }
+
 .study-description {
   font-size: 16px;
   color: #4b5563;
   margin-bottom: 8px;
 }
+
 .study-meta {
   font-size: 14px;
   color: #6b7280;
 }
+
 .shared-banner {
   margin-top: 8px;
   font-size: 14px;
   color: #374151;
 }
+
 hr {
   margin: 12px 0;
   border: 0;
@@ -4850,13 +4879,15 @@ hr {
 .details-panel {
   margin-bottom: 16px;
 }
+
 .details-controls {
   display: flex;
   align-items: center;
-  justify-content: flex-end; /* keep on the right, as you asked */
+  justify-content: flex-end;
   gap: 12px;
   margin-bottom: 8px;
 }
+
 .details-toggle-btn {
   background: none;
   border: none;
@@ -4868,9 +4899,11 @@ hr {
   align-items: center;
   gap: 6px;
 }
+
 .details-toggle-btn i {
   font-size: 14px;
 }
+
 .share-icon {
   background: none;
   border: none;
@@ -4880,34 +4913,40 @@ hr {
   padding: 6px;
   line-height: 1;
 }
+
 .share-icon:hover {
   color: #374151;
 }
+
 .details-content {
   background: #f9fafb;
   border: 1px solid #e5e7eb;
   border-radius: 6px;
   padding: 16px;
 }
+
 .details-block {
   margin-bottom: 16px;
 }
+
 .details-block strong {
   display: block;
   font-size: 14px;
   color: #1f2937;
   margin-bottom: 6px;
 }
+
 .details-block ul {
   margin: 0 0 12px 16px;
   padding: 0;
 }
+
 .details-block li {
   font-size: 14px;
   color: #374151;
 }
 
-/* Merge Study button (now sits in the header controls row) */
+/* Merge button */
 .btn-merge-study {
   background: #2563eb;
   color: #ffffff;
@@ -4918,6 +4957,7 @@ hr {
   cursor: pointer;
   transition: background 0.2s;
 }
+
 .btn-merge-study:hover {
   background: #1d4ed8;
 }
@@ -4934,13 +4974,22 @@ hr {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 12px;
 }
+
 .crumb-left {
   display: flex;
   gap: 10px;
   flex-wrap: wrap;
   align-items: center;
 }
+
+.crumb-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .version-helper {
   font-size: 12px;
   color: #374151;
@@ -4949,6 +4998,7 @@ hr {
   border-radius: 6px;
   padding: 4px 8px;
 }
+
 .legend-btn {
   background: transparent;
   border: none;
@@ -4957,244 +5007,71 @@ hr {
   line-height: 1;
   color: #6b7280;
 }
+
 .legend-btn:hover {
   color: #374151;
 }
 
-/* Sections + fields */
-.entry-form-section h2 {
+/* Entry heading */
+.entry-title {
   font-size: 18px;
   font-weight: 600;
   color: #1f2937;
   margin-bottom: 16px;
 }
-.section-block {
-  margin-bottom: 16px;
-  padding: 16px;
-  border: 1px solid #e5e7eb;
-  border-radius: 6px;
-  background: #ffffff;
+
+/* Section stack */
+.sections-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
 }
-.section-block h3 {
-  margin: 0 0 12px 0;
+
+/* Section card */
+.section-card {
+  border: 1px solid #dbe4ee;
+  border-radius: 12px;
+  background: #f8fafc;
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.04);
+  overflow: hidden;
+}
+
+.section-card-header {
+  padding: 14px 16px;
+  background: #eef4f9;
+  border-bottom: 1px solid #dbe4ee;
+}
+
+.section-card-header h3 {
+  margin: 0;
   font-size: 16px;
   font-weight: 600;
   color: #1f2937;
 }
-.form-field {
-  margin-bottom: 16px;
-}
-.field-label {
+
+.section-card-body {
+  padding: 16px;
   display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-wrap: wrap;
-}
-.helper-icon {
-  font-size: 14px;
-  color: #6b7280;
-  cursor: pointer;
-}
-.helper-icon:hover {
-  color: #374151;
-}
-.required {
-  color: #dc2626;
-  margin-left: 4px;
-}
-.help-inline {
-  display: block;
-  width: 100%;
-  margin-top: 4px;
-  margin-left: 0;
-  font-style: italic;
-  color: #6b7280;
-  white-space: pre-line;
+  flex-direction: column;
+  gap: 14px;
 }
 
-/* Inputs */
-input[type="text"],
-textarea,
-input[type="number"],
-input[type="date"],
-select {
-  width: 100%;
-  padding: 8px;
-  border: 1px solid #d1d5db;
-  border-radius: 6px;
-  box-sizing: border-box;
-  font-size: 14px;
-  color: #1f2937;
-  background: #fff;
-  min-height: 44px;
-}
-input:focus,
-textarea:focus,
-select:focus {
-  outline: none;
-  border-color: #6b7280;
-  box-shadow: 0 0 0 3px rgba(107, 114, 128, 0.1);
-}
-
-/* Errors */
-.error-message {
-  color: #dc2626;
-  font-size: 12px;
-  margin-top: 4px;
-}
-
-/* Empty state */
-.no-assigned {
-  font-style: italic;
-  color: #6b7280;
-  margin-top: 12px;
-}
-
-/* Actions */
-.form-actions {
-  text-align: right;
-  margin-top: 16px;
-}
-.btn-save {
-  background: #16a34a;
-  color: #ffffff;
-  border: none;
-  padding: 8px 16px;
-  border-radius: 6px;
-  font-size: 14px;
-  cursor: pointer;
-  transition: background 0.2s;
-}
-.btn-save[disabled] {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-.btn-save:hover:not([disabled]) {
-  background: #15803d;
-}
-.btn-clear {
-  background: #e5e7eb;
-  color: #1f2937;
-  border: none;
-  padding: 8px 16px;
-  border-radius: 6px;
-  font-size: 14px;
-  cursor: pointer;
-  margin-left: 8px;
-  transition: background 0.2s;
-}
-.btn-clear:hover {
-  background: #d1d5db;
-}
-
-/* Generic dialogs */
-.loading {
-  text-align: center;
-  padding: 50px;
-  font-size: 16px;
-  color: #6b7280;
-}
-
-/* Tiny pill near error */
-.skip-pill {
-  display: inline-block;
-  margin-left: 6px;
-  padding: 1px 6px;
-  font-size: 11px;
-  border-radius: 999px;
-  background: #fff7ed;
-  color: #9a3412;
-  border: 1px solid #fed7aa;
-}
-
-/* Merge panel shown instead of matrix, within same container */
-.merge-panel {
+/* Field card */
+.field-card {
   padding: 14px;
   border: 1px solid #e5e7eb;
   border-radius: 10px;
   background: #ffffff;
-}
-.calc-warning-message {
-  color: #92400e;
-  font-size: 12px;
-  margin-top: 4px;
-  background: #fffbeb;
-  border: 1px solid #fde68a;
-  border-radius: 6px;
-  padding: 6px 8px;
-}
-.crumb-actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
 }
 
-.import-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  background: #2563eb;
-  color: #ffffff;
-  border: none;
-  padding: 8px 12px;
-  border-radius: 6px;
-  font-size: 14px;
-  cursor: pointer;
-  transition: background 0.2s;
-}
-
-.import-btn:hover {
-  background: #1d4ed8;
-}
-.previous-visit-import-row {
-  margin-top: 8px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-.btn-import-previous,
-.btn-import-unlock {
-  border: 1px solid #d1d5db;
-  background: #f9fafb;
-  color: #374151;
-  border-radius: 6px;
-  padding: 4px 10px;
-  font-size: 12px;
-  cursor: pointer;
-  line-height: 1.2;
-}
-
-.btn-import-previous:hover,
-.btn-import-unlock:hover {
-  background: #f3f4f6;
-}
-
-.imported-lock-info {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-.imported-lock-pill {
-  display: inline-flex;
-  align-items: center;
-  padding: 4px 10px;
-  border-radius: 999px;
-  background: #eef2ff;
-  color: #3730a3;
-  border: 1px solid #c7d2fe;
-  font-size: 12px;
-  line-height: 1.2;
-}
-.field-label-row {
+/* Field header */
+.field-card-header {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
   gap: 8px;
-  margin-bottom: 6px;
+  margin-bottom: 8px;
 }
 
 .field-label {
@@ -5203,6 +5080,13 @@ select:focus {
   flex-wrap: wrap;
   gap: 4px;
   margin: 0;
+  color: #111827;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.field-label-main {
+  display: inline-block;
 }
 
 .field-label-actions {
@@ -5212,6 +5096,7 @@ select:focus {
   flex-shrink: 0;
 }
 
+/* Right-side square action buttons */
 .field-icon-btn {
   width: 30px;
   height: 30px;
@@ -5224,10 +5109,12 @@ select:focus {
   align-items: center;
   justify-content: center;
   cursor: pointer;
+  transition: background 0.18s ease, border-color 0.18s ease, color 0.18s ease;
 }
 
 .field-icon-btn:hover:not(:disabled) {
   background: #f3f4f6;
+  border-color: #9ca3af;
 }
 
 .field-icon-btn:disabled {
@@ -5239,5 +5126,193 @@ select:focus {
   background: #eef2ff;
   border-color: #a5b4fc;
   color: #3730a3;
+}
+
+.required {
+  color: #dc2626;
+  margin-left: 2px;
+}
+
+/* Help text */
+.field-help-box {
+  margin-bottom: 10px;
+  padding: 8px 10px;
+  background: #f9fafb;
+  border: 1px dashed #d1d5db;
+  border-radius: 8px;
+  font-size: 12px;
+  color: #6b7280;
+  line-height: 1.5;
+  white-space: pre-line;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+/* Field body */
+.field-card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+/* Inputs */
+input[type="text"],
+input[type="number"],
+input[type="date"],
+input[type="time"],
+textarea,
+select {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  box-sizing: border-box;
+  font-size: 14px;
+  color: #1f2937;
+  background: #fff;
+  min-height: 44px;
+}
+
+input:focus,
+textarea:focus,
+select:focus {
+  outline: none;
+  border-color: #6b7280;
+  box-shadow: 0 0 0 3px rgba(107, 114, 128, 0.1);
+}
+
+/* Errors / warnings */
+.error-message {
+  color: #dc2626;
+  font-size: 12px;
+  margin-top: 8px;
+}
+
+.calc-warning-message {
+  color: #92400e;
+  font-size: 12px;
+  margin-top: 8px;
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+  border-radius: 6px;
+  padding: 6px 8px;
+}
+
+.skip-pill {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 6px;
+  font-size: 11px;
+  border-radius: 999px;
+  background: #fff7ed;
+  color: #9a3412;
+  border: 1px solid #fed7aa;
+}
+
+/* Empty state */
+.no-assigned {
+  font-style: italic;
+  color: #6b7280;
+  margin-top: 12px;
+  padding: 16px;
+  background: #f9fafb;
+  border: 1px dashed #d1d5db;
+  border-radius: 8px;
+}
+
+/* Actions */
+.form-actions {
+  margin-top: 18px;
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.btn-save {
+  background: #16a34a;
+  color: #ffffff;
+  border: none;
+  padding: 8px 16px;
+  border-radius: 6px;
+  font-size: 14px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.btn-save[disabled] {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn-save:hover:not([disabled]) {
+  background: #15803d;
+}
+
+.btn-clear {
+  background: #e5e7eb;
+  color: #1f2937;
+  border: none;
+  padding: 8px 16px;
+  border-radius: 6px;
+  font-size: 14px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.btn-clear:hover {
+  background: #d1d5db;
+}
+
+/* Loading */
+.loading {
+  text-align: center;
+  padding: 50px;
+  font-size: 16px;
+  color: #6b7280;
+}
+
+/* Merge panel */
+.merge-panel {
+  padding: 14px;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  background: #ffffff;
+}
+
+/* Responsive */
+@media (max-width: 900px) {
+  .bread-crumb {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .crumb-actions {
+    justify-content: flex-end;
+  }
+}
+
+@media (max-width: 768px) {
+  .field-card-header {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .field-label-actions {
+    justify-content: flex-start;
+  }
+
+  .details-controls {
+    flex-wrap: wrap;
+  }
+
+  .form-actions {
+    justify-content: stretch;
+  }
+
+  .btn-save,
+  .btn-clear {
+    width: 100%;
+  }
 }
 </style>
