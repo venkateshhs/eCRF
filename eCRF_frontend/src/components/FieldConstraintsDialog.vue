@@ -533,18 +533,38 @@
               </div>
             </div>
 
-            <div class="row">
-              <label>Source field</label>
-              <select v-model="rule.sourceFieldKey" @change="onSourceFieldChanged(rule)">
-                <option value="">Select source field…</option>
-                <option
-                  v-for="f in availableSourceFields"
-                  :key="f.key"
-                  :value="f.key"
+            <div class="row two">
+              <div>
+                <label>Source section</label>
+                <select v-model="rule._sectionKey" @change="onSourceSectionChanged(rule)">
+                  <option value="">Select section…</option>
+                  <option
+                    v-for="section in availableSourceSections"
+                    :key="section.key"
+                    :value="section.key"
+                  >
+                    {{ section.title }}
+                  </option>
+                </select>
+              </div>
+
+              <div>
+                <label>Source field</label>
+                <select
+                  v-model="rule.sourceFieldKey"
+                  @change="onSourceFieldChanged(rule)"
+                  :disabled="!rule._sectionKey"
                 >
-                  {{ f.pathLabel }}
-                </option>
-              </select>
+                  <option value="">Select field…</option>
+                  <option
+                    v-for="f in fieldsForSelectedSection(rule)"
+                    :key="f.key"
+                    :value="f.key"
+                  >
+                    {{ f.label }}
+                  </option>
+                </select>
+              </div>
             </div>
 
             <div class="row" v-if="rule.sourceFieldKey">
@@ -912,6 +932,9 @@ export default {
       markEditLabel: "",
     };
   },
+  mounted() {
+    this.syncRuleSectionKeys();
+    },
 
   computed: {
     type() {
@@ -1038,20 +1061,41 @@ export default {
           const constraints = field.constraints || {};
 
           out.push({
-            key: String(key),
-            label: field.label || field.name || `Field ${fi + 1}`,
-            sectionTitle: section.title || `Section ${si + 1}`,
-            pathLabel: `${section.title || `Section ${si + 1}`}.${field.label || field.name || `Field ${fi + 1}`}`,
-            type: field.type || "text",
-            options: Array.isArray(field.options) ? [...field.options] : [],
-            allowMultiple: !!constraints.allowMultiple,
-            dateFormat: constraints.dateFormat || "dd.MM.yyyy",
-            hourCycle: constraints.hourCycle || "24",
-          });
+              key: String(key),
+              sectionKey: `section_${si}`,
+              label: field.label || field.name || `Field ${fi + 1}`,
+              sectionTitle: section.title || `Section ${si + 1}`,
+              pathLabel: `${section.title || `Section ${si + 1}`}.${field.label || field.name || `Field ${fi + 1}`}`,
+              type: field.type || "text",
+              options: Array.isArray(field.options) ? [...field.options] : [],
+              allowMultiple: !!constraints.allowMultiple,
+              dateFormat: constraints.dateFormat || "dd.MM.yyyy",
+              hourCycle: constraints.hourCycle || "24",
+            });
         });
       });
 
       return out;
+    },
+    availableSourceSections() {
+      const groups = [];
+      const seen = new Map();
+
+      (this.availableSourceFields || []).forEach((f) => {
+        const sectionKey = String(f.sectionKey || "");
+        if (!seen.has(sectionKey)) {
+          const entry = {
+            key: sectionKey,
+            title: f.sectionTitle || "Untitled Section",
+            fields: [],
+          };
+          seen.set(sectionKey, entry);
+          groups.push(entry);
+        }
+        seen.get(sectionKey).fields.push(f);
+      });
+
+      return groups;
     },
   },
 
@@ -1072,6 +1116,9 @@ export default {
           this.localOptions = cleaned.length ? cleaned : ["Option 1"];
           this.optionsCount = this.localOptions.length;
         }
+        this.$nextTick(() => {
+            this.syncRuleSectionKeys();
+          });
       },
     },
 
@@ -1129,6 +1176,54 @@ export default {
   },
 
   methods: {
+    syncRuleSectionKeys() {
+      const rules = this.local?.visibilityLogic?.rules;
+      if (!Array.isArray(rules)) return;
+
+      const sourceFields = Array.isArray(this.availableSourceFields)
+        ? this.availableSourceFields
+        : [];
+
+      rules.forEach((rule) => {
+        if (!rule || !rule.sourceFieldKey) return;
+
+        const matchedField =
+          sourceFields.find((f) => String(f.key) === String(rule.sourceFieldKey)) || null;
+
+        rule._sectionKey = matchedField?.sectionKey || "";
+      });
+    },
+    fieldsForSelectedSection(rule) {
+      const sectionKey = String(rule?._sectionKey || "");
+      if (!sectionKey) return [];
+      return this.availableSourceFields.filter(
+        (f) => String(f.sectionKey) === sectionKey
+      );
+    },
+    onSourceSectionChanged(rule) {
+      const fields = this.fieldsForSelectedSection(rule);
+
+      if (!fields.length) {
+        rule.sourceFieldKey = "";
+        rule.operator = "eq";
+        rule.value = "";
+        rule.valueTo = "";
+        rule._chipInput = "";
+        return;
+      }
+
+      const stillValid = fields.some(
+        (f) => String(f.key) === String(rule.sourceFieldKey || "")
+      );
+
+      if (!stillValid) {
+        rule.sourceFieldKey = "";
+        rule.operator = "eq";
+        rule.value = "";
+        rule.valueTo = "";
+        rule._chipInput = "";
+      }
+    },
     num(v) {
       return v === undefined || v === null || Number.isNaN(v) ? "" : v;
     },
@@ -1150,6 +1245,7 @@ export default {
     makeLogicRule() {
       return {
         id: this.uuidForRule(),
+        _sectionKey: "",
         sourceFieldKey: "",
         operator: "eq",
         value: "",
@@ -1161,9 +1257,18 @@ export default {
     normalizeSingleLogicRule(rule) {
       if (!rule || typeof rule !== "object") return this.makeLogicRule();
 
+      const sourceFieldKey = String(rule.sourceFieldKey || "");
+      const sourceFields = Array.isArray(this.availableSourceFields)
+        ? this.availableSourceFields
+        : [];
+
+      const matchedField =
+        sourceFields.find((f) => String(f.key) === sourceFieldKey) || null;
+
       return {
         id: rule.id || this.uuidForRule(),
-        sourceFieldKey: String(rule.sourceFieldKey || ""),
+        _sectionKey: matchedField?.sectionKey || "",
+        sourceFieldKey,
         operator: String(rule.operator || "eq"),
         value: Array.isArray(rule.value) ? [...rule.value] : rule.value ?? "",
         valueTo: rule.valueTo ?? "",
@@ -1758,7 +1863,7 @@ export default {
 .row.two {
   display: grid;
   gap: 10px;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
 }
 .choice-row {
   display: flex;
@@ -1917,6 +2022,11 @@ select {
   border-radius: 8px;
   padding: 10px;
   background: #fafafa;
+}
+.logic-rule-card select {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
 }
 .logic-rule-top {
   display: flex;
