@@ -8,11 +8,12 @@
       >
         Back
       </button>
+
       <div class="title-wrap">
         <h2>Calculations</h2>
         <p>
-          Choose source fields, select an operation, and store the result in an existing field
-          or create a new read-only calculated field.
+          Build expressions by clicking fields, operators, functions, and parentheses.
+          Supports numeric fields and scored non-numeric fields.
         </p>
       </div>
 
@@ -28,20 +29,18 @@
       <!-- LEFT -->
       <section class="panel panel-left">
         <div class="panel-head">
-          <h3>1) Source fields</h3>
-          <div class="sub">Pick 2 or more fields</div>
+          <h3>1) Inputs</h3>
+          <div class="sub">Click a field to insert it into the expression</div>
         </div>
 
         <div class="toolbar">
           <input
             v-model="fieldSearch"
             class="search"
-            placeholder="Search source fields…"
-            aria-label="Search source fields"
+            placeholder="Search fields…"
+            aria-label="Search fields"
           />
-          <button class="btn-mini" @click="clearSelection" :disabled="selectedSourceIds.length === 0">
-            Clear
-          </button>
+          <button class="btn-mini" @click="refreshSymbolUsages">Refresh</button>
         </div>
 
         <div class="picker-list">
@@ -57,85 +56,113 @@
             </summary>
 
             <div class="field-list">
-              <label
+              <button
                 v-for="f in sec.fields"
                 :key="f.id"
-                class="field-row"
+                type="button"
+                class="field-row field-row-btn"
                 :title="f.path"
+                @click="insertFieldIntoExpression(f)"
               >
-                <input
-                  type="checkbox"
-                  :checked="selectedSourceIds.includes(f.id)"
-                  @change="toggleSource(f.id, $event)"
-                />
                 <div class="field-meta">
                   <div class="field-label">{{ f.label }}</div>
-                  <div class="field-sub">{{ f.typeLabel }}</div>
+                  <div class="field-sub">
+                    {{ f.typeLabel }}
+                    <span v-if="isScorableField(f)" class="score-badge">scoreable</span>
+                  </div>
                 </div>
-              </label>
+
+                <div class="field-insert-name">{{ suggestedSymbolForField(f) }}</div>
+              </button>
             </div>
           </details>
 
           <div v-if="!filteredFieldTree.length" class="empty">No fields found.</div>
-        </div>
-
-        <div class="selection-summary">
-          <div class="summary-title">Selected</div>
-          <div v-if="selectedSourceIds.length" class="chips">
-            <span v-for="id in selectedSourceIds" :key="id" class="chip">
-              {{ shortLabel(id) }}
-            </span>
-          </div>
-          <div v-else class="empty-small">No source fields selected yet.</div>
         </div>
       </section>
 
       <!-- MIDDLE -->
       <section class="panel panel-middle">
         <div class="panel-head">
-          <h3>2) Operation</h3>
-          <div class="sub">How should the result be calculated?</div>
+          <h3>2) Expression</h3>
+          <div class="sub">Click fields/operators or type directly</div>
         </div>
 
-        <div class="op-select-wrap">
-          <label class="field-block">
-            <span class="field-block-label">Operation</span>
-            <select v-model="operation" class="select">
-              <option v-for="op in operations" :key="op.value" :value="op.value">
-                {{ op.label }}
-              </option>
-            </select>
-          </label>
+        <div class="expr-builder">
+          <div class="token-toolbar">
+            <div class="toolbar-group">
+              <button v-for="op in operatorButtons" :key="op" class="btn-token" @click="insertToken(op)">
+                {{ op }}
+              </button>
+            </div>
 
-          <div class="selected-op-card">
-            <div class="op-name">{{ selectedOperationLabel }}</div>
-            <div class="op-desc">{{ selectedOperationDesc }}</div>
+            <div class="toolbar-group">
+              <button v-for="fn in functionButtons" :key="fn.token" class="btn-token fn" @click="insertToken(fn.token)">
+                {{ fn.label }}
+              </button>
+            </div>
+
+            <div class="toolbar-group">
+              <button class="btn-token" @click="insertToken(' 0 ')">0</button>
+              <button class="btn-token" @click="insertToken(' 1 ')">1</button>
+              <button class="btn-token" @click="insertToken(' 100 ')">100</button>
+              <button class="btn-token" @click="insertToken(' pi ')">π</button>
+            </div>
           </div>
-        </div>
 
-        <div class="preview-card">
-          <div class="preview-title">Formula preview</div>
-          <div class="formula" v-if="selectedSourceIds.length">
-            {{ formulaPreview }}
+          <div class="expr-editor-wrap">
+            <textarea
+              ref="expressionInput"
+              v-model="expression"
+              class="expr-editor"
+              placeholder="Example: weight_kg / ((height_cm / 100)^2)"
+              @click="captureCursor"
+              @keyup="captureCursor"
+              @focus="captureCursor"
+            />
           </div>
-          <div v-else class="empty-small">Choose source fields to see preview.</div>
-        </div>
 
-        <div class="preview-card">
-          <div class="preview-title">Notes</div>
-          <ul class="notes">
-            <li>For subtraction and division, the first selected field is used as the base.</li>
-            <li>Statistical operations work best with number fields.</li>
-            <li>Calculated result fields created here are read-only in the form.</li>
-          </ul>
+          <div class="expr-actions">
+            <button class="btn-mini" @click="removeLastToken">Backspace</button>
+            <button class="btn-mini" @click="clearExpression" :disabled="!expression.trim()">Clear</button>
+            <button class="btn-mini" @click="formatExpression">Format</button>
+            <button class="btn-mini" @click="validateExpressionNow">Validate</button>
+          </div>
+
+          <div class="preview-card">
+            <div class="preview-title">Expression preview</div>
+            <div v-if="expression.trim()" class="formula">{{ expression }}</div>
+            <div v-else class="empty-small">Build an expression.</div>
+          </div>
+
+          <div class="preview-card">
+            <div class="preview-title">Validation</div>
+            <div v-if="expressionValidation.ok" class="valid-box">
+              Expression looks valid.
+            </div>
+            <div v-else class="warn-box">
+              <div class="warn-title">Issues</div>
+              <ul>
+                <li v-for="(m, i) in expressionValidation.messages" :key="i">{{ m }}</li>
+              </ul>
+            </div>
+          </div>
+
+          <div class="preview-card">
+            <div class="preview-title">Detected symbols</div>
+            <div v-if="usedSymbols.length" class="chips">
+              <span v-for="sym in usedSymbols" :key="sym" class="chip">{{ sym }}</span>
+            </div>
+            <div v-else class="empty-small">No field symbols detected yet.</div>
+          </div>
         </div>
       </section>
 
       <!-- RIGHT -->
       <section class="panel panel-right">
         <div class="panel-head">
-          <h3>3) Result field</h3>
-          <div class="sub">Store result in an existing field or create a new one</div>
+          <h3>3) Result + scoring</h3>
+          <div class="sub">Choose result field and define scoring for non-numeric inputs</div>
         </div>
 
         <div class="target-mode">
@@ -150,7 +177,6 @@
           </label>
         </div>
 
-        <!-- EXISTING -->
         <div v-if="targetMode === 'existing'" class="target-block">
           <div class="toolbar">
             <input
@@ -201,18 +227,13 @@
           </div>
         </div>
 
-        <!-- NEW -->
         <div v-else class="target-block">
           <div class="form-block">
             <label class="field-block">
               <span class="field-block-label">Section</span>
               <select v-model="newTargetSectionId" class="select">
                 <option disabled value="">Select section…</option>
-                <option
-                  v-for="sec in sectionOptions"
-                  :key="sec.id"
-                  :value="sec.id"
-                >
+                <option v-for="sec in sectionOptions" :key="sec.id" :value="sec.id">
                   {{ sec.title }}
                 </option>
               </select>
@@ -223,12 +244,85 @@
               <input
                 v-model="newTargetLabel"
                 class="search"
-                placeholder="e.g. Total Score"
+                placeholder="e.g. BMI or Total Score"
+              />
+            </label>
+
+            <label class="field-block">
+              <span class="field-block-label">Decimals</span>
+              <input
+                v-model.number="resultDecimals"
+                type="number"
+                min="0"
+                max="10"
+                class="search"
+                placeholder="2"
               />
             </label>
 
             <div class="new-field-note">
-              A new <strong>read-only number field</strong> will be created in the selected section.
+              A new <strong>read-only calculated number field</strong> will be created.
+            </div>
+          </div>
+        </div>
+
+        <div class="form-block">
+          <label class="field-block">
+            <span class="field-block-label">Blank handling</span>
+            <select v-model="blankPolicy" class="select">
+              <option value="strict">Strict (missing input => no result)</option>
+              <option value="zero">Zero (missing numeric/scored => 0)</option>
+            </select>
+          </label>
+        </div>
+
+        <div class="preview-card">
+          <div class="preview-title">Scoring for non-numeric symbols</div>
+
+          <div v-if="!scoringSymbols.length" class="empty-small">
+            No scored non-numeric symbols used in the expression.
+          </div>
+
+          <div v-for="sym in scoringSymbols" :key="sym.symbol" class="score-card">
+            <div class="score-head">
+              <div class="score-title">{{ sym.field.label }}</div>
+              <div class="score-sub">{{ sym.symbol }} · {{ sym.field.typeLabel }}</div>
+            </div>
+
+            <div v-if="sym.field.type === 'checkbox'" class="checkbox-score-grid">
+              <label class="field-block">
+                <span class="field-block-label">Unchecked</span>
+                <input
+                  v-model.number="symbolMapDraft[sym.symbol].mappings.__unchecked"
+                  type="number"
+                  class="search"
+                />
+              </label>
+
+              <label class="field-block">
+                <span class="field-block-label">Checked</span>
+                <input
+                  v-model.number="symbolMapDraft[sym.symbol].mappings.__checked"
+                  type="number"
+                  class="search"
+                />
+              </label>
+            </div>
+
+            <div v-else class="score-options">
+              <div
+                v-for="opt in getFieldOptions(sym.field)"
+                :key="String(opt)"
+                class="score-row"
+              >
+                <div class="score-opt">{{ opt }}</div>
+                <input
+                  type="number"
+                  class="score-input"
+                  :value="getMappingValue(sym.symbol, opt)"
+                  @input="setMappingValue(sym.symbol, opt, $event.target.value)"
+                />
+              </div>
             </div>
           </div>
         </div>
@@ -237,17 +331,7 @@
           <div class="preview-title">Result summary</div>
 
           <div class="preview-row">
-            <div class="preview-k">Sources</div>
-            <div class="preview-v">{{ selectedSourceLabels || "—" }}</div>
-          </div>
-
-          <div class="preview-row">
-            <div class="preview-k">Operation</div>
-            <div class="preview-v">{{ prettyOperation(operation) }}</div>
-          </div>
-
-          <div class="preview-row">
-            <div class="preview-k">Result</div>
+            <div class="preview-k">Target</div>
             <div class="preview-v">
               <template v-if="targetMode === 'existing'">
                 {{ targetLabel || "—" }}
@@ -256,6 +340,21 @@
                 {{ newTargetPreview || "—" }}
               </template>
             </div>
+          </div>
+
+          <div class="preview-row">
+            <div class="preview-k">Output</div>
+            <div class="preview-v">Number</div>
+          </div>
+
+          <div class="preview-row">
+            <div class="preview-k">Blank rule</div>
+            <div class="preview-v">{{ blankPolicy }}</div>
+          </div>
+
+          <div class="preview-row">
+            <div class="preview-k">Decimals</div>
+            <div class="preview-v">{{ resultDecimals }}</div>
           </div>
 
           <div v-if="warnings.length" class="warn-box">
@@ -294,18 +393,30 @@
 </template>
 
 <script>
-/**
- * SIMPLE CALCULATIONS ONLY
- * - full-width 3-column UX
- * - result target can be:
- *    1) existing field
- *    2) newly created read-only calculated field
- *
- * IMPORTANT:
- * - never mutates the incoming form prop
- * - maintains an internal working copy
- * - emits both updated form structure and logic payload back to parent
- */
+/* eslint-disable */
+import { create, all } from "mathjs";
+
+const math = create(all, {});
+
+try {
+  math.import({
+    ifElse: (cond, a, b) => (cond ? a : b),
+    nz: (v, fallback = 0) => (v === null || v === undefined || v === "" ? fallback : v),
+    mean: (...args) => {
+      const arr = Array.isArray(args[0]) && args.length === 1 ? args[0] : args;
+      const nums = arr.map(Number).filter(Number.isFinite);
+      if (!nums.length) return 0;
+      return nums.reduce((a, b) => a + b, 0) / nums.length;
+    }
+  }, { override: true });
+} catch {}
+
+const RESERVED_SYMBOLS = new Set([
+  "e", "E", "pi", "PI", "true", "false", "null", "undefined",
+  "abs", "ceil", "floor", "round", "sqrt", "pow", "min", "max",
+  "mean", "ifElse", "nz", "mod"
+]);
+
 export default {
   name: "LogicCalculationsRoute",
   props: {
@@ -325,42 +436,43 @@ export default {
       fieldSearch: "",
       targetSearch: "",
 
-      selectedSourceIds: [],
-      operation: "sum",
-
+      expression: "",
+      symbolMapDraft: {},
       targetMode: "existing",
       targetFieldId: "",
-
       newTargetSectionId: "",
       newTargetLabel: "",
+      resultDecimals: 2,
+      blankPolicy: "strict",
 
       calcRules: [],
       editingRuleId: null,
 
-      operations: [
-        { value: "sum", label: "Sum", desc: "Add all selected values" },
-        { value: "subtract", label: "Subtract", desc: "First - second - third…" },
-        { value: "multiply", label: "Multiply", desc: "Multiply all selected values" },
-        { value: "divide", label: "Divide", desc: "First ÷ second ÷ third…" },
-        { value: "mean", label: "Mean", desc: "Average of selected values" },
-        { value: "median", label: "Median", desc: "Middle value after sorting" },
-        { value: "mode", label: "Mode", desc: "Most frequent value" },
-        { value: "min", label: "Minimum", desc: "Smallest value" },
-        { value: "max", label: "Maximum", desc: "Largest value" },
-        { value: "range", label: "Range", desc: "Maximum - Minimum" },
-        { value: "count", label: "Count (non-empty)", desc: "Count only filled values" },
-        { value: "count_all", label: "Count (all)", desc: "Count all selected fields" },
-        { value: "stddev_pop", label: "Std Dev (Population)", desc: "Population standard deviation" },
-        { value: "stddev_samp", label: "Std Dev (Sample)", desc: "Sample standard deviation" },
-        { value: "variance_pop", label: "Variance (Population)", desc: "Population variance" },
-        { value: "variance_samp", label: "Variance (Sample)", desc: "Sample variance" }
+      cursorStart: 0,
+      cursorEnd: 0,
+
+      expressionValidation: {
+        ok: false,
+        messages: ["Expression is empty."]
+      },
+
+      operatorButtons: [" + ", " - ", " * ", " / ", " ^ ", " % ", " ( ", " ) ", " , "],
+      functionButtons: [
+        { label: "mean()", token: "mean()" },
+        { label: "min()", token: "min()" },
+        { label: "max()", token: "max()" },
+        { label: "round()", token: "round()" },
+        { label: "abs()", token: "abs()" },
+        { label: "sqrt()", token: "sqrt()" },
+        { label: "ifElse()", token: "ifElse()" },
+        { label: "nz()", token: "nz()" }
       ]
     };
   },
 
   computed: {
     currentForm() {
-      return this.forms[this.formIndex] || { sections: [], logic: { version: 1, calculations: [], conditions: [] } };
+      return this.forms[this.formIndex] || { sections: [], logic: { version: 2, calculations: [], conditions: [] } };
     },
 
     sectionOptions() {
@@ -379,118 +491,88 @@ export default {
       return this.buildTreeFromFields(this.allFields, this.targetSearch);
     },
 
-    selectedSourceLabels() {
-      const m = new Map(this.allFields.map(f => [f.id, f]));
-      return this.selectedSourceIds
-        .map(id => m.get(id)?.label)
-        .filter(Boolean)
-        .join(", ");
+    usedSymbols() {
+      return this.extractSymbolsFromExpression(this.expression);
+    },
+
+    scoringSymbols() {
+      return this.usedSymbols
+        .map((symbol) => {
+          const def = this.symbolMapDraft[symbol];
+          if (!def) return null;
+          const field = this.allFields.find((f) => f.id === def.fieldId);
+          if (!field) return null;
+          if (def.valueType !== "mapped_choice" && def.valueType !== "boolean_score") return null;
+          return { symbol, def, field };
+        })
+        .filter(Boolean);
     },
 
     targetLabel() {
-      const f = this.allFields.find(x => x.id === this.targetFieldId);
+      const f = this.allFields.find((x) => x.id === this.targetFieldId);
       return f ? `${f.label} — ${f.sectionTitle}` : "";
     },
 
     newTargetPreview() {
-      const sec = this.sectionOptions.find(s => s.id === this.newTargetSectionId);
+      const sec = this.sectionOptions.find((s) => s.id === this.newTargetSectionId);
       if (!sec && !this.newTargetLabel.trim()) return "";
       return `${this.newTargetLabel || "New Calculated Field"}${sec ? ` — ${sec.title}` : ""}`;
     },
 
+    warnings() {
+      const out = [];
+
+      if (!this.expression.trim()) out.push("Expression is empty.");
+
+      const undefinedSymbols = this.usedSymbols.filter((sym) => !this.symbolMapDraft[sym]);
+      if (undefinedSymbols.length) {
+        out.push(`Some symbols are not mapped to fields: ${undefinedSymbols.join(", ")}`);
+      }
+
+      if (this.targetMode === "existing") {
+        if (this.targetFieldId) {
+          const targetIsSource = Object.values(this.symbolMapDraft).some(
+            (x) => String(x?.fieldId || "") === String(this.targetFieldId)
+          );
+          if (targetIsSource) out.push("Result field is also used as an input.");
+        }
+
+        const t = this.allFields.find((f) => f.id === this.targetFieldId);
+        if (t && t.type && t.type !== "number") {
+          out.push(`Existing result field type is "${t.type}". Number field is recommended.`);
+        }
+      }
+
+      this.scoringSymbols.forEach((sym) => {
+        if (sym.field.type === "checkbox") {
+          const m = sym.def.mappings || {};
+          if (typeof m.__checked === "undefined" || typeof m.__unchecked === "undefined") {
+            out.push(`Checkbox scoring for "${sym.field.label}" is incomplete.`);
+          }
+        } else {
+          const opts = this.getFieldOptions(sym.field);
+          const missing = opts.filter((opt) => {
+            const v = sym.def.mappings?.[String(opt)];
+            return v === "" || v === null || typeof v === "undefined";
+          });
+          if (missing.length) {
+            out.push(`Scoring for "${sym.field.label}" is incomplete.`);
+          }
+        }
+      });
+
+      return out;
+    },
+
     canSave() {
-      if (this.selectedSourceIds.length < 2 || !this.operation) return false;
+      if (!this.expression.trim()) return false;
+      if (!this.expressionValidation.ok) return false;
 
       if (this.targetMode === "existing") {
         return !!this.targetFieldId;
       }
 
       return !!this.newTargetSectionId && !!String(this.newTargetLabel || "").trim();
-    },
-
-    selectedOperation() {
-      return this.operations.find(op => op.value === this.operation) || this.operations[0];
-    },
-
-    selectedOperationLabel() {
-      return this.selectedOperation?.label || "";
-    },
-
-    selectedOperationDesc() {
-      return this.selectedOperation?.desc || "";
-    },
-
-    formulaPreview() {
-      const src = this.selectedSourceIds.map(id => this.shortLabel(id)).filter(Boolean);
-      if (!src.length) return "Select source fields";
-
-      const resultName =
-        this.targetMode === "existing"
-          ? (this.shortLabel(this.targetFieldId) || "Result")
-          : (this.newTargetLabel || "New Calculated Field");
-
-      const A = src[0];
-      const rest = src.slice(1);
-
-      if (this.operation === "sum") return `${resultName} = ${src.join(" + ")}`;
-      if (this.operation === "subtract") return `${resultName} = ${A}${rest.length ? " - " + rest.join(" - ") : ""}`;
-      if (this.operation === "multiply") return `${resultName} = ${src.join(" × ")}`;
-      if (this.operation === "divide") return `${resultName} = ${A}${rest.length ? " ÷ " + rest.join(" ÷ ") : ""}`;
-
-      if (this.operation === "mean") return `${resultName} = MEAN(${src.join(", ")})`;
-      if (this.operation === "median") return `${resultName} = MEDIAN(${src.join(", ")})`;
-      if (this.operation === "mode") return `${resultName} = MODE(${src.join(", ")})`;
-      if (this.operation === "min") return `${resultName} = MIN(${src.join(", ")})`;
-      if (this.operation === "max") return `${resultName} = MAX(${src.join(", ")})`;
-      if (this.operation === "range") return `${resultName} = RANGE(${src.join(", ")})`;
-      if (this.operation === "count") return `${resultName} = COUNT_NON_EMPTY(${src.join(", ")})`;
-      if (this.operation === "count_all") return `${resultName} = COUNT_ALL(${src.join(", ")})`;
-      if (this.operation === "stddev_pop") return `${resultName} = STDDEV_POP(${src.join(", ")})`;
-      if (this.operation === "stddev_samp") return `${resultName} = STDDEV_SAMP(${src.join(", ")})`;
-      if (this.operation === "variance_pop") return `${resultName} = VAR_POP(${src.join(", ")})`;
-      if (this.operation === "variance_samp") return `${resultName} = VAR_SAMP(${src.join(", ")})`;
-
-      return `${resultName} = ${String(this.operation).toUpperCase()}(${src.join(", ")})`;
-    },
-
-    warnings() {
-      const out = [];
-
-      const sourceNonNumber = this.selectedSourceIds
-        .map(id => this.allFields.find(f => f.id === id))
-        .filter(f => f && f.type && f.type !== "number");
-
-      if (sourceNonNumber.length) {
-        out.push("Some selected source fields are not number fields.");
-      }
-
-      if (this.targetMode === "existing") {
-        if (this.targetFieldId && this.selectedSourceIds.includes(this.targetFieldId)) {
-          out.push("Result field is also included in source fields.");
-        }
-
-        const t = this.allFields.find(f => f.id === this.targetFieldId);
-        if (t && t.type && t.type !== "number") {
-          out.push(`Existing result field type is "${t.type}". Number field is recommended.`);
-        }
-      }
-
-      if (this.targetMode === "new" && this.newTargetLabel.trim()) {
-        const duplicate = this.allFields.some(
-          f =>
-            String(f.label || "").trim().toLowerCase() ===
-            String(this.newTargetLabel || "").trim().toLowerCase()
-        );
-        if (duplicate) {
-          out.push("A field with the same label already exists.");
-        }
-      }
-
-      if (this.operation === "divide" && this.selectedSourceIds.length >= 2) {
-        out.push("Division can fail at runtime if a divisor becomes zero or empty.");
-      }
-
-      return out;
     }
   },
 
@@ -500,11 +582,12 @@ export default {
       handler(newForm) {
         if (!newForm || typeof newForm !== "object") return;
 
-        console.log("[Logic] prop form changed", JSON.parse(JSON.stringify(newForm)));
+        console.log("[LogicCalc] prop form changed =", JSON.parse(JSON.stringify(newForm || {})));
+        console.log("[LogicCalc] prop logic changed =", JSON.parse(JSON.stringify(newForm?.logic || {})));
 
         const next = JSON.parse(JSON.stringify(newForm));
         if (!next.logic || typeof next.logic !== "object") {
-          next.logic = { version: 1, calculations: [], conditions: [] };
+          next.logic = { version: 2, calculations: [], conditions: [] };
         }
         if (!Array.isArray(next.logic.calculations)) next.logic.calculations = [];
         if (!Array.isArray(next.logic.conditions)) next.logic.conditions = [];
@@ -513,34 +596,40 @@ export default {
         this.ensurePersistentIds();
         this.buildFieldIndex();
         this.loadCalcRules();
+        this.refreshSymbolUsages();
       }
+    },
+
+    expression() {
+      this.refreshSymbolUsages();
+      this.validateExpressionNow();
     }
   },
 
   mounted() {
-    const idx = parseInt(this.$route?.query?.formIndex ?? "0", 10);
-    this.formIndex = Number.isFinite(idx) && idx >= 0 ? idx : 0;
+      const idx = parseInt(this.$route?.query?.formIndex ?? "0", 10);
+      this.formIndex = Number.isFinite(idx) && idx >= 0 ? idx : 0;
 
-    this.loadFormsFromStorage();
-    this.ensurePersistentIds();
-    this.buildFieldIndex();
-    this.loadCalcRules();
-  },
+      console.log("[LogicCalc] mounted formIndex =", this.formIndex);
+      console.log("[LogicCalc] mounted incoming prop form =", JSON.parse(JSON.stringify(this.form || {})));
+      console.log("[LogicCalc] mounted incoming prop logic =", JSON.parse(JSON.stringify(this.form?.logic || {})));
 
+      this.loadFormsFromSource();
+      this.ensurePersistentIds();
+      this.buildFieldIndex();
+      this.loadCalcRules();
+      this.refreshSymbolUsages();
+    },
   methods: {
     goBack() {
       this.persistRules();
-
-      console.log("[Logic] goBack() after persistRules", {
-        fullForm: JSON.parse(JSON.stringify(this.currentForm || {})),
-        logic: JSON.parse(JSON.stringify(this.currentForm?.logic || {}))
-      });
-
       this.emitCurrentFormToParent("goBack");
       this.$emit("back-to-builder");
     },
 
-    loadFormsFromStorage() {
+    loadFormsFromSource() {
+      // Always prefer parent prop form as source of truth for the currently open form.
+      // Local storage is only fallback support.
       try {
         const parsed = JSON.parse(localStorage.getItem("scratchForms") || "[]");
         this.forms = Array.isArray(parsed) ? parsed : [];
@@ -548,13 +637,15 @@ export default {
         this.forms = [];
       }
 
-      if (!this.forms.length) this.forms = [{ sections: [] }];
-      while (this.forms.length <= this.formIndex) this.forms.push({ sections: [] });
+      if (!this.forms.length) this.forms = [{ sections: [], logic: { version: 2, calculations: [], conditions: [] } }];
+      while (this.forms.length <= this.formIndex) {
+        this.forms.push({ sections: [], logic: { version: 2, calculations: [], conditions: [] } });
+      }
 
       if (this.form && typeof this.form === "object") {
         this.forms[this.formIndex] = JSON.parse(JSON.stringify(this.form));
       } else if (!this.forms[this.formIndex]) {
-        this.forms[this.formIndex] = { sections: [] };
+        this.forms[this.formIndex] = { sections: [], logic: { version: 2, calculations: [], conditions: [] } };
       }
 
       if (!Array.isArray(this.forms[this.formIndex].sections)) {
@@ -562,7 +653,7 @@ export default {
       }
 
       if (!this.forms[this.formIndex].logic || typeof this.forms[this.formIndex].logic !== "object") {
-        this.forms[this.formIndex].logic = { version: 1, calculations: [], conditions: [] };
+        this.forms[this.formIndex].logic = { version: 2, calculations: [], conditions: [] };
       }
       if (!Array.isArray(this.forms[this.formIndex].logic.calculations)) {
         this.forms[this.formIndex].logic.calculations = [];
@@ -571,11 +662,8 @@ export default {
         this.forms[this.formIndex].logic.conditions = [];
       }
 
-      console.log("[Logic] loadFormsFromStorage()", {
-        formIndex: this.formIndex,
-        propForm: JSON.parse(JSON.stringify(this.form || {})),
-        workingForm: JSON.parse(JSON.stringify(this.forms[this.formIndex] || {}))
-      });
+      console.log("[LogicCalc] loadFormsFromSource current form =", JSON.parse(JSON.stringify(this.forms[this.formIndex] || {})));
+      console.log("[LogicCalc] loadFormsFromSource current logic =", JSON.parse(JSON.stringify(this.forms[this.formIndex]?.logic || {})));
     },
 
     saveFormsToStorage() {
@@ -585,15 +673,10 @@ export default {
     emitCurrentFormToParent(reason = "unknown") {
       const currentForm = JSON.parse(JSON.stringify(this.currentForm || {}));
       const currentLogic = JSON.parse(JSON.stringify(currentForm.logic || {
-        version: 1,
+        version: 2,
         calculations: [],
         conditions: []
       }));
-
-      console.log(`[Logic] emitCurrentFormToParent() reason=${reason}`, {
-        currentForm,
-        currentLogic
-      });
 
       this.$emit("update-form-structure", currentForm);
       this.$emit("update-logic", currentLogic);
@@ -607,10 +690,11 @@ export default {
     ensurePersistentIds() {
       const form = this.currentForm;
 
-      (form.sections || []).forEach(sec => {
+      (form.sections || []).forEach((sec) => {
         if (!sec._id) sec._id = this.uuid();
         if (!Array.isArray(sec.fields)) sec.fields = [];
-        sec.fields.forEach(f => {
+
+        sec.fields.forEach((f) => {
           if (!f._id) f._id = this.uuid();
           if (!f.constraints || typeof f.constraints !== "object") {
             f.constraints = {};
@@ -618,10 +702,10 @@ export default {
         });
       });
 
-      if (!form.logic) form.logic = { version: 1, calculations: [], conditions: [] };
+      if (!form.logic) form.logic = { version: 2, calculations: [], conditions: [] };
       if (!Array.isArray(form.logic.calculations)) form.logic.calculations = [];
       if (!Array.isArray(form.logic.conditions)) form.logic.conditions = [];
-      if (!form.logic.version) form.logic.version = 1;
+      if (!form.logic.version) form.logic.version = 2;
 
       this.forms[this.formIndex] = form;
       this.saveFormsToStorage();
@@ -635,23 +719,22 @@ export default {
         const sectionTitle = sec.title || `Section ${si + 1}`;
 
         (sec.fields || []).forEach((f, fi) => {
-          const id = f._id || f.id || `sec${si}_fld${fi}_${String(f.name || "")}`;
+          const id = f._id || f.id || f.field_id || f.uid || f.key || `sec${si}_fld${fi}`;
 
           out.push({
             id: String(id),
             label: String(f.label || f.name || `Field ${fi + 1}`),
             name: String(f.name || ""),
-            type: String(f.type || "text"),
+            type: String(f.type || "text").toLowerCase(),
             typeLabel: this.prettyTypeLabel(String(f.type || "text")),
             sectionTitle,
-            path: `${sectionTitle} / ${String(f.label || f.name || `Field ${fi + 1}`)}`
+            path: `${sectionTitle} / ${String(f.label || f.name || `Field ${fi + 1}`)}`,
+            field: f
           });
         });
       });
 
-      this.allFields = out.filter(f => f.type !== "button");
-
-      console.log("[Logic] buildFieldIndex()", JSON.parse(JSON.stringify(this.allFields)));
+      this.allFields = out.filter((f) => f.type !== "button");
     },
 
     prettyTypeLabel(t) {
@@ -675,20 +758,20 @@ export default {
 
       const filtered = !q
         ? fields
-        : fields.filter(f => {
+        : fields.filter((f) => {
             const hay = `${f.label} ${f.sectionTitle} ${f.path} ${f.typeLabel}`.toLowerCase();
             return hay.includes(q);
           });
 
       const bySection = new Map();
-      filtered.forEach(f => {
+      filtered.forEach((f) => {
         const key = String(f.sectionTitle || "Other");
         if (!bySection.has(key)) bySection.set(key, []);
         bySection.get(key).push(f);
       });
 
       const sectionOrder = [];
-      (this.currentForm?.sections || []).forEach(sec => {
+      (this.currentForm?.sections || []).forEach((sec) => {
         const st = String(sec?.title || "");
         if (st) sectionOrder.push(st);
       });
@@ -696,7 +779,7 @@ export default {
       const out = [];
       const used = new Set();
 
-      sectionOrder.forEach(st => {
+      sectionOrder.forEach((st) => {
         if (!bySection.has(st)) return;
         used.add(st);
         out.push({
@@ -707,7 +790,7 @@ export default {
         });
       });
 
-      Array.from(bySection.keys()).forEach(st => {
+      Array.from(bySection.keys()).forEach((st) => {
         if (used.has(st)) return;
         out.push({
           key: `sec_${st}`,
@@ -720,108 +803,287 @@ export default {
       return out;
     },
 
+    suggestedSymbolForField(f) {
+      const raw = String(f.label || f.name || "field")
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "_")
+        .replace(/^_+|_+$/g, "");
+
+      let base = raw || "field";
+      if (/^\d/.test(base)) base = `f_${base}`;
+
+      let next = base;
+      let n = 2;
+      const used = new Set(Object.keys(this.symbolMapDraft || {}));
+
+      while (used.has(next) && this.symbolMapDraft[next]?.fieldId !== f.id) {
+        next = `${base}_${n++}`;
+      }
+
+      return next;
+    },
+
+    isNumericField(f) {
+      return ["number", "slider"].includes(String(f?.type || "").toLowerCase());
+    },
+
+    isScorableField(f) {
+      return ["select", "radio", "checkbox"].includes(String(f?.type || "").toLowerCase());
+    },
+
+    getFieldOptions(fieldMeta) {
+      const field = fieldMeta?.field || fieldMeta;
+      const opts = field?.options || field?.constraints?.options || [];
+      if (Array.isArray(opts)) {
+        return opts
+          .map((o) => {
+            if (typeof o === "string") return o;
+            if (o && typeof o === "object") return o.label || o.value || o.name || "";
+            return "";
+          })
+          .filter(Boolean);
+      }
+      return [];
+    },
+
+    captureCursor() {
+      const el = this.$refs.expressionInput;
+      if (!el) return;
+      this.cursorStart = el.selectionStart ?? 0;
+      this.cursorEnd = el.selectionEnd ?? 0;
+    },
+
+    setCursor(pos) {
+      this.$nextTick(() => {
+        const el = this.$refs.expressionInput;
+        if (!el) return;
+        el.focus();
+        el.setSelectionRange(pos, pos);
+        this.cursorStart = pos;
+        this.cursorEnd = pos;
+      });
+    },
+
+    insertToken(token) {
+      const el = this.$refs.expressionInput;
+      const current = this.expression || "";
+      const start = el ? (el.selectionStart ?? this.cursorStart ?? current.length) : current.length;
+      const end = el ? (el.selectionEnd ?? this.cursorEnd ?? current.length) : current.length;
+
+      let insertion = token;
+      let moveBack = 0;
+
+      if (token.endsWith("()")) {
+        insertion = token.replace("()", "( )");
+        moveBack = 2;
+      }
+
+      const next = current.slice(0, start) + insertion + current.slice(end);
+      this.expression = next;
+
+      const newPos = start + insertion.length - moveBack;
+      this.setCursor(newPos);
+    },
+
+    removeLastToken() {
+      if (!this.expression) return;
+      this.expression = this.expression.slice(0, -1);
+      this.setCursor(this.expression.length);
+    },
+
+    clearExpression() {
+      this.expression = "";
+      this.refreshSymbolUsages();
+      this.validateExpressionNow();
+    },
+
+    formatExpression() {
+      this.expression = String(this.expression || "")
+        .replace(/\s+/g, " ")
+        .replace(/\(\s+/g, "(")
+        .replace(/\s+\)/g, ")")
+        .trim();
+      this.refreshSymbolUsages();
+      this.validateExpressionNow();
+    },
+
+    insertFieldIntoExpression(fieldMeta) {
+      const symbol = this.ensureSymbolForField(fieldMeta);
+      this.insertToken(symbol);
+    },
+
+    ensureSymbolForField(fieldMeta) {
+      const existing = Object.entries(this.symbolMapDraft).find(
+        ([, def]) => String(def?.fieldId || "") === String(fieldMeta.id)
+      );
+      if (existing) return existing[0];
+
+      const symbol = this.suggestedSymbolForField(fieldMeta);
+      const isNumeric = this.isNumericField(fieldMeta);
+      const isCheckbox = String(fieldMeta.type || "").toLowerCase() === "checkbox";
+
+      this.symbolMapDraft = {
+        ...this.symbolMapDraft,
+        [symbol]: {
+          fieldId: fieldMeta.id,
+          fieldLabel: fieldMeta.label,
+          sourceType: fieldMeta.type,
+          valueType: isNumeric
+            ? "number"
+            : isCheckbox
+              ? "boolean_score"
+              : "mapped_choice",
+          mappings: isCheckbox
+            ? { __unchecked: 0, __checked: 1 }
+            : {}
+        }
+      };
+
+      return symbol;
+    },
+
+    extractSymbolsFromExpression(expr) {
+      if (!String(expr || "").trim()) return [];
+
+      try {
+        const node = math.parse(expr);
+        const out = new Set();
+
+        node.traverse((n) => {
+          if (n?.isSymbolNode) {
+            const name = String(n.name || "");
+            if (!name) return;
+            if (RESERVED_SYMBOLS.has(name)) return;
+            out.add(name);
+          }
+        });
+
+        return Array.from(out);
+      } catch {
+        const matches = String(expr || "").match(/[A-Za-z_][A-Za-z0-9_]*/g) || [];
+        return [...new Set(matches.filter((x) => !RESERVED_SYMBOLS.has(x)))];
+      }
+    },
+
+    refreshSymbolUsages() {
+      const used = this.extractSymbolsFromExpression(this.expression);
+      const next = { ...this.symbolMapDraft };
+
+      used.forEach((sym) => {
+        if (!next[sym]) {
+          next[sym] = {
+            fieldId: "",
+            fieldLabel: sym,
+            sourceType: "number",
+            valueType: "number",
+            mappings: {}
+          };
+        }
+      });
+
+      this.symbolMapDraft = next;
+    },
+
+    validateExpressionNow() {
+      const messages = [];
+      const expr = String(this.expression || "").trim();
+
+      if (!expr) {
+        this.expressionValidation = { ok: false, messages: ["Expression is empty."] };
+        return;
+      }
+
+      try {
+        math.parse(expr);
+      } catch (err) {
+        messages.push(err?.message || "Expression syntax is invalid.");
+      }
+
+      const symbols = this.extractSymbolsFromExpression(expr);
+
+      if (!symbols.length) {
+        messages.push("Expression should reference at least one field symbol.");
+      }
+
+      symbols.forEach((sym) => {
+        const def = this.symbolMapDraft[sym];
+        if (!def || !def.fieldId) {
+          messages.push(`Symbol "${sym}" is not mapped to a field.`);
+          return;
+        }
+
+        const field = this.allFields.find((f) => f.id === def.fieldId);
+        if (!field) {
+          messages.push(`Symbol "${sym}" points to a missing field.`);
+          return;
+        }
+
+        if (def.valueType === "mapped_choice") {
+          const opts = this.getFieldOptions(field);
+          const missing = opts.filter((opt) => {
+            const v = def.mappings?.[String(opt)];
+            return v === "" || v === null || typeof v === "undefined";
+          });
+          if (missing.length) {
+            messages.push(`Scoring for "${sym}" is incomplete.`);
+          }
+        }
+
+        if (def.valueType === "boolean_score") {
+          const m = def.mappings || {};
+          if (typeof m.__checked === "undefined" || typeof m.__unchecked === "undefined") {
+            messages.push(`Checkbox scoring for "${sym}" is incomplete.`);
+          }
+        }
+      });
+
+      this.expressionValidation = {
+        ok: messages.length === 0,
+        messages: messages.length ? messages : ["Looks good."]
+      };
+    },
+
     loadCalcRules() {
       const form = this.currentForm;
-      if (!form.logic) form.logic = { version: 1, calculations: [], conditions: [] };
+      if (!form.logic) form.logic = { version: 2, calculations: [], conditions: [] };
       if (!Array.isArray(form.logic.calculations)) form.logic.calculations = [];
 
       this.calcRules = JSON.parse(
-        JSON.stringify((form.logic.calculations || []).filter(r => r && r.kind === "calc"))
+        JSON.stringify(
+          (form.logic.calculations || []).filter(
+            (r) => r && (r.kind === "calc_expr" || r.kind === "calc")
+          )
+        )
       );
-
-      console.log("[Logic] loadCalcRules()", JSON.parse(JSON.stringify(this.calcRules)));
     },
 
     persistRules() {
       const form = this.currentForm;
 
-      if (!form.logic) form.logic = { version: 1, calculations: [], conditions: [] };
+      if (!form.logic) form.logic = { version: 2, calculations: [], conditions: [] };
       if (!Array.isArray(form.logic.calculations)) form.logic.calculations = [];
       if (!Array.isArray(form.logic.conditions)) form.logic.conditions = [];
 
       form.logic.calculations = JSON.parse(JSON.stringify(this.calcRules));
-      form.logic.version = 1;
+      form.logic.version = 2;
 
       this.forms[this.formIndex] = form;
       this.saveFormsToStorage();
-
-      console.log("[Logic] persistRules()", {
-        calcRules: JSON.parse(JSON.stringify(this.calcRules || [])),
-        logicOnForm: JSON.parse(JSON.stringify(form.logic || {})),
-        fullForm: JSON.parse(JSON.stringify(form || {}))
-      });
-
       this.emitCurrentFormToParent("persistRules");
 
       if (this.$store) this.$store.commit("setStudyCreationDirty", true);
     },
 
-    toggleSource(id, evt) {
-      const checked = !!evt?.target?.checked;
-      const next = new Set(this.selectedSourceIds);
-
-      if (checked) next.add(id);
-      else next.delete(id);
-
-      const order = new Map(this.allFields.map((f, i) => [f.id, i]));
-      this.selectedSourceIds = Array.from(next).sort((a, b) => (order.get(a) ?? 0) - (order.get(b) ?? 0));
-    },
-
-    clearSelection() {
-      this.selectedSourceIds = [];
-    },
-
-    resetBuilder() {
-      this.selectedSourceIds = [];
-      this.operation = "sum";
-
-      this.targetMode = "existing";
-      this.targetFieldId = "";
-
-      this.newTargetSectionId = "";
-      this.newTargetLabel = "";
-
-      this.fieldSearch = "";
-      this.targetSearch = "";
-      this.editingRuleId = null;
-    },
-
-    shortLabel(id) {
-      const f = this.allFields.find(x => x.id === id);
-      return f ? f.label : id;
-    },
-
-    prettyOperation(op) {
-      const map = {
-        sum: "Sum",
-        subtract: "Subtract",
-        multiply: "Multiply",
-        divide: "Divide",
-        mean: "Mean",
-        median: "Median",
-        mode: "Mode",
-        min: "Minimum",
-        max: "Maximum",
-        range: "Range",
-        count: "Count (non-empty)",
-        count_all: "Count (all)",
-        stddev_pop: "Std Dev (Population)",
-        stddev_samp: "Std Dev (Sample)",
-        variance_pop: "Variance (Population)",
-        variance_samp: "Variance (Sample)"
-      };
-      return map[op] || op;
-    },
-
     createNewCalculatedField() {
       const form = this.currentForm;
-      const secIndex = (form.sections || []).findIndex(sec => sec._id === this.newTargetSectionId);
+      const secIndex = (form.sections || []).findIndex((sec) => sec._id === this.newTargetSectionId);
       if (secIndex < 0) return null;
 
       const section = form.sections[secIndex];
       const label = String(this.newTargetLabel || "").trim();
       const safeBase =
         label.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "") || "calculated_result";
+
       const fieldId = this.uuid();
 
       const newField = {
@@ -844,20 +1106,44 @@ export default {
       section.fields.push(newField);
 
       this.forms[this.formIndex] = form;
+      return { fieldId, field: newField };
+    },
 
-      console.log("[Logic] createNewCalculatedField()", {
-        secIndex,
-        newField,
-        formAfterCreate: JSON.parse(JSON.stringify(form))
+    buildRulePayload(finalTargetFieldId) {
+      const used = this.extractSymbolsFromExpression(this.expression);
+      const symbolMap = {};
+
+      used.forEach((sym) => {
+        const def = this.symbolMapDraft[sym];
+        if (!def) return;
+        symbolMap[sym] = {
+          fieldId: def.fieldId,
+          fieldLabel: def.fieldLabel,
+          sourceType: def.sourceType,
+          valueType: def.valueType,
+          mappings: JSON.parse(JSON.stringify(def.mappings || {}))
+        };
       });
 
       return {
-        fieldId,
-        field: newField
+        id: this.editingRuleId || this.uuid(),
+        kind: "calc_expr",
+        version: 2,
+        expression: String(this.expression || "").trim(),
+        symbolOrder: used,
+        symbolMap,
+        target: finalTargetFieldId,
+        targetMode: this.targetMode,
+        outputType: "number",
+        decimals: Number.isFinite(Number(this.resultDecimals)) ? Number(this.resultDecimals) : 2,
+        blankPolicy: this.blankPolicy || "strict",
+        enabled: true,
+        updatedAt: new Date().toISOString()
       };
     },
 
     saveCalculation() {
+      this.validateExpressionNow();
       if (!this.canSave) return;
 
       let finalTargetFieldId = this.targetFieldId;
@@ -866,24 +1152,13 @@ export default {
         const created = this.createNewCalculatedField();
         if (!created?.fieldId) return;
         finalTargetFieldId = created.fieldId;
-
         this.buildFieldIndex();
       }
 
-      const rule = {
-        id: this.editingRuleId || this.uuid(),
-        kind: "calc",
-        version: 1,
-        op: this.operation,
-        sources: [...this.selectedSourceIds],
-        target: finalTargetFieldId,
-        targetMode: this.targetMode,
-        enabled: true,
-        updatedAt: new Date().toISOString()
-      };
+      const rule = this.buildRulePayload(finalTargetFieldId);
 
       if (this.editingRuleId) {
-        const idx = this.calcRules.findIndex(r => r.id === this.editingRuleId);
+        const idx = this.calcRules.findIndex((r) => r.id === this.editingRuleId);
         if (idx >= 0) this.calcRules.splice(idx, 1, rule);
         else this.calcRules.unshift(rule);
       } else {
@@ -892,41 +1167,45 @@ export default {
 
       this.persistRules();
 
-      console.log("[Logic] saveCalculation() completed", {
-        finalTargetFieldId,
-        calcRules: JSON.parse(JSON.stringify(this.calcRules || [])),
-        formAfterSave: JSON.parse(JSON.stringify(this.currentForm || {}))
-      });
-
-      this.selectedSourceIds = [];
-      this.fieldSearch = "";
-      this.targetSearch = "";
-
       this.targetMode = "existing";
       this.targetFieldId = finalTargetFieldId;
       this.newTargetSectionId = "";
       this.newTargetLabel = "";
       this.editingRuleId = null;
 
+      this.expression = "";
+      this.symbolMapDraft = {};
+      this.fieldSearch = "";
+      this.targetSearch = "";
+      this.resultDecimals = 2;
+      this.blankPolicy = "strict";
+
       this.saveFormsToStorage();
     },
 
     deleteRule(id) {
-      this.calcRules = this.calcRules.filter(r => r.id !== id);
+      this.calcRules = this.calcRules.filter((r) => r.id !== id);
       this.persistRules();
     },
 
     loadRuleToEditor(rule) {
       this.editingRuleId = rule.id;
-      this.selectedSourceIds = Array.isArray(rule.sources) ? [...rule.sources] : [];
-      this.operation = rule.op || "sum";
 
-      if (rule.targetMode === "new") {
-        this.targetMode = "new";
-        this.targetFieldId = "";
-      } else {
-        this.targetMode = "existing";
+      if (rule.kind === "calc_expr") {
+        this.expression = rule.expression || "";
+        this.symbolMapDraft = JSON.parse(JSON.stringify(rule.symbolMap || {}));
+        this.targetMode = rule.targetMode || "existing";
         this.targetFieldId = rule.target || "";
+        this.resultDecimals = Number.isFinite(Number(rule.decimals)) ? Number(rule.decimals) : 2;
+        this.blankPolicy = rule.blankPolicy || "strict";
+      } else {
+        const migrated = this.migrateLegacyRuleToExpression(rule);
+        this.expression = migrated.expression || "";
+        this.symbolMapDraft = JSON.parse(JSON.stringify(migrated.symbolMap || {}));
+        this.targetMode = migrated.targetMode || "existing";
+        this.targetFieldId = migrated.target || "";
+        this.resultDecimals = Number.isFinite(Number(migrated.decimals)) ? Number(migrated.decimals) : 2;
+        this.blankPolicy = migrated.blankPolicy || "strict";
       }
 
       this.newTargetSectionId = "";
@@ -934,16 +1213,115 @@ export default {
 
       this.fieldSearch = "";
       this.targetSearch = "";
+      this.refreshSymbolUsages();
+      this.validateExpressionNow();
+    },
+
+    migrateLegacyRuleToExpression(rule) {
+      const sources = Array.isArray(rule.sources) ? rule.sources : [];
+      const symMap = {};
+      const symbols = sources.map((srcId) => {
+        const field = this.allFields.find((f) => f.id === String(srcId));
+        const symbol = this.suggestedSymbolForField(field || { id: srcId, label: `field_${srcId}` });
+        symMap[symbol] = {
+          fieldId: String(srcId),
+          fieldLabel: field?.label || symbol,
+          sourceType: field?.type || "number",
+          valueType: this.isNumericField(field) ? "number" : "mapped_choice",
+          mappings: {}
+        };
+        return symbol;
+      });
+
+      const expr = this.legacyRuleToExpression(rule.op, symbols);
+
+      return {
+        ...rule,
+        kind: "calc_expr",
+        version: 2,
+        expression: expr,
+        symbolOrder: symbols,
+        symbolMap: symMap,
+        decimals: 2,
+        blankPolicy: "strict"
+      };
+    },
+
+    legacyRuleToExpression(op, symbols) {
+      const A = symbols[0] || "a";
+      const rest = symbols.slice(1);
+
+      if (op === "sum") return symbols.join(" + ");
+      if (op === "subtract") return `${A}${rest.length ? " - " + rest.join(" - ") : ""}`;
+      if (op === "multiply") return symbols.join(" * ");
+      if (op === "divide") return `${A}${rest.length ? " / " + rest.join(" / ") : ""}`;
+      if (op === "mean") return `mean(${symbols.join(", ")})`;
+      if (op === "min") return `min(${symbols.join(", ")})`;
+      if (op === "max") return `max(${symbols.join(", ")})`;
+      if (op === "count_all") return String(symbols.length || 0);
+
+      return symbols.join(" + ");
     },
 
     ruleSummary(rule) {
       const tgt = this.shortLabel(rule.target);
-      return `${tgt} ← ${this.prettyOperation(rule.op)}`;
+      return `${tgt} ← Expression`;
     },
 
     ruleFormula(rule) {
-      const sources = (rule.sources || []).map(id => this.shortLabel(id)).join(", ");
-      return `${this.shortLabel(rule.target)} = ${this.prettyOperation(rule.op)}(${sources})`;
+      if (rule.kind === "calc_expr") {
+        return `${this.shortLabel(rule.target)} = ${rule.expression || ""}`;
+      }
+
+      const migrated = this.migrateLegacyRuleToExpression(rule);
+      return `${this.shortLabel(rule.target)} = ${migrated.expression || ""}`;
+    },
+
+    shortLabel(id) {
+      const f = this.allFields.find((x) => x.id === id);
+      return f ? f.label : id;
+    },
+
+    getMappingValue(symbol, option) {
+      const def = this.symbolMapDraft[symbol] || {};
+      const val = def.mappings?.[String(option)];
+      return typeof val === "undefined" ? "" : val;
+    },
+
+    setMappingValue(symbol, option, rawValue) {
+      const n = rawValue === "" ? "" : Number(rawValue);
+      if (!this.symbolMapDraft[symbol]) return;
+
+      this.symbolMapDraft = {
+        ...this.symbolMapDraft,
+        [symbol]: {
+          ...this.symbolMapDraft[symbol],
+          mappings: {
+            ...(this.symbolMapDraft[symbol].mappings || {}),
+            [String(option)]: n
+          }
+        }
+      };
+
+      this.validateExpressionNow();
+    },
+
+    resetBuilder() {
+      this.expression = "";
+      this.symbolMapDraft = {};
+      this.targetMode = "existing";
+      this.targetFieldId = "";
+      this.newTargetSectionId = "";
+      this.newTargetLabel = "";
+      this.resultDecimals = 2;
+      this.blankPolicy = "strict";
+      this.fieldSearch = "";
+      this.targetSearch = "";
+      this.editingRuleId = null;
+      this.expressionValidation = {
+        ok: false,
+        messages: ["Expression is empty."]
+      };
     }
   }
 };
@@ -1015,7 +1393,7 @@ export default {
 
 .workspace {
   display: grid;
-  grid-template-columns: 1.15fr 0.95fr 1.15fr;
+  grid-template-columns: 1.05fr 1.1fr 1.1fr;
   gap: 16px;
   align-items: start;
 }
@@ -1052,13 +1430,65 @@ export default {
 }
 
 .search,
-.select {
+.select,
+.score-input,
+.expr-editor {
   width: 100%;
   border: 1px solid #dfe3ea;
   border-radius: 12px;
   padding: 10px 12px;
   background: #fff;
   box-sizing: border-box;
+}
+
+.expr-builder {
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.token-toolbar {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.toolbar-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.btn-token {
+  border: 1px solid #dbe1ea;
+  background: #fff;
+  border-radius: 10px;
+  padding: 8px 10px;
+  cursor: pointer;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 12px;
+}
+
+.btn-token.fn {
+  font-family: inherit;
+}
+
+.expr-editor-wrap {
+  display: flex;
+}
+
+.expr-editor {
+  min-height: 120px;
+  resize: vertical;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  line-height: 1.45;
+}
+
+.expr-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 .btn-mini {
@@ -1159,6 +1589,13 @@ export default {
   border-color: #e5e7eb;
 }
 
+.field-row-btn {
+  width: 100%;
+  background: #fff;
+  text-align: left;
+  justify-content: space-between;
+}
+
 .field-row input[type="checkbox"],
 .field-row input[type="radio"] {
   margin-top: 3px;
@@ -1178,58 +1615,23 @@ export default {
   color: #6b7280;
 }
 
-.selection-summary {
-  border-top: 1px solid #eef2f7;
-  padding: 12px 16px 16px;
-}
-
-.summary-title {
-  font-weight: 700;
-  margin-bottom: 8px;
-}
-
-.chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.chip {
-  background: #eef2ff;
-  color: #3730a3;
-  border: 1px solid #c7d2fe;
-  border-radius: 999px;
-  padding: 6px 10px;
+.field-insert-name {
+  margin-left: auto;
   font-size: 12px;
-}
-
-.op-select-wrap {
-  padding: 16px;
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-}
-
-.selected-op-card {
-  border: 1px solid #dbeafe;
+  color: #1d4ed8;
+  border: 1px solid #bfdbfe;
   background: #eff6ff;
-  border-radius: 14px;
-  padding: 12px;
+  border-radius: 999px;
+  padding: 4px 8px;
 }
 
-.op-name {
-  font-weight: 700;
-  color: #111827;
-}
-
-.op-desc {
-  margin-top: 4px;
-  font-size: 12px;
-  color: #6b7280;
+.score-badge {
+  margin-left: 6px;
+  color: #7c3aed;
+  font-weight: 600;
 }
 
 .preview-card {
-  margin: 0 16px 16px;
   border: 1px solid #e5e7eb;
   background: #fafafa;
   border-radius: 14px;
@@ -1249,13 +1651,8 @@ export default {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
   font-size: 13px;
   line-height: 1.5;
-}
-
-.notes {
-  margin: 0;
-  padding-left: 18px;
-  color: #374151;
-  font-size: 13px;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .target-mode {
@@ -1309,7 +1706,8 @@ export default {
   font-size: 13px;
 }
 
-.new-field-note {
+.new-field-note,
+.valid-box {
   border: 1px solid #dbeafe;
   background: #eff6ff;
   color: #1e3a8a;
@@ -1347,6 +1745,51 @@ export default {
 .warn-title {
   font-weight: 700;
   margin-bottom: 6px;
+}
+
+.score-card {
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  padding: 10px;
+  background: #fff;
+  margin-bottom: 10px;
+}
+
+.score-head {
+  margin-bottom: 10px;
+}
+
+.score-title {
+  font-weight: 700;
+}
+
+.score-sub {
+  font-size: 12px;
+  color: #6b7280;
+}
+
+.score-options {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.score-row {
+  display: grid;
+  grid-template-columns: 1fr 110px;
+  gap: 8px;
+  align-items: center;
+}
+
+.score-opt {
+  font-size: 13px;
+  color: #111827;
+}
+
+.checkbox-score-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
 }
 
 .saved-block {
@@ -1393,6 +1836,22 @@ export default {
   margin-top: 6px;
   font-size: 13px;
   color: #6b7280;
+  word-break: break-word;
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.chip {
+  background: #eef2ff;
+  color: #3730a3;
+  border: 1px solid #c7d2fe;
+  border-radius: 999px;
+  padding: 6px 10px;
+  font-size: 12px;
 }
 
 .empty {

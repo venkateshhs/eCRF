@@ -1416,6 +1416,47 @@ export default {
           created_by: meta.created_by
         };
 
+        const normalizedForms =
+          Array.isArray(sd.forms) && sd.forms.length
+            ? sd.forms.map((form) => ({
+                ...JSON.parse(JSON.stringify(form)),
+                sections: Array.isArray(form.sections)
+                  ? form.sections.map((section) => ({
+                      ...section,
+                      fields: Array.isArray(section.fields)
+                        ? section.fields.map((field) => ({
+                            ...field,
+                            constraints: field?.constraints || {}
+                          }))
+                        : []
+                    }))
+                  : [],
+                logic: {
+                  version: form?.logic?.version || 1,
+                  calculations: Array.isArray(form?.logic?.calculations) ? form.logic.calculations : [],
+                  conditions: Array.isArray(form?.logic?.conditions) ? form.logic.conditions : []
+                }
+              }))
+            : (sd.selectedModels ? [{
+                sections: sd.selectedModels.map(model => ({
+                  ...JSON.parse(JSON.stringify(model)),
+                  title: model.title,
+                  fields: Array.isArray(model.fields)
+                    ? model.fields.map((field) => ({
+                        ...field,
+                        constraints: field?.constraints || {}
+                      }))
+                    : [],
+                  source: model.source || "template"
+                })),
+                logic: {
+                  version: 1,
+                  calculations: [],
+                  conditions: []
+                }
+              }] : []);
+
+
         this.$store.commit("setStudyDetails", {
           study_metadata: studyInfo,
           study: { id: meta.id, ...sd.study },
@@ -1425,25 +1466,10 @@ export default {
           assignmentMethod: sd.assignmentMethod || "random",
           subjects: sd.subjects || [],
           assignments: assignments,
-          forms: sd.selectedModels ? [{
-            sections: sd.selectedModels.map(model => ({
-              title: model.title,
-              fields: model.fields,
-              source: "template"
-            }))
-          }] : []
+          forms: normalizedForms
         });
 
-        if (sd.selectedModels) {
-          const scratchForms = [{
-            sections: sd.selectedModels.map(model => ({
-              title: model.title,
-              fields: model.fields,
-              source: "template"
-            }))
-          }];
-          localStorage.setItem("scratchForms", JSON.stringify(scratchForms));
-        }
+        localStorage.setItem("scratchForms", JSON.stringify(normalizedForms));
 
         return true;
       } catch (e) {

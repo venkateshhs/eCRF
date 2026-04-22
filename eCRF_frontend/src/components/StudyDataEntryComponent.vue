@@ -2075,9 +2075,10 @@ applyImportedRowFromDialog(payload) {
       const rules = this.calculationRules || [];
       if (!rules.length) return;
 
-      const changedField = changedMIdx != null && changedFIdx != null
-        ? this.selectedModels?.[changedMIdx]?.fields?.[changedFIdx]
-        : null;
+      const changedField =
+        changedMIdx != null && changedFIdx != null
+          ? this.selectedModels?.[changedMIdx]?.fields?.[changedFIdx]
+          : null;
 
       const changedKeys = changedField
         ? new Set(
@@ -2095,20 +2096,44 @@ applyImportedRowFromDialog(payload) {
           )
         : null;
 
-      rules.forEach((rule) => {
-        if (!rule?.target || !Array.isArray(rule?.sources) || !rule.sources.length) return;
+      const currentCellData = this.entryData?.[s]?.[v]?.[g] || [];
 
+      rules.forEach((rule) => {
+        if (!rule?.target) return;
+
+        // Only re-run affected rules if a field changed
         if (changedKeys) {
-          const touchesChanged = rule.sources.some((src) => changedKeys.has(String(src)));
+          let touchesChanged = false;
+
+          if (rule.kind === "calc_expr") {
+            const defs = Object.values(rule.symbolMap || {});
+            touchesChanged = defs.some((def) =>
+              changedKeys.has(String(def?.fieldId || ""))
+            );
+          } else if (Array.isArray(rule.sources)) {
+            touchesChanged = rule.sources.some((src) =>
+              changedKeys.has(String(src))
+            );
+          }
+
           if (!touchesChanged) return;
         }
 
-        const sourceValues = rule.sources.map((srcId) => this.getCellValueByFieldId(s, v, g, srcId));
-        const result = computeCalculation(rule, sourceValues);
+        const result = computeCalculation(
+          rule,
+          this.selectedModels,
+          currentCellData
+        );
 
         if (!result.ok) {
           this.setCellValueByFieldId(s, v, g, rule.target, null);
-          this.setCalcWarningByRuleTarget(s, v, g, rule.target, result.warning || "Calculation could not be applied.");
+          this.setCalcWarningByRuleTarget(
+            s,
+            v,
+            g,
+            rule.target,
+            result.warning || "Calculation could not be applied."
+          );
           return;
         }
 

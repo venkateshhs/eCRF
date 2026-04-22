@@ -1124,22 +1124,39 @@ export default {
     window.addEventListener("beforeunload", this.beforeUnloadHandler);
     this.hydratingScratch = true;
 
-    const stored = localStorage.getItem("scratchForms");
+    const hasStudyForms =
+      Array.isArray(this.studyDetails.forms) && this.studyDetails.forms.length;
 
-    if (stored) {
-      try {
-        const parsed = JSON.parse(stored);
-        this.forms = (Array.isArray(parsed) && parsed.length) ? parsed : [{ sections: [] }];
-      } catch {
-        this.forms = [{ sections: [] }];
-      }
-    } else if (Array.isArray(this.studyDetails.forms) && this.studyDetails.forms.length) {
+    const isEditMode = !!this.currentStudyId;
+    console.log("[Scratch] mounted studyDetails =", JSON.parse(JSON.stringify(this.studyDetails || {})));
+    console.log("[Scratch] mounted studyDetails.forms =", JSON.parse(JSON.stringify(this.studyDetails?.forms || [])));
+    console.log("[Scratch] mounted currentStudyId =", this.currentStudyId);
+    if (isEditMode && hasStudyForms) {
       this.forms = JSON.parse(JSON.stringify(this.studyDetails.forms));
+      console.log("[Scratch] mounted hydrated forms =", JSON.parse(JSON.stringify(this.forms || [])));
+      console.log("[Scratch] mounted hydrated current form =", JSON.parse(JSON.stringify(this.forms?.[this.currentFormIndex] || {})));
+      console.log("[Scratch] mounted hydrated current logic =", JSON.parse(JSON.stringify(this.forms?.[this.currentFormIndex]?.logic || {})));
       localStorage.setItem("scratchForms", JSON.stringify(this.forms));
     } else {
-      this.forms = [{ sections: [] }];
-      localStorage.setItem("scratchForms", JSON.stringify(this.forms));
+      const stored = localStorage.getItem("scratchForms");
+
+      if (stored) {
+        try {
+          const parsed = JSON.parse(stored);
+          this.forms = (Array.isArray(parsed) && parsed.length) ? parsed : [{ sections: [] }];
+        } catch {
+          this.forms = [{ sections: [] }];
+        }
+      } else if (hasStudyForms) {
+        this.forms = JSON.parse(JSON.stringify(this.studyDetails.forms));
+        localStorage.setItem("scratchForms", JSON.stringify(this.forms));
+      } else {
+        this.forms = [{ sections: [] }];
+        localStorage.setItem("scratchForms", JSON.stringify(this.forms));
+      }
     }
+
+    this.normalizeAllForms();
 
       // FIX: ensure current slot always exists after hydration too
     this.ensureCurrentFormExists();
@@ -1188,6 +1205,33 @@ export default {
   },
 
   methods: {
+    normalizeAllForms() {
+      if (!Array.isArray(this.forms)) {
+        this.forms = [];
+      }
+
+      this.forms = this.forms.map((form) => {
+        const safeForm = form && typeof form === "object" ? form : {};
+
+        return {
+          ...safeForm,
+          sections: Array.isArray(safeForm.sections) ? safeForm.sections : [],
+          logic: {
+            version: safeForm.logic?.version || 1,
+            calculations: Array.isArray(safeForm.logic?.calculations) ? safeForm.logic.calculations : [],
+            conditions: Array.isArray(safeForm.logic?.conditions) ? safeForm.logic.conditions : []
+          }
+        };
+      });
+
+      if (!this.forms.length) {
+        this.forms = [{
+          sections: [],
+          logic: { version: 1, calculations: [], conditions: [] }
+        }];
+      }
+    },
+
     getBasicConstraintsForCopiedField(field) {
       const c = JSON.parse(JSON.stringify(field?.constraints || {}));
       const type = String(field?.type || "").toLowerCase();

@@ -1,26 +1,53 @@
 /* eslint-disable */
+import { create, all } from "mathjs";
 
-/**
- * Runtime calculation engine for Add Data screen.
- *
- * Supports:
- * - sum
- * - subtract
- * - multiply
- * - divide
- * - mean
- * - median
- * - mode
- * - min
- * - max
- * - range
- * - count
- * - count_all
- * - stddev_pop
- * - stddev_samp
- * - variance_pop
- * - variance_samp
- */
+/* ============================================================
+   MATHJS RUNTIME
+   ============================================================ */
+
+const math = create(all, {});
+
+// Reduce risky parser surface as recommended by mathjs security guidance.
+// We only need compile/evaluate support indirectly plus normal math functions.
+try {
+  math.import({
+    import: function () {
+      throw new Error("math.import is disabled in calculation expressions.");
+    },
+    createUnit: function () {
+      throw new Error("createUnit is disabled in calculation expressions.");
+    },
+    reviver: function () {
+      throw new Error("reviver is disabled in calculation expressions.");
+    },
+    simplify: function () {
+      throw new Error("simplify is disabled in calculation expressions.");
+    },
+    derivative: function () {
+      throw new Error("derivative is disabled in calculation expressions.");
+    },
+    resolve: function () {
+      throw new Error("resolve is disabled in calculation expressions.");
+    }
+  }, { override: true });
+} catch {}
+
+try {
+  math.import({
+    ifElse: (cond, a, b) => (cond ? a : b),
+    nz: (v, fallback = 0) => (v === null || v === undefined || v === "" ? fallback : v),
+    mean: (...args) => {
+      const arr = Array.isArray(args[0]) && args.length === 1 ? args[0] : args;
+      const nums = arr.map(Number).filter(Number.isFinite);
+      if (!nums.length) return 0;
+      return nums.reduce((a, b) => a + b, 0) / nums.length;
+    }
+  }, { override: true });
+} catch {}
+
+/* ============================================================
+   BASIC HELPERS
+   ============================================================ */
 
 function isFiniteNumber(n) {
   return typeof n === "number" && Number.isFinite(n);
@@ -37,7 +64,7 @@ function valuesToNumbers(values) {
   return values.map(toNumber).filter((n) => n !== null);
 }
 
-function mean(nums) {
+function meanLegacy(nums) {
   if (!nums.length) return null;
   return nums.reduce((a, b) => a + b, 0) / nums.length;
 }
@@ -66,13 +93,13 @@ function mode(nums) {
 
 function variancePopulation(nums) {
   if (!nums.length) return null;
-  const m = mean(nums);
+  const m = meanLegacy(nums);
   return nums.reduce((acc, n) => acc + Math.pow(n - m, 2), 0) / nums.length;
 }
 
 function varianceSample(nums) {
   if (nums.length < 2) return null;
-  const m = mean(nums);
+  const m = meanLegacy(nums);
   return nums.reduce((acc, n) => acc + Math.pow(n - m, 2), 0) / (nums.length - 1);
 }
 
@@ -85,6 +112,17 @@ function stddevSample(nums) {
   const v = varianceSample(nums);
   return v === null ? null : Math.sqrt(v);
 }
+
+function roundToDecimals(val, decimals) {
+  if (!isFiniteNumber(val)) return val;
+  const d = Number.isFinite(Number(decimals)) ? Number(decimals) : null;
+  if (d === null) return val;
+  return Number(val.toFixed(d));
+}
+
+/* ============================================================
+   STUDY / FORM HELPERS
+   ============================================================ */
 
 export function getStudyFormsFromStudy(study) {
   const sd = study?.content?.study_data || {};
@@ -100,7 +138,9 @@ export function getPrimaryFormFromStudy(study) {
 export function getCalculationRulesFromStudy(study) {
   const form = getPrimaryFormFromStudy(study);
   const calculations = form?.logic?.calculations;
-  return Array.isArray(calculations) ? calculations.filter((r) => r && r.enabled !== false) : [];
+  return Array.isArray(calculations)
+    ? calculations.filter((r) => r && r.enabled !== false && (r.kind === "calc_expr" || r.kind === "calc"))
+    : [];
 }
 
 export function buildFieldLookup(selectedModels) {
@@ -163,7 +203,155 @@ export function isCalculatedRuntimeField(study, field) {
   return keys.some((k) => targetIds.has(String(k)));
 }
 
-export function computeCalculation(rule, sourceValues) {
+/* ============================================================
+   FIELD KEY HELPERS
+   ============================================================ */
+
+function getFieldKeys(field) {
+  return [
+    field?._id,
+    field?.id,
+    field?.field_id,
+    field?.uid,
+    field?.key,
+    field?.name,
+    field?.label,
+    field?.title,
+  ]
+    .filter(Boolean)
+    .map(String);
+}
+
+function getMetaForFieldId(selectedModels, fieldId) {
+  const lookup = buildFieldLookup(selectedModels);
+  return lookup.get(String(fieldId)) || null;
+}
+
+function getRawFieldValueById(selectedModels, currentCellData, fieldId) {
+  const meta = getMetaForFieldId(selectedModels, fieldId);
+  if (!meta) return null;
+  return currentCellData?.[meta.mIdx]?.[meta.fIdx];
+}
+
+function getFieldLabelByIdInternal(selectedModels, fieldId) {
+  const lookup = buildFieldLookup(selectedModels);
+  const meta = lookup.get(String(fieldId));
+  if (!meta?.field) return "Field";
+  return meta.field.label || meta.field.name || meta.field.title || "Field";
+}
+
+/* ============================================================
+   EXPRESSION RULE HELPERS
+   ============================================================ */
+
+function resolveMappedChoice(rawValue, mappings) {
+  if (rawValue === null || rawValue === undefined || rawValue === "") return null;
+  if (!mappings || typeof mappings !== "object") return null;
+
+  const exact = mappings[String(rawValue)];
+  const n = Number(exact);
+  return Number.isFinite(n) ? n : null;
+}
+
+function resolveBooleanScore(rawValue, mappings) {
+  const checked = rawValue === true || rawValue === "true" || rawValue === 1 || rawValue === "1";
+  const key = checked ? "__checked" : "__unchecked";
+  const n = Number(mappings?.[key]);
+  return Number.isFinite(n) ? n : null;
+}
+
+function resolveSymbolValue(symbolDef, rawValue, blankPolicy = "strict") {
+  const valueType = String(symbolDef?.valueType || "number");
+
+  if (valueType === "number") {
+    const n = toNumber(rawValue);
+    if (n === null && blankPolicy === "zero") return 0;
+    return n;
+  }
+
+  if (valueType === "mapped_choice") {
+    const n = resolveMappedChoice(rawValue, symbolDef.mappings || {});
+    if (n === null && blankPolicy === "zero") return 0;
+    return n;
+  }
+
+  if (valueType === "boolean_score") {
+    const n = resolveBooleanScore(rawValue, symbolDef.mappings || {});
+    if (n === null && blankPolicy === "zero") return 0;
+    return n;
+  }
+
+  const fallback = toNumber(rawValue);
+  if (fallback === null && blankPolicy === "zero") return 0;
+  return fallback;
+}
+
+function buildScopeForExpressionRule(rule, selectedModels, currentCellData) {
+  const scope = {};
+  const symbolMap = rule?.symbolMap || {};
+  const blankPolicy = rule?.blankPolicy || "strict";
+
+  for (const [symbol, def] of Object.entries(symbolMap)) {
+    const rawValue = getRawFieldValueById(selectedModels, currentCellData, def?.fieldId);
+    scope[symbol] = resolveSymbolValue(def, rawValue, blankPolicy);
+  }
+
+  return scope;
+}
+
+function hasStrictMissingValues(scope) {
+  return Object.values(scope).some((v) => v === null || typeof v === "undefined" || Number.isNaN(v));
+}
+
+function compileRuleExpression(rule) {
+  const expr = String(rule?.expression || "").trim();
+  if (!expr) throw new Error("Expression is empty.");
+  return math.compile(expr);
+}
+
+export function computeExpressionCalculation(rule, selectedModels, currentCellData) {
+  try {
+    const scope = buildScopeForExpressionRule(rule, selectedModels, currentCellData);
+
+    if ((rule?.blankPolicy || "strict") === "strict" && hasStrictMissingValues(scope)) {
+      return {
+        ok: false,
+        value: null,
+        warning: "One or more inputs are missing or unmapped."
+      };
+    }
+
+    const compiled = compileRuleExpression(rule);
+    const result = compiled.evaluate(scope);
+    const numeric = Number(result);
+
+    if (!Number.isFinite(numeric)) {
+      return {
+        ok: false,
+        value: null,
+        warning: "Expression result is not a finite number."
+      };
+    }
+
+    return {
+      ok: true,
+      value: roundToDecimals(numeric, rule?.decimals),
+      warning: ""
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      value: null,
+      warning: err?.message || "Failed to evaluate expression."
+    };
+  }
+}
+
+/* ============================================================
+   LEGACY RULE SUPPORT
+   ============================================================ */
+
+export function computeLegacyCalculation(rule, sourceValues) {
   const op = String(rule?.op || "").toLowerCase();
   const nums = valuesToNumbers(sourceValues);
   const rawCount = Array.isArray(sourceValues) ? sourceValues.length : 0;
@@ -179,7 +367,9 @@ export function computeCalculation(rule, sourceValues) {
     };
   }
 
-  if (["sum", "subtract", "multiply", "divide", "mean", "median", "mode", "min", "max", "range", "stddev_pop", "stddev_samp", "variance_pop", "variance_samp"].includes(op)) {
+  if (
+    ["sum", "subtract", "multiply", "divide", "mean", "median", "mode", "min", "max", "range", "stddev_pop", "stddev_samp", "variance_pop", "variance_samp"].includes(op)
+  ) {
     if (!nums.length) {
       return {
         ok: false,
@@ -220,7 +410,7 @@ export function computeCalculation(rule, sourceValues) {
     }
 
     case "mean":
-      return { ok: true, value: mean(nums), warning: "" };
+      return { ok: true, value: meanLegacy(nums), warning: "" };
 
     case "median":
       return { ok: true, value: median(nums), warning: "" };
@@ -279,20 +469,25 @@ export function computeCalculation(rule, sourceValues) {
       };
   }
 }
-function getFieldKeys(field) {
-  return [
-    field?._id,
-    field?.id,
-    field?.field_id,
-    field?.uid,
-    field?.key,
-    field?.name,
-    field?.label,
-    field?.title,
-  ]
-    .filter(Boolean)
-    .map(String);
+
+export function computeCalculation(rule, selectedModels, currentCellData, sourceValues = null) {
+  if (String(rule?.kind || "") === "calc_expr") {
+    return computeExpressionCalculation(rule, selectedModels, currentCellData);
+  }
+
+  if (Array.isArray(sourceValues)) {
+    return computeLegacyCalculation(rule, sourceValues);
+  }
+
+  const values = (rule?.sources || []).map((srcId) =>
+    getRawFieldValueById(selectedModels, currentCellData, srcId)
+  );
+  return computeLegacyCalculation(rule, values);
 }
+
+/* ============================================================
+   RULE LOOKUP + FORMULA LABELS
+   ============================================================ */
 
 export function findCalculationRuleForField(study, field) {
   if (!field) return null;
@@ -305,32 +500,43 @@ export function findCalculationRuleForField(study, field) {
 }
 
 export function getFieldLabelById(selectedModels, fieldId) {
-  const lookup = buildFieldLookup(selectedModels);
-  const meta = lookup.get(String(fieldId));
-  if (!meta?.field) return "Field";
-  return (
-    meta.field.label ||
-    meta.field.name ||
-    meta.field.title ||
-    "Field"
-  );
+  return getFieldLabelByIdInternal(selectedModels, fieldId);
+}
+
+function replaceSymbolsWithLabels(expression, rule, selectedModels) {
+  let out = String(expression || "");
+  const entries = Object.entries(rule?.symbolMap || {}).sort((a, b) => b[0].length - a[0].length);
+
+  entries.forEach(([symbol, def]) => {
+    const label =
+      def?.fieldLabel ||
+      getFieldLabelByIdInternal(selectedModels, def?.fieldId) ||
+      symbol;
+
+    const rx = new RegExp(`\\b${symbol.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "g");
+    out = out.replace(rx, label);
+  });
+
+  return out;
 }
 
 export function buildCalculationFormula(rule, selectedModels, targetField = null) {
   if (!rule) return "";
 
-  const sourceLabels = (rule.sources || []).map((srcId) =>
-    getFieldLabelById(selectedModels, srcId)
-  );
-
   const targetLabel =
     targetField?.label ||
     targetField?.name ||
     targetField?.title ||
-    getFieldLabelById(selectedModels, rule.target) ||
+    getFieldLabelByIdInternal(selectedModels, rule.target) ||
     "Result";
 
-  if (!sourceLabels.length) return "";
+  if (rule.kind === "calc_expr") {
+    return `${targetLabel} = ${replaceSymbolsWithLabels(rule.expression, rule, selectedModels)}`;
+  }
+
+  const sourceLabels = (rule.sources || []).map((srcId) =>
+    getFieldLabelByIdInternal(selectedModels, srcId)
+  );
 
   const A = sourceLabels[0];
   const rest = sourceLabels.slice(1);
@@ -431,8 +637,6 @@ function parseDateLike(value, format = "dd.MM.yyyy") {
 function parseTimeLike(value) {
   if (!value) return null;
   const s = String(value).trim();
-
-  // supports HH:mm and HH:mm:ss
   const mm = /^(\d{2}):(\d{2})(?::(\d{2}))?$/.exec(s);
   if (!mm) return null;
 
@@ -453,7 +657,6 @@ function evaluateSingleVisibilityRule(rule, sourceValue, sourceField) {
   if (operator === "empty") return isBlankValue(sourceValue);
   if (operator === "not_empty" || operator === "is_not_empty") return !isBlankValue(sourceValue);
 
-  // choice fields
   if (sourceType === "select" || sourceType === "radio") {
     if (Array.isArray(sourceValue)) {
       if (operator === "eq") {
@@ -470,7 +673,6 @@ function evaluateSingleVisibilityRule(rule, sourceValue, sourceField) {
     }
   }
 
-  // checkbox
   if (sourceType === "checkbox") {
     const left = !!sourceValue;
     const right = compareValue === true || compareValue === "true" || compareValue === 1 || compareValue === "1";
@@ -478,7 +680,6 @@ function evaluateSingleVisibilityRule(rule, sourceValue, sourceField) {
     if (operator === "neq") return left !== right;
   }
 
-  // number / slider
   if (sourceType === "number" || sourceType === "slider") {
     const left = toComparableNumber(sourceValue);
     const right = toComparableNumber(compareValue);
@@ -495,7 +696,6 @@ function evaluateSingleVisibilityRule(rule, sourceValue, sourceField) {
     if (operator === "between") return right !== null && rightTo !== null && left >= right && left <= rightTo;
   }
 
-  // date
   if (sourceType === "date") {
     const fmt = constraints.dateFormat || "dd.MM.yyyy";
     const left = parseDateLike(sourceValue, fmt);
@@ -513,7 +713,6 @@ function evaluateSingleVisibilityRule(rule, sourceValue, sourceField) {
     if (operator === "between") return right !== null && rightTo !== null && left >= right && left <= rightTo;
   }
 
-  // time
   if (sourceType === "time") {
     const left = parseTimeLike(sourceValue);
     const right = parseTimeLike(compareValue);
@@ -530,7 +729,6 @@ function evaluateSingleVisibilityRule(rule, sourceValue, sourceField) {
     if (operator === "between") return right !== null && rightTo !== null && left >= right && left <= rightTo;
   }
 
-  // text / fallback
   const leftText = String(sourceValue ?? "");
   const rightText = String(compareValue ?? "");
   const rightToText = String(compareValueTo ?? "");
@@ -585,7 +783,6 @@ export function evaluateFieldVisibility(study, selectedModels, currentCellData, 
     return !matched;
   }
 
-  // default: show
   return matched;
 }
 
