@@ -305,7 +305,7 @@
 
                           <button
                             class="icon-button"
-                            title="Add Similar Field"
+                            title="Copy field (basic settings only)"
                             @click.stop.prevent="setActiveSection(si); addSimilarField(si, fi)"
                           ><i :class="icons.add"></i></button>
 
@@ -314,6 +314,13 @@
                             title="Delete Field"
                             @click.stop.prevent="setActiveSection(si, fi); removeField(si, fi)"
                           ><i :class="icons.delete"></i></button>
+
+                          <button
+                              v-if="hasFieldDependencies(si, fi)"
+                              class="icon-button"
+                              title="View dependencies"
+                              @click.stop.prevent="openDependencyInfoDialog(si, fi)"
+                            ><i :class="icons.info || 'fas fa-question-circle'"></i></button>
 
                           <button
                             class="icon-button"
@@ -691,6 +698,17 @@
         @showGenericDialog="openGenericDialog"
       />
     </div>
+    <FieldOptionRemapDialog
+      :visible="showFieldOptionRemapDialog"
+      :sourceFieldLabel="pendingFieldOptionRemapSourceLabel"
+      :currentItem="fieldOptionRemapContext"
+      :nextOptions="pendingFieldOptionRemapNextOptions"
+      :currentIndex="pendingFieldOptionRemapIndex"
+      :queueLength="pendingFieldOptionRemapQueue.length"
+      @confirm="confirmFieldOptionRemapDialog"
+      @cancel="cancelFieldOptionRemapDialog"
+      @validation-error="openGenericDialog"
+    />
 
     <!-- Preview Dialog -->
     <div v-if="showPreviewDialog" class="modal-overlay">
@@ -810,7 +828,7 @@ import LogicCalculationsRoute from "./LogicCalculationsRoute.vue";
 import ImportCsvTemplateDialog from "./ImportCsvTemplateDialog.vue";
 import RearrangeStructureDialog from "@/components/RearrangeStructureDialog.vue";
 import FieldTable from "@/components/FieldTable.vue";
-
+import FieldOptionRemapDialog from "@/components/FieldOptionRemapDialog.vue";
 export default {
   name: "ScratchFormComponent",
   components: {
@@ -829,6 +847,7 @@ export default {
     FieldFileUpload,
     FieldTable,
     RearrangeStructureDialog,
+    FieldOptionRemapDialog,
   },
 
   beforeRouteLeave(to, from, next) {
@@ -971,6 +990,14 @@ export default {
 
       showRearrangeDialog: false,
       rearrangeInitialFocus: null,
+
+      showFieldOptionRemapDialog: false,
+      fieldOptionRemapContext: null,
+      pendingFieldOptionRemapResolve: null,
+      pendingFieldOptionRemapQueue: [],
+      pendingFieldOptionRemapSourceLabel: "",
+      pendingFieldOptionRemapIndex: 0,
+      pendingFieldOptionRemapNextOptions: [],
     };
   },
 
@@ -1161,6 +1188,312 @@ export default {
   },
 
   methods: {
+    getBasicConstraintsForCopiedField(field) {
+      const c = JSON.parse(JSON.stringify(field?.constraints || {}));
+      const type = String(field?.type || "").toLowerCase();
+
+      const basic = {
+        required: !!c.required,
+        readonly: !!c.readonly,
+        helpText: c.helpText || "",
+        placeholder: c.placeholder || "",
+      };
+
+      if (type === "date") {
+        basic.dateFormat = c.dateFormat || "dd.MM.yyyy";
+      }
+
+      if (type === "time") {
+        basic.hourCycle = c.hourCycle || "24";
+      }
+
+      if (type === "slider") {
+        basic.mode = c.mode === "linear" ? "linear" : "slider";
+        basic.min = Number.isFinite(c.min) ? c.min : 1;
+        basic.max = Number.isFinite(c.max) ? c.max : 100;
+        basic.step = Number.isFinite(c.step) ? c.step : 1;
+        basic.percent = !!c.percent;
+        basic.leftLabel = c.leftLabel || "";
+        basic.rightLabel = c.rightLabel || "";
+        basic.marks = Array.isArray(c.marks) ? JSON.parse(JSON.stringify(c.marks)) : [];
+      }
+
+      if (type === "file") {
+        basic.allowedFormats = Array.isArray(c.allowedFormats) ? [...c.allowedFormats] : [];
+        basic.storagePreference = c.storagePreference === "url" ? "url" : "local";
+        basic.allowMultipleFiles = c.allowMultipleFiles !== false;
+        basic.modalities = Array.isArray(c.modalities) ? [...c.modalities] : [];
+      }
+
+      // DO NOT copy advanced logic
+      basic.visibilityLogic = {
+        action: "show",
+        match: "all",
+        rules: []
+      };
+
+      return basic;
+    },
+
+    haveChoiceOptionsChanged(previousField, nextField) {
+      const prevType = String(previousField?.type || "").toLowerCase();
+      const nextType = String(nextField?.type || "").toLowerCase();
+
+      if (!["radio", "select"].includes(prevType) || !["radio", "select"].includes(nextType)) {
+        return false;
+      }
+
+      const prev = (Array.isArray(previousField?.options) ? previousField.options : [])
+        .map(v => String(v || "").trim())
+        .filter(Boolean);
+
+      const next = (Array.isArray(nextField?.options) ? nextField.options : [])
+        .map(v => String(v || "").trim())
+        .filter(Boolean);
+
+      if (prev.length !== next.length) return true;
+
+      for (let i = 0; i < prev.length; i++) {
+        if (prev[i] !== next[i]) return true;
+      }
+
+      return false;
+    },
+
+    buildBuilderFieldLookup() {
+      const lookup = new Map();
+
+      (this.currentForm.sections || []).forEach((section, si) => {
+        (section.fields || []).forEach((field, fi) => {
+          const keys = [
+            field?._id,
+            field?.id,
+            field?.field_id,
+            field?.uid,
+            field?.key,
+            field?.name,
+          ].filter(Boolean);
+
+          const meta = { section, field, sectionIndex: si, fieldIndex: fi };
+
+          keys.forEach((k) => {
+            lookup.set(String(k), meta);
+          });
+        });
+      });
+
+      return lookup;
+    },
+
+    getFieldDisplayName(sectionIndex, fieldIndex) {
+      const section = this.currentForm.sections?.[sectionIndex];
+      const field = section?.fields?.[fieldIndex];
+      if (!field) return "Unknown field";
+      const sectionTitle = section?.title || `Section ${sectionIndex + 1}`;
+      const fieldTitle = field.label || field.name || `Field ${fieldIndex + 1}`;
+      return `${sectionTitle} → ${fieldTitle}`;
+    },
+
+    getDependentFieldsFor(sectionIndex, fieldIndex) {
+      const sourceField = this.currentForm.sections?.[sectionIndex]?.fields?.[fieldIndex];
+      if (!sourceField) return [];
+
+      const sourceKey = this.getFieldLogicKey(sourceField, sectionIndex, fieldIndex);
+
+      const out = [];
+
+      (this.currentForm.sections || []).forEach((section, si) => {
+        (section.fields || []).forEach((field, fi) => {
+          if (si === sectionIndex && fi === fieldIndex) return;
+
+          const rules = field?.constraints?.visibilityLogic?.rules;
+          if (!Array.isArray(rules) || !rules.length) return;
+
+          const matches = rules
+            .map((rule, ri) => ({ rule, ri }))
+            .filter(({ rule }) => String(rule?.sourceFieldKey || "") === String(sourceKey));
+
+          if (matches.length) {
+            out.push({
+              sectionIndex: si,
+              fieldIndex: fi,
+              section,
+              field,
+              matches,
+            });
+          }
+        });
+      });
+
+      return out;
+    },
+
+    getDependenciesOfField(sectionIndex, fieldIndex) {
+      const field = this.currentForm.sections?.[sectionIndex]?.fields?.[fieldIndex];
+      const rules = field?.constraints?.visibilityLogic?.rules;
+      if (!Array.isArray(rules) || !rules.length) return [];
+
+      const lookup = this.buildBuilderFieldLookup();
+
+      return rules.map((rule) => {
+        const src = lookup.get(String(rule?.sourceFieldKey || ""));
+        return {
+          rule,
+          sourceLabel: src
+            ? this.getFieldDisplayName(src.sectionIndex, src.fieldIndex)
+            : `Unknown source (${rule?.sourceFieldKey || "missing"})`
+        };
+      });
+    },
+
+    hasFieldDependencies(sectionIndex, fieldIndex) {
+      return (
+        this.getDependentFieldsFor(sectionIndex, fieldIndex).length > 0 ||
+        this.getDependenciesOfField(sectionIndex, fieldIndex).length > 0
+      );
+    },
+
+    openDependencyInfoDialog(sectionIndex, fieldIndex) {
+      const currentLabel = this.getFieldDisplayName(sectionIndex, fieldIndex);
+      const dependents = this.getDependentFieldsFor(sectionIndex, fieldIndex);
+      const dependencies = this.getDependenciesOfField(sectionIndex, fieldIndex);
+
+      const dependentText = dependents.length
+        ? dependents
+            .map((d) => {
+              const rulesText = d.matches
+                .map(({ rule }) => {
+                  const val = Array.isArray(rule?.value)
+                    ? `[${rule.value.join(", ")}]`
+                    : (rule?.value ?? "");
+                  return `${rule?.operator || "eq"} ${val}`;
+                })
+                .join(" | ");
+              return `• ${this.getFieldDisplayName(d.sectionIndex, d.fieldIndex)} (${rulesText})`;
+            })
+            .join("\n")
+        : "• No fields depend on this field.";
+
+      const dependencyText = dependencies.length
+        ? dependencies
+            .map((d) => {
+              const val = Array.isArray(d.rule?.value)
+                ? `[${d.rule.value.join(", ")}]`
+                : (d.rule?.value ?? "");
+              return `• ${d.sourceLabel} (${d.rule?.operator || "eq"} ${val})`;
+            })
+            .join("\n")
+        : "• This field does not depend on any other field.";
+
+      this.openGenericDialog(
+        `Field: ${currentLabel}\n\n` +
+        `Depends on this field:\n${dependentText}\n\n` +
+        `This field depends on:\n${dependencyText}`
+      );
+    },
+
+    collectRemovedChoiceOptions(previousField, nextField) {
+      const previousOptions = (Array.isArray(previousField?.options) ? previousField.options : [])
+        .map(v => String(v ?? "").trim())
+        .filter(Boolean);
+
+      const nextOptions = (Array.isArray(nextField?.options) ? nextField.options : [])
+        .map(v => String(v ?? "").trim())
+        .filter(Boolean);
+
+      return previousOptions.filter(v => !nextOptions.includes(v));
+    },
+
+    extractMatchingRemovedValues(candidate, removedOptions) {
+      if (Array.isArray(candidate)) {
+        return candidate
+          .map(v => String(v ?? "").trim())
+          .filter(v => v && removedOptions.includes(v));
+      }
+
+      const single = String(candidate ?? "").trim();
+      return single && removedOptions.includes(single) ? [single] : [];
+    },
+
+    removeAffectedDependentVisibilityRules({ sourceSectionIndex, sourceFieldIndex, previousField, nextField }) {
+      const removedOptions = this.collectRemovedChoiceOptions(previousField, nextField);
+      if (!removedOptions.length) return;
+
+      const dependents = this.getDependentFieldsFor(sourceSectionIndex, sourceFieldIndex);
+      if (!dependents.length) return;
+
+      const impactedFields = [];
+      const sourceFieldLabel = previousField?.label || previousField?.name || "Field";
+      const sourceFieldKey = this.getFieldLogicKey(previousField, sourceSectionIndex, sourceFieldIndex);
+
+      dependents.forEach((dep) => {
+        const rules = dep.field?.constraints?.visibilityLogic?.rules;
+        if (!Array.isArray(rules) || !rules.length) return;
+
+        const remainingRules = [];
+        const removedRuleSummaries = [];
+
+        rules.forEach((rule) => {
+          const sameSource = String(rule?.sourceFieldKey || "") === String(sourceFieldKey);
+
+          if (!sameSource) {
+            remainingRules.push(rule);
+            return;
+          }
+
+          const matchesValue = this.extractMatchingRemovedValues(rule?.value, removedOptions);
+          const matchesValueTo = this.extractMatchingRemovedValues(rule?.valueTo, removedOptions);
+          const matchedRemovedValues = [...new Set([...matchesValue, ...matchesValueTo])];
+
+          if (matchedRemovedValues.length) {
+            removedRuleSummaries.push({
+              operator: String(rule?.operator || "rule"),
+              removedValues: matchedRemovedValues,
+            });
+          } else {
+            remainingRules.push(rule);
+          }
+        });
+
+        if (removedRuleSummaries.length) {
+          dep.field.constraints = dep.field.constraints || {};
+          dep.field.constraints.visibilityLogic = dep.field.constraints.visibilityLogic || {
+            action: "show",
+            match: "all",
+            rules: []
+          };
+
+          dep.field.constraints.visibilityLogic.rules = remainingRules;
+
+          impactedFields.push({
+            fieldLabel: this.getFieldDisplayName(dep.sectionIndex, dep.fieldIndex),
+            removedRuleSummaries,
+          });
+        }
+      });
+
+      if (!impactedFields.length) return;
+
+      const messageLines = [
+        `Options were changed in "${sourceFieldLabel}".`,
+        ``,
+        `Some removed option values were still used in visibility logic, so those affected visibility rule(s) were removed automatically.`,
+        ``,
+        `Please review and add visibility logic again if still needed.`,
+        ``,
+        `Affected field(s):`
+      ];
+
+      impactedFields.forEach((item) => {
+        messageLines.push(`• ${item.fieldLabel}`);
+        item.removedRuleSummaries.forEach((summary) => {
+          messageLines.push(`  - ${summary.operator}: ${summary.removedValues.join(", ")}`);
+        });
+      });
+
+      this.openGenericDialog(messageLines.join("\n"));
+    },
+
     togglePropSelection(i, prop) {
       if (this.modelAddToExisting && this.isPropAlreadyInTargetSection(prop)) return;
 
@@ -1188,7 +1521,6 @@ export default {
 
       this.selectedProps = next;
     },
-
 
     openRearrangeDialog(focus = null) {
       this.ensureCurrentFormExists();
@@ -2769,18 +3101,59 @@ export default {
       const f = this.currentForm.sections[si]?.fields?.[fi];
       if (!f) return;
 
+      const baseName = String(f.name || "field").replace(/_\d+$/, "");
+      let candidateName = `${baseName}_${Date.now()}`;
+
+      const existingNames = new Set(
+        (this.currentForm.sections[si]?.fields || []).map(field => String(field?.name || ""))
+      );
+
+      let uniqueName = candidateName;
+      let counter = 2;
+      while (existingNames.has(uniqueName)) {
+        uniqueName = `${candidateName}_${counter}`;
+        counter += 1;
+      }
+
+      const originalLabel = String(f.label || "Field").trim() || "Field";
+      let candidateLabel = `${originalLabel}_copy`;
+
+      const existingLabels = new Set(
+        (this.currentForm.sections[si]?.fields || []).map(field => String(field?.label || "").trim())
+      );
+
+      let uniqueLabel = candidateLabel;
+      let labelCounter = 2;
+      while (existingLabels.has(uniqueLabel)) {
+        uniqueLabel = `${candidateLabel}_${labelCounter}`;
+        labelCounter += 1;
+      }
+
       const clone = {
-        ...JSON.parse(JSON.stringify(f)),
         _id: this.uuidForLogic(),
-        name: `${f.name}_${Date.now()}`,
+        name: uniqueName,
+        label: uniqueLabel,
+        type: f.type,
+        placeholder: f.placeholder || "",
+        description: f.description || "",
+        rows: f.type === "textarea" ? (f.rows || 4) : undefined,
+        options: Array.isArray(f.options) ? JSON.parse(JSON.stringify(f.options)) : [],
         value:
+          f.type === "checkbox" ? false :
+          f.type === "slider" ? null :
+          f.type === "file" ? null :
           f.type === "radio" && f.constraints?.allowMultiple ? [] :
-          (f.type === "radio" || f.type === "select") ? "" :
-          (f.type === "slider" ? null :
-          (f.type === "file" ? null : f.value))
+          "",
+        constraints: this.getBasicConstraintsForCopiedField(f),
       };
 
+      if (clone.type !== "textarea") {
+        delete clone.rows;
+      }
+
       this.currentForm.sections[si].fields.splice(fi + 1, 0, clone);
+
+      this.openGenericDialog("Basic settings are copied. Advanced settings are not copied.");
     },
 
     removeField(si, fi) {
@@ -2826,7 +3199,7 @@ export default {
       this.showConstraintsDialog = true;
     },
 
-    confirmConstraintsDialog(payload) {
+    async confirmConstraintsDialog(payload) {
       const { sectionIndex, fieldIndex } = this.currentFieldIndices;
       const f = this.currentForm.sections[sectionIndex]?.fields?.[fieldIndex];
       if (!f) {
@@ -2834,7 +3207,9 @@ export default {
         return;
       }
 
+      const previousField = JSON.parse(JSON.stringify(f));
       const nextField = payload?.field;
+
       if (!nextField || typeof nextField !== "object") {
         this.showConstraintsDialog = false;
         return;
@@ -2925,6 +3300,17 @@ export default {
         }
         mergedField.value =
           mergedField.constraints?.allowMultipleFiles !== false ? [] : null;
+      }
+
+      // IMPORTANT: if choice options changed, remove affected visibility logic rules
+      const optionsChanged = this.haveChoiceOptionsChanged(previousField, mergedField);
+      if (optionsChanged) {
+        this.removeAffectedDependentVisibilityRules({
+          sourceSectionIndex: sectionIndex,
+          sourceFieldIndex: fieldIndex,
+          previousField,
+          nextField: mergedField,
+        });
       }
 
       this.currentForm.sections[sectionIndex].fields.splice(fieldIndex, 1, mergedField);
@@ -3121,7 +3507,7 @@ export default {
 .scratch-form-content {
   display: flex;
   gap: 20px;
-}
+ }
 
 .available-fields {
   width: 300px;
@@ -3642,11 +4028,18 @@ input, textarea, select {
   max-height:90%;
   overflow-y:auto;
 }
-
+.modal p {
+  margin: 0;
+  white-space: pre-line;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  line-height: 1.6;
+  color: #374151;
+}
 .modal.model-dialog {
   width:400px;
-  max-height:80vh;
-  padding:20px 16px;
+  max-height: 80vh;
+  padding: 20px 16px;
 }
 
 .preview-modal {
