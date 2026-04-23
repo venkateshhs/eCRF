@@ -271,15 +271,16 @@
       <div v-if="showColumnConstraintsDialog" class="modal-overlay nested-modal-overlay">
         <div class="modal nested-modal">
           <FieldConstraintsDialog
-            :currentFieldType="currentColumnFieldType"
-            :constraintsForm="columnConstraintsForm"
-            :form="mockForm"
-            :currentFieldKey="currentColumnKey"
-            :currentFieldLabel="currentColumnLabel"
-            @updateConstraints="confirmColumnConstraintsDialog"
-            @closeConstraintsDialog="cancelColumnConstraintsDialog"
-            @showGenericDialog="forwardGenericDialog"
-          />
+          :currentFieldType="currentColumnFieldType"
+          :constraintsForm="columnConstraintsForm"
+          :form="mockForm"
+          :currentFieldKey="currentColumnKey"
+          :currentFieldLabel="currentColumnLabel"
+          :fieldDefinition="currentColumn"
+          @updateConstraints="confirmColumnConstraintsDialog"
+          @closeConstraintsDialog="cancelColumnConstraintsDialog"
+          @showGenericDialog="forwardGenericDialog"
+        />
         </div>
       </div>
     </div>
@@ -445,7 +446,6 @@ import FieldCheckbox from "@/components/fields/FieldCheckbox.vue";
 import FieldRadioGroup from "@/components/fields/FieldRadioGroup.vue";
 import FieldTime from "@/components/fields/FieldTime.vue";
 import FieldSelect from "@/components/fields/FieldSelect.vue";
-import { normalizeConstraints } from "@/utils/constraints";
 import { createAjv, validateFieldValue } from "@/utils/jsonschemaValidation";
 
 export default {
@@ -1232,37 +1232,48 @@ export default {
       this.showColumnConstraintsDialog = true;
     },
 
-    confirmColumnConstraintsDialog(c) {
+    confirmColumnConstraintsDialog(payload) {
       const col = this.currentColumn;
       if (!col) {
         this.showColumnConstraintsDialog = false;
         return;
       }
 
-      const prevConstraints = JSON.parse(JSON.stringify(col.constraints || {}));
-      const type = col.type;
-      const norm = normalizeConstraints(type, c);
+      const nextField = payload?.field || null;
+      const nextType = String(payload?.type || col.type || "text");
+      if (!nextField) {
+        this.showColumnConstraintsDialog = false;
+        this.editingColumnIndex = null;
+        return;
+      }
 
-      if ((type === "select" || type === "radio") && Array.isArray(c.options)) {
-        const cleanedOptions = c.options.map(o => String(o || "").trim()).filter(Boolean);
+      // apply changed type too
+      col.type = this.normalizeAllowedType(nextType);
+
+      // keep existing stable identity fields
+      col.id = nextField.id || col.id;
+      col.label = nextField.label || col.label;
+
+      // always refresh key from current label later on saveConfig,
+      // but keep a live key here too for preview/runtime consistency
+      col.key = nextField.key || this.buildColumnKey(col.label, this.editingColumnIndex || 0);
+
+      // options are stored on the field, not directly on the emitted payload
+      if (col.type === "select" || col.type === "radio") {
+        const cleanedOptions = Array.isArray(nextField.options)
+          ? nextField.options.map(o => String(o || "").trim()).filter(Boolean)
+          : [];
+
         col.options = cleanedOptions.length ? cleanedOptions : ["Option 1"];
+      } else {
+        col.options = [];
       }
 
-      if (type === "date" && (c.dateFormat || norm.dateFormat)) {
-        norm.dateFormat = c.dateFormat || norm.dateFormat;
-      }
+      // constraints are already normalized by FieldConstraintsDialog for the chosen type
+      col.constraints = JSON.parse(JSON.stringify(nextField.constraints || {}));
 
-      col.constraints = {
-        ...prevConstraints,
-        ...norm,
-        visibilityLogic: c.visibilityLogic || prevConstraints.visibilityLogic || {
-          enabled: false,
-          match: "all",
-          action: "show",
-          targetFieldKeys: [],
-          rules: []
-        }
-      };
+      this.currentColumnFieldType = col.type;
+      this.columnConstraintsForm = this.buildConstraintsFormForColumn(col);
 
       this.showColumnConstraintsDialog = false;
       this.editingColumnIndex = null;
