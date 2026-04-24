@@ -742,11 +742,11 @@ export default {
     },
 
     getPreviewColKey(col, idx) {
-      return col.key || this.buildColumnKey(col.label, idx);
-    },
+        return col?.id || col?.key || this.buildColumnKey(col?.label, idx);
+      },
 
     getRuntimeColKey(col, idx) {
-      return col.key || this.buildColumnKey(col.label, idx);
+      return col?.id || col.key || this.buildColumnKey(col.label, idx);
     },
 
     defaultValueForType(type, constraints = {}) {
@@ -769,18 +769,24 @@ export default {
     },
 
     ensurePreviewData() {
-      const columns = this.localConfig.columns.map((col, idx) => ({
-        ...col,
-        key: this.buildColumnKey(col.label, idx)
-      }));
+        const columns = this.localConfig.columns.map((col, idx) => ({
+          ...col,
+          key: this.getPreviewColKey(col, idx)
+        }));
 
-      const row = {};
-      columns.forEach((col) => {
-        row[col.key] = this.defaultValueForType(col.type, col.constraints || {});
-      });
+        const count = Math.max(1, Number(this.localConfig.initialRows) || 1);
+        const rows = [];
 
-      this.previewData = [row];
-    },
+        for (let i = 0; i < count; i += 1) {
+          const row = {};
+          columns.forEach((col) => {
+            row[col.key] = this.defaultValueForType(col.type, col.constraints || {});
+          });
+          rows.push(row);
+        }
+
+        this.previewData = rows;
+      },
 
     normalizeRows(rows, columns, initialRows = 1) {
       const safeColumns = Array.isArray(columns) ? columns : [];
@@ -798,7 +804,7 @@ export default {
       incoming.forEach((row) => {
         const normalized = {};
         safeColumns.forEach((col, idx) => {
-          const key = col.key || this.buildColumnKey(col.label, idx);
+          const key = this.getRuntimeColKey(col, idx);
           normalized[key] =
             row?.[key] !== undefined
               ? row[key]
@@ -813,11 +819,12 @@ export default {
     createEmptyRow(columns) {
       const row = {};
       (columns || []).forEach((col, idx) => {
-        const key = col.key || this.buildColumnKey(col.label, idx);
+        const key = this.getRuntimeColKey(col, idx);
         row[key] = this.defaultValueForType(col.type, col.constraints || {});
       });
       return row;
     },
+
 
     cellErrorKey(rowIndex, colIndex) {
       return `${rowIndex}-${colIndex}`;
@@ -936,97 +943,100 @@ export default {
     },
 
     validateSingleCell(rowIndex, colIndex) {
-      const col = this.resolvedColumns[colIndex];
-      if (!col) return true;
+        const col = this.resolvedColumns[colIndex];
+        if (!col) return true;
 
-      const key = this.getRuntimeColKey(col, colIndex);
-      const row = this.internalRows[rowIndex] || {};
-      const value = row[key];
-      const label = col.label || `Column ${colIndex + 1}`;
-      const constraints = col.constraints || {};
+        const key = this.getRuntimeColKey(col, colIndex);
+        const row = this.internalRows[rowIndex] || {};
+        const value = row[key];
+        const label = col.label || `Column ${colIndex + 1}`;
+        const constraints = col.constraints || {};
 
-      this.clearCellError(rowIndex, colIndex);
+        this.clearCellError(rowIndex, colIndex);
 
-      if (constraints.readonly) return true;
-
-      if (constraints.required && this.isCellEmpty(col, value)) {
-        this.setCellError(rowIndex, colIndex, `${label} is required.`);
-        return false;
-      }
-
-      const pseudoField = {
-        type: col.type,
-        label,
-        name: key,
-        options: Array.isArray(col.options) ? col.options : [],
-        constraints
-      };
-
-      if (col.type !== "file") {
-        const { valid, message } = validateFieldValue(this.ajv, pseudoField, value);
-        if (!valid) {
-          this.setCellError(rowIndex, colIndex, message || `${label} is invalid.`);
-          return false;
-        }
-      }
-
-      if (col.type === "number" && value !== "" && value != null) {
-        const num = Number(value);
-        if (!Number.isFinite(num)) {
-          this.setCellError(rowIndex, colIndex, `${label} must be a number.`);
+        if (constraints.required && this.isCellEmpty(col, value)) {
+          this.setCellError(rowIndex, colIndex, `${label} is required.`);
           return false;
         }
 
-        if (constraints.integerOnly && !Number.isInteger(num)) {
-          this.setCellError(rowIndex, colIndex, `${label} must be an integer.`);
-          return false;
+        if (constraints.readonly) return true;
+
+        const pseudoField = {
+          type: col.type,
+          label,
+          name: key,
+          options: Array.isArray(col.options) ? col.options : [],
+          constraints
+        };
+
+        if (col.type !== "file") {
+          const { valid, message } = validateFieldValue(this.ajv, pseudoField, value);
+          if (!valid) {
+            this.setCellError(rowIndex, colIndex, message || `${label} is invalid.`);
+            return false;
+          }
         }
 
-        const digits = String(Math.abs(num)).replace(".", "").replace("-", "").length;
+        if (col.type === "number" && value !== "" && value != null) {
+          const num = Number(value);
+          if (!Number.isFinite(num)) {
+            this.setCellError(rowIndex, colIndex, `${label} must be a number.`);
+            return false;
+          }
 
-        if (Number.isFinite(Number(constraints.minDigits)) && digits < Number(constraints.minDigits)) {
-          this.setCellError(rowIndex, colIndex, `${label} must have at least ${constraints.minDigits} digits.`);
-          return false;
+          if (constraints.integerOnly && !Number.isInteger(num)) {
+            this.setCellError(rowIndex, colIndex, `${label} must be an integer.`);
+            return false;
+          }
+
+          // digit limits apply to integer part only
+          const integerPart = String(Math.trunc(Math.abs(num)));
+          const digits = integerPart.length;
+
+          if (Number.isFinite(Number(constraints.minDigits)) && digits < Number(constraints.minDigits)) {
+            this.setCellError(rowIndex, colIndex, `${label} must have at least ${constraints.minDigits} digits.`);
+            return false;
+          }
+
+          if (Number.isFinite(Number(constraints.maxDigits)) && digits > Number(constraints.maxDigits)) {
+            this.setCellError(rowIndex, colIndex, `${label} must have at most ${constraints.maxDigits} digits.`);
+            return false;
+          }
         }
 
-        if (Number.isFinite(Number(constraints.maxDigits)) && digits > Number(constraints.maxDigits)) {
-          this.setCellError(rowIndex, colIndex, `${label} must have at most ${constraints.maxDigits} digits.`);
-          return false;
+        if (col.type === "date") {
+          const msg = this.validateDateBounds(value, constraints, label);
+          if (msg) {
+            this.setCellError(rowIndex, colIndex, msg);
+            return false;
+          }
         }
-      }
 
-      if (col.type === "date") {
-        const msg = this.validateDateBounds(value, constraints, label);
-        if (msg) {
-          this.setCellError(rowIndex, colIndex, msg);
-          return false;
+        if (col.type === "time") {
+          const msg = this.validateTimeBounds(value, constraints, label);
+          if (msg) {
+            this.setCellError(rowIndex, colIndex, msg);
+            return false;
+          }
         }
-      }
 
-      if (col.type === "time") {
-        const msg = this.validateTimeBounds(value, constraints, label);
-        if (msg) {
-          this.setCellError(rowIndex, colIndex, msg);
-          return false;
-        }
-      }
-
-      if ((col.type === "select" || col.type === "radio") && value != null && value !== "") {
-        const opts = Array.isArray(col.options) ? col.options.map(String) : [];
-        if (Array.isArray(value)) {
-          const allValid = value.every((v) => opts.includes(String(v)));
-          if (!allValid) {
+        if ((col.type === "select" || col.type === "radio") && value != null && value !== "") {
+          const opts = Array.isArray(col.options) ? col.options.map(String) : [];
+          if (Array.isArray(value)) {
+            const allValid = value.every((v) => opts.includes(String(v)));
+            if (!allValid) {
+              this.setCellError(rowIndex, colIndex, `${label} has an invalid option.`);
+              return false;
+            }
+          } else if (!opts.includes(String(value))) {
             this.setCellError(rowIndex, colIndex, `${label} has an invalid option.`);
             return false;
           }
-        } else if (!opts.includes(String(value))) {
-          this.setCellError(rowIndex, colIndex, `${label} has an invalid option.`);
-          return false;
         }
-      }
 
-      return true;
-    },
+        return true;
+      },
+
 
     validateCellAt(rowIndex, colIndex) {
       const ok = this.validateSingleCell(rowIndex, colIndex);
@@ -1233,51 +1243,51 @@ export default {
     },
 
     confirmColumnConstraintsDialog(payload) {
-      const col = this.currentColumn;
-      if (!col) {
-        this.showColumnConstraintsDialog = false;
-        return;
-      }
+        const col = this.currentColumn;
+        if (!col) {
+          this.showColumnConstraintsDialog = false;
+          this.editingColumnIndex = null;
+          return;
+        }
 
-      const nextField = payload?.field || null;
-      const nextType = String(payload?.type || col.type || "text");
-      if (!nextField) {
+        const nextField = payload?.field || null;
+        const nextType = String(payload?.type || col.type || "text").toLowerCase();
+
+        if (!nextField) {
+          this.showColumnConstraintsDialog = false;
+          this.editingColumnIndex = null;
+          return;
+        }
+
+        col.type = this.normalizeAllowedType(nextType);
+
+        // keep stable identity
+        col.id = nextField.id || col.id;
+        col.label = nextField.label || col.label || `Column ${(this.editingColumnIndex ?? 0) + 1}`;
+        col.key = col.id || nextField.key || col.key || this.buildColumnKey(col.label, this.editingColumnIndex || 0);
+
+        if (col.type === "select" || col.type === "radio") {
+          const cleanedOptions = Array.isArray(nextField.options)
+            ? nextField.options.map((o) => String(o || "").trim()).filter(Boolean)
+            : [];
+
+          col.options = cleanedOptions.length ? Array.from(new Set(cleanedOptions)) : ["Option 1"];
+        } else {
+          col.options = [];
+        }
+
+        col.constraints = JSON.parse(JSON.stringify(nextField.constraints || {}));
+
+        // dropdowns stay single-select in this builder
+        if (col.type === "select" && col.constraints) {
+          delete col.constraints.allowMultiple;
+        }
+
+        this.currentColumnFieldType = col.type;
+        this.columnConstraintsForm = this.buildConstraintsFormForColumn(col);
         this.showColumnConstraintsDialog = false;
         this.editingColumnIndex = null;
-        return;
-      }
-
-      // apply changed type too
-      col.type = this.normalizeAllowedType(nextType);
-
-      // keep existing stable identity fields
-      col.id = nextField.id || col.id;
-      col.label = nextField.label || col.label;
-
-      // always refresh key from current label later on saveConfig,
-      // but keep a live key here too for preview/runtime consistency
-      col.key = nextField.key || this.buildColumnKey(col.label, this.editingColumnIndex || 0);
-
-      // options are stored on the field, not directly on the emitted payload
-      if (col.type === "select" || col.type === "radio") {
-        const cleanedOptions = Array.isArray(nextField.options)
-          ? nextField.options.map(o => String(o || "").trim()).filter(Boolean)
-          : [];
-
-        col.options = cleanedOptions.length ? cleanedOptions : ["Option 1"];
-      } else {
-        col.options = [];
-      }
-
-      // constraints are already normalized by FieldConstraintsDialog for the chosen type
-      col.constraints = JSON.parse(JSON.stringify(nextField.constraints || {}));
-
-      this.currentColumnFieldType = col.type;
-      this.columnConstraintsForm = this.buildConstraintsFormForColumn(col);
-
-      this.showColumnConstraintsDialog = false;
-      this.editingColumnIndex = null;
-    },
+      },
 
     cancelColumnConstraintsDialog() {
       this.showColumnConstraintsDialog = false;
@@ -1371,13 +1381,13 @@ export default {
       }
 
       const columns = this.localConfig.columns.map((col, idx) => ({
-        id: col.id,
-        key: this.buildColumnKey(col.label, idx),
-        label: col.label,
-        type: col.type,
-        options: Array.isArray(col.options) ? [...col.options] : [],
-        constraints: JSON.parse(JSON.stringify(col.constraints || {}))
-      }));
+          id: col.id,
+          key: col.id || col.key || this.buildColumnKey(col.label, idx),
+          label: col.label,
+          type: col.type,
+          options: Array.isArray(col.options) ? [...col.options] : [],
+          constraints: JSON.parse(JSON.stringify(col.constraints || {}))
+        }));
 
       const rows = [];
       const rowCount = Math.max(1, Number(this.localConfig.initialRows) || 1);
