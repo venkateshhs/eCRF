@@ -1,5 +1,5 @@
 <template>
-  <div class="dfp-wrapper" :class="{ readonly: isReadonly }">
+  <div class="case-date-wrapper" :class="{ readonly: isReadonly }">
     <VueDatePicker
       v-model="innerValue"
       :model-type="'format'"
@@ -16,12 +16,13 @@
       :clearable="!isReadonly"
       :disabled="isReadonly"
       :config="pickerConfig"
-      input-class="dfp-input"
-      class="dfp-picker"
+      input-class="case-date-input"
+      class="case-date-picker"
       v-bind="$attrs"
     />
+
     <!-- overlay to guarantee no edits when readonly -->
-    <div v-if="isReadonly" class="dfp-overlay" aria-hidden="true"></div>
+    <div v-if="isReadonly" class="case-date-overlay" aria-hidden="true"></div>
   </div>
 </template>
 
@@ -265,7 +266,7 @@ export default {
 </script>
 
 <style scoped>
-.dfp-wrapper {
+.case-date-wrapper {
   position: relative;
   width: 100%;
   min-width: 0;
@@ -275,7 +276,7 @@ export default {
   overflow: visible !important;
 }
 
-.dfp-picker {
+.case-date-picker {
   width: 100%;
   min-width: 0;
   display: block !important;
@@ -308,7 +309,7 @@ export default {
 
 /* Main input */
 :deep(.dp__input),
-:deep(.dfp-input) {
+:deep(.case-date-input) {
   display: block !important;
   width: 100% !important;
   min-width: 0 !important;
@@ -334,18 +335,18 @@ export default {
 }
 
 :deep(.dp__input::placeholder),
-:deep(.dfp-input::placeholder) {
+:deep(.case-date-input::placeholder) {
   color: #9ca3af !important;
   opacity: 1 !important;
 }
 
 :deep(.dp__input:hover),
-:deep(.dfp-input:hover) {
+:deep(.case-date-input:hover) {
   border-color: #cbd5e1 !important;
 }
 
 :deep(.dp__input:focus),
-:deep(.dfp-input:focus) {
+:deep(.case-date-input:focus) {
   border-color: #93c5fd !important;
   box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.12) !important;
 }
@@ -385,7 +386,7 @@ export default {
 }
 
 :deep(.dp__main[data-dp-mobile="true"] .dp__input),
-:deep(.dp__main[data-dp-mobile="true"] .dfp-input) {
+:deep(.dp__main[data-dp-mobile="true"] .case-date-input) {
   display: block !important;
   width: 100% !important;
   min-width: 0 !important;
@@ -436,13 +437,13 @@ export default {
 
 :deep(.dp__disabled),
 :deep(.dp__input:disabled),
-:deep(.dfp-input:disabled) {
+:deep(.case-date-input:disabled) {
   background: #f9fafb !important;
   color: #9ca3af !important;
   cursor: not-allowed !important;
 }
 
-.dfp-overlay {
+.case-date-overlay {
   position: absolute;
   inset: 0;
   z-index: 3;
@@ -451,8 +452,8 @@ export default {
   cursor: not-allowed;
 }
 
-.dfp-wrapper.readonly :deep(.dp__input),
-.dfp-wrapper.readonly :deep(.dfp-input) {
+.case-date-wrapper.readonly :deep(.dp__input),
+.case-date-wrapper.readonly :deep(.case-date-input) {
   background: #f9fafb !important;
   color: #6b7280 !important;
   opacity: 1 !important;
