@@ -40,9 +40,9 @@
             </label>
           </div>
         </div>
-        <div class="row">
+        <div class="row" v-if="!hideBasicTypeControls && !isTable">
           <label>Field type</label>
-          <select v-model="localType" @change="onFieldTypeChange">
+          <select v-model="localType" @change="onFieldTypeChange" :disabled="!allowTypeChange">
             <option
               v-for="opt in FIELD_TYPE_OPTIONS"
               :key="opt.value"
@@ -89,7 +89,7 @@
           </label>
         </div>
 
-        <div class="row" v-if="!isCheckbox && !(isSlider && local.mode === 'slider') && !isFile">
+        <div class="row" v-if="!isCheckbox && !isTable && !(isSlider && local.mode === 'slider') && !isFile">
           <label>Placeholder</label>
           <input type="text" v-model="local.placeholder" placeholder="Shown when empty" />
         </div>
@@ -113,7 +113,7 @@
           </select>
         </div>
 
-        <div class="row" v-if="!isDate && !(isSlider && local.mode === 'slider') && !isFile">
+        <div class="row" v-if="!isDate && !isTable && !(isSlider && local.mode === 'slider') && !isFile">
           <label>Default value</label>
 
           <select v-if="isChoice && !local.allowMultiple" v-model="local.defaultValue">
@@ -865,7 +865,7 @@ function buildInitialLocal(vm, constraintsForm, currentFieldType) {
     .map(String);
 
   const defaultValue =
-    base.defaultValue !== undefined
+    type === "table"
       ? base.defaultValue
       : type === "checkbox"
       ? false
@@ -881,7 +881,7 @@ function buildInitialLocal(vm, constraintsForm, currentFieldType) {
     required: !!base.required,
     readonly: !!base.readonly,
     helpText: base.helpText || "",
-    placeholder: base.placeholder || "",
+    placeholder: type === "table" ? "" : (base.placeholder || ""),
     defaultValue,
 
     minLength: isFinite(base.minLength) ? Number(base.minLength) : undefined,
@@ -947,6 +947,9 @@ export default {
     currentFieldKey: { type: String, default: "" },
     currentFieldLabel: { type: String, default: "" },
     fieldDefinition: { type: Object, default: () => ({}) },
+    allowTypeChange: { type: Boolean, default: true },
+    hideBasicTypeControls: { type: Boolean, default: false },
+    forceTypeLabel: { type: String, default: "" },
   },
 
   data() {
@@ -1019,6 +1022,7 @@ export default {
       return this.type === "file";
     },
     currentTypeLabel() {
+      if (this.forceTypeLabel) return this.forceTypeLabel;
       return this.type.charAt(0).toUpperCase() + this.type.slice(1);
     },
 
@@ -1105,6 +1109,9 @@ export default {
         (section.fields || []).forEach((field, fi) => {
           const key = field._id || field.name || `section_${si}_field_${fi}`;
           if (String(key) === currentKey) return;
+
+          const fieldType = String(field.type || "text").toLowerCase();
+          if (fieldType === "table") return;
 
           const constraints = field.constraints || {};
 
@@ -1306,6 +1313,11 @@ export default {
     },
 
     onFieldTypeChange() {
+      if (!this.allowTypeChange) {
+        this.localType = (this.currentFieldType || "text").toLowerCase();
+        return;
+      }
+
       const nextType = String(this.localType || "").toLowerCase();
       const prevType = String(this.currentFieldType || "").toLowerCase();
 
@@ -1772,7 +1784,9 @@ export default {
       const visibilityLogic = this.cleanedVisibilityLogic();
       const nextType = String(this.localType || this.currentFieldType || "text").toLowerCase();
       const originalType = String(this.currentFieldType || "text").toLowerCase();
-
+      if (!this.allowTypeChange) {
+      this.localType = originalType;
+    }
       const snapshot = this.buildCurrentFieldSnapshot();
 
       let fieldPayload;
@@ -1808,6 +1822,26 @@ export default {
         });
         return;
       }
+      if (this.isTable) {
+      const cleaned = {
+        helpText: this.local.helpText || "",
+        required: !!this.local.required,
+        readonly: !!this.local.readonly,
+        visibilityLogic,
+      };
+
+      this.$emit("updateConstraints", {
+        type: nextType,
+        field: {
+          ...this.fieldDefinition,
+          type: nextType,
+          constraints: cleaned,
+        },
+        changedType: false,
+        conversionWarnings: [],
+      });
+      return;
+    }
 
       if (this.isFile) {
         const parsedFormats = String(this.allowedFormatsText || "")
@@ -1982,7 +2016,22 @@ export default {
       if (t === "checkbox") this.local.defaultValue = false;
       else if (t === "radio" && this.local.allowMultiple) this.local.defaultValue = [];
       else this.local.defaultValue = "";
+      if (t === "table") {
+      this.local.placeholder = "";
+      this.local.defaultValue = undefined;
+      this.local.visibilityLogic = {
+        action: "show",
+        match: "all",
+        rules: [this.makeLogicRule()],
+      };
 
+      this.activeTab = "basic";
+      this.chipInput = "";
+      this.markEditValue = null;
+      this.markEditLabel = "";
+      this.customMod = "";
+      return;
+    }
       if (t === "number") {
         this.local.min = undefined;
         this.local.max = undefined;

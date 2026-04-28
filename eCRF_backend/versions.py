@@ -41,6 +41,26 @@ from . import models
 from .datalad_repo import DataladStudyRepo
 from .logger import logger
 
+def _normalized_visibility_logic(vl: Any) -> Dict[str, Any]:
+    if not isinstance(vl, dict):
+        return {"action": "show", "match": "all", "rules": []}
+
+    rules = []
+    for r in vl.get("rules") or []:
+        if not isinstance(r, dict):
+            continue
+        rules.append({
+            "sourceFieldKey": _norm_str(r.get("sourceFieldKey")),
+            "operator": _norm_str(r.get("operator") or "eq"),
+            "value": _json_clone(r.get("value")),
+            "valueTo": _json_clone(r.get("valueTo")),
+        })
+
+    return {
+        "action": _norm_str(vl.get("action") or "show"),
+        "match": _norm_str(vl.get("match") or "all"),
+        "rules": rules,
+    }
 
 class VersionDecision(dict):
     """Small convenience type for returning decision details."""
@@ -188,6 +208,9 @@ def _field_signature(f: Dict[str, Any]) -> Dict[str, Any]:
 
     cons = f.get("constraints") or {}
     cons_sig = {k: cons.get(k) for k in sorted(_STRUCTURAL_CONSTRAINT_KEYS) if k in cons}
+    if "visibilityLogic" in cons:
+        cons_sig["visibilityLogic"] = _normalized_visibility_logic(cons.get("visibilityLogic"))
+
     if cons_sig:
         sig["constraints"] = cons_sig
 
@@ -229,6 +252,9 @@ def _table_column_signature(col: Dict[str, Any]) -> Dict[str, Any]:
         for k in sorted(_TABLE_STRUCTURAL_CONSTRAINT_KEYS)
         if k in cons
     }
+    if "visibilityLogic" in cons:
+        cons_sig["visibilityLogic"] = _normalized_visibility_logic(cons.get("visibilityLogic"))
+
     if cons_sig:
         sig["constraints"] = cons_sig
 

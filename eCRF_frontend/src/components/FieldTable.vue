@@ -47,6 +47,26 @@
 
       <div class="tc-section">
         <div class="tc-section-header">
+          <h4>Table Settings</h4>
+          <button class="btn-option" type="button" @click="openTableSettings">
+            Table settings
+          </button>
+        </div>
+
+        <div class="tc-column-summary">
+          <span class="tc-chip">Table</span>
+
+          <span v-if="tableSummary()" class="tc-summary-text">
+            {{ tableSummary() }}
+          </span>
+          <span v-else class="tc-summary-text muted">
+            No extra table constraints configured
+          </span>
+        </div>
+      </div>
+
+      <div class="tc-section">
+        <div class="tc-section-header">
           <h4>Columns</h4>
           <button class="btn-option" type="button" @click="addColumn">
             + Add Column
@@ -145,12 +165,12 @@
               <tr>
                 <th v-if="localConfig.showRowNumbers" class="rowno-col">#</th>
                 <th
-                  v-for="(col, colIdx) in localConfig.columns"
-                  :key="col.id || colIdx"
+                  v-for="item in previewColumnRenderList"
+                  :key="item.col.id || item.colIdx"
                 >
                   <div class="table-head-title">
-                    <span>{{ col.label || 'Untitled column' }}</span>
-                    <span v-if="col.constraints?.required" class="required-star">*</span>
+                    <span>{{ item.col.label || 'Untitled column' }}</span>
+                    <span v-if="item.col.constraints?.required" class="required-star">*</span>
                   </div>
                 </th>
               </tr>
@@ -161,93 +181,96 @@
                 <td v-if="localConfig.showRowNumbers" class="rowno-col">{{ rowIndex + 1 }}</td>
 
                 <td
-                  v-for="(col, colIdx) in localConfig.columns"
-                  :key="`${rowIndex}-${col.id || colIdx}`"
+                  v-for="item in previewColumnRenderList"
+                  :key="`${rowIndex}-${item.col.id || item.colIdx}`"
                 >
-                  <div class="table-cell-box">
+                  <div
+                    v-if="isPreviewColumnVisible(item.colIdx, rowIndex)"
+                    class="table-cell-box"
+                  >
                     <div class="table-cell-control">
                       <input
-                        v-if="col.type === 'text'"
+                        v-if="item.col.type === 'text'"
                         type="text"
-                        :value="row[getPreviewColKey(col, colIdx)]"
-                        :placeholder="col.constraints?.placeholder || ''"
+                        :value="row[getPreviewColKey(item.col, item.colIdx)]"
+                        :placeholder="item.col.constraints?.placeholder || ''"
                         readonly
                       />
 
                       <textarea
-                        v-else-if="col.type === 'textarea'"
-                        :value="row[getPreviewColKey(col, colIdx)]"
-                        :placeholder="col.constraints?.placeholder || ''"
+                        v-else-if="item.col.type === 'textarea'"
+                        :value="row[getPreviewColKey(item.col, item.colIdx)]"
+                        :placeholder="item.col.constraints?.placeholder || ''"
                         rows="3"
                         readonly
                       ></textarea>
 
                       <input
-                        v-else-if="col.type === 'number'"
+                        v-else-if="item.col.type === 'number'"
                         type="number"
-                        :value="row[getPreviewColKey(col, colIdx)]"
-                        :min="col.constraints?.min"
-                        :max="col.constraints?.max"
-                        :step="col.constraints?.step"
+                        :value="row[getPreviewColKey(item.col, item.colIdx)]"
+                        :min="item.col.constraints?.min"
+                        :max="item.col.constraints?.max"
+                        :step="item.col.constraints?.step"
                         readonly
                       />
 
                       <DateFormatPicker
-                        v-else-if="col.type === 'date'"
-                        :modelValue="row[getPreviewColKey(col, colIdx)]"
-                        :format="col.constraints?.dateFormat || 'dd.MM.yyyy'"
-                        :placeholder="col.constraints?.placeholder || (col.constraints?.dateFormat || 'dd.MM.yyyy')"
-                        :min-date="col.constraints?.minDate || null"
-                        :max-date="col.constraints?.maxDate || null"
+                        v-else-if="item.col.type === 'date'"
+                        :modelValue="row[getPreviewColKey(item.col, item.colIdx)]"
+                        :format="item.col.constraints?.dateFormat || 'dd.MM.yyyy'"
+                        :placeholder="item.col.constraints?.placeholder || (item.col.constraints?.dateFormat || 'dd.MM.yyyy')"
+                        :min-date="item.col.constraints?.minDate || null"
+                        :max-date="item.col.constraints?.maxDate || null"
                         :readonly="true"
                       />
 
                       <FieldTime
-                        v-else-if="col.type === 'time'"
-                        :modelValue="row[getPreviewColKey(col, colIdx)]"
-                        :placeholder="col.constraints?.placeholder || (col.constraints?.timeFormat || 'HH:mm')"
-                        v-bind="col.constraints || {}"
+                        v-else-if="item.col.type === 'time'"
+                        :modelValue="row[getPreviewColKey(item.col, item.colIdx)]"
+                        :placeholder="item.col.constraints?.placeholder || (item.col.constraints?.timeFormat || 'HH:mm')"
+                        v-bind="item.col.constraints || {}"
                         :readonly="true"
                       />
 
                       <FieldSelect
-                        v-else-if="col.type === 'select'"
-                        :modelValue="row[getPreviewColKey(col, colIdx)]"
-                        :options="col.options || []"
-                        :multiple="!!col.constraints?.allowMultiple"
+                        v-else-if="item.col.type === 'select'"
+                        :modelValue="row[getPreviewColKey(item.col, item.colIdx)]"
+                        :options="item.col.options || []"
+                        :multiple="!!item.col.constraints?.allowMultiple"
                         :readonly="true"
-                        :default-value="col.constraints?.defaultValue"
+                        :default-value="item.col.constraints?.defaultValue"
                         :placeholder="'Select…'"
                       />
 
                       <FieldRadioGroup
-                        v-else-if="col.type === 'radio'"
-                        :name="`preview_radio_${rowIndex}_${col.id || colIdx}`"
-                        :options="col.options || []"
-                        :modelValue="row[getPreviewColKey(col, colIdx)]"
-                        :default-value="col.constraints?.defaultValue"
-                        v-bind="col.constraints || {}"
+                        v-else-if="item.col.type === 'radio'"
+                        :name="`preview_radio_${rowIndex}_${item.col.id || item.colIdx}`"
+                        :options="item.col.options || []"
+                        :modelValue="row[getPreviewColKey(item.col, item.colIdx)]"
+                        :default-value="item.col.constraints?.defaultValue"
+                        v-bind="item.col.constraints || {}"
                         :disabled="true"
                       />
 
                       <FieldCheckbox
-                        v-else-if="col.type === 'checkbox'"
-                        :modelValue="row[getPreviewColKey(col, colIdx)]"
-                        v-bind="col.constraints || {}"
+                        v-else-if="item.col.type === 'checkbox'"
+                        :modelValue="row[getPreviewColKey(item.col, item.colIdx)]"
+                        v-bind="item.col.constraints || {}"
                         :disabled="true"
                       />
 
                       <input
                         v-else
                         type="text"
-                        :value="row[getPreviewColKey(col, colIdx)]"
-                        :placeholder="col.constraints?.placeholder || ''"
+                        :value="row[getPreviewColKey(item.col, item.colIdx)]"
+                        :placeholder="item.col.constraints?.placeholder || ''"
                         readonly
                       />
                     </div>
 
-                    <div v-if="col.constraints?.helpText" class="cell-help">
-                      {{ col.constraints.helpText }}
+                    <div v-if="item.col.constraints?.helpText" class="cell-help">
+                      {{ item.col.constraints.helpText }}
                     </div>
                   </div>
                 </td>
@@ -271,16 +294,32 @@
       <div v-if="showColumnConstraintsDialog" class="modal-overlay nested-modal-overlay">
         <div class="modal nested-modal">
           <FieldConstraintsDialog
-          :currentFieldType="currentColumnFieldType"
-          :constraintsForm="columnConstraintsForm"
-          :form="mockForm"
-          :currentFieldKey="currentColumnKey"
-          :currentFieldLabel="currentColumnLabel"
-          :fieldDefinition="currentColumn"
-          @updateConstraints="confirmColumnConstraintsDialog"
-          @closeConstraintsDialog="cancelColumnConstraintsDialog"
-          @showGenericDialog="forwardGenericDialog"
-        />
+            :currentFieldType="currentColumnFieldType"
+            :constraintsForm="columnConstraintsForm"
+            :form="mockForm"
+            :currentFieldKey="currentColumnKey"
+            :currentFieldLabel="currentColumnLabel"
+            :fieldDefinition="currentColumn"
+            @updateConstraints="confirmColumnConstraintsDialog"
+            @closeConstraintsDialog="cancelColumnConstraintsDialog"
+            @showGenericDialog="forwardGenericDialog"
+          />
+        </div>
+      </div>
+
+      <div v-if="showTableConstraintsDialog" class="modal-overlay nested-modal-overlay">
+        <div class="modal nested-modal">
+          <FieldConstraintsDialog
+            :currentFieldType="'table'"
+            :constraintsForm="tableConstraintsForm"
+            :form="formForTableVisibility"
+            :currentFieldKey="value?._id || value?.name || 'table_field'"
+            :currentFieldLabel="localConfig.label"
+            :fieldDefinition="tableFieldDefinition"
+            @updateConstraints="confirmTableConstraintsDialog"
+            @closeConstraintsDialog="cancelTableConstraintsDialog"
+            @showGenericDialog="forwardGenericDialog"
+          />
         </div>
       </div>
     </div>
@@ -294,10 +333,10 @@
           <thead>
             <tr>
               <th v-if="resolvedTableConfig.showRowNumbers" class="rowno-col">#</th>
-              <th v-for="(col, colIdx) in resolvedColumns" :key="col.id || colIdx">
+              <th v-for="item in runtimeColumnRenderList" :key="item.col.id || item.colIdx">
                 <div class="table-head-title">
-                  <span>{{ col.label }}</span>
-                  <span v-if="col.constraints?.required" class="required-star">*</span>
+                  <span>{{ item.col.label }}</span>
+                  <span v-if="item.col.constraints?.required" class="required-star">*</span>
                 </div>
               </th>
               <th v-if="!readonly" class="row-actions-col">Actions</th>
@@ -308,107 +347,110 @@
             <tr v-for="(row, rowIndex) in internalRows" :key="`row-${rowIndex}`">
               <td v-if="resolvedTableConfig.showRowNumbers" class="rowno-col">{{ rowIndex + 1 }}</td>
 
-              <td v-for="(col, colIdx) in resolvedColumns" :key="`${rowIndex}-${col.id || colIdx}`">
-                <div class="table-cell-box">
+              <td v-for="item in runtimeColumnRenderList" :key="`${rowIndex}-${item.col.id || item.colIdx}`">
+                <div
+                  v-if="isRuntimeColumnVisible(item.colIdx, rowIndex)"
+                  class="table-cell-box"
+                >
                   <div class="table-cell-control">
                     <input
-                      v-if="col.type === 'text'"
+                      v-if="item.col.type === 'text'"
                       type="text"
-                      v-model="internalRows[rowIndex][getRuntimeColKey(col, colIdx)]"
-                      :placeholder="col.constraints?.placeholder || ''"
-                      :readonly="readonly || !!col.constraints?.readonly"
-                      @blur="validateCellAt(rowIndex, colIdx)"
+                      v-model="internalRows[rowIndex][getRuntimeColKey(item.col, item.colIdx)]"
+                      :placeholder="item.col.constraints?.placeholder || ''"
+                      :readonly="readonly || !!item.col.constraints?.readonly"
+                      @blur="validateCellAt(rowIndex, item.colIdx)"
                     />
 
                     <textarea
-                      v-else-if="col.type === 'textarea'"
-                      v-model="internalRows[rowIndex][getRuntimeColKey(col, colIdx)]"
-                      :placeholder="col.constraints?.placeholder || ''"
+                      v-else-if="item.col.type === 'textarea'"
+                      v-model="internalRows[rowIndex][getRuntimeColKey(item.col, item.colIdx)]"
+                      :placeholder="item.col.constraints?.placeholder || ''"
                       rows="3"
-                      :readonly="readonly || !!col.constraints?.readonly"
-                      @blur="validateCellAt(rowIndex, colIdx)"
+                      :readonly="readonly || !!item.col.constraints?.readonly"
+                      @blur="validateCellAt(rowIndex, item.colIdx)"
                     ></textarea>
 
                     <input
-                      v-else-if="col.type === 'number'"
+                      v-else-if="item.col.type === 'number'"
                       type="number"
-                      v-model.number="internalRows[rowIndex][getRuntimeColKey(col, colIdx)]"
-                      :min="col.constraints?.min"
-                      :max="col.constraints?.max"
-                      :step="col.constraints?.step"
-                      :readonly="readonly || !!col.constraints?.readonly"
-                      @blur="validateCellAt(rowIndex, colIdx)"
+                      v-model.number="internalRows[rowIndex][getRuntimeColKey(item.col, item.colIdx)]"
+                      :min="item.col.constraints?.min"
+                      :max="item.col.constraints?.max"
+                      :step="item.col.constraints?.step"
+                      :readonly="readonly || !!item.col.constraints?.readonly"
+                      @blur="validateCellAt(rowIndex, item.colIdx)"
                     />
 
                     <DateFormatPicker
-                      v-else-if="col.type === 'date'"
-                      v-model="internalRows[rowIndex][getRuntimeColKey(col, colIdx)]"
-                      :format="col.constraints?.dateFormat || 'dd.MM.yyyy'"
-                      :placeholder="col.constraints?.placeholder || (col.constraints?.dateFormat || 'dd.MM.yyyy')"
-                      :min-date="col.constraints?.minDate || null"
-                      :max-date="col.constraints?.maxDate || null"
-                      :readonly="readonly || !!col.constraints?.readonly"
-                      @change="validateCellAt(rowIndex, colIdx)"
-                      @blur="validateCellAt(rowIndex, colIdx)"
+                      v-else-if="item.col.type === 'date'"
+                      v-model="internalRows[rowIndex][getRuntimeColKey(item.col, item.colIdx)]"
+                      :format="item.col.constraints?.dateFormat || 'dd.MM.yyyy'"
+                      :placeholder="item.col.constraints?.placeholder || (item.col.constraints?.dateFormat || 'dd.MM.yyyy')"
+                      :min-date="item.col.constraints?.minDate || null"
+                      :max-date="item.col.constraints?.maxDate || null"
+                      :readonly="readonly || !!item.col.constraints?.readonly"
+                      @change="validateCellAt(rowIndex, item.colIdx)"
+                      @blur="validateCellAt(rowIndex, item.colIdx)"
                     />
 
                     <FieldTime
-                      v-else-if="col.type === 'time'"
-                      v-model="internalRows[rowIndex][getRuntimeColKey(col, colIdx)]"
-                      :placeholder="col.constraints?.placeholder || (col.constraints?.timeFormat || 'HH:mm')"
-                      v-bind="col.constraints || {}"
-                      :readonly="readonly || !!col.constraints?.readonly"
-                      @change="validateCellAt(rowIndex, colIdx)"
-                      @blur="validateCellAt(rowIndex, colIdx)"
+                      v-else-if="item.col.type === 'time'"
+                      v-model="internalRows[rowIndex][getRuntimeColKey(item.col, item.colIdx)]"
+                      :placeholder="item.col.constraints?.placeholder || (item.col.constraints?.timeFormat || 'HH:mm')"
+                      v-bind="item.col.constraints || {}"
+                      :readonly="readonly || !!item.col.constraints?.readonly"
+                      @change="validateCellAt(rowIndex, item.colIdx)"
+                      @blur="validateCellAt(rowIndex, item.colIdx)"
                     />
 
                     <FieldSelect
-                      v-else-if="col.type === 'select'"
-                      v-model="internalRows[rowIndex][getRuntimeColKey(col, colIdx)]"
-                      :options="col.options || []"
-                      :multiple="!!col.constraints?.allowMultiple"
-                      :readonly="readonly || !!col.constraints?.readonly"
-                      :default-value="col.constraints?.defaultValue"
+                      v-else-if="item.col.type === 'select'"
+                      v-model="internalRows[rowIndex][getRuntimeColKey(item.col, item.colIdx)]"
+                      :options="item.col.options || []"
+                      :multiple="!!item.col.constraints?.allowMultiple"
+                      :readonly="readonly || !!item.col.constraints?.readonly"
+                      :default-value="item.col.constraints?.defaultValue"
                       :placeholder="'Select…'"
-                      @update:modelValue="validateCellAt(rowIndex, colIdx)"
+                      @update:modelValue="validateCellAt(rowIndex, item.colIdx)"
                     />
 
                     <FieldRadioGroup
-                      v-else-if="col.type === 'radio'"
-                      :name="`table_radio_${rowIndex}_${col.id || colIdx}`"
-                      :options="col.options || []"
-                      v-model="internalRows[rowIndex][getRuntimeColKey(col, colIdx)]"
-                      :default-value="col.constraints?.defaultValue"
-                      v-bind="col.constraints || {}"
-                      :disabled="readonly || !!col.constraints?.readonly"
-                      @change="validateCellAt(rowIndex, colIdx)"
-                      @update:modelValue="validateCellAt(rowIndex, colIdx)"
+                      v-else-if="item.col.type === 'radio'"
+                      :name="`table_radio_${rowIndex}_${item.col.id || item.colIdx}`"
+                      :options="item.col.options || []"
+                      v-model="internalRows[rowIndex][getRuntimeColKey(item.col, item.colIdx)]"
+                      :default-value="item.col.constraints?.defaultValue"
+                      v-bind="item.col.constraints || {}"
+                      :disabled="readonly || !!item.col.constraints?.readonly"
+                      @change="validateCellAt(rowIndex, item.colIdx)"
+                      @update:modelValue="validateCellAt(rowIndex, item.colIdx)"
                     />
 
                     <FieldCheckbox
-                      v-else-if="col.type === 'checkbox'"
-                      v-model="internalRows[rowIndex][getRuntimeColKey(col, colIdx)]"
-                      v-bind="col.constraints || {}"
-                      :disabled="readonly || !!col.constraints?.readonly"
-                      @update:modelValue="validateCellAt(rowIndex, colIdx)"
+                      v-else-if="item.col.type === 'checkbox'"
+                      v-model="internalRows[rowIndex][getRuntimeColKey(item.col, item.colIdx)]"
+                      v-bind="item.col.constraints || {}"
+                      :disabled="readonly || !!item.col.constraints?.readonly"
+                      @update:modelValue="validateCellAt(rowIndex, item.colIdx)"
                     />
 
                     <input
                       v-else
                       type="text"
-                      v-model="internalRows[rowIndex][getRuntimeColKey(col, colIdx)]"
-                      :placeholder="col.constraints?.placeholder || ''"
+                      v-model="internalRows[rowIndex][getRuntimeColKey(item.col, item.colIdx)]"
+                      :placeholder="item.col.constraints?.placeholder || ''"
                       :readonly="readonly"
-                      @blur="validateCellAt(rowIndex, colIdx)"
+                      @blur="validateCellAt(rowIndex, item.colIdx)"
                     />
                   </div>
 
-                  <div v-if="col.constraints?.helpText" class="cell-help">
-                    {{ col.constraints.helpText }}
+                  <div v-if="item.col.constraints?.helpText" class="cell-help">
+                    {{ item.col.constraints.helpText }}
                   </div>
 
-                  <div v-if="getCellError(rowIndex, colIdx)" class="table-cell-error">
-                    {{ getCellError(rowIndex, colIdx) }}
+                  <div v-if="getCellError(rowIndex, item.colIdx)" class="table-cell-error">
+                    {{ getCellError(rowIndex, item.colIdx) }}
                   </div>
                 </div>
               </td>
@@ -475,6 +517,10 @@ export default {
       type: Object,
       default: () => ({})
     },
+    form: {
+      type: Object,
+      default: () => ({ sections: [] })
+    },
     readonly: {
       type: Boolean,
       default: false
@@ -499,15 +545,20 @@ export default {
       localConfig: this.buildInitialConfig(this.value),
       previewData: [],
       showColumnConstraintsDialog: false,
+      showTableConstraintsDialog: false,
       editingColumnIndex: null,
       currentColumnFieldType: "",
       columnConstraintsForm: {},
+      tableConstraintsForm: {},
       internalRows: [],
       syncingFromParent: false,
       lastEmittedRowsJson: ""
     };
   },
   computed: {
+    isTable() {
+      return this.type === "table";
+    },
     previewRows() {
       return this.previewData;
     },
@@ -523,6 +574,20 @@ export default {
 
     currentColumnKey() {
       return this.currentColumn?.id || "";
+    },
+
+    tableFieldDefinition() {
+      return {
+        _id: this.value?._id || this.value?.name || "table_field",
+        label: this.localConfig.label || "Table",
+        name: this.value?.name || "table_field",
+        type: "table",
+        constraints: this.localConfig?.constraints || {}
+      };
+    },
+
+    formForTableVisibility() {
+      return this.form || { sections: [] };
     },
 
     mockForm() {
@@ -557,6 +622,18 @@ export default {
       return Array.isArray(this.field?.tableConfig?.columns)
         ? this.field.tableConfig.columns
         : [];
+    },
+
+    previewColumnRenderList() {
+      return this.localConfig.columns
+        .map((col, colIdx) => ({ col, colIdx }))
+        .filter(({ colIdx }) => this.shouldRenderPreviewColumn(colIdx));
+    },
+
+    runtimeColumnRenderList() {
+      return this.resolvedColumns
+        .map((col, colIdx) => ({ col, colIdx }))
+        .filter(({ colIdx }) => this.shouldRenderRuntimeColumn(colIdx));
     }
   },
   watch: {
@@ -676,6 +753,7 @@ export default {
     validateForSubmit() {
       return this.validateAllCells();
     },
+
     buildInitialConfig(src) {
       const initialColumns =
         Array.isArray(src?.tableConfig?.columns) && src.tableConfig.columns.length
@@ -687,6 +765,16 @@ export default {
         initialRows: Number(src?.tableConfig?.initialRows) > 0 ? Number(src.tableConfig.initialRows) : 1,
         allowAddRows: src?.tableConfig?.allowAddRows !== false,
         showRowNumbers: src?.tableConfig?.showRowNumbers !== false,
+        constraints: {
+          helpText: src?.constraints?.helpText || "",
+          required: !!src?.constraints?.required,
+          readonly: !!src?.constraints?.readonly,
+          visibilityLogic: src?.constraints?.visibilityLogic || {
+            action: "show",
+            match: "all",
+            rules: []
+          }
+        },
         columns: initialColumns
       };
     },
@@ -742,11 +830,11 @@ export default {
     },
 
     getPreviewColKey(col, idx) {
-        return col?.id || col?.key || this.buildColumnKey(col?.label, idx);
-      },
+      return col?.id || col?.key || this.buildColumnKey(col?.label, idx);
+    },
 
     getRuntimeColKey(col, idx) {
-      return col?.id || col.key || this.buildColumnKey(col.label, idx);
+      return col?.id || col?.key || this.buildColumnKey(col?.label, idx);
     },
 
     defaultValueForType(type, constraints = {}) {
@@ -769,24 +857,24 @@ export default {
     },
 
     ensurePreviewData() {
-        const columns = this.localConfig.columns.map((col, idx) => ({
-          ...col,
-          key: this.getPreviewColKey(col, idx)
-        }));
+      const columns = this.localConfig.columns.map((col, idx) => ({
+        ...col,
+        key: this.getPreviewColKey(col, idx)
+      }));
 
-        const count = Math.max(1, Number(this.localConfig.initialRows) || 1);
-        const rows = [];
+      const count = Math.max(1, Number(this.localConfig.initialRows) || 1);
+      const rows = [];
 
-        for (let i = 0; i < count; i += 1) {
-          const row = {};
-          columns.forEach((col) => {
-            row[col.key] = this.defaultValueForType(col.type, col.constraints || {});
-          });
-          rows.push(row);
-        }
+      for (let i = 0; i < count; i += 1) {
+        const row = {};
+        columns.forEach((col) => {
+          row[col.key] = this.defaultValueForType(col.type, col.constraints || {});
+        });
+        rows.push(row);
+      }
 
-        this.previewData = rows;
-      },
+      this.previewData = rows;
+    },
 
     normalizeRows(rows, columns, initialRows = 1) {
       const safeColumns = Array.isArray(columns) ? columns : [];
@@ -825,6 +913,289 @@ export default {
       return row;
     },
 
+    getNormalizedVisibilityLogic(rawLogic) {
+      const logic = rawLogic && typeof rawLogic === "object" ? rawLogic : {};
+      const rules = Array.isArray(logic.rules) ? logic.rules.filter(Boolean) : [];
+
+      return {
+        action: String(logic.action || "show").toLowerCase() === "hide" ? "hide" : "show",
+        match: String(logic.match || "all").toLowerCase() === "any" ? "any" : "all",
+        rules
+      };
+    },
+
+    isBlankValue(val) {
+      if (val === null || val === undefined) return true;
+      if (typeof val === "string") return val.trim() === "";
+      if (Array.isArray(val)) return val.length === 0;
+      return false;
+    },
+
+    toComparableNumber(val) {
+      if (val === null || val === undefined || val === "") return null;
+      const n = Number(val);
+      return Number.isFinite(n) ? n : null;
+    },
+
+    parseDateLike(value, format = "dd.MM.yyyy") {
+      if (!value) return null;
+      const s = String(value).trim();
+
+      const map = {
+        "dd.MM.yyyy": /^(\d{2})\.(\d{2})\.(\d{4})$/,
+        "MM-dd-yyyy": /^(\d{2})-(\d{2})-(\d{4})$/,
+        "dd-MM-yyyy": /^(\d{2})-(\d{2})-(\d{4})$/,
+        "yyyy-MM-dd": /^(\d{4})-(\d{2})-(\d{2})$/,
+        "MM/yyyy": /^(\d{2})\/(\d{4})$/,
+        "MM-yyyy": /^(\d{2})-(\d{4})$/,
+        "yyyy/MM": /^(\d{4})\/(\d{2})$/,
+        "yyyy-MM": /^(\d{4})-(\d{2})$/,
+        "yyyy": /^(\d{4})$/
+      };
+
+      const rx = map[format];
+      if (!rx) return null;
+
+      const m = rx.exec(s);
+      if (!m) return null;
+
+      let y;
+      let M;
+      let d;
+
+      if (format === "dd.MM.yyyy") {
+        d = +m[1];
+        M = +m[2];
+        y = +m[3];
+      } else if (format === "MM-dd-yyyy") {
+        M = +m[1];
+        d = +m[2];
+        y = +m[3];
+      } else if (format === "dd-MM-yyyy") {
+        d = +m[1];
+        M = +m[2];
+        y = +m[3];
+      } else if (format === "yyyy-MM-dd") {
+        y = +m[1];
+        M = +m[2];
+        d = +m[3];
+      } else if (format === "MM/yyyy" || format === "MM-yyyy") {
+        M = +m[1];
+        y = +m[2];
+        d = 1;
+      } else if (format === "yyyy/MM" || format === "yyyy-MM") {
+        y = +m[1];
+        M = +m[2];
+        d = 1;
+      } else if (format === "yyyy") {
+        y = +m[1];
+        M = 1;
+        d = 1;
+      }
+
+      const dt = new Date(y, M - 1, d);
+      return Number.isNaN(dt.getTime()) ? null : dt.getTime();
+    },
+
+    parseTimeLike(value) {
+      if (!value) return null;
+      const s = String(value).trim();
+      const mm = /^(\d{2}):(\d{2})(?::(\d{2}))?$/.exec(s);
+      if (!mm) return null;
+
+      const h = +mm[1];
+      const m = +mm[2];
+      const sec = mm[3] ? +mm[3] : 0;
+
+      return h * 3600 + m * 60 + sec;
+    },
+
+    compareArraysContainsAll(leftArr, rightArr) {
+      if (!Array.isArray(leftArr) || !Array.isArray(rightArr)) return false;
+      return rightArr.every((v) => leftArr.includes(v));
+    },
+
+    getColumnBySourceKey(columns, sourceKey) {
+      const key = String(sourceKey || "");
+      if (!key) return null;
+
+      for (let idx = 0; idx < (columns || []).length; idx += 1) {
+        const col = columns[idx];
+        const candidates = [
+          col?.id,
+          col?.key,
+          this.buildColumnKey(col?.label, idx),
+          col?.label
+        ].filter(Boolean).map(String);
+
+        if (candidates.includes(key)) {
+          return { col, colIdx: idx };
+        }
+      }
+
+      return null;
+    },
+
+    getRowValueForColumn(row, columns, sourceKey) {
+      const found = this.getColumnBySourceKey(columns, sourceKey);
+      if (!found) return undefined;
+
+      const rowKey = this.mode === "configure"
+        ? this.getPreviewColKey(found.col, found.colIdx)
+        : this.getRuntimeColKey(found.col, found.colIdx);
+
+      return row?.[rowKey];
+    },
+
+    evaluateColumnVisibilityRule(rule, row, columns) {
+      const operator = String(rule?.operator || "eq").toLowerCase();
+      const sourceInfo = this.getColumnBySourceKey(columns, rule?.sourceFieldKey);
+      if (!sourceInfo) return false;
+
+      const sourceField = sourceInfo.col;
+      const sourceValue = this.getRowValueForColumn(row, columns, rule?.sourceFieldKey);
+      const sourceType = String(sourceField?.type || "").toLowerCase();
+      const constraints = sourceField?.constraints || {};
+      const compareValue = rule?.value;
+      const compareValueTo = rule?.valueTo;
+
+      if (operator === "empty" || operator === "is_empty") return this.isBlankValue(sourceValue);
+      if (operator === "not_empty" || operator === "is_not_empty") return !this.isBlankValue(sourceValue);
+
+      if (sourceType === "select" || sourceType === "radio") {
+        if (Array.isArray(sourceValue)) {
+          if (operator === "eq") {
+            if (Array.isArray(compareValue)) return this.compareArraysContainsAll(sourceValue, compareValue);
+            return sourceValue.includes(compareValue);
+          }
+          if (operator === "neq") {
+            if (Array.isArray(compareValue)) return !this.compareArraysContainsAll(sourceValue, compareValue);
+            return !sourceValue.includes(compareValue);
+          }
+        } else {
+          if (operator === "eq") return String(sourceValue ?? "") === String(compareValue ?? "");
+          if (operator === "neq") return String(sourceValue ?? "") !== String(compareValue ?? "");
+        }
+      }
+
+      if (sourceType === "checkbox") {
+        const left = !!sourceValue;
+        const right = compareValue === true || compareValue === "true" || compareValue === 1 || compareValue === "1";
+        if (operator === "eq") return left === right;
+        if (operator === "neq") return left !== right;
+      }
+
+      if (sourceType === "number") {
+        const left = this.toComparableNumber(sourceValue);
+        const right = this.toComparableNumber(compareValue);
+        const rightTo = this.toComparableNumber(compareValueTo);
+
+        if (left === null) return false;
+
+        if (operator === "eq") return right !== null && left === right;
+        if (operator === "neq") return right !== null && left !== right;
+        if (operator === "lt") return right !== null && left < right;
+        if (operator === "lte") return right !== null && left <= right;
+        if (operator === "gt") return right !== null && left > right;
+        if (operator === "gte") return right !== null && left >= right;
+        if (operator === "between") return right !== null && rightTo !== null && left >= right && left <= rightTo;
+      }
+
+      if (sourceType === "date") {
+        const fmt = constraints.dateFormat || "dd.MM.yyyy";
+        const left = this.parseDateLike(sourceValue, fmt);
+        const right = this.parseDateLike(compareValue, fmt);
+        const rightTo = this.parseDateLike(compareValueTo, fmt);
+
+        if (left === null) return false;
+
+        if (operator === "eq") return right !== null && left === right;
+        if (operator === "neq") return right !== null && left !== right;
+        if (operator === "lt") return right !== null && left < right;
+        if (operator === "lte") return right !== null && left <= right;
+        if (operator === "gt") return right !== null && left > right;
+        if (operator === "gte") return right !== null && left >= right;
+        if (operator === "between") return right !== null && rightTo !== null && left >= right && left <= rightTo;
+      }
+
+      if (sourceType === "time") {
+        const left = this.parseTimeLike(sourceValue);
+        const right = this.parseTimeLike(compareValue);
+        const rightTo = this.parseTimeLike(compareValueTo);
+
+        if (left === null) return false;
+
+        if (operator === "eq") return right !== null && left === right;
+        if (operator === "neq") return right !== null && left !== right;
+        if (operator === "lt") return right !== null && left < right;
+        if (operator === "lte") return right !== null && left <= right;
+        if (operator === "gt") return right !== null && left > right;
+        if (operator === "gte") return right !== null && left >= right;
+        if (operator === "between") return right !== null && rightTo !== null && left >= right && left <= rightTo;
+      }
+
+      const leftText = String(sourceValue ?? "");
+      const rightText = String(compareValue ?? "");
+      const rightToText = String(compareValueTo ?? "");
+
+      if (operator === "eq") return leftText === rightText;
+      if (operator === "neq") return leftText !== rightText;
+      if (operator === "contains") return leftText.includes(rightText);
+      if (operator === "not_contains") return !leftText.includes(rightText);
+      if (operator === "starts_with") return leftText.startsWith(rightText);
+      if (operator === "ends_with") return leftText.endsWith(rightText);
+      if (operator === "regex") {
+        try {
+          return new RegExp(rightText).test(leftText);
+        } catch {
+          return false;
+        }
+      }
+      if (operator === "between") return leftText >= rightText && leftText <= rightToText;
+
+      return false;
+    },
+
+    evaluateColumnVisibility(col, row, columns) {
+      const logic = this.getNormalizedVisibilityLogic(col?.constraints?.visibilityLogic);
+      if (!logic.rules.length) return true;
+
+      const results = logic.rules.map((rule) =>
+        this.evaluateColumnVisibilityRule(rule, row, columns)
+      );
+
+      const matched = logic.match === "any"
+        ? results.some(Boolean)
+        : results.every(Boolean);
+
+      return logic.action === "hide" ? !matched : matched;
+    },
+
+    isPreviewColumnVisible(colIdx, rowIndex) {
+      const row = this.previewRows?.[rowIndex] || {};
+      const col = this.localConfig.columns?.[colIdx];
+      if (!col) return false;
+      return this.evaluateColumnVisibility(col, row, this.localConfig.columns || []);
+    },
+
+    isRuntimeColumnVisible(colIdx, rowIndex) {
+      const row = this.internalRows?.[rowIndex] || {};
+      const col = this.resolvedColumns?.[colIdx];
+      if (!col) return false;
+      return this.evaluateColumnVisibility(col, row, this.resolvedColumns || []);
+    },
+
+    shouldRenderPreviewColumn(colIdx) {
+      const rows = Array.isArray(this.previewRows) ? this.previewRows : [];
+      if (!rows.length) return true;
+      return rows.some((_, rowIndex) => this.isPreviewColumnVisible(colIdx, rowIndex));
+    },
+
+    shouldRenderRuntimeColumn(colIdx) {
+      const rows = Array.isArray(this.internalRows) ? this.internalRows : [];
+      if (!rows.length) return true;
+      return rows.some((_, rowIndex) => this.isRuntimeColumnVisible(colIdx, rowIndex));
+    },
 
     cellErrorKey(rowIndex, colIndex) {
       return `${rowIndex}-${colIndex}`;
@@ -943,100 +1314,103 @@ export default {
     },
 
     validateSingleCell(rowIndex, colIndex) {
-        const col = this.resolvedColumns[colIndex];
-        if (!col) return true;
+      const col = this.resolvedColumns[colIndex];
+      if (!col) return true;
 
-        const key = this.getRuntimeColKey(col, colIndex);
-        const row = this.internalRows[rowIndex] || {};
-        const value = row[key];
-        const label = col.label || `Column ${colIndex + 1}`;
-        const constraints = col.constraints || {};
-
+      if (!this.isRuntimeColumnVisible(colIndex, rowIndex)) {
         this.clearCellError(rowIndex, colIndex);
+        return true;
+      }
 
-        if (constraints.required && this.isCellEmpty(col, value)) {
-          this.setCellError(rowIndex, colIndex, `${label} is required.`);
+      const key = this.getRuntimeColKey(col, colIndex);
+      const row = this.internalRows[rowIndex] || {};
+      const value = row[key];
+      const label = col.label || `Column ${colIndex + 1}`;
+      const constraints = col.constraints || {};
+
+      this.clearCellError(rowIndex, colIndex);
+
+      if (constraints.required && this.isCellEmpty(col, value)) {
+        this.setCellError(rowIndex, colIndex, `${label} is required.`);
+        return false;
+      }
+
+      if (constraints.readonly) return true;
+
+      const pseudoField = {
+        type: col.type,
+        label,
+        name: key,
+        options: Array.isArray(col.options) ? col.options : [],
+        constraints
+      };
+
+      if (col.type !== "file") {
+        const { valid, message } = validateFieldValue(this.ajv, pseudoField, value);
+        if (!valid) {
+          this.setCellError(rowIndex, colIndex, message || `${label} is invalid.`);
+          return false;
+        }
+      }
+
+      if (col.type === "number" && value !== "" && value != null) {
+        const num = Number(value);
+        if (!Number.isFinite(num)) {
+          this.setCellError(rowIndex, colIndex, `${label} must be a number.`);
           return false;
         }
 
-        if (constraints.readonly) return true;
-
-        const pseudoField = {
-          type: col.type,
-          label,
-          name: key,
-          options: Array.isArray(col.options) ? col.options : [],
-          constraints
-        };
-
-        if (col.type !== "file") {
-          const { valid, message } = validateFieldValue(this.ajv, pseudoField, value);
-          if (!valid) {
-            this.setCellError(rowIndex, colIndex, message || `${label} is invalid.`);
-            return false;
-          }
+        if (constraints.integerOnly && !Number.isInteger(num)) {
+          this.setCellError(rowIndex, colIndex, `${label} must be an integer.`);
+          return false;
         }
 
-        if (col.type === "number" && value !== "" && value != null) {
-          const num = Number(value);
-          if (!Number.isFinite(num)) {
-            this.setCellError(rowIndex, colIndex, `${label} must be a number.`);
-            return false;
-          }
+        const integerPart = String(Math.trunc(Math.abs(num)));
+        const digits = integerPart.length;
 
-          if (constraints.integerOnly && !Number.isInteger(num)) {
-            this.setCellError(rowIndex, colIndex, `${label} must be an integer.`);
-            return false;
-          }
-
-          // digit limits apply to integer part only
-          const integerPart = String(Math.trunc(Math.abs(num)));
-          const digits = integerPart.length;
-
-          if (Number.isFinite(Number(constraints.minDigits)) && digits < Number(constraints.minDigits)) {
-            this.setCellError(rowIndex, colIndex, `${label} must have at least ${constraints.minDigits} digits.`);
-            return false;
-          }
-
-          if (Number.isFinite(Number(constraints.maxDigits)) && digits > Number(constraints.maxDigits)) {
-            this.setCellError(rowIndex, colIndex, `${label} must have at most ${constraints.maxDigits} digits.`);
-            return false;
-          }
+        if (Number.isFinite(Number(constraints.minDigits)) && digits < Number(constraints.minDigits)) {
+          this.setCellError(rowIndex, colIndex, `${label} must have at least ${constraints.minDigits} digits.`);
+          return false;
         }
 
-        if (col.type === "date") {
-          const msg = this.validateDateBounds(value, constraints, label);
-          if (msg) {
-            this.setCellError(rowIndex, colIndex, msg);
-            return false;
-          }
+        if (Number.isFinite(Number(constraints.maxDigits)) && digits > Number(constraints.maxDigits)) {
+          this.setCellError(rowIndex, colIndex, `${label} must have at most ${constraints.maxDigits} digits.`);
+          return false;
         }
+      }
 
-        if (col.type === "time") {
-          const msg = this.validateTimeBounds(value, constraints, label);
-          if (msg) {
-            this.setCellError(rowIndex, colIndex, msg);
-            return false;
-          }
+      if (col.type === "date") {
+        const msg = this.validateDateBounds(value, constraints, label);
+        if (msg) {
+          this.setCellError(rowIndex, colIndex, msg);
+          return false;
         }
+      }
 
-        if ((col.type === "select" || col.type === "radio") && value != null && value !== "") {
-          const opts = Array.isArray(col.options) ? col.options.map(String) : [];
-          if (Array.isArray(value)) {
-            const allValid = value.every((v) => opts.includes(String(v)));
-            if (!allValid) {
-              this.setCellError(rowIndex, colIndex, `${label} has an invalid option.`);
-              return false;
-            }
-          } else if (!opts.includes(String(value))) {
+      if (col.type === "time") {
+        const msg = this.validateTimeBounds(value, constraints, label);
+        if (msg) {
+          this.setCellError(rowIndex, colIndex, msg);
+          return false;
+        }
+      }
+
+      if ((col.type === "select" || col.type === "radio") && value != null && value !== "") {
+        const opts = Array.isArray(col.options) ? col.options.map(String) : [];
+        if (Array.isArray(value)) {
+          const allValid = value.every((v) => opts.includes(String(v)));
+          if (!allValid) {
             this.setCellError(rowIndex, colIndex, `${label} has an invalid option.`);
             return false;
           }
+        } else if (!opts.includes(String(value))) {
+          this.setCellError(rowIndex, colIndex, `${label} has an invalid option.`);
+          return false;
         }
+      }
 
-        return true;
-      },
-
+      return true;
+    },
 
     validateCellAt(rowIndex, colIndex) {
       const ok = this.validateSingleCell(rowIndex, colIndex);
@@ -1114,10 +1488,8 @@ export default {
           required: !!prev.required,
           readonly: !!prev.readonly,
           visibilityLogic: prev.visibilityLogic || {
-            enabled: false,
-            match: "all",
             action: "show",
-            targetFieldKeys: [],
+            match: "all",
             rules: []
           }
         };
@@ -1128,13 +1500,11 @@ export default {
           helpText: prev.helpText || "",
           required: !!prev.required,
           readonly: !!prev.readonly,
-          allowMultiple: !!prev.allowMultiple,
+          allowMultiple: type === "radio" ? !!prev.allowMultiple : false,
           defaultValue: prev.defaultValue,
           visibilityLogic: prev.visibilityLogic || {
-            enabled: false,
-            match: "all",
             action: "show",
-            targetFieldKeys: [],
+            match: "all",
             rules: []
           }
         };
@@ -1151,10 +1521,8 @@ export default {
           maxDate: prev.maxDate || null,
           defaultValue: prev.defaultValue,
           visibilityLogic: prev.visibilityLogic || {
-            enabled: false,
-            match: "all",
             action: "show",
-            targetFieldKeys: [],
+            match: "all",
             rules: []
           }
         };
@@ -1169,10 +1537,8 @@ export default {
           hourCycle: prev.hourCycle || "24",
           defaultValue: prev.defaultValue,
           visibilityLogic: prev.visibilityLogic || {
-            enabled: false,
-            match: "all",
             action: "show",
-            targetFieldKeys: [],
+            match: "all",
             rules: []
           }
         };
@@ -1192,10 +1558,8 @@ export default {
           maxDigits: prev.maxDigits,
           defaultValue: prev.defaultValue,
           visibilityLogic: prev.visibilityLogic || {
-            enabled: false,
-            match: "all",
             action: "show",
-            targetFieldKeys: [],
+            match: "all",
             rules: []
           }
         };
@@ -1208,10 +1572,8 @@ export default {
         placeholder: prev.placeholder || "",
         defaultValue: prev.defaultValue,
         visibilityLogic: prev.visibilityLogic || {
-          enabled: false,
-          match: "all",
           action: "show",
-          targetFieldKeys: [],
+          match: "all",
           rules: []
         }
       };
@@ -1232,6 +1594,52 @@ export default {
       };
     },
 
+    buildConstraintsFormForTable() {
+      const existing = JSON.parse(JSON.stringify(this.localConfig?.constraints || {}));
+      return {
+        ...existing,
+        helpText: existing.helpText || "",
+        required: !!existing.required,
+        readonly: !!existing.readonly,
+        visibilityLogic: existing.visibilityLogic || {
+          action: "show",
+          match: "all",
+          rules: []
+        }
+      };
+    },
+
+    openTableSettings() {
+      this.tableConstraintsForm = this.buildConstraintsFormForTable();
+      this.showTableConstraintsDialog = true;
+    },
+
+    confirmTableConstraintsDialog(payload) {
+      const nextField = payload?.field || null;
+      if (!nextField) {
+        this.showTableConstraintsDialog = false;
+        return;
+      }
+
+      this.localConfig.constraints = {
+        ...(this.localConfig.constraints || {}),
+        ...(nextField.constraints || {}),
+        visibilityLogic:
+          nextField?.constraints?.visibilityLogic ||
+          this.localConfig?.constraints?.visibilityLogic || {
+            action: "show",
+            match: "all",
+            rules: []
+          }
+      };
+
+      this.showTableConstraintsDialog = false;
+    },
+
+    cancelTableConstraintsDialog() {
+      this.showTableConstraintsDialog = false;
+    },
+
     openColumnSettings(idx) {
       const col = this.localConfig.columns[idx];
       if (!col) return;
@@ -1243,51 +1651,49 @@ export default {
     },
 
     confirmColumnConstraintsDialog(payload) {
-        const col = this.currentColumn;
-        if (!col) {
-          this.showColumnConstraintsDialog = false;
-          this.editingColumnIndex = null;
-          return;
-        }
-
-        const nextField = payload?.field || null;
-        const nextType = String(payload?.type || col.type || "text").toLowerCase();
-
-        if (!nextField) {
-          this.showColumnConstraintsDialog = false;
-          this.editingColumnIndex = null;
-          return;
-        }
-
-        col.type = this.normalizeAllowedType(nextType);
-
-        // keep stable identity
-        col.id = nextField.id || col.id;
-        col.label = nextField.label || col.label || `Column ${(this.editingColumnIndex ?? 0) + 1}`;
-        col.key = col.id || nextField.key || col.key || this.buildColumnKey(col.label, this.editingColumnIndex || 0);
-
-        if (col.type === "select" || col.type === "radio") {
-          const cleanedOptions = Array.isArray(nextField.options)
-            ? nextField.options.map((o) => String(o || "").trim()).filter(Boolean)
-            : [];
-
-          col.options = cleanedOptions.length ? Array.from(new Set(cleanedOptions)) : ["Option 1"];
-        } else {
-          col.options = [];
-        }
-
-        col.constraints = JSON.parse(JSON.stringify(nextField.constraints || {}));
-
-        // dropdowns stay single-select in this builder
-        if (col.type === "select" && col.constraints) {
-          delete col.constraints.allowMultiple;
-        }
-
-        this.currentColumnFieldType = col.type;
-        this.columnConstraintsForm = this.buildConstraintsFormForColumn(col);
+      const col = this.currentColumn;
+      if (!col) {
         this.showColumnConstraintsDialog = false;
         this.editingColumnIndex = null;
-      },
+        return;
+      }
+
+      const nextField = payload?.field || null;
+      const nextType = String(payload?.type || col.type || "text").toLowerCase();
+
+      if (!nextField) {
+        this.showColumnConstraintsDialog = false;
+        this.editingColumnIndex = null;
+        return;
+      }
+
+      col.type = this.normalizeAllowedType(nextType);
+
+      col.id = nextField.id || col.id;
+      col.label = nextField.label || col.label || `Column ${(this.editingColumnIndex ?? 0) + 1}`;
+      col.key = col.id || nextField.key || col.key || this.buildColumnKey(col.label, this.editingColumnIndex || 0);
+
+      if (col.type === "select" || col.type === "radio") {
+        const cleanedOptions = Array.isArray(nextField.options)
+          ? nextField.options.map((o) => String(o || "").trim()).filter(Boolean)
+          : [];
+
+        col.options = cleanedOptions.length ? Array.from(new Set(cleanedOptions)) : ["Option 1"];
+      } else {
+        col.options = [];
+      }
+
+      col.constraints = JSON.parse(JSON.stringify(nextField.constraints || {}));
+
+      if (col.type === "select" && col.constraints) {
+        delete col.constraints.allowMultiple;
+      }
+
+      this.currentColumnFieldType = col.type;
+      this.columnConstraintsForm = this.buildConstraintsFormForColumn(col);
+      this.showColumnConstraintsDialog = false;
+      this.editingColumnIndex = null;
+    },
 
     cancelColumnConstraintsDialog() {
       this.showColumnConstraintsDialog = false;
@@ -1296,6 +1702,22 @@ export default {
 
     forwardGenericDialog(msg) {
       this.$emit("showGenericDialog", msg);
+    },
+
+    tableSummary() {
+      const c = this.localConfig?.constraints || {};
+      const parts = [];
+
+      if (c.required) parts.push("Required");
+      if (c.readonly) parts.push("Read only");
+      if (c.helpText) parts.push("Help text set");
+
+      const rules = Array.isArray(c?.visibilityLogic?.rules) ? c.visibilityLogic.rules : [];
+      if (rules.length) {
+        parts.push(`Visibility: ${c.visibilityLogic?.action || "show"} (${rules.length} rule${rules.length === 1 ? "" : "s"})`);
+      }
+
+      return parts.join(" • ");
     },
 
     columnSummary(col) {
@@ -1330,6 +1752,11 @@ export default {
 
       if (c.helpText) parts.push("Help text set");
       if (Object.prototype.hasOwnProperty.call(c, "defaultValue")) parts.push("Default set");
+
+      const rules = Array.isArray(c?.visibilityLogic?.rules) ? c.visibilityLogic.rules : [];
+      if (rules.length) {
+        parts.push(`Visibility: ${c.visibilityLogic?.action || "show"} (${rules.length} rule${rules.length === 1 ? "" : "s"})`);
+      }
 
       return parts.join(" • ");
     },
@@ -1381,13 +1808,17 @@ export default {
       }
 
       const columns = this.localConfig.columns.map((col, idx) => ({
-          id: col.id,
-          key: col.id || col.key || this.buildColumnKey(col.label, idx),
-          label: col.label,
-          type: col.type,
-          options: Array.isArray(col.options) ? [...col.options] : [],
-          constraints: JSON.parse(JSON.stringify(col.constraints || {}))
-        }));
+        id: col.id,
+        key: col.id || col.key || this.buildColumnKey(col.label, idx),
+        label: col.label,
+        type: col.type,
+        options: Array.isArray(col.options) ? [...col.options] : [],
+        constraints: (() => {
+          const cloned = JSON.parse(JSON.stringify(col.constraints || {}));
+          if (col.type === "select") delete cloned.allowMultiple;
+          return cloned;
+        })()
+      }));
 
       const rows = [];
       const rowCount = Math.max(1, Number(this.localConfig.initialRows) || 1);
@@ -1407,10 +1838,10 @@ export default {
         type: "table",
         value: { rows },
         constraints: {
-          helpText: this.value?.constraints?.helpText || "",
-          required: !!this.value?.constraints?.required,
-          readonly: !!this.value?.constraints?.readonly,
-          visibilityLogic: this.value?.constraints?.visibilityLogic || {
+          helpText: this.localConfig?.constraints?.helpText || "",
+          required: !!this.localConfig?.constraints?.required,
+          readonly: !!this.localConfig?.constraints?.readonly,
+          visibilityLogic: this.localConfig?.constraints?.visibilityLogic || {
             action: "show",
             match: "all",
             rules: []
@@ -1461,6 +1892,7 @@ export default {
   }
 };
 </script>
+
 <style scoped lang="scss">
 .field-table-root {
   width: 100%;

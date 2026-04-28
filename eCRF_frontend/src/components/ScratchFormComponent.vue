@@ -441,8 +441,9 @@
                         <FieldTable
                           v-else-if="field.type === 'table'"
                           mode="render"
-                          modelValue="field.value"
+                          :modelValue="field.value"
                           :field="field"
+                          :form="currentForm"
                           :readonly="true"
                         />
 
@@ -583,6 +584,7 @@
         <FieldTable
           mode="configure"
           :value="pendingTableField"
+          :form="currentForm"
           @save="handleTableConfiguratorSave"
           @cancel="cancelTableConfigurator"
           @showGenericDialog="openGenericDialog"
