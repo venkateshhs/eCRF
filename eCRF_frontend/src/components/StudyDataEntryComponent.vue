@@ -179,15 +179,28 @@
                     {{ selectedModels[mIdx].title }}
                   </h3>
 
-                  <button
-                    type="button"
-                    class="section-collapse-btn"
-                    @click="toggleSectionCollapse(mIdx)"
-                    :title="isSectionCollapsed(mIdx) ? 'Unfold section' : 'Fold section'"
-                  >
-                    <i :class="isSectionCollapsed(mIdx) ? 'fas fa-chevron-down' : 'fas fa-chevron-up'"></i>
-                  </button>
-                </div>
+                  <div class="section-header-actions">
+                    <button
+                      v-if="hasSectionErrors(mIdx)"
+                      type="button"
+                      class="section-error-btn"
+                      :title="`Go to validation error in this section (${sectionErrorCount(mIdx)})`"
+                      @click="goToNextErrorInSection(mIdx)"
+                    >
+                      <i class="fas fa-exclamation-circle"></i>
+                      <span>{{ sectionErrorCount(mIdx) }}</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      class="section-collapse-btn"
+                      @click="toggleSectionCollapse(mIdx)"
+                      :title="isSectionCollapsed(mIdx) ? 'Unfold section' : 'Fold section'"
+                    >
+                      <i :class="isSectionCollapsed(mIdx) ? 'fas fa-chevron-down' : 'fas fa-chevron-up'"></i>
+                    </button>
+                  </div>
+              </div>
 
                 <div v-show="!isSectionCollapsed(mIdx)" class="section-card-body">
                 <template
@@ -198,6 +211,11 @@
                     v-if="isFieldVisible(mIdx, fIdx)"
                     :key="'f-' + mIdx + '-' + fIdx"
                     class="field-card"
+                    :class="{
+                            'field-card-has-error': !!fieldErrors(mIdx, fIdx),
+                            'field-card-error-highlight': highlightedErrorKey === errorKey(mIdx, fIdx)
+                          }"
+                          :data-error-key="errorKey(mIdx, fIdx)"
                   >
                     <div class="field-card-header">
                       <label :for="fieldId(mIdx, fIdx)" class="field-label">
@@ -750,6 +768,7 @@ export default {
       tableValidationStates: {},
       collapsedSections: {},
       allSectionsCollapsed: false,
+      highlightedErrorKey: "",
       showPreviousVisitImportDialog: false,
       previousVisitImportOptions: [],
       previousVisitImportContext: null,
@@ -1068,6 +1087,146 @@ export default {
   },
 
   methods: {
+    getCurrentValidationErrorItems() {
+      const s0 = this.currentSubjectIndex;
+      const v0 = this.currentVisitIndex;
+      const g0 = this.currentGroupIndex;
+
+      const items = [];
+
+      Object.entries(this.validationErrors || {}).forEach(([key, message]) => {
+        if (!message) return;
+
+        const parsed = this.parseKey(key);
+        if (!parsed) return;
+
+        const { s, v, g, m, f } = parsed;
+
+        if (s !== s0 || v !== v0 || g !== g0) return;
+
+        const isSkipped = !!this.skipFlags?.[s]?.[v]?.[g]?.[m]?.[f];
+        if (isSkipped) return;
+
+        const section = this.selectedModels?.[m];
+        const field = section?.fields?.[f];
+        if (!section || !field) return;
+
+        if (!this.assignedModelIndices.includes(m)) return;
+        if (!this.hasVisibleFieldsInSection(m)) return;
+        if (!this.isFieldVisible(m, f)) return;
+
+        items.push({
+          key,
+          message,
+          sectionIndex: m,
+          fieldIndex: f,
+          sectionTitle: section.title || `Section ${m + 1}`,
+          fieldLabel: field.label || field.name || field.title || `Field ${f + 1}`,
+        });
+      });
+
+      const sectionOrder = new Map(
+        this.assignedModelIndices.map((mIdx, order) => [mIdx, order])
+      );
+
+      items.sort((a, b) => {
+        const sa = sectionOrder.has(a.sectionIndex)
+          ? sectionOrder.get(a.sectionIndex)
+          : a.sectionIndex;
+
+        const sb = sectionOrder.has(b.sectionIndex)
+          ? sectionOrder.get(b.sectionIndex)
+          : b.sectionIndex;
+
+        if (sa !== sb) return sa - sb;
+        return a.fieldIndex - b.fieldIndex;
+      });
+
+      return items;
+    },
+
+    getSectionErrorItems(mIdx) {
+      return this.getCurrentValidationErrorItems().filter(
+        (item) => item.sectionIndex === mIdx
+      );
+    },
+
+    hasSectionErrors(mIdx) {
+      return this.getSectionErrorItems(mIdx).length > 0;
+    },
+
+    sectionErrorCount(mIdx) {
+      return this.getSectionErrorItems(mIdx).length;
+    },
+
+    async revealValidationError(item) {
+      if (!item) return;
+
+      const mIdx = item.sectionIndex;
+      const fIdx = item.fieldIndex;
+
+      if (this.isSectionCollapsed(mIdx)) {
+        this.collapsedSections = {
+          ...(this.collapsedSections || {}),
+          [mIdx]: false,
+        };
+        this.syncAllSectionsCollapsedState();
+      }
+
+      await this.$nextTick();
+
+      const key = this.errorKey(mIdx, fIdx);
+      this.highlightedErrorKey = key;
+
+      await this.$nextTick();
+
+      const inputEl = document.getElementById(this.fieldId(mIdx, fIdx));
+      const cardEl =
+        inputEl?.closest?.(".field-card") ||
+        document.querySelector(`[data-error-key="${key}"]`);
+
+      const target = cardEl || inputEl;
+      if (!target) return;
+
+      target.scrollIntoView({
+        behavior: "smooth",
+        block: "center",
+        inline: "nearest",
+      });
+
+      window.setTimeout(() => {
+        const focusTarget =
+          inputEl ||
+          target.querySelector?.("input, textarea, select, button, [tabindex]:not([tabindex='-1'])");
+
+        if (focusTarget && typeof focusTarget.focus === "function") {
+          try {
+            focusTarget.focus({ preventScroll: true });
+          } catch {
+            focusTarget.focus();
+          }
+        }
+      }, 350);
+    },
+
+    goToFirstValidationError() {
+      const items = this.getCurrentValidationErrorItems();
+      if (!items.length) return;
+
+      this.revealValidationError(items[0]);
+    },
+
+    goToNextErrorInSection(mIdx) {
+      const items = this.getSectionErrorItems(mIdx);
+      if (!items.length) return;
+
+      const currentIdx = items.findIndex(
+        (item) => item.key === this.highlightedErrorKey
+      );
+
+      const nextIdx = currentIdx >= 0 ? (currentIdx + 1) % items.length : 0;
+      this.revealValidationError(items[nextIdx]);
+    },
     isSectionCollapsed(mIdx) {
       return !!this.collapsedSections?.[mIdx];
     },
@@ -3067,10 +3226,15 @@ applyImportedRowFromDialog(payload) {
     },
     clearError(mIdx, fIdx) {
       const k = this.errorKey(mIdx, fIdx);
+
       if (k in this.validationErrors) {
         const next = { ...this.validationErrors };
         delete next[k];
         this.validationErrors = next;
+      }
+
+      if (this.highlightedErrorKey === k) {
+        this.highlightedErrorKey = "";
       }
     },
     fieldErrors(mIdx, fIdx) {
@@ -4128,20 +4292,26 @@ applyImportedRowFromDialog(payload) {
   });
 
   if ((!ok && blocking.length) || tableFieldsInvalid) {
+      this.$nextTick(() => {
+        this.goToFirstValidationError();
+      });
+
       this.showDialogMessage("Please fix validation errors before saving.");
       return;
     }
 
   const requiredFailures = this.computeRequiredFailures();
   if (requiredFailures.length) {
-    this.skipCandidates = requiredFailures;
-    this.skipSelections = requiredFailures.reduce((acc, it) => {
-      acc[it.key] = false;
-      return acc;
-    }, {});
-    this.showSkipDialog = true;
-    return;
-  }
+      this.highlightedErrorKey = "";
+
+      this.skipCandidates = requiredFailures;
+      this.skipSelections = requiredFailures.reduce((acc, it) => {
+        acc[it.key] = false;
+        return acc;
+      }, {});
+      this.showSkipDialog = true;
+      return;
+    }
 
   try {
     await this.uploadPendingFilesForCurrentSection();
@@ -4386,12 +4556,28 @@ applyImportedRowFromDialog(payload) {
 
     cancelSkipSelection() {
       this.showSkipDialog = false;
+      this.skipSelections = {};
+
+      this.$nextTick(() => {
+        this.validateCurrentSection();
+        this.highlightedErrorKey = "";
+        this.goToFirstValidationError();
+      });
     },
     jumpToField(item) {
       this.showSkipDialog = false;
+
+      if (!item) return;
+
       this.$nextTick(() => {
-        const el = document.getElementById(item.id);
-        if (el && typeof el.focus === "function") el.focus();
+        this.revealValidationError({
+          key: item.key,
+          sectionIndex: item.sectionIndex,
+          fieldIndex: item.fieldIndex,
+          sectionTitle: item.sectionTitle,
+          fieldLabel: item.fieldLabel,
+          message: this.validationErrors?.[item.key] || "",
+        });
       });
     },
 
@@ -5455,7 +5641,69 @@ select:focus {
   vertical-align: middle;
   transition: background 0.18s ease, border-color 0.18s ease, color 0.18s ease;
 }
+.section-header-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
 
+.section-error-btn {
+  height: 34px;
+  min-width: 42px;
+  padding: 0 10px;
+  border: 1px solid #fecaca;
+  border-radius: 8px;
+  background: #fff1f2;
+  color: #b91c1c;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.section-error-btn:hover {
+  background: #ffe4e6;
+  border-color: #fca5a5;
+  color: #991b1b;
+}
+
+.field-card-has-error {
+  border-color: #fca5a5;
+  background: #fffafa;
+}
+
+.field-card-error-highlight {
+  border-color: #dc2626;
+  box-shadow:
+    0 0 0 3px rgba(220, 38, 38, 0.12),
+    0 8px 22px rgba(220, 38, 38, 0.12);
+  animation: field-error-pulse 1.1s ease-in-out 2;
+}
+
+@keyframes field-error-pulse {
+  0% {
+    box-shadow:
+      0 0 0 0 rgba(220, 38, 38, 0.25),
+      0 8px 22px rgba(220, 38, 38, 0.08);
+  }
+
+  50% {
+    box-shadow:
+      0 0 0 6px rgba(220, 38, 38, 0.12),
+      0 8px 22px rgba(220, 38, 38, 0.14);
+  }
+
+  100% {
+    box-shadow:
+      0 0 0 3px rgba(220, 38, 38, 0.12),
+      0 8px 22px rgba(220, 38, 38, 0.12);
+  }
+}
 .field-help-inline-btn:hover {
   background: #f3f4f6;
   border-color: #9ca3af;
@@ -5495,5 +5743,12 @@ select:focus {
   .btn-clear {
     width: 100%;
   }
+  .section-card-header {
+  align-items: flex-start;
+}
+
+.section-header-actions {
+  align-self: flex-start;
+}
 }
 </style>
