@@ -288,7 +288,11 @@
                         :min="field.constraints?.min"
                         :max="field.constraints?.max"
                         :step="field.constraints?.step"
-                        @blur="() => { validateField(mIdx, fIdx); onRuntimeFieldChanged(mIdx, fIdx); }"
+                        @blur="() => {
+                            $nextTick(() => {
+                              validateField(mIdx, fIdx);
+                            });
+                          }"
                         @input="() => { clearError(mIdx, fIdx); onRuntimeFieldChanged(mIdx, fIdx); }"
                       />
 
