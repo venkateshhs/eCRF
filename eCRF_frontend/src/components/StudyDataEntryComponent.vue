@@ -595,8 +595,18 @@
       @close="closePreviousVisitImportDialog"
       @select="applyPreviousVisitImport"
     />
+    <button
+      v-if="!showSelection"
+      type="button"
+      class="floating-scroll-btn"
+      :class="{ 'is-up': scrollFloatingMode === 'top' }"
+      :title="scrollFloatingMode === 'top' ? 'Go to top' : 'Go to bottom'"
+      :aria-label="scrollFloatingMode === 'top' ? 'Go to top' : 'Go to bottom'"
+      @click.prevent.stop="toggleScrollPosition"
+    >
+      <i :class="scrollFloatingMode === 'top' ? 'fas fa-arrow-up' : 'fas fa-arrow-down'"></i>
+    </button>
   </div>
-
   <div v-else class="loading">
     <p>Loading study details…</p>
   </div>
@@ -770,6 +780,8 @@ export default {
       collapsedSections: {},
       allSectionsCollapsed: false,
       highlightedErrorKey: "",
+      scrollFloatingMode: "bottom",
+      scrollListenerAttached: false,
       showPreviousVisitImportDialog: false,
       previousVisitImportOptions: [],
       previousVisitImportContext: null,
@@ -1047,7 +1059,9 @@ export default {
       this.matrixReady = true;
     }
   },
-
+  beforeUnmount() {
+      this.detachFloatingScrollListener();
+    },
   watch: {
     // Merge mode is controlled by query param: ?merge=1
     "$route.query.merge": {
@@ -1085,9 +1099,123 @@ export default {
       this.buildStatusCache();
       this.visitLoading = false;
     },
+    showSelection(val) {
+      if (val) {
+        this.detachFloatingScrollListener();
+        return;
+      }
+
+      this.$nextTick(() => {
+        this.attachFloatingScrollListener();
+        this.updateFloatingScrollMode();
+      });
+    },
   },
 
   methods: {
+    getScrollRoot() {
+      const candidates = [
+        this.$el?.closest?.(".dashboard-main"),
+        document.querySelector(".dashboard-main"),
+        document.scrollingElement,
+        document.documentElement,
+      ].filter(Boolean);
+
+      return (
+        candidates.find((el) => {
+          const style = window.getComputedStyle(el);
+          const canScroll =
+            /(auto|scroll)/.test(style.overflowY) ||
+            el.scrollHeight > el.clientHeight + 2;
+
+          return canScroll && el.scrollHeight > el.clientHeight + 2;
+        }) ||
+        document.scrollingElement ||
+        document.documentElement
+      );
+    },
+
+    getScrollTop(root) {
+      if (root === document.scrollingElement || root === document.documentElement || root === document.body) {
+        return window.scrollY || root.scrollTop || 0;
+      }
+
+      return root.scrollTop || 0;
+    },
+
+    getClientHeight(root) {
+      if (root === document.scrollingElement || root === document.documentElement || root === document.body) {
+        return window.innerHeight || document.documentElement.clientHeight || 0;
+      }
+
+      return root.clientHeight || 0;
+    },
+
+    updateFloatingScrollMode() {
+      if (this.showSelection) return;
+
+      const root = this.getScrollRoot();
+      const scrollTop = this.getScrollTop(root);
+      const viewportHeight = this.getClientHeight(root);
+      const scrollHeight = root.scrollHeight || 0;
+
+      const distanceFromBottom = scrollHeight - (scrollTop + viewportHeight);
+
+      this.scrollFloatingMode = distanceFromBottom <= 180 ? "top" : "bottom";
+    },
+
+    toggleScrollPosition() {
+      const root = this.getScrollRoot();
+
+      const targetTop =
+        this.scrollFloatingMode === "top"
+          ? 0
+          : Math.max(0, root.scrollHeight - this.getClientHeight(root));
+
+      if (root === document.scrollingElement || root === document.documentElement || root === document.body) {
+        window.scrollTo({
+          top: targetTop,
+          behavior: "smooth",
+        });
+      } else {
+        root.scrollTo({
+          top: targetTop,
+          behavior: "smooth",
+        });
+      }
+
+      window.setTimeout(() => {
+        this.updateFloatingScrollMode();
+      }, 350);
+    },
+
+    attachFloatingScrollListener() {
+      if (this.scrollListenerAttached) return;
+
+      const root = this.getScrollRoot();
+      this._floatingScrollRoot = root;
+
+      root.addEventListener("scroll", this.updateFloatingScrollMode, { passive: true });
+      window.addEventListener("resize", this.updateFloatingScrollMode, { passive: true });
+
+      this.scrollListenerAttached = true;
+
+      this.$nextTick(() => {
+        this.updateFloatingScrollMode();
+      });
+    },
+
+    detachFloatingScrollListener() {
+      if (!this.scrollListenerAttached) return;
+
+      const root = this._floatingScrollRoot || this.getScrollRoot();
+
+      root.removeEventListener("scroll", this.updateFloatingScrollMode);
+      window.removeEventListener("resize", this.updateFloatingScrollMode);
+
+      this._floatingScrollRoot = null;
+      this.scrollListenerAttached = false;
+    },
     buildSaveSuccessMessage(mode = "saved") {
       const subjectLabel =
         this.sd.subjects?.[this.currentSubjectIndex]?.id ||
@@ -3730,6 +3858,7 @@ applyImportedRowFromDialog(payload) {
 
     backToSelection() {
       if (this.isShared) return;
+      this.detachFloatingScrollListener();
       this.buildStatusCache();
       this.showSelection = true;
       this.showDetails = false;
@@ -5640,7 +5769,49 @@ select:focus {
   border-radius: 10px;
   background: #ffffff;
 }
+.floating-scroll-btn {
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+  z-index: 900;
+  width: 44px;
+  height: 44px;
+  border: 1px solid #d1d5db;
+  border-radius: 999px;
+  background: #ffffff;
+  color: #374151;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.16);
+  transition:
+    background 0.18s ease,
+    border-color 0.18s ease,
+    color 0.18s ease,
+    transform 0.12s ease,
+    box-shadow 0.18s ease;
+}
 
+.floating-scroll-btn:hover {
+  background: #f3f4f6;
+  border-color: #9ca3af;
+  color: #111827;
+  transform: translateY(-1px);
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.2);
+}
+
+.floating-scroll-btn:active {
+  transform: translateY(0);
+}
+
+.floating-scroll-btn i {
+  font-size: 16px;
+}
+
+.floating-scroll-btn.is-up {
+  background: #f8fafc;
+}
 /* Responsive */
 @media (max-width: 900px) {
   .bread-crumb {
@@ -5650,6 +5821,12 @@ select:focus {
 
   .crumb-actions {
     justify-content: flex-end;
+  }
+.floating-scroll-btn {
+    right: 16px;
+    bottom: 16px;
+    width: 42px;
+    height: 42px;
   }
 }
 .field-help-inline-btn {
