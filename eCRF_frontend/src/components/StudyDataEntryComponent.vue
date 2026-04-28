@@ -705,6 +705,7 @@ export default {
 
       showDialog: false,
       dialogMessage: "",
+      dialogAction: null,
       showSkipDialog: false,
       skipCandidates: [],
       skipSelections: {},
@@ -1087,6 +1088,19 @@ export default {
   },
 
   methods: {
+    buildSaveSuccessMessage(mode = "saved") {
+      const subjectLabel =
+        this.sd.subjects?.[this.currentSubjectIndex]?.id ||
+        `Subject ${this.currentSubjectIndex + 1}`;
+
+      const visitLabel =
+        this.visitList?.[this.currentVisitIndex]?.name ||
+        `Visit ${this.currentVisitIndex + 1}`;
+
+      const actionText = mode === "updated" ? "updated" : "saved";
+
+      return `Data ${actionText} successfully for Subject: ${subjectLabel}, Visit: ${visitLabel}.`;
+    },
     getCurrentValidationErrorItems() {
       const s0 = this.currentSubjectIndex;
       const v0 = this.currentVisitIndex;
@@ -4368,7 +4382,7 @@ applyImportedRowFromDialog(payload) {
       };
       (this.existingEntries = this.existingEntries || []).push(saved);
 
-      this.showDialogMessage("Data saved successfully.");
+      this.showDialogMessage(this.buildSaveSuccessMessage("saved"));
       this.rebuildEntriesIndex();
       this.hydrateCache.delete(`${s}|${v}|${g}|${this.selectedVersion}`);
       this.applyVersionView();
@@ -4400,7 +4414,10 @@ applyImportedRowFromDialog(payload) {
         }
       );
 
-      this.showDialogMessage("Data updated successfully.");
+      this.showDialogMessage(
+          this.buildSaveSuccessMessage("updated"),
+          "backToSelection"
+        );
       const idx = this.existingEntries.findIndex((x) => x.id === existingId);
       if (idx >= 0) this.existingEntries.splice(idx, 1, resp.data);
     } else {
@@ -4433,7 +4450,10 @@ applyImportedRowFromDialog(payload) {
         created_at: resp?.data?.created_at ?? new Date().toISOString(),
       };
       (this.existingEntries = this.existingEntries || []).push(saved);
-      this.showDialogMessage("Data saved successfully.");
+      this.showDialogMessage(
+      this.buildSaveSuccessMessage("saved"),
+      "backToSelection"
+    );
     }
 
     const latestSlot = await this.fetchRevisionTokenForSlot(s, v, g, this.selectedVersion);
@@ -4889,13 +4909,21 @@ applyImportedRowFromDialog(payload) {
       }
     },
 
-    showDialogMessage(message) {
+    showDialogMessage(message, action = null) {
       this.dialogMessage = message;
+      this.dialogAction = action;
       this.showDialog = true;
     },
     closeDialog() {
+      const action = this.dialogAction;
+
       this.showDialog = false;
       this.dialogMessage = "";
+      this.dialogAction = null;
+
+      if (action === "backToSelection") {
+        this.backToSelection();
+      }
     },
     openGroupAssignDialog(subjectIndex, visitIndex) {
       this.groupAssignSubjectIndex = subjectIndex;
