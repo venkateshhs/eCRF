@@ -1,5 +1,5 @@
 <template>
-  <div class="study-data-container" v-if="study">
+  <div class="study-data-container" :class="{ 'is-entry-mode': !showSelection }" v-if="study">
     <!-- Back Buttons -->
     <div class="back-buttons-container" v-if="!isShared">
       <button v-if="isMergeMode" @click="closeMergeStudy" class="btn-back">
@@ -5235,7 +5235,7 @@ applyImportedRowFromDialog(payload) {
   background: #ffffff;
   border-radius: 8px;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
-  overflow-x: hidden;
+  overflow-x: visible;
 }
 
 /* Back buttons */
@@ -5489,6 +5489,12 @@ hr {
   flex-direction: column;
   gap: 18px;
 }
+.entry-form-wrapper,
+.entry-form-section,
+.sections-stack,
+.section-card {
+  overflow: visible;
+}
 
 /* Section card */
 .section-card {
@@ -5496,17 +5502,45 @@ hr {
   border-radius: 12px;
   background: #f8fafc;
   box-shadow: 0 2px 8px rgba(15, 23, 42, 0.04);
-  overflow: hidden;
+  overflow: visible;
+}
+.study-data-container.is-entry-mode {
+  margin-top: 0;
+  padding-top: 0;
 }
 
 .section-card-header {
+  position: sticky;
+  top: -8px;
+  z-index: 40;
+
   padding: 18px 20px;
   background: #eef4f9;
   border-bottom: 1px solid #dbe4ee;
+  border-radius: 12px 12px 0 0;
+
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+}
+
+.section-card-header {
+  position: sticky;
+  top: -8px;
+  z-index: 120;
+
+  padding: 18px 20px;
+  background: #eef4f9;
+  border-bottom: 1px solid #dbe4ee;
+  border-radius: 12px 12px 0 0;
+
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.12);
 }
 
 .section-title {
