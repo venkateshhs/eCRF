@@ -150,10 +150,22 @@
       </div>
 
       <div class="entry-form-section">
-        <h2 class="entry-title">
-          Enter Data for Subject: {{ sd.subjects?.[currentSubjectIndex]?.id }},
-          Visit: “{{ visitList[currentVisitIndex].name }}”
-        </h2>
+        <div class="entry-title-row">
+          <h2 class="entry-title">
+            Enter Data for Subject: {{ sd.subjects?.[currentSubjectIndex]?.id }},
+            Visit: “{{ visitList[currentVisitIndex].name }}”
+          </h2>
+
+          <button
+            v-if="assignedModelIndices.length"
+            type="button"
+            class="section-collapse-all-btn"
+            @click="toggleAllSectionsCollapse"
+            :title="allSectionsCollapsed ? 'Unfold all sections' : 'Fold all sections'"
+          >
+            <i :class="allSectionsCollapsed ? 'fas fa-chevron-down' : 'fas fa-chevron-up'"></i>
+          </button>
+        </div>
 
         <div v-if="assignedModelIndices.length" class="sections-stack">
           <template v-for="mIdx in assignedModelIndices" :key="'sec-wrap-' + mIdx">
@@ -163,10 +175,21 @@
               class="section-card"
             >
               <div class="section-card-header">
-                <h3>{{ selectedModels[mIdx].title }}</h3>
-              </div>
+                  <h3 class="section-title">
+                    {{ selectedModels[mIdx].title }}
+                  </h3>
 
-              <div class="section-card-body">
+                  <button
+                    type="button"
+                    class="section-collapse-btn"
+                    @click="toggleSectionCollapse(mIdx)"
+                    :title="isSectionCollapsed(mIdx) ? 'Unfold section' : 'Fold section'"
+                  >
+                    <i :class="isSectionCollapsed(mIdx) ? 'fas fa-chevron-down' : 'fas fa-chevron-up'"></i>
+                  </button>
+                </div>
+
+                <div v-show="!isSectionCollapsed(mIdx)" class="section-card-body">
                 <template
                   v-for="(field, fIdx) in selectedModels[mIdx].fields"
                   :key="'f-wrap-' + mIdx + '-' + fIdx"
@@ -178,13 +201,21 @@
                   >
                     <div class="field-card-header">
                       <label :for="fieldId(mIdx, fIdx)" class="field-label">
-                        <span class="field-label-main">
-                          {{ field.label || field.name || field.title }}
-                        </span>
-                        <span v-if="field.constraints?.required" class="required">*</span>
-                      </label>
+                          <span class="field-label-main">
+                            {{ field.label || field.name || field.title }}
+                          </span>
 
-                      <div class="field-label-actions">
+                          <span v-if="field.constraints?.required" class="required">*</span>
+                          <button
+                            v-if="hasConstraints(field)"
+                            type="button"
+                            class="field-help-inline-btn"
+                            title="Field constraints"
+                            @click.prevent.stop="openConstraintDialog(field)"
+                          >
+                            <i class="fas fa-question-circle"></i>
+                          </button>
+                        </label>
                         <button
                           v-if="!isShared && canShowPreviousVisitImport(field, mIdx, fIdx) && !isImportedFromPreviousVisit(mIdx, fIdx)"
                           type="button"
@@ -205,18 +236,8 @@
                         >
                           <i :class="icons.lock || 'fas fa-lock'"></i>
                         </button>
-
-                        <button
-                          v-if="hasConstraints(field)"
-                          type="button"
-                          class="field-icon-btn"
-                          title="Field constraints"
-                          @click="openConstraintDialog(field)"
-                        >
-                          <i class="fas fa-question-circle"></i>
-                        </button>
                       </div>
-                    </div>
+
 
                     <div v-if="field.constraints?.helpText" class="field-help-box">
                       {{ field.constraints.helpText }}
@@ -723,6 +744,8 @@ export default {
       currentRevisionToken: "",
       slotLoading: false,
       tableValidationStates: {},
+      collapsedSections: {},
+      allSectionsCollapsed: false,
       showPreviousVisitImportDialog: false,
       previousVisitImportOptions: [],
       previousVisitImportContext: null,
@@ -1041,6 +1064,47 @@ export default {
   },
 
   methods: {
+    isSectionCollapsed(mIdx) {
+      return !!this.collapsedSections?.[mIdx];
+    },
+
+    toggleSectionCollapse(mIdx) {
+      this.collapsedSections = {
+        ...(this.collapsedSections || {}),
+        [mIdx]: !this.collapsedSections?.[mIdx],
+      };
+
+      this.syncAllSectionsCollapsedState();
+    },
+
+    toggleAllSectionsCollapse() {
+      const nextCollapsed = !this.allSectionsCollapsed;
+      const next = {};
+
+      this.assignedModelIndices.forEach((mIdx) => {
+        if (this.hasVisibleFieldsInSection(mIdx)) {
+          next[mIdx] = nextCollapsed;
+        }
+      });
+
+      this.collapsedSections = next;
+      this.allSectionsCollapsed = nextCollapsed;
+    },
+
+    syncAllSectionsCollapsedState() {
+      const visibleSectionIndices = this.assignedModelIndices.filter((mIdx) =>
+        this.hasVisibleFieldsInSection(mIdx)
+      );
+
+      if (!visibleSectionIndices.length) {
+        this.allSectionsCollapsed = false;
+        return;
+      }
+
+      this.allSectionsCollapsed = visibleSectionIndices.every((mIdx) =>
+        this.isSectionCollapsed(mIdx)
+      );
+    },
   validateTableChild(mIdx, fIdx) {
       const refName = `tableField_${mIdx}_${fIdx}`;
       const comp = this.$refs?.[refName];
@@ -2817,10 +2881,8 @@ applyImportedRowFromDialog(payload) {
     },
 
     hasConstraints(field) {
-      const c = field?.constraints || {};
-      return Object.keys(c).some(
-        (k) => k !== "required" && k !== "helpText"
-      );
+      const items = this.buildConstraintList(field);
+      return Array.isArray(items) && items.length > 0 && items[0] !== "No constraints.";
     },
     buildConstraintList(field) {
       const c = field?.constraints || {};
@@ -4819,12 +4881,14 @@ applyImportedRowFromDialog(payload) {
 }
 
 .study-data-container {
-  max-width: none;
+  width: 100%;
+  box-sizing: border-box;
   margin: 24px auto;
-  padding: 10px;
+  padding: 8px 42px 24px 42px;
   background: #ffffff;
   border-radius: 8px;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+  overflow-x: hidden;
 }
 
 /* Back buttons */
@@ -5037,12 +5101,39 @@ hr {
   color: #374151;
 }
 
-/* Entry heading */
+.entry-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 18px;
+}
+
 .entry-title {
   font-size: 18px;
   font-weight: 600;
   color: #1f2937;
-  margin-bottom: 16px;
+  margin: 0;
+}
+
+.section-collapse-all-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid #d1d5db;
+  background: #ffffff;
+  color: #374151;
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.section-collapse-all-btn:hover {
+  background: #f3f4f6;
+  border-color: #9ca3af;
 }
 
 /* Section stack */
@@ -5062,17 +5153,44 @@ hr {
 }
 
 .section-card-header {
-  padding: 14px 16px;
+  padding: 18px 20px;
   background: #eef4f9;
   border-bottom: 1px solid #dbe4ee;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
 }
 
-.section-card-header h3 {
+.section-title {
   margin: 0;
-  font-size: 16px;
-  font-weight: 600;
-  color: #1f2937;
+  font-size: 22px;
+  font-weight: 800;
+  color: #111827;
+  line-height: 1.25;
 }
+
+.section-collapse-btn {
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #374151;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.section-collapse-btn:hover {
+  background: #f3f4f6;
+  border-color: #9ca3af;
+}
+
+
 
 .section-card-body {
   padding: 16px;
@@ -5316,13 +5434,47 @@ select:focus {
     justify-content: flex-end;
   }
 }
+.field-help-inline-btn {
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  margin-left: 6px;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  background: #ffffff;
+  color: #374151;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex-shrink: 0;
+  vertical-align: middle;
+  transition: background 0.18s ease, border-color 0.18s ease, color 0.18s ease;
+}
+
+.field-help-inline-btn:hover {
+  background: #f3f4f6;
+  border-color: #9ca3af;
+}
 
 @media (max-width: 768px) {
   .field-card-header {
     flex-direction: column;
     align-items: stretch;
   }
+  .entry-title-row {
+  flex-direction: column;
+  align-items: stretch;
+ }
 
+ .section-collapse-all-btn {
+  width: 100%;
+  justify-content: center;
+ }
+
+.study-data-container {
+  padding: 16px;
+}
   .field-label-actions {
     justify-content: flex-start;
   }

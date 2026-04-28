@@ -1047,7 +1047,7 @@ export default {
   grid-template-areas:
     "header header"
     "main main";
-  grid-template-columns: 0 1fr;
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .dashboard-header {
@@ -1152,15 +1152,16 @@ export default {
 /* Main Content */
 .dashboard-main {
   grid-area: main;
-  padding: 20px;
+  padding: 8px 20px 20px 20px;
   background: #fff;
   transition: margin-left 0.3s ease;
   min-width: 0;
 
-  /* IMPORTANT: main must NOT constrain routed pages */
-  width: 100%;
-  max-width: none;
+  width: auto;
+  max-width: 100%;
+  box-sizing: border-box;
   margin: 0;
+  overflow-x: hidden;
 }
 
 .dashboard-main.expanded {
@@ -1611,9 +1612,17 @@ export default {
 
 @media (min-width: 1700px) {
   /* Typography scale up */
-  .dashboard-layout {
-    font-size: 16px;
-  }
+.dashboard-layout {
+  display: grid;
+  grid-template-areas:
+    "header header"
+    "sidebar main";
+  grid-template-rows: 70px 1fr;
+  grid-template-columns: 220px minmax(0, 1fr);
+  height: 100vh;
+  transition: grid-template-columns 0.3s ease;
+  overflow-x: hidden;
+}
 
   .user-role {
     font-size: 14px;
