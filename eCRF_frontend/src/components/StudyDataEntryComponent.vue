@@ -59,9 +59,10 @@
           <div class="details-block">
             <strong>Study Info:</strong>
             <ul>
-              <li v-for="[key, val] in studyInfoEntries" :key="key">
-                {{ key }}: {{ val }}
-              </li>
+            <li v-for="[key, val] in studyInfoEntries" :key="key">
+              <span class="details-key">{{ key }}:</span>
+              <span class="details-value">{{ val }}</span>
+            </li>
             </ul>
           </div>
 
@@ -69,8 +70,9 @@
             <strong>Visit Info:</strong>
             <ul>
               <li v-for="[key, val] in Object.entries(visitList[currentVisitIndex] || {})" :key="key">
-                {{ key }}: {{ val }}
-              </li>
+                  <span class="details-key">{{ key }}:</span>
+                  <span class="details-value">{{ val }}</span>
+                </li>
             </ul>
           </div>
         </div>
@@ -5271,115 +5273,233 @@ applyImportedRowFromDialog(payload) {
   font-size: 14px;
 }
 
-/* Header */
+/* ========= Study header container ========= */
 .study-header-container {
   margin-bottom: 24px;
+  padding: 18px 20px;
+  background: #f8fafc;
+  border: 1px solid #dbe4ee;
+  border-radius: 14px;
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.04);
 }
 
 .study-header {
   text-align: center;
   margin-bottom: 16px;
+  padding: 4px 12px 12px;
 }
-
 .study-name {
-  font-size: 24px;
-  font-weight: 600;
-  color: #1f2937;
-  margin-bottom: 8px;
+  font-size: 26px;
+  font-weight: 800;
+  color: #111827;
+  margin: 0 0 8px;
+  line-height: 1.2;
 }
 
 .study-description {
-  font-size: 16px;
+  font-size: 15px;
   color: #4b5563;
-  margin-bottom: 8px;
+  margin: 0 0 10px;
+  line-height: 1.5;
 }
 
 .study-meta {
-  font-size: 14px;
-  color: #6b7280;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #374151;
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 999px;
+  padding: 7px 13px;
+  margin: 0;
 }
 
 .shared-banner {
-  margin-top: 8px;
-  font-size: 14px;
+  display: inline-flex;
+  align-items: center;
+  margin-top: 10px;
+  font-size: 13px;
   color: #374151;
+  background: #eef2ff;
+  border: 1px solid #c7d2fe;
+  border-radius: 999px;
+  padding: 7px 12px;
 }
-
-hr {
-  margin: 12px 0;
+/* Divider inside header card */
+.study-header-container hr {
+  margin: 16px 0 0;
   border: 0;
   border-top: 1px solid #e5e7eb;
 }
 
-/* Details panel */
+/* ========= Details panel ========= */
 .details-panel {
-  margin-bottom: 16px;
+  margin-bottom: 0;
 }
 
 .details-controls {
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 12px;
-  margin-bottom: 8px;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 0;
 }
 
 .details-toggle-btn {
-  background: none;
-  border: none;
-  color: #374151;
-  font-size: 14px;
-  font-weight: 500;
-  cursor: pointer;
-  display: flex;
+  min-height: 38px;
+  display: inline-flex;
   align-items: center;
-  gap: 6px;
+  justify-content: center;
+  gap: 8px;
+  background: #ffffff;
+  border: 1px solid #d1d5db;
+  color: #374151;
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  transition:
+    background 0.18s ease,
+    border-color 0.18s ease,
+    color 0.18s ease,
+    transform 0.12s ease,
+    box-shadow 0.18s ease;
+}
+
+.details-toggle-btn:hover {
+  background: #f3f4f6;
+  border-color: #9ca3af;
+  color: #111827;
+  transform: translateY(-1px);
+  box-shadow: 0 6px 14px rgba(15, 23, 42, 0.08);
+}
+
+.details-toggle-btn:active {
+  transform: translateY(0);
 }
 
 .details-toggle-btn i {
-  font-size: 14px;
+  font-size: 13px;
 }
 
+/* Merge button in header controls */
+.btn-merge-study {
+  min-height: 38px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: #2563eb;
+  color: #ffffff;
+  border: 1px solid #2563eb;
+  padding: 8px 13px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  transition:
+    background 0.18s ease,
+    border-color 0.18s ease,
+    transform 0.12s ease,
+    box-shadow 0.18s ease;
+}
+
+.btn-merge-study:hover {
+  background: #1d4ed8;
+  border-color: #1d4ed8;
+  transform: translateY(-1px);
+  box-shadow: 0 6px 14px rgba(37, 99, 235, 0.18);
+}
+
+.btn-merge-study:active {
+  transform: translateY(0);
+}
+
+/* Share button in header controls */
 .share-icon {
-  background: none;
-  border: none;
+  width: 38px;
+  height: 38px;
+  background: #ffffff;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
   color: #6b7280;
   cursor: pointer;
-  font-size: 16px;
-  padding: 6px;
+  font-size: 15px;
+  padding: 0;
   line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition:
+    background 0.18s ease,
+    border-color 0.18s ease,
+    color 0.18s ease,
+    transform 0.12s ease,
+    box-shadow 0.18s ease;
 }
 
 .share-icon:hover {
-  color: #374151;
+  background: #f3f4f6;
+  border-color: #9ca3af;
+  color: #111827;
+  transform: translateY(-1px);
+  box-shadow: 0 6px 14px rgba(15, 23, 42, 0.08);
 }
 
+.share-icon:active {
+  transform: translateY(0);
+}
+
+/* Expanded details content */
 .details-content {
-  background: #f9fafb;
+  margin-top: 14px;
+  background: #ffffff;
   border: 1px solid #e5e7eb;
-  border-radius: 6px;
+  border-radius: 12px;
   padding: 16px;
+  box-shadow: inset 0 1px 0 rgba(15, 23, 42, 0.02);
 }
 
 .details-block {
   margin-bottom: 16px;
 }
 
+.details-block:last-child {
+  margin-bottom: 0;
+}
+
 .details-block strong {
   display: block;
-  font-size: 14px;
-  color: #1f2937;
-  margin-bottom: 6px;
+  font-size: 13px;
+  font-weight: 800;
+  color: #111827;
+  margin-bottom: 8px;
 }
 
 .details-block ul {
-  margin: 0 0 12px 16px;
+  margin: 0;
   padding: 0;
+  list-style: none;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 8px;
 }
 
 .details-block li {
-  font-size: 14px;
+  font-size: 13px;
   color: #374151;
+  background: #f9fafb;
+  border: 1px solid #eef2f7;
+  border-radius: 8px;
+  padding: 8px 10px;
+  line-height: 1.4;
+  word-break: break-word;
+  font-weight: 400;
 }
 
 /* Merge button */
@@ -5729,7 +5849,7 @@ select:focus {
   font-size: 11px;
   border-radius: 999px;
   background: #fff7ed;
-  color: #9a3412;
+  color: #ffffff;
   border: 1px solid #fed7aa;
 }
 
@@ -5947,8 +6067,58 @@ select:focus {
   background: #f3f4f6;
   border-color: #9ca3af;
 }
+.details-key {
+  font-weight: 800;
+  color: #111827;
+}
 
+.details-value {
+  font-weight: 400;
+  color: #374151;
+}
 @media (max-width: 768px) {
+ .study-header-container {
+    padding: 16px;
+    border-radius: 12px;
+  }
+
+  .study-name {
+    font-size: 22px;
+  }
+
+  .study-description {
+    font-size: 14px;
+  }
+
+  .study-meta,
+  .shared-banner {
+    width: 100%;
+    box-sizing: border-box;
+    border-radius: 10px;
+    flex-wrap: wrap;
+  }
+.details-controls {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+
+
+  .details-toggle-btn,
+  .btn-merge-study {
+    width: 100%;
+  }
+
+  .share-icon {
+    margin-left: auto;
+  }
+
+  .details-block ul {
+    grid-template-columns: 1fr;
+  }
   .field-card-header {
     flex-direction: column;
     align-items: stretch;

@@ -201,186 +201,308 @@ export default {
 <style scoped>
 /* ========= Boot / init messaging ========= */
 .boot-message {
-  padding: 16px;
-  margin-bottom: 10px;
-  border: 1px dashed #e5e7eb;
-  background: #fafafa;
+  padding: 16px 18px;
+  margin-bottom: 14px;
+  border: 1px dashed #d1d5db;
+  background: #f9fafb;
   color: #4b5563;
-  border-radius: 8px;
+  border-radius: 10px;
   font-size: 14px;
+  line-height: 1.5;
 }
 
-/* ========= Matrix toolbar (visit dropdown) ========= */
+/* ========= Matrix toolbar ========= */
 .matrix-toolbar {
   display: flex;
   align-items: center;
-  gap: 12px;
-  margin-bottom: 10px;
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 16px;
+  padding: 14px 16px;
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
 }
+
 .matrix-toolbar-left {
   display: flex;
   align-items: flex-end;
   gap: 12px;
+  flex-wrap: wrap;
+  min-width: 0;
 }
+
 .visit-filter {
   display: flex;
   flex-direction: column;
   gap: 6px;
 }
+
 .visit-filter label {
   font-size: 13px;
-  color: #444;
-}
-.visit-select {
-  padding: 8px;
-  border: 1px solid #ddd;
-  border-radius: 8px;
-  min-width: 220px;
-  background: #fff;
-}
-.version-helper {
-  font-size: 12px;
+  font-weight: 700;
   color: #374151;
-  background: #f3f4f6;
-  border: 1px solid #e5e7eb;
-  border-radius: 6px;
-  padding: 8px 10px 12px;
-  line-height: 1;
+}
+
+.visit-select {
+  min-width: 220px;
+  min-height: 40px;
+  padding: 8px 34px 8px 12px;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #1f2937;
+  font-size: 14px;
+  cursor: pointer;
+  transition:
+    border-color 0.18s ease,
+    box-shadow 0.18s ease,
+    background 0.18s ease;
+}
+
+.visit-select:hover {
+  border-color: #9ca3af;
+}
+
+.visit-select:focus {
+  outline: none;
+  border-color: #6b7280;
+  box-shadow: 0 0 0 3px rgba(107, 114, 128, 0.12);
+}
+
+/* Version badge */
+.version-helper {
+  min-height: 40px;
+  display: inline-flex;
+  align-items: center;
   white-space: nowrap;
+  box-sizing: border-box;
+  font-size: 12px;
+  font-weight: 700;
+  color: #374151;
+  background: #eef2ff;
+  border: 1px solid #c7d2fe;
+  border-radius: 8px;
+  padding: 8px 11px;
+  line-height: 1;
   align-self: flex-end;
 }
 
-/* Add subjects button in toolbar */
+/* Add subjects button */
 .btn-add-subject {
-  padding: 8px 12px;
+  min-height: 40px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 8px 13px;
   border-radius: 8px;
-  border: 1px solid #d1d5db;
-  background: #f9fafb;
+  border: 1px solid #2563eb;
+  background: #2563eb;
+  color: #ffffff;
   font-size: 13px;
+  font-weight: 700;
   cursor: pointer;
   align-self: flex-end;
+  transition:
+    background 0.18s ease,
+    border-color 0.18s ease,
+    transform 0.12s ease,
+    box-shadow 0.18s ease;
 }
+
 .btn-add-subject:hover {
-  background: #e5e7eb;
+  background: #1d4ed8;
+  border-color: #1d4ed8;
+  transform: translateY(-1px);
+  box-shadow: 0 6px 14px rgba(37, 99, 235, 0.18);
+}
+
+.btn-add-subject:active {
+  transform: translateY(0);
 }
 
 /* Info icon at far right */
 .legend-icon-btn {
-  background: transparent;
-  border: none;
-  padding: 4px 6px;
+  width: 38px;
+  height: 38px;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #6b7280;
   cursor: pointer;
   display: inline-flex;
   align-items: center;
-  line-height: 1;
-  color: #6b7280;
+  justify-content: center;
+  flex-shrink: 0;
   margin-left: auto;
-}
-.legend-icon-btn:hover {
-  color: #374151;
-}
-.legend-icon-btn i {
-  font-size: 14px;
+  transition:
+    background 0.18s ease,
+    border-color 0.18s ease,
+    color 0.18s ease,
+    transform 0.12s ease;
 }
 
-/* ========= Scrollable selection matrix ========= */
+.legend-icon-btn:hover {
+  background: #f3f4f6;
+  border-color: #9ca3af;
+  color: #111827;
+  transform: translateY(-1px);
+}
+
+.legend-icon-btn i {
+  font-size: 15px;
+}
+
+/* ========= Matrix card / scroll container ========= */
 .matrix-wrap {
   position: relative;
   overflow: auto;
   max-height: 70vh;
-  border: 1px solid #e5e7eb;
-  border-radius: 8px;
-  background: #fff;
   width: 100%;
+  background: #ffffff;
+  border: 1px solid #dbe4ee;
+  border-radius: 12px;
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.04);
 }
 
 /* Loading overlay */
 .busy-overlay {
   position: absolute;
   inset: 0;
-  background: rgba(255, 255, 255, 0.7);
+  background: rgba(255, 255, 255, 0.76);
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 5;
+  z-index: 20;
+  backdrop-filter: blur(1px);
 }
+
 .spinner {
-  width: 28px;
-  height: 28px;
+  width: 30px;
+  height: 30px;
   border: 3px solid #d1d5db;
   border-top-color: #6b7280;
   border-radius: 50%;
   animation: spin 0.9s linear infinite;
 }
+
 @keyframes spin {
   to {
     transform: rotate(360deg);
   }
 }
 
-/* Make table fill container or scroll based on column count */
+/* ========= Matrix table ========= */
 .selection-matrix {
-  border-collapse: collapse;
+  border-collapse: separate;
+  border-spacing: 0;
   width: max-content;
   min-width: 720px;
   table-layout: fixed;
+  background: #ffffff;
 }
+
 .selection-matrix.fluid {
   width: 100%;
   min-width: 100%;
 }
 
-/* Base table cells */
+/* Base cells */
 .selection-matrix th,
 .selection-matrix td {
-  border: 1px solid #e5e7eb;
-  padding: 10px 12px;
+  border-right: 1px solid #e5e7eb;
+  border-bottom: 1px solid #e5e7eb;
+  padding: 12px 14px;
   text-align: center;
   vertical-align: middle;
   white-space: nowrap;
+  box-sizing: border-box;
+}
+
+.selection-matrix th:last-child,
+.selection-matrix td:last-child {
+  border-right: none;
+}
+
+.selection-matrix tbody tr:last-child td {
+  border-bottom: none;
 }
 
 /* Sticky header row */
 .selection-matrix thead th {
   position: sticky;
   top: 0;
-  z-index: 3;
-  background: #f9fafb;
-  font-weight: 600;
-  color: #1f2937;
+  z-index: 6;
+  background: #eef4f9;
+  color: #111827;
+  font-size: 14px;
+  font-weight: 800;
+  border-bottom: 1px solid #dbe4ee;
+  box-shadow: 0 1px 0 rgba(15, 23, 42, 0.04);
 }
 
-/* Subject column sticky */
+/* Subject sticky column */
 .subject-col,
 .subject-cell {
   position: sticky;
   left: 0;
-  z-index: 4;
-  background: #ffffff;
-  text-align: left;
-}
-.subject-col {
-  background: #f3f4f6;
-  font-weight: 600;
-  color: #1f2937;
-   z-index: 6;
-}
-
-/* Default fixed sizing */
-.subject-col,
-.subject-cell {
   min-width: 200px;
   max-width: 320px;
+  text-align: left !important;
 }
+
+.subject-col {
+  z-index: 9 !important;
+  background: #eaf1f8 !important;
+  color: #111827;
+  font-weight: 800;
+}
+
+.subject-cell {
+  z-index: 5;
+  background: #ffffff;
+  color: #1f2937;
+  font-weight: 800;
+}
+
+/* Group sticky column */
+.group-col,
+.group-cell {
+  position: sticky;
+  left: var(--subject-width, 200px);
+  min-width: 160px;
+  width: 180px;
+  text-align: left !important;
+}
+
+.group-col {
+  z-index: 8 !important;
+  background: #eaf1f8 !important;
+  color: #111827;
+  font-weight: 800;
+}
+
+.group-cell {
+  z-index: 4;
+  background: #ffffff;
+  color: #4b5563;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+/* Visit columns */
 .visit-col {
   min-width: 132px;
   max-width: 200px;
   text-align: center;
 }
+
 .visit-cell {
   width: 140px;
   text-align: center;
-  padding: 8px;
+  padding: 9px 10px;
 }
 
 /* Fluid mode overrides */
@@ -392,127 +514,242 @@ export default {
   max-width: none;
 }
 
-/* Buttons */
+/* Zebra rows */
+.selection-matrix tbody tr:nth-child(odd) td {
+  background: #fcfcfd;
+}
+
+.selection-matrix tbody tr:nth-child(odd) .subject-cell,
+.selection-matrix tbody tr:nth-child(odd) .group-cell {
+  background: #f8fafc;
+}
+
+/* Hover rows */
+.selection-matrix tbody tr:hover td {
+  background: #f8fafc;
+}
+
+.selection-matrix tbody tr:hover .subject-cell,
+.selection-matrix tbody tr:hover .group-cell {
+  background: #f1f5f9;
+}
+
+/* ========= Select/status button ========= */
 .select-btn {
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   width: 100%;
   min-width: 100px;
   max-width: 160px;
-  color: #fff;
-  border: none;
-  padding: 6px 10px;
-  border-radius: 6px;
+  min-height: 34px;
+  border: 1px solid transparent;
+  padding: 7px 11px;
+  border-radius: 999px;
   cursor: pointer;
-  font-size: 14px;
+  font-size: 13px;
+  font-weight: 800;
   line-height: 1.15;
-  transition: opacity 0.15s ease-in-out, transform 0.02s ease-in-out;
   user-select: none;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  transition:
+    background 0.18s ease,
+    border-color 0.18s ease,
+    color 0.18s ease,
+    transform 0.12s ease,
+    box-shadow 0.18s ease;
 }
+
 .selection-matrix.fluid .select-btn {
   min-width: 0;
   max-width: none;
 }
-.select-btn:active {
-  transform: translateY(1px);
-}
+
 .select-btn:hover {
-  opacity: 0.9;
+  transform: translateY(-1px);
+  box-shadow: 0 6px 14px rgba(15, 23, 42, 0.09);
 }
 
+.select-btn:active {
+  transform: translateY(0);
+}
+
+/* Status colors matching add-data soft style */
 .select-btn.status-none {
-  background: #9ca3af;
-  color: #1f2937;
+  background: #f3f4f6;
+  color: #4b5563;
+  border-color: #e5e7eb;
 }
+
+.select-btn.status-none:hover {
+  background: #e5e7eb;
+  color: #374151;
+}
+
 .select-btn.status-partial {
-  background: #f59e0b;
+  background: #fffbeb;
+  color: #92400e;
+  border-color: #fde68a;
 }
+
+.select-btn.status-partial:hover {
+  background: #fef3c7;
+}
+
 .select-btn.status-complete {
-  background: #16a34a;
+  background: #ecfdf5;
+  color: #166534;
+  border-color: #bbf7d0;
 }
+
+.select-btn.status-complete:hover {
+  background: #dcfce7;
+}
+
 .select-btn.status-skipped {
-  background: #ef4444;
+  background: #fff7ed;
+  color: #ef4444;
+  border-color: #fed7aa;
 }
 
-.selection-matrix tbody tr:nth-child(odd) .subject-cell {
-  background: #fafafa;
-}
-.selection-matrix tbody tr:nth-child(odd) td:not(.subject-cell) {
-  background: #fcfcfc;
+.select-btn.status-skipped:hover {
+  background: #ffedd5;
 }
 
+/* ========= Scrollbars ========= */
 .matrix-wrap::-webkit-scrollbar {
   height: 10px;
   width: 10px;
 }
-.matrix-wrap::-webkit-scrollbar-thumb {
-  background: #d1d5db;
-  border-radius: 8px;
-}
-.matrix-wrap::-webkit-scrollbar-thumb:hover {
-  background: #9ca3af;
+
+.matrix-wrap::-webkit-scrollbar-track {
+  background: #f3f4f6;
+  border-radius: 999px;
 }
 
-/* No subjects placeholder & button */
+.matrix-wrap::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 999px;
+}
+
+.matrix-wrap::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+/* ========= Empty state ========= */
 .no-subjects-placeholder {
   text-align: center;
-  padding: 20px;
+  padding: 28px 20px !important;
   color: #6b7280;
   font-style: italic;
-  background: #fafafa;
+  background: #f9fafb !important;
+  line-height: 1.55;
 }
+
 .no-subjects-actions {
-  margin-top: 12px;
+  margin-top: 14px;
 }
+
 .btn-add-subject-inline {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 38px;
   padding: 8px 14px;
-  border-radius: 6px;
-  border: 1px solid #d1d5db;
-  background: #f9fafb;
+  border-radius: 8px;
+  border: 1px solid #2563eb;
+  background: #2563eb;
+  color: #ffffff;
   font-size: 14px;
+  font-weight: 700;
   cursor: pointer;
+  transition:
+    background 0.18s ease,
+    border-color 0.18s ease,
+    transform 0.12s ease,
+    box-shadow 0.18s ease;
 }
+
 .btn-add-subject-inline:hover {
-  background: #e5e7eb;
+  background: #1d4ed8;
+  border-color: #1d4ed8;
+  transform: translateY(-1px);
+  box-shadow: 0 6px 14px rgba(37, 99, 235, 0.18);
 }
 
-.group-col,
-.group-cell {
-  position: sticky;
-  left: var(--subject-width, 200px);
-  z-index: 4;
-  background: #ffffff;
-  text-align: left;
-  min-width: 160px;
-  width: 180px;
-
+.btn-add-subject-inline:active {
+  transform: translateY(0);
 }
 
-/* header styling parity */
-.group-col {
-  background: #f3f4f6;
-  font-weight: 600;
-  color: #1f2937;
-  z-index: 5;
-}
-
-/* zebra parity */
-.selection-matrix tbody tr:nth-child(odd) .group-cell {
-  background: #fafafa;
-}
-
+/* ========= Responsive ========= */
 @media (max-width: 900px) {
+  .matrix-toolbar {
+    align-items: stretch;
+  }
+
+  .matrix-toolbar-left {
+    flex: 1;
+  }
+
   .visit-col {
     min-width: 112px;
   }
+
   .visit-cell {
     width: 120px;
   }
+
   .select-btn {
     min-width: 90px;
     max-width: 140px;
+  }
+}
+
+@media (max-width: 768px) {
+  .matrix-toolbar {
+    flex-direction: column;
+    align-items: stretch;
+    padding: 12px;
+  }
+
+  .matrix-toolbar-left {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+  }
+
+  .visit-select,
+  .btn-add-subject,
+  .version-helper {
+    width: 100%;
+  }
+
+  .legend-icon-btn {
+    align-self: flex-end;
+    margin-left: 0;
+  }
+
+  .matrix-wrap {
+    border-radius: 10px;
+  }
+
+  .selection-matrix th,
+  .selection-matrix td {
+    padding: 10px 9px;
+    font-size: 13px;
+  }
+
+  .subject-col,
+  .subject-cell {
+    min-width: 170px;
+  }
+
+  .group-col,
+  .group-cell {
+    min-width: 140px;
+    width: 150px;
   }
 }
 </style>
