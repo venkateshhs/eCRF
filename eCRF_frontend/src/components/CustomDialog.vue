@@ -2,7 +2,7 @@
   <div v-if="isVisible" class="dialog-overlay">
     <div class="dialog">
       <div class="dialog-content">
-        <p>{{ message }}</p>
+        <p class="dialog-message">{{ message }}</p>
       </div>
       <div class="dialog-actions">
         <button @click="closeDialog" class="btn-primary">OK</button>
@@ -83,5 +83,8 @@ export default {
 
 .btn-primary:hover {
   background: #0056b3;
+}
+.dialog-message {
+  white-space: pre-line;
 }
 </style>

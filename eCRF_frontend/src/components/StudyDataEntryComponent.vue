@@ -1229,7 +1229,9 @@ export default {
 
       const actionText = mode === "updated" ? "updated" : "saved";
 
-      return `Data ${actionText} successfully for Subject: ${subjectLabel}, Visit: ${visitLabel}.`;
+      return `Data ${actionText} successfully for:
+    Subject: ${subjectLabel}
+    Visit: ${visitLabel}`;
     },
     getCurrentValidationErrorItems() {
       const s0 = this.currentSubjectIndex;
