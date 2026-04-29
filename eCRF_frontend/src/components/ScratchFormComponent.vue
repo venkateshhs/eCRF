@@ -4223,7 +4223,33 @@ input, textarea, select {
 .scratch-form-content-full {
   margin-top: 0;
 }
+/* ========= Protocol Matrix parent layout fix ========= */
+/* When ProtocolMatrix is open, do not trap it inside the builder scroll area */
+.scratch-form-content-full {
+  display: block;
+  width: 100%;
+  min-width: 0;
+}
 
+.form-area-full {
+  width: 100%;
+  min-width: 0;
+  height: auto;
+  min-height: calc(100vh - 40px);
+  overflow: visible;
+}
+
+/* Important: ProtocolMatrix needs to manage its own horizontal/vertical scroll */
+.form-area-full .sections-container {
+  overflow: hidden;
+  padding: 0;
+}
+
+/* Make sure the direct ProtocolMatrix wrapper does not restrict width */
+.form-area-full .sections-container > div {
+  width: 100%;
+  min-width: 0;
+}
 .form-area-full {
   height: calc(100vh - 40px);
 }

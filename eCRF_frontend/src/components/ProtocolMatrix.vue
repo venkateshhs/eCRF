@@ -1,63 +1,60 @@
 <template>
   <div class="protocol-matrix-container">
-    <div class="screen-header">
-      <button
-        class="btn-back protocol-back-btn"
-        @click="$emit('edit-template')"
-        title="Back"
-      >
-        Back
-      </button>
+    <div ref="matrixScrollEl" class="matrix-scroll card-surface">
+      <!-- Sticky action/header bar: independent of horizontal table scroll -->
+      <div class="matrix-topbar">
+        <button
+          class="btn-back protocol-back-btn"
+          @click="$emit('edit-template')"
+          title="Back"
+        >
+          Back
+        </button>
 
-      <h2 class="screen-title">Schedule of Assessments</h2>
-      <button class="icon-btn header-info-btn" @click="showInfo = true" aria-label="What is Protocol Matrix?">
-        <i :class="icons.info"></i>
-      </button>
-    </div>
+        <h2 class="screen-title">Schedule of Assessments</h2>
 
-    <!-- 1. Visit Navigator (when >3 visits) -->
-    <div v-if="visitList.length > 3" class="visit-nav">
-      <button @click="prevVisit" :disabled="currentVisitIndex === 0" class="nav-btn">&lt;</button>
+        <div class="matrix-topbar-actions">
+          <button class="icon-btn header-info-btn" @click="showInfo = true" aria-label="What is Protocol Matrix?">
+            <i :class="icons.info"></i>
+          </button>
 
-      <div class="visit-nav-center">
-        <span class="visit-counter">
-          Visit {{ currentVisitIndex + 1 }} / {{ visitList.length }}
-        </span>
-        <!-- show current visit name directly below -->
-        <span class="visit-name">{{ visitList[currentVisitIndex]?.name || 'Visit' }}</span>
+          <button @click="$emit('edit-template')" class="btn-option">Back to Edit Template</button>
+          <button @click="openPreview" :disabled="!hasAnyAssignment" class="btn-option">Preview</button>
+
+          <!-- FIX: explicit publish mode -->
+          <button @click="saveStudy('publish')" class="btn-primary">
+            Publish Study
+          </button>
+        </div>
       </div>
 
-      <button @click="nextVisit" :disabled="currentVisitIndex === visitList.length - 1" class="nav-btn">&gt;</button>
-    </div>
-
-    <!-- Bulk controls for current visit (only when many visits) -->
-    <div
-      v-if="visitList.length > 3 && groupList.length && selectedModels.length"
-      class="visit-bulk-bar"
-    >
-      <label class="bulk-toggle">
-        <input
-          type="checkbox"
-          :checked="isVisitFullySelected(currentVisitIndex)"
-          @change="onToggleVisitAll(currentVisitIndex, $event.target.checked)"
-        />
-        <span>Assign all forms to this visit</span>
-      </label>
-    </div>
-
-    <!-- 2. Protocol Matrix -->
-    <div class="table-container card-surface">
+      <!-- 2. Protocol Matrix -->
       <table class="protocol-table">
-        <!-- Full matrix if ≤3 visits -->
-        <thead v-if="visitList.length <= 3">
+        <thead>
           <tr>
             <th rowspan="2" class="model-header-col">
-              Data Models
+              <div class="model-header-main">
+                <span class="model-header-title">Template</span>
+
+                <label
+                  v-if="visitList.length && groupList.length && selectedModels.length"
+                  class="bulk-toggle small model-global-toggle"
+                >
+                  <input
+                    type="checkbox"
+                    :checked="isEverythingSelected"
+                    @change="onToggleAll($event.target.checked)"
+                  />
+                  <span>Assign all sections to all visits</span>
+                </label>
+              </div>
             </th>
+
             <th
               v-for="(visit, vIdx) in visitList"
               :key="`vh-${vIdx}`"
               :colspan="groupList.length"
+              class="visit-header-col"
             >
               <div class="visit-header-cell">
                 <div class="visit-header-main">
@@ -78,24 +75,17 @@
               </div>
             </th>
           </tr>
+
           <tr>
             <template v-for="(_, vIdx) in visitList" :key="`vg-${vIdx}`">
-              <th v-for="(group, gIdx) in groupList" :key="`vg-${vIdx}-${gIdx}`">
+              <th
+                v-for="(group, gIdx) in groupList"
+                :key="`vg-${vIdx}-${gIdx}`"
+                class="group-header-col"
+              >
                 <span class="group-name">Group: {{ group.name }}</span>
               </th>
             </template>
-          </tr>
-        </thead>
-
-        <!-- Single-visit view if >3 visits -->
-        <thead v-else>
-          <tr>
-            <th class="model-header-col">
-              Data Models
-            </th>
-            <th v-for="(group, gIdx) in groupList" :key="`g-${gIdx}`">
-              <span class="group-name">{{ group.name }}</span>
-            </th>
           </tr>
         </thead>
 
@@ -124,53 +114,26 @@
             </td>
 
             <!-- Full-matrix cells -->
-            <template v-if="visitList.length <= 3">
-              <template v-for="(_, vIdx) in visitList" :key="`row-${mIdx}-v-${vIdx}`">
-                <td v-for="(_, gIdx) in groupList" :key="`cell-${mIdx}-${vIdx}-${gIdx}`">
-                  <label class="chk-wrap" :title="`Toggle ${model.title} @ ${visitList[vIdx]?.name} / ${groupList[gIdx]?.name}`">
-                    <input
-                      type="checkbox"
-                      :checked="assignments[mIdx][vIdx][gIdx]"
-                      @change="onToggle(mIdx, vIdx, gIdx, $event.target.checked)"
-                    />
-                    <!-- Unchecked: outline square; Checked: check-square -->
-                    <i class="fa-chk" :class="[assignments[mIdx][vIdx][gIdx] ? 'fas fa-check-square' : 'far fa-square']"></i>
-                  </label>
-                </td>
-              </template>
-            </template>
-
-            <!-- Single-visit cells -->
-            <template v-else>
-              <td v-for="(_, gIdx) in groupList" :key="`celln-${mIdx}-${gIdx}`">
-                <label class="chk-wrap" :title="`Toggle ${model.title} @ ${visitList[currentVisitIndex]?.name} / ${groupList[gIdx]?.name}`">
+            <template v-for="(_, vIdx) in visitList" :key="`row-${mIdx}-v-${vIdx}`">
+              <td
+                v-for="(_, gIdx) in groupList"
+                :key="`cell-${mIdx}-${vIdx}-${gIdx}`"
+                class="assignment-cell"
+              >
+                <label class="chk-wrap" :title="`Toggle ${model.title} @ ${visitList[vIdx]?.name} / ${groupList[gIdx]?.name}`">
                   <input
                     type="checkbox"
-                    :checked="assignments[mIdx][currentVisitIndex][gIdx]"
-                    @change="onToggle(mIdx, currentVisitIndex, gIdx, $event.target.checked)"
+                    :checked="assignments[mIdx][vIdx][gIdx]"
+                    @change="onToggle(mIdx, vIdx, gIdx, $event.target.checked)"
                   />
-                  <i class="fa-chk" :class="[assignments[mIdx][currentVisitIndex][gIdx] ? 'fas fa-check-square' : 'far fa-square']"></i>
+                  <!-- Unchecked: outline square; Checked: check-square -->
+                  <i class="fa-chk" :class="[assignments[mIdx][vIdx][gIdx] ? 'fas fa-check-square' : 'far fa-square']"></i>
                 </label>
               </td>
             </template>
           </tr>
         </tbody>
       </table>
-    </div>
-
-    <!-- Global bulk control: everything -->
-    <div
-      v-if="visitList.length && groupList.length && selectedModels.length"
-      class="global-bulk-bar"
-    >
-      <label class="bulk-toggle">
-        <input
-          type="checkbox"
-          :checked="isEverythingSelected"
-          @change="onToggleAll($event.target.checked)"
-        />
-        <span>Assign all models to all visits</span>
-      </label>
     </div>
 
     <!-- 3. Preview Modal -->
@@ -428,17 +391,6 @@
         </div>
       </div>
     </div>
-
-    <!-- Footer Actions -->
-    <div class="matrix-actions card-surface">
-      <button @click="$emit('edit-template')" class="btn-option">Back to Edit Template</button>
-      <button @click="openPreview" :disabled="!hasAssignment(currentVisitIndex)" class="btn-option">Preview</button>
-
-      <!-- FIX: explicit publish mode -->
-      <button @click="saveStudy('publish')" class="btn-primary">
-        Publish Study
-      </button>
-    </div>
   </div>
 </template>
 
@@ -468,8 +420,7 @@ export default {
 
     const isEditing = computed(() => !!(store.state.studyDetails?.study_metadata?.id));
 
-    // Matrix indices
-    const currentVisitIndex = ref(0);
+    const matrixScrollEl = ref(null);
 
     // Preview indices + modal control
     const showPreviewModal = ref(false);
@@ -541,6 +492,16 @@ export default {
     const totalModels = computed(() => props.selectedModels.length);
     const totalVisits = computed(() => props.visits.length);
     const totalGroups = computed(() => props.groups.length);
+
+    const hasAnyAssignment = computed(() => {
+      return props.visits.some((_, vIdx) =>
+        props.groups.some((_, gIdx) =>
+          props.selectedModels.some((_, mIdx) =>
+            props.assignments?.[mIdx]?.[vIdx]?.[gIdx] === true
+          )
+        )
+      );
+    });
 
     /* ============================================================
        FIELD / LOGIC HELPERS
@@ -865,10 +826,6 @@ export default {
       }
     }
 
-    // Matrix nav
-    function prevVisit() { if (currentVisitIndex.value > 0) currentVisitIndex.value--; }
-    function nextVisit() { if (currentVisitIndex.value < visitList.value.length - 1) currentVisitIndex.value++; }
-
     // Preview helpers
     function groupsForVisit(vIdx) {
       return groupList.value
@@ -1191,8 +1148,23 @@ export default {
     }
 
     function goToFirstEmptyVisit() {
-      if (emptyVisitIndices.value.length) currentVisitIndex.value = emptyVisitIndices.value[0];
+      const firstEmpty = emptyVisitIndices.value.length ? emptyVisitIndices.value[0] : 0;
       showEmptyVisitsModal.value = false;
+
+      nextTick(() => {
+        const el = matrixScrollEl.value;
+        if (!el) return;
+
+        const firstVisitHeader = el.querySelector(".visit-header");
+        const visitWidth = firstVisitHeader ? firstVisitHeader.offsetWidth : 180;
+        const targetLeft = Math.max(0, firstEmpty * visitWidth);
+
+        el.scrollTo({
+          left: targetLeft,
+          top: 0,
+          behavior: "smooth",
+        });
+      });
     }
 
     async function saveAnyway() {
@@ -1404,9 +1376,13 @@ export default {
     }
 
     function openPreview() {
-      if (!hasAssignment(currentVisitIndex.value)) return;
-      previewVisitIndex.value = currentVisitIndex.value;
-      setFirstGroup(currentVisitIndex.value);
+      if (!hasAnyAssignment.value) return;
+
+      const firstVisitIdx = props.visits.findIndex((_, vIdx) => hasAssignment(vIdx));
+
+      previewVisitIndex.value = firstVisitIdx >= 0 ? firstVisitIdx : 0;
+      setFirstGroup(previewVisitIndex.value);
+
       showPreviewModal.value = true;
     }
 
@@ -1536,15 +1512,12 @@ export default {
     return {
       icons,
 
+      matrixScrollEl,
+
       // state
       visitList,
       groupList,
       isEditing,
-
-      // matrix nav
-      currentVisitIndex,
-      prevVisit,
-      nextVisit,
 
       // preview
       showPreviewModal,
@@ -1563,6 +1536,7 @@ export default {
       // toggles
       onToggle,
       hasAssignment,
+      hasAnyAssignment,
 
       // bulk helpers
       isModelFullySelected,
@@ -1619,7 +1593,6 @@ export default {
   },
 };
 </script>
-
 <style scoped lang="scss">
 @import "@/assets/styles/_base.scss";
 
@@ -1627,129 +1600,413 @@ export default {
 .protocol-matrix-container {
   display: flex;
   flex-direction: column;
-  gap: 16px;
-  padding: 20px;
+  padding: 0;
   background: linear-gradient(180deg, #f7f9fc 0%, #ffffff 100%);
   border-radius: 12px;
+  width: 100%;
+  min-height: 0;
+  min-width: 0;
+  box-sizing: border-box;
 }
 
-/* Header */
-.screen-header {
-  display: grid;
-  grid-template-columns: auto 1fr auto;
-  align-items: center;
-  gap: 12px;
-  padding: 4px 4px 0;
-  min-height: 44px;
+.matrix-scroll {
+  position: relative;
+  width: 100%;
+  max-width: none;
+  min-width: 0;
+
+  /* key fix: grow naturally, scroll only when content is taller than viewport */
+  height: auto;
+  max-height: calc(100vh - 40px);
+  min-height: 0;
+
+  overflow: auto;
+  border-radius: 12px;
+  background: #ffffff;
+  border: 1px solid $border-color;
+
+  --matrix-topbar-height: 64px;
 }
+
+/* Top bar must not move horizontally */
+.matrix-topbar {
+  position: sticky;
+  top: 0;
+  left: 0;
+  z-index: 300;
+
+  width: 100%;
+  min-width: 100%;
+  box-sizing: border-box;
+
+  display: grid;
+  grid-template-columns: auto minmax(220px, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+
+  min-height: var(--matrix-topbar-height);
+  padding: 8px 10px;
+
+  background: #ffffff;
+  border-bottom: 1px solid $border-color;
+  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.08);
+}
+
 .screen-title {
   margin: 0;
   font-weight: 800;
-  font-size: 18px;
+  font-size: clamp(17px, 1.8vw, 22px);
   color: #101828;
   text-align: center;
+  line-height: 1.25;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
-.icon-btn { background: transparent; cursor: pointer; border: none; padding: 0; }
-.header-info-btn { position: absolute; right: 6px; top: 50%; transform: translateY(-50%); font-size: 18px; color: #667085; }
-.header-info-btn:hover { color: #111827; }
+
+.matrix-topbar-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.icon-btn {
+  background: transparent;
+  cursor: pointer;
+  border: none;
+  padding: 0;
+}
+
+.header-info-btn {
+  font-size: 18px;
+  color: #667085;
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.header-info-btn:hover {
+  color: #111827;
+  background: #f3f4f6;
+}
 
 /* Reusable surface */
-.card-surface { border: 1px solid $border-color; border-radius: 12px; background: #fff; box-shadow: 0 10px 25px rgba(16, 24, 40, 0.06); }
-
-/* Visit Pagination */
-.visit-nav {
-  display: grid; grid-template-columns: 1fr auto 1fr;
-  position: relative; align-items: center; gap: 10px; padding: 10px 12px;
-  border-radius: 12px; background: #f5f6fa; border: 1px solid $border-color;
-}
-.visit-nav .nav-btn { justify-self: start; }
-.visit-nav .nav-btn:last-child { justify-self: end; }
-
-.visit-nav-center { display: flex; flex-direction: column; align-items: center; gap: 2px; }
-.visit-counter { font-weight: 700; letter-spacing: 0.2px; color: $text-color; }
-
-.th-chip, .visit-name {
-  display: inline-block; white-space: normal; overflow-wrap: anywhere; word-break: break-word; hyphens: auto; line-height: 1.25;
-  max-width: clamp(30ch, 36vw, 64ch); text-align: center;
+.card-surface {
+  border: 1px solid $border-color;
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 8px 20px rgba(16, 24, 40, 0.05);
 }
 
-.nav-btn {
-  background: #ffffff; padding: 8px 12px; border: 1px solid $border-color; border-radius: $button-border-radius; cursor: pointer; font-size: 16px;
-  transition: transform .05s ease, box-shadow .2s ease, background .2s ease;
+/* Table */
+.protocol-table {
+  width: max-content;
+  min-width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  background: #ffffff;
 }
-.nav-btn:hover:not(:disabled) { background: #f8fafc; box-shadow: 0 4px 10px rgba(16,24,40,.08); }
-.nav-btn:disabled { opacity: 0.6; cursor: not-allowed; }
 
-/* Matrix */
-.table-container { overflow: auto; }
-.protocol-table { width: 100%; border-collapse: separate; border-spacing: 0; background: white; border-radius: 12px; overflow: hidden; }
-.protocol-table thead th { position: sticky; top: 0; z-index: 1; background: #f8fafc; border-bottom: 1px solid $border-color; white-space: normal; vertical-align: middle; }
-.protocol-table th, .protocol-table td { border-right: 1px solid $border-color; border-bottom: 1px solid $border-color; padding: 12px; text-align: center; font-size: 14px; }
-.protocol-table th:first-child, .protocol-table td:first-child { border-left: 1px solid $border-color; }
-.protocol-table tr:nth-child(even) td { background: #fbfdff; }
-.protocol-table tbody tr:hover td { background: #eef6ff; }
-.th-title { color: #667085; font-size: 12px; margin-right: 6px; }
-.group-name { font-weight: 600; color: #101828; white-space: normal; overflow-wrap: anywhere; word-break: break-word; }
-.th-chip { display: inline-block; font-size: 12px; background: #eef2ff; color: #3538cd; border: 1px solid #e0e7ff; padding: 1px 8px; border-radius: 999px; }
-.model-cell { text-align: left; background: #fff; }
-.model-title { font-weight: 600; color: #101828; }
+/* Sticky table header: this is the important fix */
+.protocol-table thead {
+  position: sticky;
+  top: var(--matrix-topbar-height);
+  z-index: 220;
+}
+
+.protocol-table thead th {
+  background: #f8fafc;
+  border-top: 1px solid $border-color;
+  white-space: normal;
+  vertical-align: middle;
+  z-index: 220;
+}
+
+.protocol-table th,
+.protocol-table td {
+  border-right: 1px solid $border-color;
+  border-bottom: 1px solid $border-color;
+  padding: 10px 12px;
+  text-align: center;
+  font-size: 14px;
+  vertical-align: middle;
+  background: #ffffff;
+}
+
+.protocol-table th:first-child,
+.protocol-table td:first-child {
+  border-left: 1px solid $border-color;
+}
+
+/* Sticky first column */
+.model-header-col,
+.model-cell {
+  position: sticky;
+  left: 0;
+  min-width: 270px;
+  max-width: 360px;
+  text-align: left;
+}
+
+.model-header-col {
+  z-index: 260 !important;
+  background: #eef4f9 !important;
+  color: #101828;
+  font-weight: 800;
+  vertical-align: top;
+}
+
+
+.model-header-main {
+  min-height: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.model-header-title {
+  display: block;
+  font-weight: 800;
+  color: #101828;
+  line-height: 1.25;
+}
+
+.model-global-toggle {
+  align-self: flex-end;
+  justify-content: flex-end;
+  text-align: right;
+  white-space: normal;
+  max-width: 190px;
+  margin-top: auto;
+}
+
+.model-global-toggle span {
+  white-space: normal;
+  line-height: 1.25;
+}
+
+.model-cell {
+  z-index: 120;
+  background: #ffffff !important;
+}
+
+.protocol-table tbody tr:nth-child(even) td {
+  background: #fbfdff;
+}
+
+.protocol-table tbody tr:hover td {
+  background: #eef6ff;
+}
+
+.protocol-table tbody tr:nth-child(even) .model-cell {
+  background: #fbfdff !important;
+}
+
+.protocol-table tbody tr:hover .model-cell {
+  background: #eef6ff !important;
+}
+
+.visit-header-col {
+  min-width: 180px;
+}
+
+.group-header-col,
+.assignment-cell {
+  min-width: 140px;
+}
+
+.visit-header-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 38px;
+}
+
+.visit-header-main {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  max-width: 220px;
+}
+
+.th-title {
+  color: #667085;
+  font-size: 12px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.th-chip,
+.visit-name {
+  display: inline-block;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  hyphens: auto;
+  line-height: 1.25;
+  max-width: clamp(18ch, 20vw, 36ch);
+  text-align: center;
+}
+
+.th-chip {
+  font-size: 12px;
+  background: #eef2ff;
+  color: #3538cd;
+  border: 1px solid #e0e7ff;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-weight: 700;
+}
+
+.group-name {
+  font-weight: 700;
+  color: #101828;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  line-height: 1.25;
+}
+
+.model-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.model-title {
+  font-weight: 700;
+  color: #101828;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  line-height: 1.3;
+}
 
 /* Checkbox using Font Awesome */
-.chk-wrap { --size: 18px; display: inline-flex; align-items: center; justify-content: center; width: var(--size); height: var(--size); position: relative; cursor: pointer; background: transparent; }
-.chk-wrap input { opacity: 0; width: var(--size); height: var(--size); position: absolute; margin: 0; }
-.fa-chk { font-size: 18px; line-height: 1; pointer-events: none; color: #98a2b3; }
-.chk-wrap input:checked + .fa-chk { color: $primary-color; }
-.chk-wrap:focus-within .fa-chk { outline: 2px solid rgba(52, 96, 255, .25); outline-offset: 2px; }
-
-/* Modals */
-.modal-overlay { position: fixed; inset: 0; background: rgba(0, 12, 34, 0.45); display: flex; justify-content: center; align-items: center; z-index: 1000; padding: 12px; }
-.protocol-preview-modal, .validation-modal { background: white; border-radius: 12px; width: 96%; max-width: 900px; padding: 20px; box-shadow: 0 20px 50px rgba(16,24,40,.18); }
-.validation-title { margin: 0 0 6px; font-size: 18px; font-weight: 800; color: #101828; display: flex; align-items: center; gap: 8px; }
-.validation-text { margin: 0 0 10px; color: #475467; }
-.modal-actions { display: flex; justify-content: flex-end; gap: 12px; margin-top: 16px; }
-
-/* Unsaved dialog actions */
-.unsaved-actions {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  width: 100%;
-}
-@media (max-width: 760px) {
-  .unsaved-actions {
-    grid-template-columns: 1fr;
-  }
+.chk-wrap {
+  --size: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--size);
+  height: var(--size);
+  position: relative;
+  cursor: pointer;
+  background: transparent;
 }
 
-/* Confirm changes scroll handling */
-.confirm-scroll { max-width: 1100px; }
-.diff-scroll {
-  max-height: 60vh;
-  overflow-y: auto;
-  overflow-x: auto;
+.chk-wrap input {
+  opacity: 0;
+  width: var(--size);
+  height: var(--size);
+  position: absolute;
+  margin: 0;
+  cursor: pointer;
+}
+
+.fa-chk {
+  font-size: 19px;
+  line-height: 1;
+  pointer-events: none;
+  color: #98a2b3;
+}
+
+.chk-wrap input:checked + .fa-chk {
+  color: $primary-color;
+}
+
+.chk-wrap:focus-within .fa-chk {
+  outline: 2px solid rgba(52, 96, 255, 0.25);
+  outline-offset: 2px;
+}
+
+/* Buttons */
+.btn-option,
+.btn-primary {
+  padding: $button-padding;
+  border-radius: $button-border-radius;
+  cursor: pointer;
+  font-size: 14px;
+  border: 1px solid transparent;
+  transition:
+    transform 0.05s ease,
+    box-shadow 0.2s ease,
+    background 0.2s ease,
+    color 0.2s ease,
+    border-color 0.2s ease;
+}
+
+.btn-option {
+  background: #ffffff;
   border: 1px solid $border-color;
-  border-radius: 10px;
-  padding: 12px;
-  background: #fff;
+  color: #111827;
 }
 
-/* Sticky footer inside confirm dialog */
-.sticky-actions { position: sticky; bottom: 0; background: #fff; padding-top: 12px; margin-top: 12px; border-top: 1px solid $border-color; }
+.btn-option:hover:not(:disabled) {
+  background: #f8fafc;
+  box-shadow: 0 6px 14px rgba(16, 24, 40, 0.08);
+}
 
-/* Footer */
-.matrix-actions { position: sticky; bottom: 0; padding: 14px; display: flex; justify-content: flex-end; gap: 12px; z-index: 10; background: #fff; border: 1px solid $border-color; border-radius: 12px; }
-.btn-option, .btn-primary { padding: $button-padding; border-radius: $button-border-radius; cursor: pointer; font-size: 14px; border: 1px solid transparent; transition: transform .05s ease, box-shadow .2s ease, background .2s ease, color .2s ease, border-color .2s ease; }
-.btn-option { background: #ffffff; border: 1px solid $border-color; color: #111827; }
-.btn-option:hover { background: #f8fafc; box-shadow: 0 6px 14px rgba(16,24,40,.08); }
-.btn-primary { background: $primary-color; color: #fff; }
-.btn-primary:hover { background: darken($primary-color, 6%); box-shadow: 0 8px 18px rgba(52, 96, 255, .25); }
+.btn-primary {
+  background: $primary-color;
+  color: #fff;
+}
 
-/* Empty-visit list */
-.empty-visits-list { margin: 0 0 8px 18px; padding: 0; list-style: disc; color: #344054; max-height: 40vh; overflow-y: auto; }
-.empty-visits-list .visit-item-title { display: inline-block; white-space: normal; overflow-wrap: anywhere; word-break: break-word; line-height: 1.3; }
+.btn-primary:hover:not(:disabled) {
+  background: darken($primary-color, 6%);
+  box-shadow: 0 8px 18px rgba(52, 96, 255, 0.25);
+}
 
-/* Small utility */
-.li-icon { margin-right: 6px; }
-.mr-6 { margin-right: 6px; }
+.btn-option:disabled,
+.btn-primary:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.protocol-back-btn {
+  justify-self: start;
+}
+
+.btn-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: #fff;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  padding: 9px 13px;
+  cursor: pointer;
+  color: $text-color;
+  font-size: 14px;
+  line-height: 1;
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease,
+    transform 0.02s ease;
+}
+
+.btn-back:hover {
+  background: #f9fafb;
+  border-color: #d1d5db;
+}
+
+.btn-back:active {
+  transform: scale(0.98);
+}
+
+/* Bulk checkbox */
 .bulk-toggle {
   display: inline-flex;
   align-items: center;
@@ -1757,21 +2014,13 @@ export default {
   font-size: 12px;
   color: #111827;
   cursor: pointer;
+  white-space: nowrap;
 }
-.bulk-toggle.small { font-size: 11px; }
-.visit-bulk-bar,
-.global-bulk-bar {
-  display: flex;
-  justify-content: flex-end;
-  padding: 4px 0;
-  margin-top: 4px;
+
+.bulk-toggle.small {
+  font-size: 11px;
 }
-.model-header-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-}
+
 .bulk-toggle input {
   -webkit-appearance: none;
   appearance: none;
@@ -1784,11 +2033,14 @@ export default {
   position: relative;
   margin: 0;
   cursor: pointer;
+  flex-shrink: 0;
 }
+
 .bulk-toggle input:checked {
   background: $primary-color;
   border-color: $primary-color;
 }
+
 .bulk-toggle input:checked::after {
   content: "";
   position: absolute;
@@ -1801,51 +2053,164 @@ export default {
   border-left: none;
   transform: rotate(45deg);
 }
-.bulk-toggle span { line-height: 1.2; }
-.screen-header {
-  position: relative;
-  text-align: center;
-  padding: 4px 4px 0;
-  min-height: 44px;
+
+.bulk-toggle span {
+  line-height: 1.2;
 }
 
-.protocol-back-btn {
-  justify-self: start;
+/* Preview nav */
+.nav-btn {
+  background: #ffffff;
+  padding: 8px 12px;
+  border: 1px solid $border-color;
+  border-radius: $button-border-radius;
+  cursor: pointer;
+  font-size: 16px;
+  transition:
+    transform 0.05s ease,
+    box-shadow 0.2s ease,
+    background 0.2s ease;
 }
 
-.header-info-btn {
-  justify-self: end;
-  font-size: 18px;
-  color: #667085;
+.nav-btn:hover:not(:disabled) {
+  background: #f8fafc;
+  box-shadow: 0 4px 10px rgba(16, 24, 40, 0.08);
 }
 
-.header-info-btn:hover {
-  color: #111827;
+.nav-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
-.btn-back {
-  display: inline-flex;
+.preview-header {
+  display: flex;
   align-items: center;
   gap: 8px;
+}
+
+.preview-label {
+  font-size: 13px;
+  color: #344054;
+  font-weight: 700;
+}
+
+.spacer {
+  flex: 1;
+}
+
+.preview-content {
+  margin-top: 14px;
+  max-height: 65vh;
+  overflow-y: auto;
+  border: 1px solid $border-color;
+  border-radius: 10px;
+  padding: 12px;
+}
+
+/* Modals */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 12, 34, 0.45);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 1000;
+  padding: 12px;
+}
+
+.protocol-preview-modal,
+.validation-modal {
+  background: white;
+  border-radius: 12px;
+  width: 96%;
+  max-width: 900px;
+  padding: 20px;
+  box-shadow: 0 20px 50px rgba(16, 24, 40, 0.18);
+}
+
+.validation-title {
+  margin: 0 0 6px;
+  font-size: 18px;
+  font-weight: 800;
+  color: #101828;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.validation-text {
+  margin: 0 0 10px;
+  color: #475467;
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+/* Unsaved dialog actions */
+.unsaved-actions {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  width: 100%;
+}
+
+/* Confirm changes scroll handling */
+.confirm-scroll {
+  max-width: 1100px;
+}
+
+.diff-scroll {
+  max-height: 60vh;
+  overflow-y: auto;
+  overflow-x: auto;
+  border: 1px solid $border-color;
+  border-radius: 10px;
+  padding: 12px;
   background: #fff;
-  border: 1px solid #ddd;
-  border-radius: 8px;
-  padding: 10px 14px;
-  cursor: pointer;
-  color: $text-color;
-  font-size: 14px;
-  line-height: 1;
-  transition: background 0.15s ease, border-color 0.15s ease, transform 0.02s ease;
 }
 
-.btn-back:hover {
-  background: #f9fafb;
-  border-color: #d1d5db;
+/* Sticky footer inside confirm dialog */
+.sticky-actions {
+  position: sticky;
+  bottom: 0;
+  background: #fff;
+  padding-top: 12px;
+  margin-top: 12px;
+  border-top: 1px solid $border-color;
 }
 
-.btn-back:active {
-  transform: scale(0.98);
+/* Empty-visit list */
+.empty-visits-list {
+  margin: 0 0 8px 18px;
+  padding: 0;
+  list-style: disc;
+  color: #344054;
+  max-height: 40vh;
+  overflow-y: auto;
 }
+
+.empty-visits-list .visit-item-title {
+  display: inline-block;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  line-height: 1.3;
+}
+
+/* Small utility */
+.li-icon {
+  margin-right: 6px;
+}
+
+.mr-6 {
+  margin-right: 6px;
+}
+
+/* Logical issues modal */
 .logical-issues-modal {
   max-width: 980px;
 }
@@ -1968,16 +2333,7 @@ export default {
   line-height: 1.4;
 }
 
-@media (max-width: 760px) {
-  .logic-arrow-row {
-    grid-template-columns: 1fr;
-  }
-
-  .logic-arrow-wrap {
-    flex-direction: row;
-    justify-content: flex-start;
-  }
-}
+/* Pretty error modal */
 .pretty-error-modal {
   max-width: 900px;
 }
@@ -2001,5 +2357,94 @@ export default {
   background: #f8fafc;
   color: #344054;
   line-height: 1.45;
+}
+
+/* Scrollbar */
+.matrix-scroll::-webkit-scrollbar {
+  height: 11px;
+  width: 11px;
+}
+
+.matrix-scroll::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 999px;
+}
+
+.matrix-scroll::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+.matrix-scroll::-webkit-scrollbar-track {
+  background: #f8fafc;
+  border-radius: 999px;
+}
+
+/* Mobile */
+@media (max-width: 760px) {
+  .protocol-matrix-container {
+    height: auto;
+  }
+
+  .matrix-scroll {
+   max-height: calc(100vh - 30px);
+    --matrix-topbar-height: 138px;
+  }
+
+  .matrix-topbar {
+    grid-template-columns: 1fr auto;
+    align-items: start;
+  }
+
+  .protocol-back-btn {
+    grid-column: 1 / 2;
+    justify-self: start;
+  }
+
+  .header-info-btn {
+    grid-column: 2;
+    grid-row: 1;
+  }
+
+  .screen-title {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    text-align: left;
+  }
+
+  .matrix-topbar-actions {
+    grid-column: 1 / -1;
+    grid-row: 3;
+    display: grid;
+    grid-template-columns: 1fr;
+    width: 100%;
+  }
+
+  .model-header-col,
+  .model-cell {
+    min-width: 220px;
+    max-width: 260px;
+  }
+
+  .visit-header-col {
+    min-width: 160px;
+  }
+
+  .group-header-col,
+  .assignment-cell {
+    min-width: 130px;
+  }
+
+  .unsaved-actions {
+    grid-template-columns: 1fr;
+  }
+
+  .logic-arrow-row {
+    grid-template-columns: 1fr;
+  }
+
+  .logic-arrow-wrap {
+    flex-direction: row;
+    justify-content: flex-start;
+  }
 }
 </style>
