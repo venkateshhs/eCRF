@@ -5845,12 +5845,13 @@ select:focus {
 .skip-pill {
   display: inline-block;
   margin-left: 6px;
-  padding: 1px 6px;
+  padding: 1px 8px;
   font-size: 11px;
+  font-weight: 800;
   border-radius: 999px;
-  background: #fff7ed;
-  color: #ffffff;
-  border: 1px solid #fed7aa;
+  background: #fef2f2;
+  color: #7f1d1d;
+  border: 1px solid #fecaca;
 }
 
 /* Empty state */
