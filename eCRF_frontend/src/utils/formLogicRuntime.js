@@ -585,9 +585,9 @@ function toComparableNumber(val) {
   return Number.isFinite(n) ? n : null;
 }
 
-function compareArraysContainsAll(leftArr, rightArr) {
+function compareArraysHasAny(leftArr, rightArr) {
   if (!Array.isArray(leftArr) || !Array.isArray(rightArr)) return false;
-  return rightArr.every((v) => leftArr.includes(v));
+  return rightArr.some((v) => leftArr.includes(v));
 }
 
 function parseDateLike(value, format = "dd.MM.yyyy") {
@@ -657,21 +657,35 @@ function evaluateSingleVisibilityRule(rule, sourceValue, sourceField) {
   if (operator === "empty") return isBlankValue(sourceValue);
   if (operator === "not_empty" || operator === "is_not_empty") return !isBlankValue(sourceValue);
 
-  if (sourceType === "select" || sourceType === "radio") {
-    if (Array.isArray(sourceValue)) {
-      if (operator === "eq") {
-        if (Array.isArray(compareValue)) return compareArraysContainsAll(sourceValue, compareValue);
-        return sourceValue.includes(compareValue);
+ if (sourceType === "select" || sourceType === "radio") {
+  if (Array.isArray(sourceValue)) {
+    if (operator === "eq") {
+      if (Array.isArray(compareValue)) return compareArraysHasAny(sourceValue, compareValue);
+      return sourceValue.includes(compareValue);
+    }
+
+    if (operator === "neq") {
+      if (Array.isArray(compareValue)) return !compareArraysHasAny(sourceValue, compareValue);
+      return !sourceValue.includes(compareValue);
+    }
+  } else {
+    if (operator === "eq") {
+      if (Array.isArray(compareValue)) {
+        return compareValue.map(String).includes(String(sourceValue ?? ""));
       }
-      if (operator === "neq") {
-        if (Array.isArray(compareValue)) return !compareArraysContainsAll(sourceValue, compareValue);
-        return !sourceValue.includes(compareValue);
+
+      return String(sourceValue ?? "") === String(compareValue ?? "");
+    }
+
+    if (operator === "neq") {
+      if (Array.isArray(compareValue)) {
+        return !compareValue.map(String).includes(String(sourceValue ?? ""));
       }
-    } else {
-      if (operator === "eq") return String(sourceValue ?? "") === String(compareValue ?? "");
-      if (operator === "neq") return String(sourceValue ?? "") !== String(compareValue ?? "");
+
+      return String(sourceValue ?? "") !== String(compareValue ?? "");
     }
   }
+}
 
   if (sourceType === "checkbox") {
     const left = !!sourceValue;

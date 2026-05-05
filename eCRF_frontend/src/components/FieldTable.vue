@@ -587,7 +587,61 @@ export default {
     },
 
     formForTableVisibility() {
-      return this.form || { sections: [] };
+      const sourceForm =
+        this.form && Array.isArray(this.form.sections)
+          ? JSON.parse(JSON.stringify(this.form))
+          : { sections: [] };
+
+      const tableId = String(this.value?._id || this.value?.name || "");
+      const tableName = String(this.value?.name || "");
+
+      let foundTable = false;
+
+      sourceForm.sections = sourceForm.sections.map((section) => {
+        const fields = Array.isArray(section.fields) ? section.fields : [];
+
+        const nextFields = fields.map((field) => {
+          const fieldId = String(field?._id || "");
+          const fieldName = String(field?.name || "");
+
+          if (
+            tableId &&
+            (fieldId === tableId || fieldName === tableId || fieldName === tableName)
+          ) {
+            foundTable = true;
+
+            return {
+              ...field,
+              _id: this.value?._id || field._id,
+              name: this.value?.name || field.name,
+              label: this.localConfig.label || field.label || "Table",
+              type: "table",
+              constraints: JSON.parse(JSON.stringify(this.localConfig?.constraints || {})),
+              tableConfig: {
+                ...(field.tableConfig || {}),
+                ...(this.value?.tableConfig || {}),
+                columns: JSON.parse(JSON.stringify(this.localConfig?.columns || []))
+              }
+            };
+          }
+
+          return field;
+        });
+
+        return {
+          ...section,
+          fields: nextFields
+        };
+      });
+
+      if (!foundTable && sourceForm.sections.length) {
+        sourceForm.sections[0].fields = [
+          ...(sourceForm.sections[0].fields || []),
+          this.tableFieldDefinition
+        ];
+      }
+
+      return sourceForm;
     },
 
     mockForm() {
@@ -1015,6 +1069,36 @@ export default {
       return rightArr.every((v) => leftArr.includes(v));
     },
 
+    compareChoiceValue(sourceValue, compareValue, operator) {
+      const op = String(operator || "eq").toLowerCase();
+
+      const leftValues = Array.isArray(sourceValue)
+        ? sourceValue.map((v) => String(v ?? "").trim()).filter(Boolean)
+        : [String(sourceValue ?? "").trim()].filter(Boolean);
+
+      const rightValues = Array.isArray(compareValue)
+        ? compareValue.map((v) => String(v ?? "").trim()).filter(Boolean)
+        : [String(compareValue ?? "").trim()].filter(Boolean);
+
+      if (op === "eq") {
+        return rightValues.some((v) => leftValues.includes(v));
+      }
+
+      if (op === "neq") {
+        return !rightValues.some((v) => leftValues.includes(v));
+      }
+
+      if (op === "contains") {
+        return rightValues.some((v) => leftValues.includes(v));
+      }
+
+      if (op === "not_contains") {
+        return !rightValues.some((v) => leftValues.includes(v));
+      }
+
+      return false;
+    },
+
     getColumnBySourceKey(columns, sourceKey) {
       const key = String(sourceKey || "");
       if (!key) return null;
@@ -1063,19 +1147,7 @@ export default {
       if (operator === "not_empty" || operator === "is_not_empty") return !this.isBlankValue(sourceValue);
 
       if (sourceType === "select" || sourceType === "radio") {
-        if (Array.isArray(sourceValue)) {
-          if (operator === "eq") {
-            if (Array.isArray(compareValue)) return this.compareArraysContainsAll(sourceValue, compareValue);
-            return sourceValue.includes(compareValue);
-          }
-          if (operator === "neq") {
-            if (Array.isArray(compareValue)) return !this.compareArraysContainsAll(sourceValue, compareValue);
-            return !sourceValue.includes(compareValue);
-          }
-        } else {
-          if (operator === "eq") return String(sourceValue ?? "") === String(compareValue ?? "");
-          if (operator === "neq") return String(sourceValue ?? "") !== String(compareValue ?? "");
-        }
+        return this.compareChoiceValue(sourceValue, compareValue, operator);
       }
 
       if (sourceType === "checkbox") {

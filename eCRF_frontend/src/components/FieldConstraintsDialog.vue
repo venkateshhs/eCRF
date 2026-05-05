@@ -856,6 +856,21 @@ const BIDS_MODALITIES = Object.freeze([
   "swi",
 ]);
 
+function choiceOptionsFromField(field) {
+  const direct = Array.isArray(field?.options) ? field.options : [];
+  const fromConstraints = Array.isArray(field?.constraints?.options)
+    ? field.constraints.options
+    : [];
+
+  return Array.from(
+    new Set(
+      [...direct, ...fromConstraints]
+        .map((v) => String(v ?? "").trim())
+        .filter(Boolean)
+    )
+  );
+}
+
 function buildInitialLocal(vm, constraintsForm, currentFieldType) {
   const base = constraintsForm || {};
   const type = (currentFieldType || "text").toLowerCase();
@@ -864,14 +879,44 @@ function buildInitialLocal(vm, constraintsForm, currentFieldType) {
     .filter(Boolean)
     .map(String);
 
-  const defaultValue =
-    type === "table"
-      ? base.defaultValue
-      : type === "checkbox"
-      ? false
-      : type === "radio" && base.allowMultiple
-      ? []
-      : "";
+  const defaultValue = (() => {
+    if (type === "table") {
+      return base.defaultValue;
+    }
+
+    if (type === "checkbox") {
+      return (
+        base.defaultValue === true ||
+        base.defaultValue === "true" ||
+        base.defaultValue === 1 ||
+        base.defaultValue === "1"
+      );
+    }
+
+    if (type === "radio" && base.allowMultiple) {
+      if (Array.isArray(base.defaultValue)) {
+        return base.defaultValue
+          .map((v) => String(v ?? "").trim())
+          .filter(Boolean);
+      }
+
+      if (
+        base.defaultValue === "" ||
+        base.defaultValue === null ||
+        base.defaultValue === undefined
+      ) {
+        return [];
+      }
+
+      return [String(base.defaultValue).trim()].filter(Boolean);
+    }
+
+    if (base.defaultValue === null || base.defaultValue === undefined) {
+      return "";
+    }
+
+    return base.defaultValue;
+  })();
 
   const allowedFormats = Array.isArray(base.allowedFormats)
     ? base.allowedFormats.map(String).map((s) => s.trim()).filter(Boolean)
@@ -954,9 +999,15 @@ export default {
 
   data() {
     const local = buildInitialLocal(this, this.constraintsForm, this.currentFieldType);
-    const initialOptions = (Array.isArray(this.constraintsForm?.options) ? this.constraintsForm.options : [])
-      .filter(Boolean)
-      .map(String);
+
+    const initialOptions = choiceOptionsFromField({
+      ...(this.fieldDefinition || {}),
+      constraints: this.constraintsForm || {},
+      options: Array.isArray(this.fieldDefinition?.options)
+        ? this.fieldDefinition.options
+        : this.constraintsForm?.options,
+    });
+
     const allowedFormats = Array.isArray(this.constraintsForm?.allowedFormats)
       ? this.constraintsForm.allowedFormats.map(String).map((s) => s.trim()).filter(Boolean)
       : [];
@@ -1122,7 +1173,7 @@ export default {
               sectionTitle: section.title || `Section ${si + 1}`,
               pathLabel: `${section.title || `Section ${si + 1}`}.${field.label || field.name || `Field ${fi + 1}`}`,
               type: field.type || "text",
-              options: Array.isArray(field.options) ? [...field.options] : [],
+              options: choiceOptionsFromField(field),
               allowMultiple: !!constraints.allowMultiple,
               dateFormat: constraints.dateFormat || "dd.MM.yyyy",
               hourCycle: constraints.hourCycle || "24",
@@ -1169,11 +1220,19 @@ export default {
         this.conversionReport = null;
         this.lossyConversionConfirmed = false;
 
-        if (Array.isArray(nv?.options)) {
-          const cleaned = nv.options.filter(Boolean).map(String);
-          this.localOptions = cleaned.length ? cleaned : ["Option 1"];
+        const cleaned = choiceOptionsFromField({
+          ...(this.fieldDefinition || {}),
+          constraints: nv || {},
+          options: Array.isArray(this.fieldDefinition?.options)
+            ? this.fieldDefinition.options
+            : nv?.options,
+        });
+
+        if (cleaned.length) {
+          this.localOptions = cleaned;
           this.optionsCount = this.localOptions.length;
         }
+
         this.$nextTick(() => {
             this.syncRuleSectionKeys();
           });
@@ -1218,11 +1277,15 @@ export default {
         if (!this.isChoice) return;
 
         if (this.isRadio && this.local.allowMultiple) {
-          if (Array.isArray(this.local.defaultValue)) {
-            this.local.defaultValue = this.local.defaultValue.filter((v) =>
-              this.localOptions.includes(v)
-            );
+          if (!Array.isArray(this.local.defaultValue)) {
+            this.local.defaultValue = this.local.defaultValue
+              ? [String(this.local.defaultValue).trim()]
+              : [];
           }
+
+          this.local.defaultValue = this.local.defaultValue.filter((v) =>
+            this.localOptions.includes(v)
+          );
         } else {
           if (!this.localOptions.includes(this.local.defaultValue)) {
             this.local.defaultValue = "";
@@ -1354,6 +1417,18 @@ export default {
           sourceFields.find((f) => String(f.key) === String(rule.sourceFieldKey)) || null;
 
         rule._sectionKey = matchedField?.sectionKey || "";
+
+        const isMultiChoice =
+          !!matchedField &&
+          String(matchedField.type || "").toLowerCase() === "radio" &&
+          !!matchedField.allowMultiple;
+
+        if (isMultiChoice && !Array.isArray(rule.value)) {
+          rule.value =
+            rule.value === "" || rule.value === null || rule.value === undefined
+              ? []
+              : [String(rule.value).trim()].filter(Boolean);
+        }
       });
     },
     fieldsForSelectedSection(rule) {
@@ -1428,12 +1503,31 @@ export default {
       const matchedField =
         sourceFields.find((f) => String(f.key) === sourceFieldKey) || null;
 
+      const isMultiChoice =
+        !!matchedField &&
+        String(matchedField.type || "").toLowerCase() === "radio" &&
+        !!matchedField.allowMultiple;
+
+      let value;
+
+      if (isMultiChoice) {
+        value = Array.isArray(rule.value)
+          ? rule.value.map((v) => String(v ?? "").trim()).filter(Boolean)
+          : rule.value === "" || rule.value === null || rule.value === undefined
+          ? []
+          : [String(rule.value).trim()].filter(Boolean);
+      } else {
+        // Important: do not collapse saved array during initial load.
+        // matchedField may not be resolved yet when the dialog first initializes.
+        value = Array.isArray(rule.value) ? [...rule.value] : rule.value ?? "";
+      }
+
       return {
         id: rule.id || this.uuidForRule(),
         _sectionKey: matchedField?.sectionKey || "",
         sourceFieldKey,
         operator: String(rule.operator || "eq"),
-        value: Array.isArray(rule.value) ? [...rule.value] : rule.value ?? "",
+        value,
         valueTo: rule.valueTo ?? "",
         _chipInput: "",
       };
@@ -1472,7 +1566,27 @@ export default {
             return r;
           }
 
-          r.value = rule.value;
+          if (this.ruleSourceIsChoiceMulti(rule)) {
+            const values = [];
+
+            if (Array.isArray(rule.value)) {
+              rule.value.forEach((v) => {
+                const val = String(v ?? "").trim();
+                if (val && !values.includes(val)) values.push(val);
+              });
+            } else {
+              const val = String(rule.value ?? "").trim();
+              if (val) values.push(val);
+            }
+
+            const pending = String(rule._chipInput || "").trim();
+            if (pending && !values.includes(pending)) values.push(pending);
+
+            r.value = values;
+            return r;
+          }
+
+          r.value = Array.isArray(rule.value) ? rule.value[0] || "" : rule.value;
           return r;
         })
         .filter(Boolean);
@@ -1574,7 +1688,7 @@ export default {
           { value: "gt", label: "After / Greater than" },
           { value: "gte", label: "On or after / Greater than or equal" },
           { value: "lt", label: "Before / Less than" },
-          { value: "lte", label: "On or before / Less than or equal" },
+          { value: "lte", label: "On or before / Less than equal" },
           { value: "between", label: "Between" },
           { value: "is_empty", label: "Is empty" },
           { value: "is_not_empty", label: "Is not empty" },
@@ -1635,6 +1749,7 @@ export default {
         rule.value = true;
       } else {
         rule.valueTo = "";
+        if (Array.isArray(rule.value)) rule.value = rule.value[0] || "";
       }
     },
 
@@ -1901,10 +2016,17 @@ export default {
           if (this.isSelect) delete cleaned.allowMultiple;
         }
 
-        cleaned.defaultValue = coerceDefaultForType(
-          this.isRadio && this.local.allowMultiple ? "radio" : this.type,
-          cleaned.defaultValue
-        );
+        if (this.isRadio && this.local.allowMultiple) {
+          cleaned.defaultValue = Array.isArray(cleaned.defaultValue)
+            ? cleaned.defaultValue
+                .map((v) => String(v ?? "").trim())
+                .filter((v) => v && finalOptions.includes(v))
+            : cleaned.defaultValue
+            ? [String(cleaned.defaultValue).trim()].filter((v) => v && finalOptions.includes(v))
+            : [];
+        } else {
+          cleaned.defaultValue = coerceDefaultForType(this.type, cleaned.defaultValue);
+        }
         cleaned.hourCycle = this.local.hourCycle || "24";
         cleaned.visibilityLogic = visibilityLogic;
 
