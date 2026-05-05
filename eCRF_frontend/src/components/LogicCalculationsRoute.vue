@@ -1330,18 +1330,33 @@ export default {
 <style scoped>
 .logic-calc-page {
   width: 100%;
-  min-height: 100%;
+  height: calc(100vh - 40px);
+  min-height: 0;
   padding: 18px;
   background: #f5f6f8;
   box-sizing: border-box;
+  overflow-y: auto;
+  overflow-x: hidden;
 }
 
+/* Keep main calculation header visible */
 .topbar {
+  position: sticky;
+  top: 0;
+  z-index: 250;
+
   display: grid;
   grid-template-columns: auto 1fr auto;
   align-items: center;
   gap: 14px;
+
   margin-bottom: 16px;
+  padding: 14px 16px;
+
+  background: #ffffff;
+  border: 1px solid #dbe4ee;
+  border-radius: 14px;
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.12);
 }
 
 .logic-back-btn {
@@ -1352,12 +1367,12 @@ export default {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  background: #fff;
-  border: 1px solid #ddd;
+  background: #ffffff;
+  border: 1px solid #dddddd;
   border-radius: 8px;
   padding: 10px 14px;
   cursor: pointer;
-  color: #111827;
+  color: #374151;
   font-size: 14px;
   line-height: 1;
   transition: background 0.15s ease, border-color 0.15s ease, transform 0.02s ease;
@@ -1374,59 +1389,132 @@ export default {
 
 .title-wrap {
   text-align: center;
+  min-width: 0;
 }
 
 .title-wrap h2 {
   margin: 0;
+  color: #111827;
+  font-size: 24px;
+  font-weight: 800;
+  line-height: 1.2;
 }
 
 .title-wrap p {
   margin: 4px 0 0;
   color: #6b7280;
   font-size: 13px;
+  line-height: 1.4;
 }
 
 .topbar-actions {
   display: flex;
   gap: 10px;
+  align-items: center;
+  flex-shrink: 0;
 }
 
 .workspace {
   display: grid;
-  grid-template-columns: 1.05fr 1.1fr 1.1fr;
+  grid-template-columns: minmax(0, 1.05fr) minmax(0, 1.1fr) minmax(0, 1.1fr);
   gap: 16px;
   align-items: start;
+  min-width: 0;
 }
 
+/* Panels should not hide their own headers */
 .panel {
-  background: #fff;
-  border: 1px solid #e5e7eb;
-  border-radius: 16px;
-  min-height: calc(100vh - 260px);
+  background: #ffffff;
+  border: 1px solid #dbe4ee;
+  border-radius: 14px;
+  min-height: 0;
+  max-height: calc(100vh - 190px);
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.04);
 }
 
+/* Keep panel headers visible while inner list/content scrolls */
 .panel-head {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+
+  flex: 0 0 auto;
   padding: 16px 16px 10px;
-  border-bottom: 1px solid #eef2f7;
+  border-bottom: 1px solid #dbe4ee;
+  background: #eef4f9;
+  box-shadow: 0 3px 8px rgba(15, 23, 42, 0.08);
+}
+/* RIGHT PANEL FIX:
+   Result + scoring has many stacked blocks, so the whole right panel must scroll.
+   Left and middle panels keep their existing internal scrolling behavior. */
+.panel-right {
+  overflow-y: auto;
+  overflow-x: hidden;
 }
 
+/* Keep the right panel header visible while right panel content scrolls */
+.panel-right .panel-head {
+  position: sticky;
+  top: 0;
+  z-index: 40;
+}
+
+/* Do not let existing/new target block consume all height and hide blocks below */
+.panel-right .target-block {
+  flex: 0 0 auto;
+  min-height: auto;
+}
+
+/* Existing target field list gets its own comfortable scroll area */
+.panel-right .target-block .picker-list {
+  flex: 0 0 auto;
+  max-height: 260px;
+  min-height: 120px;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+/* Give right-panel cards proper spacing because the panel itself now scrolls */
+.panel-right > .preview-card {
+  margin: 0 16px 16px;
+}
+
+.panel-right > .form-block {
+  flex: 0 0 auto;
+}
+
+/* Keep the scoring/summary sections reachable at the bottom */
+.panel-right::after {
+  content: "";
+  display: block;
+  height: 16px;
+  flex: 0 0 auto;
+}
 .panel-head h3 {
   margin: 0;
+  color: #111827;
+  font-size: 18px;
+  font-weight: 800;
+  line-height: 1.25;
 }
 
 .sub {
   margin-top: 4px;
   color: #6b7280;
   font-size: 12px;
+  line-height: 1.4;
 }
 
 .toolbar {
+  flex: 0 0 auto;
   display: flex;
   gap: 8px;
   padding: 12px 16px;
+  background: #ffffff;
+  border-bottom: 1px solid #f1f5f9;
 }
 
 .search,
@@ -1434,14 +1522,29 @@ export default {
 .score-input,
 .expr-editor {
   width: 100%;
-  border: 1px solid #dfe3ea;
-  border-radius: 12px;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
   padding: 10px 12px;
-  background: #fff;
+  background: #ffffff;
+  color: #1f2937;
   box-sizing: border-box;
+  font-size: 14px;
+}
+
+.search:focus,
+.select:focus,
+.score-input:focus,
+.expr-editor:focus {
+  outline: none;
+  border-color: #6b7280;
+  box-shadow: 0 0 0 3px rgba(107, 114, 128, 0.1);
 }
 
 .expr-builder {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
   padding: 16px;
   display: flex;
   flex-direction: column;
@@ -1461,13 +1564,21 @@ export default {
 }
 
 .btn-token {
-  border: 1px solid #dbe1ea;
-  background: #fff;
-  border-radius: 10px;
+  border: 1px solid #d1d5db;
+  background: #ffffff;
+  color: #374151;
+  border-radius: 8px;
   padding: 8px 10px;
   cursor: pointer;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
   font-size: 12px;
+  transition: background 0.18s ease, border-color 0.18s ease, transform 0.12s ease;
+}
+
+.btn-token:hover {
+  background: #f3f4f6;
+  border-color: #9ca3af;
+  transform: translateY(-1px);
 }
 
 .btn-token.fn {
@@ -1476,6 +1587,7 @@ export default {
 
 .expr-editor-wrap {
   display: flex;
+  min-width: 0;
 }
 
 .expr-editor {
@@ -1492,12 +1604,22 @@ export default {
 }
 
 .btn-mini {
-  border: 1px solid #dfe3ea;
-  background: #fff;
-  border-radius: 10px;
-  padding: 10px 12px;
+  border: 1px solid #d1d5db;
+  background: #ffffff;
+  color: #374151;
+  border-radius: 8px;
+  padding: 8px 12px;
   cursor: pointer;
   white-space: nowrap;
+  font-size: 13px;
+  font-weight: 700;
+  transition: background 0.18s ease, border-color 0.18s ease, transform 0.12s ease;
+}
+
+.btn-mini:hover:not(:disabled) {
+  background: #f3f4f6;
+  border-color: #9ca3af;
+  transform: translateY(-1px);
 }
 
 .btn-mini:disabled {
@@ -1507,23 +1629,44 @@ export default {
 
 .btn-mini.danger {
   border-color: #fecaca;
+  color: #b91c1c;
 }
 
 .btn-secondary {
-  border: 1px solid #dfe3ea;
-  background: #fff;
-  border-radius: 12px;
-  padding: 11px 14px;
+  border: 1px solid #d1d5db;
+  background: #ffffff;
+  color: #374151;
+  border-radius: 8px;
+  padding: 10px 14px;
   cursor: pointer;
+  font-size: 13px;
+  font-weight: 700;
+  transition: background 0.18s ease, border-color 0.18s ease, transform 0.12s ease;
+}
+
+.btn-secondary:hover {
+  background: #f3f4f6;
+  border-color: #9ca3af;
+  transform: translateY(-1px);
 }
 
 .btn-primary {
-  border: none;
+  border: 1px solid #2563eb;
   background: #2563eb;
-  color: #fff;
-  border-radius: 12px;
-  padding: 11px 16px;
+  color: #ffffff;
+  border-radius: 8px;
+  padding: 10px 14px;
   cursor: pointer;
+  font-size: 13px;
+  font-weight: 700;
+  transition: background 0.18s ease, border-color 0.18s ease, transform 0.12s ease, box-shadow 0.18s ease;
+}
+
+.btn-primary:hover:not(:disabled) {
+  background: #1d4ed8;
+  border-color: #1d4ed8;
+  transform: translateY(-1px);
+  box-shadow: 0 6px 14px rgba(37, 99, 235, 0.18);
 }
 
 .btn-primary:disabled {
@@ -1532,30 +1675,37 @@ export default {
 }
 
 .picker-list {
-  flex: 1;
-  overflow: auto;
-  padding: 0 16px 16px;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 12px 16px 16px;
 }
 
 .group {
   border: 1px solid #e5e7eb;
   border-radius: 12px;
   margin-bottom: 10px;
-  background: #fff;
+  background: #ffffff;
+  overflow: hidden;
 }
 
 .group-summary {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 10px;
   padding: 11px 12px;
   cursor: pointer;
   user-select: none;
+  background: #f8fafc;
 }
 
 .group-title {
   font-weight: 700;
   color: #111827;
+  min-width: 0;
+  word-break: break-word;
 }
 
 .group-count {
@@ -1564,11 +1714,12 @@ export default {
   padding: 2px 8px;
   border: 1px solid #e5e7eb;
   border-radius: 999px;
-  background: #f9fafb;
+  background: #ffffff;
+  flex-shrink: 0;
 }
 
 .field-list {
-  padding: 0 8px 10px;
+  padding: 8px;
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -1580,8 +1731,9 @@ export default {
   align-items: flex-start;
   padding: 10px;
   border: 1px solid transparent;
-  border-radius: 12px;
+  border-radius: 10px;
   cursor: pointer;
+  min-width: 0;
 }
 
 .field-row:hover {
@@ -1591,7 +1743,7 @@ export default {
 
 .field-row-btn {
   width: 100%;
-  background: #fff;
+  background: #ffffff;
   text-align: left;
   justify-content: space-between;
 }
@@ -1599,6 +1751,7 @@ export default {
 .field-row input[type="checkbox"],
 .field-row input[type="radio"] {
   margin-top: 3px;
+  flex-shrink: 0;
 }
 
 .field-meta {
@@ -1608,11 +1761,13 @@ export default {
 .field-label {
   font-weight: 600;
   color: #111827;
+  word-break: break-word;
 }
 
 .field-sub {
   font-size: 12px;
   color: #6b7280;
+  line-height: 1.4;
 }
 
 .field-insert-name {
@@ -1623,30 +1778,35 @@ export default {
   background: #eff6ff;
   border-radius: 999px;
   padding: 4px 8px;
+  flex-shrink: 0;
+  max-width: 130px;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .score-badge {
   margin-left: 6px;
   color: #7c3aed;
-  font-weight: 600;
+  font-weight: 700;
 }
 
 .preview-card {
   border: 1px solid #e5e7eb;
   background: #fafafa;
-  border-radius: 14px;
+  border-radius: 12px;
   padding: 12px;
 }
 
 .preview-title {
   font-weight: 700;
   margin-bottom: 8px;
+  color: #111827;
 }
 
 .formula {
   border: 1px solid #e5e7eb;
-  background: #fff;
-  border-radius: 12px;
+  background: #ffffff;
+  border-radius: 10px;
   padding: 10px;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
   font-size: 13px;
@@ -1656,25 +1816,32 @@ export default {
 }
 
 .target-mode {
+  flex: 0 0 auto;
   display: flex;
   gap: 10px;
   padding: 12px 16px;
+  background: #ffffff;
+  border-bottom: 1px solid #f1f5f9;
 }
 
 .mode-pill {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  border: 1px solid #dfe3ea;
-  background: #fff;
+  border: 1px solid #d1d5db;
+  background: #ffffff;
+  color: #374151;
   border-radius: 999px;
   padding: 8px 12px;
   cursor: pointer;
+  font-size: 13px;
+  font-weight: 700;
 }
 
 .mode-pill.active {
   border-color: #2563eb;
   background: #eff6ff;
+  color: #1d4ed8;
 }
 
 .mode-pill input {
@@ -1682,7 +1849,7 @@ export default {
 }
 
 .target-block {
-  flex: 1;
+  flex: 1 1 auto;
   min-height: 0;
   display: flex;
   flex-direction: column;
@@ -1704,6 +1871,7 @@ export default {
 .field-block-label {
   font-weight: 700;
   font-size: 13px;
+  color: #111827;
 }
 
 .new-field-note,
@@ -1711,14 +1879,14 @@ export default {
   border: 1px solid #dbeafe;
   background: #eff6ff;
   color: #1e3a8a;
-  border-radius: 12px;
+  border-radius: 10px;
   padding: 10px 12px;
   font-size: 13px;
 }
 
 .preview-row {
   display: grid;
-  grid-template-columns: 88px 1fr;
+  grid-template-columns: 88px minmax(0, 1fr);
   gap: 10px;
   margin-bottom: 8px;
 }
@@ -1738,8 +1906,9 @@ export default {
   margin-top: 10px;
   border: 1px solid #fde68a;
   background: #fffbeb;
-  border-radius: 12px;
+  border-radius: 10px;
   padding: 10px;
+  color: #92400e;
 }
 
 .warn-title {
@@ -1747,11 +1916,16 @@ export default {
   margin-bottom: 6px;
 }
 
+.warn-box ul {
+  margin: 0;
+  padding-left: 18px;
+}
+
 .score-card {
   border: 1px solid #e5e7eb;
-  border-radius: 12px;
+  border-radius: 10px;
   padding: 10px;
-  background: #fff;
+  background: #ffffff;
   margin-bottom: 10px;
 }
 
@@ -1761,6 +1935,7 @@ export default {
 
 .score-title {
   font-weight: 700;
+  color: #111827;
 }
 
 .score-sub {
@@ -1776,7 +1951,7 @@ export default {
 
 .score-row {
   display: grid;
-  grid-template-columns: 1fr 110px;
+  grid-template-columns: minmax(0, 1fr) 110px;
   gap: 8px;
   align-items: center;
 }
@@ -1784,24 +1959,29 @@ export default {
 .score-opt {
   font-size: 13px;
   color: #111827;
+  word-break: break-word;
 }
 
 .checkbox-score-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 10px;
 }
 
 .saved-block {
   margin-top: 16px;
-  background: #fff;
-  border: 1px solid #e5e7eb;
-  border-radius: 16px;
+  background: #ffffff;
+  border: 1px solid #dbe4ee;
+  border-radius: 14px;
   padding: 16px;
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.04);
 }
 
 .saved-head h3 {
   margin: 0 0 12px;
+  color: #111827;
+  font-size: 18px;
+  font-weight: 800;
 }
 
 .rules {
@@ -1812,8 +1992,9 @@ export default {
 
 .rule {
   border: 1px solid #e5e7eb;
-  border-radius: 12px;
+  border-radius: 10px;
   padding: 12px;
+  background: #ffffff;
 }
 
 .rule-top {
@@ -1825,11 +2006,13 @@ export default {
 
 .rule-title {
   font-weight: 700;
+  color: #111827;
 }
 
 .rule-actions {
   display: flex;
   gap: 8px;
+  flex-shrink: 0;
 }
 
 .rule-sub {
@@ -1852,6 +2035,7 @@ export default {
   border-radius: 999px;
   padding: 6px 10px;
   font-size: 12px;
+  font-weight: 700;
 }
 
 .empty {
@@ -1863,5 +2047,78 @@ export default {
 .empty-small {
   color: #6b7280;
   font-size: 12px;
+}
+
+/* Responsive */
+@media (max-width: 1200px) {
+  .workspace {
+    grid-template-columns: 1fr;
+  }
+
+  .panel {
+  max-height: none;
+  overflow: visible;
+}
+
+.panel-left,
+.panel-middle,
+.panel-right {
+  overflow: visible;
+}
+
+.panel-right .target-block .picker-list {
+  max-height: 280px;
+  overflow-y: auto;
+}
+
+  .logic-calc-page {
+    height: calc(100vh - 40px);
+  }
+}
+
+@media (max-width: 768px) {
+  .logic-calc-page {
+    padding: 12px;
+  }
+
+  .topbar {
+    grid-template-columns: 1fr;
+    align-items: stretch;
+    top: 0;
+  }
+
+  .title-wrap {
+    text-align: left;
+  }
+
+  .topbar-actions {
+    flex-direction: column;
+  }
+
+  .btn-secondary,
+  .btn-primary,
+  .btn-back {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .target-mode {
+    flex-direction: column;
+  }
+
+  .checkbox-score-grid,
+  .score-row,
+  .preview-row {
+    grid-template-columns: 1fr;
+  }
+
+  .rule-top {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .rule-actions {
+    justify-content: flex-start;
+  }
 }
 </style>

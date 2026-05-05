@@ -184,12 +184,90 @@
         </div>
       </div>
 
-      <!-- ───────── Form Area / Protocol Matrix ───────── -->
-      <div class="form-area" :class="{ 'form-area-full': showMatrix || showLogic }">
+      <!-- ───────── Form Area / Protocol Matrix / Logic ───────── -->
+      <div
+        ref="scratchScrollEl"
+        class="form-area"
+        :class="{ 'form-area-full': showMatrix || showLogic }"
+        @scroll.passive="onScratchScroll"
+      >
         <div class="sections-container">
           <!-- Sections View -->
           <div v-if="!showMatrix && !showLogic">
-            <div class="sections-topbar">
+            <!-- Sticky builder toolbar -->
+            <div class="sections-topbar builder-sticky-bar">
+              <div class="form-actions-inline">
+                <button @click.prevent="addNewSection" class="btn-option">
+                  Add Section
+                </button>
+
+                <button
+                  @click.prevent="openRearrangeDialog()"
+                  class="btn-option"
+                  title="Rearrange sections and fields"
+                >
+                  Rearrange
+                </button>
+
+                <button
+                  @click.prevent="openLogicAndCalculations"
+                  class="btn-option"
+                  title="Configure conditional logic and calculations"
+                >
+                  Logic & Calculations
+                </button>
+
+                <button
+                  @click.prevent="onUnsavedSaveAndExit"
+                  class="btn-option"
+                  :disabled="unsavedBusy"
+                >
+                  {{ unsavedBusy ? "Saving…" : "Save Draft and Leave" }}
+                </button>
+
+                <button
+                  @click.prevent="handleProtocolClick"
+                  class="btn-option protocol-btn"
+                >
+                  Create Visit Schedule
+                </button>
+
+                <div class="additional-options" @click.stop>
+                  <button
+                    ref="additionalOptionsBtn"
+                    class="btn-ellipsis"
+                    title="Additional options"
+                    @click.prevent="toggleAdditionalOptions"
+                  >
+                    <i :class="icons.ellipsisV || 'fas fa-ellipsis-v'"></i>
+                  </button>
+
+                  <div
+                    v-if="showAdditionalOptions"
+                    ref="additionalOptionsMenu"
+                    class="options-menu"
+                    role="menu"
+                    aria-label="Additional options"
+                  >
+                    <button class="options-item" role="menuitem" @click.prevent="openImportCsvDialog">
+                      Import CSV / Excel Template
+                    </button>
+
+                    <button class="options-item" role="menuitem" @click.prevent="onDownloadTemplate">
+                      Download Template
+                    </button>
+
+                    <button class="options-item" role="menuitem" @click.prevent="onUploadTemplate">
+                      Upload Template
+                    </button>
+
+                    <button class="options-item danger" role="menuitem" @click.prevent="confirmClearForm">
+                      Clear All
+                    </button>
+                  </div>
+                </div>
+              </div>
+
               <div class="sections-topbar-actions">
                 <button
                   class="icon-button"
@@ -208,9 +286,9 @@
                 </button>
               </div>
             </div>
-             <div v-if="!currentForm.sections || currentForm.sections.length === 0" class="empty-builder-state">
-                Add your first section to start building this form. You can add a section manually or choose fields from the left panel.
-              </div>
+            <div v-if="!currentForm.sections || currentForm.sections.length === 0" class="empty-builder-state">
+              Add your first section to start building this form. You can add a section manually or choose fields from the left panel.
+            </div>
 
             <transition-group name="reorder" tag="div" class="sections-list">
               <div
@@ -285,7 +363,7 @@
                           :for="field.name"
                         >
                           {{ field.label }}
-                           <span v-if="field.constraints?.required" class="required-asterisk">*</span>
+                          <span v-if="field.constraints?.required" class="required-asterisk">*</span>
                           <FieldCheckbox
                             :id="field.name"
                             v-model="field.value"
@@ -316,10 +394,10 @@
                           ><i :class="icons.delete"></i></button>
 
                           <button
-                              v-if="hasFieldDependencies(si, fi)"
-                              class="icon-button"
-                              title="View dependencies"
-                              @click.stop.prevent="openDependencyInfoDialog(si, fi)"
+                            v-if="hasFieldDependencies(si, fi)"
+                            class="icon-button"
+                            title="View dependencies"
+                            @click.stop.prevent="openDependencyInfoDialog(si, fi)"
                             ><i :class="icons.info || 'fas fa-question-circle'"></i></button>
 
                           <button
@@ -503,78 +581,6 @@
             />
           </div>
         </div>
-
-        <!-- Form Actions -->
-        <div v-if="!showMatrix && !showLogic" class="form-actions">
-          <button @click.prevent="addNewSection" class="btn-option">
-            + Add Section
-          </button>
-
-          <button
-            @click.prevent="openRearrangeDialog()"
-            class="btn-option"
-            title="Rearrange sections and fields"
-          >
-            Rearrange
-          </button>
-
-          <button
-            @click.prevent="openLogicAndCalculations"
-            class="btn-option"
-            title="Configure conditional logic and calculations"
-          >
-            Logic & Calculations
-          </button>
-          <button
-            @click.prevent="onUnsavedSaveAndExit"
-            class="btn-option"
-            :disabled="unsavedBusy"
-          >
-            {{ unsavedBusy ? "Saving…" : "Save Draft and Leave" }}
-          </button>
-
-          <button
-            @click.prevent="handleProtocolClick"
-            class="btn-option protocol-btn"
-          >
-            Create Visit Schedule
-          </button>
-
-          <div class="additional-options" @click.stop>
-            <button
-              ref="additionalOptionsBtn"
-              class="btn-ellipsis"
-              title="Additional options"
-              @click.prevent="toggleAdditionalOptions"
-            >
-              <i :class="icons.ellipsisV || 'fas fa-ellipsis-v'"></i>
-            </button>
-
-            <div
-              v-if="showAdditionalOptions"
-              ref="additionalOptionsMenu"
-              class="options-menu"
-              role="menu"
-              aria-label="Additional options"
-            >
-              <button class="options-item" role="menuitem" @click.prevent="openImportCsvDialog">
-                Import CSV / Excel Template
-              </button>
-
-              <button class="options-item" role="menuitem" @click.prevent="onDownloadTemplate">
-                Download Template
-              </button>
-
-              <button class="options-item" role="menuitem" @click.prevent="onUploadTemplate">
-                Upload Template
-              </button>
-
-              <button class="options-item danger" role="menuitem" @click.prevent="confirmClearForm">
-                Clear All
-              </button>
-            </div>
-          </div>
-        </div>
       </div>
     </div>
 
@@ -598,12 +604,12 @@
         <h3>Select Properties for {{ prettyModelTitle(currentModel.title) }}</h3>
         <div class="model-prop-toolbar">
           <button
-          type="button"
-          class="btn-option btn-select-all"
-          @click="toggleSelectAllProps"
-        >
-          {{ allSelectablePropsSelected ? "Deselect All" : "Select All" }}
-        </button>
+            type="button"
+            class="btn-option btn-select-all"
+            @click="toggleSelectAllProps"
+          >
+            {{ allSelectablePropsSelected ? "Deselect All" : "Select All" }}
+          </button>
         </div>
         <div class="model-prop-list">
           <div
@@ -679,7 +685,7 @@
 
         <div class="modal-actions">
           <button @click="takeoverModel" class="btn-primary">Takeover</button>
-          <button @click="showModelDialog=false" class="btn-option">
+          <button @click="showModelDialog = false" class="btn-option">
             Cancel
           </button>
         </div>
@@ -803,11 +809,22 @@
           <button class="btn-option" @click="onUnsavedKeepEditing" :disabled="unsavedBusy">Keep editing</button>
           <button class="btn-option" @click="confirmScratchExitWithoutSaving" :disabled="unsavedBusy">Exit without saving</button>
           <button class="btn-primary" @click="onUnsavedSaveAndExit" :disabled="unsavedBusy">
-            {{ unsavedBusy ? "Saving…"  : "Save & Exit" }}
+            {{ unsavedBusy ? "Saving…" : "Save & Exit" }}
           </button>
         </div>
       </div>
     </div>
+
+    <button
+      v-if="!showMatrix && !showLogic && hasScratchScrollableContent"
+      type="button"
+      class="floating-scroll-btn"
+      :class="{ 'is-up': scratchScrollDirection === 'up' }"
+      :title="scratchScrollDirection === 'up' ? 'Scroll to top' : 'Scroll to bottom'"
+      @click="toggleScratchScroll"
+    >
+      <i :class="scratchScrollDirection === 'up' ? icons.toggleUp : icons.toggleDown"></i>
+    </button>
   </div>
 </template>
 
@@ -1000,6 +1017,8 @@ export default {
       pendingFieldOptionRemapSourceLabel: "",
       pendingFieldOptionRemapIndex: 0,
       pendingFieldOptionRemapNextOptions: [],
+      scratchScrollDirection: "down",
+      hasScratchScrollableContent: false,
     };
   },
 
@@ -1106,6 +1125,14 @@ export default {
         }
       }
     },
+    "currentForm.sections": {
+      deep: true,
+      handler() {
+        this.$nextTick(() => {
+          this.updateScratchScrollState();
+        });
+      }
+    },
 
     activeTab(newVal) {
       if (newVal !== "template" && this.searchQuery) this.searchQuery = "";
@@ -1124,6 +1151,7 @@ export default {
   async mounted() {
     document.addEventListener("click", this.onGlobalClick);
     window.addEventListener("beforeunload", this.beforeUnloadHandler);
+    window.addEventListener("resize", this.updateScratchScrollState);
     this.hydratingScratch = true;
 
     const hasStudyForms =
@@ -1198,15 +1226,78 @@ export default {
 
     this.$nextTick(() => {
       this.hydratingScratch = false;
+      this.updateScratchScrollState();
     });
   },
 
   beforeUnmount() {
     document.removeEventListener("click", this.onGlobalClick);
     window.removeEventListener("beforeunload", this.beforeUnloadHandler);
+    window.removeEventListener("resize", this.updateScratchScrollState);
   },
 
   methods: {
+    getScratchScrollEl() {
+      const el = this.$refs.scratchScrollEl;
+      return Array.isArray(el) ? el[0] : el;
+    },
+
+    updateScratchScrollState() {
+      this.$nextTick(() => {
+        const el = this.getScratchScrollEl();
+        if (!el) {
+          this.hasScratchScrollableContent = false;
+          this.scratchScrollDirection = "down";
+          return;
+        }
+
+        const canScroll = el.scrollHeight > el.clientHeight + 4;
+        this.hasScratchScrollableContent = canScroll;
+
+        if (!canScroll) {
+          this.scratchScrollDirection = "down";
+          return;
+        }
+
+        const nearBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 24;
+        this.scratchScrollDirection = nearBottom ? "up" : "down";
+      });
+    },
+
+    onScratchScroll() {
+      const el = this.getScratchScrollEl();
+      if (!el) return;
+
+      const canScroll = el.scrollHeight > el.clientHeight + 4;
+      this.hasScratchScrollableContent = canScroll;
+
+      if (!canScroll) {
+        this.scratchScrollDirection = "down";
+        return;
+      }
+
+      const nearBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 24;
+      this.scratchScrollDirection = nearBottom ? "up" : "down";
+    },
+
+    toggleScratchScroll() {
+      const el = this.getScratchScrollEl();
+      if (!el) return;
+
+      const nearBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 24;
+
+      if (nearBottom || this.scratchScrollDirection === "up") {
+        el.scrollTo({
+          top: 0,
+          behavior: "smooth"
+        });
+      } else {
+        el.scrollTo({
+          top: el.scrollHeight,
+          behavior: "smooth"
+        });
+      }
+    },
     normalizeAllForms() {
       if (!Array.isArray(this.forms)) {
         this.forms = [];
@@ -3508,33 +3599,58 @@ export default {
   }
 };
 </script>
-
 <style lang="scss" scoped>
 @import "@/assets/styles/_base.scss";
 
-/* (styles unchanged from your pasted file) */
+/* =========================
+   PAGE SHELL
+   ========================= */
 .create-form-container {
   width: 100%;
-  min-height: 100vh;
-  padding: 20px;
+  height: 100vh;
+  min-height: 0;
+  padding: 16px 20px;
   background-color: $light-background;
+  box-sizing: border-box;
+  overflow: hidden;
 }
 
+.scratch-form-content {
+  display: flex;
+  gap: 20px;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.scratch-form-content-full {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  margin-top: 0;
+}
+
+/* =========================
+   BACK BUTTON
+   ========================= */
 .btn-back {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-
-  background: #fff;
-  border: 1px solid #ddd;
+  background: #ffffff;
+  border: 1px solid #dddddd;
   border-radius: 8px;
   padding: 10px 14px;
-
   cursor: pointer;
-  color: $text-color;
+  color: #374151;
   font-size: 14px;
   line-height: 1;
-  transition: background 0.15s ease, border-color 0.15s ease, transform 0.02s ease;
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease,
+    transform 0.02s ease;
 }
 
 .btn-back:hover {
@@ -3550,73 +3666,112 @@ export default {
   font-size: 14px;
 }
 
-.scratch-form-content {
-  display: flex;
-  gap: 20px;
- }
-
+/* =========================
+   LEFT AVAILABLE FIELDS PANEL
+   ========================= */
 .available-fields {
   width: 300px;
-  background: white;
+  flex: 0 0 300px;
+  min-height: 0;
+  height: 100%;
+  background: #ffffff;
   padding: 20px;
   border: 1px solid $border-color;
-  border-radius: 8px;
-  max-height: none;
-  overflow: visible;
+  border-radius: 12px;
+  box-sizing: border-box;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
 .available-fields-topbar {
   display: flex;
   align-items: center;
   margin-bottom: 14px;
+  flex: 0 0 auto;
+}
+
+.available-fields h2 {
+  margin: 0 0 14px;
+  font-size: 20px;
+  font-weight: 800;
+  color: #111827;
+  line-height: 1.25;
+  flex: 0 0 auto;
 }
 
 .available-fields-search {
   margin: 0 0 12px 0;
   display: flex;
   justify-content: center;
+  flex: 0 0 auto;
 }
 
 .search-input {
-  width: 94%;
-  padding: 8px 10px;
-  border: 1px solid $border-color;
-  border-radius: 6px;
+  width: 100%;
+  min-height: 40px;
+  padding: 9px 11px;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
   font-size: 14px;
-  background: #fff;
+  color: #1f2937;
+  background: #ffffff;
+  box-sizing: border-box;
 }
 
 .search-input:focus {
   outline: none;
-  border-color: $primary-color;
-  box-shadow: 0 0 0 3px rgba($primary-color, 0.1);
+  border-color: #6b7280;
+  box-shadow: 0 0 0 3px rgba(107, 114, 128, 0.1);
 }
 
+/* =========================
+   TABS
+   ========================= */
 .tabs {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
   margin-bottom: 12px;
+  flex: 0 0 auto;
 }
 
 .tabs button {
-  padding: 8px;
-  border: 1px solid $border-color;
-  background: $secondary-color;
-  border-radius: 6px;
+  min-height: 38px;
+  padding: 8px 10px;
+  border: 1px solid #d1d5db;
+  background: #ffffff;
+  color: #374151;
+  border-radius: 8px;
   flex: 1 1 48%;
   min-width: 120px;
   cursor: pointer;
   font-size: 12px;
+  font-weight: 700;
   line-height: 1.2;
   white-space: normal;
   word-wrap: break-word;
+  transition:
+    background 0.18s ease,
+    border-color 0.18s ease,
+    color 0.18s ease,
+    transform 0.12s ease,
+    box-shadow 0.18s ease;
+}
+
+.tabs button:hover {
+  background: #f3f4f6;
+  border-color: #9ca3af;
+  color: #111827;
+  transform: translateY(-1px);
+  box-shadow: 0 6px 14px rgba(15, 23, 42, 0.08);
 }
 
 .tabs button.active {
-  background: $primary-color;
-  color: white;
-  border: none;
+  background: #2563eb;
+  color: #ffffff;
+  border-color: #2563eb;
+  box-shadow: 0 6px 14px rgba(37, 99, 235, 0.16);
 }
 
 .template-fields,
@@ -3624,59 +3779,188 @@ export default {
 .shacl,
 .obi-fields {
   padding: 10px 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.template-fields,
+.obi-fields {
+  flex: 1 1 auto;
+  overflow: hidden;
+}
+
+.custom-fields {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-right: 4px;
 }
 
 .tab-results {
-  max-height: 60vh;
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: none;
   overflow-y: auto;
+  overflow-x: hidden;
   padding-right: 4px;
+}
+
+.template-fields .tab-results,
+.obi-fields .tab-results {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
 }
 
 .template-instruction {
   font-style: italic;
-  margin-bottom: 10px;
+  margin: 0 0 10px;
+  color: #6b7280;
+  font-size: 13px;
+  flex: 0 0 auto;
 }
-.template-button { display:flex; flex-direction:column; align-items:flex-start; justify-content:flex-start; width:100%; padding:10px 12px; margin:6px 0; background-color:#f9fafb; border:1px solid #d1d5db; border-radius:6px; cursor:pointer; transition: background .2s, box-shadow .2s, border-color .2s; box-sizing:border-box; }
-.template-button:hover { background-color:#f3f4f6; box-shadow:0 2px 6px rgba(0,0,0,0.05); }
-.template-header { display:flex; align-items:center; font-weight:600; font-size:14px; color:#111827; margin-bottom:4px; gap:8px; }
-.template-header i { font-size:16px; color:#374151; }
-.template-description { font-size:12px; color: #6b7280; line-height:1.4; overflow-wrap:anywhere; }
-.highlighted-model { border-color: $primary-color; background: #f3f6ff; }
-.match-preview { margin: 6px 0 0 22px; padding-left: 14px; list-style: disc; color: #374151; font-size: 12px; }
-.no-matches { margin-top: 10px; font-size: 13px; color: #6b7280; }
 
-/* CUSTOM FIELDS */
+/* =========================
+   TEMPLATE FIELD CARDS
+   ========================= */
+.template-button {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: flex-start;
+  width: 100%;
+  padding: 10px 12px;
+  margin: 8px 0;
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  cursor: pointer;
+  transition:
+    background 0.18s ease,
+    box-shadow 0.18s ease,
+    border-color 0.18s ease,
+    transform 0.12s ease;
+  box-sizing: border-box;
+}
+
+.template-button:hover {
+  background: #f3f4f6;
+  border-color: #d1d5db;
+  transform: translateY(-1px);
+  box-shadow: 0 6px 14px rgba(15, 23, 42, 0.08);
+}
+
+.template-header {
+  display: flex;
+  align-items: center;
+  font-weight: 700;
+  font-size: 14px;
+  color: #111827;
+  margin-bottom: 4px;
+  gap: 8px;
+}
+
+.template-header i {
+  font-size: 16px;
+  color: #374151;
+}
+
+.template-description {
+  font-size: 12px;
+  color: #6b7280;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.highlighted-model {
+  border-color: #2563eb;
+  background: #eef4ff;
+}
+
+.match-preview {
+  margin: 6px 0 0 22px;
+  padding-left: 14px;
+  list-style: disc;
+  color: #374151;
+  font-size: 12px;
+}
+
+.no-matches {
+  margin-top: 10px;
+  font-size: 13px;
+  color: #6b7280;
+}
+
+/* =========================
+   CUSTOM FIELD BUTTONS
+   ========================= */
 .custom-fields .available-field-button {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 10px;
-  background: #f0f4f8;
-  border: 1px solid $border-color;
-  border-radius: 4px;
+  padding: 10px 12px;
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
   margin-bottom: 8px;
   cursor: pointer;
-  transition: background 0.2s;
+  transition:
+    background 0.18s ease,
+    border-color 0.18s ease,
+    transform 0.12s ease,
+    box-shadow 0.18s ease;
 }
-.custom-fields .available-field-button:hover { background: #e3effd; }
-.custom-fields .field-label { flex: 1; }
 
-/* OBI styles */
+.custom-fields .available-field-button:hover {
+  background: #f3f4f6;
+  border-color: #d1d5db;
+  transform: translateY(-1px);
+  box-shadow: 0 6px 14px rgba(15, 23, 42, 0.08);
+}
+
+.custom-fields .field-label {
+  flex: 1;
+  color: #111827;
+  font-weight: 600;
+}
+
+/* =========================
+   OBI PANEL
+   ========================= */
 .obi-toolbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
   margin-bottom: 8px;
+  flex: 0 0 auto;
 }
 
 .btn-add-selected {
-  background: $primary-color;
-  color: white;
-  padding: 6px 10px;
-  border-radius: 6px;
-  border: none;
+  min-height: 36px;
+  background: #2563eb;
+  color: #ffffff;
+  padding: 7px 11px;
+  border-radius: 8px;
+  border: 1px solid #2563eb;
   cursor: pointer;
+  font-size: 13px;
+  font-weight: 700;
+  transition:
+    background 0.18s ease,
+    border-color 0.18s ease,
+    transform 0.12s ease,
+    box-shadow 0.18s ease;
+}
+
+.btn-add-selected:hover:not(:disabled) {
+  background: #1d4ed8;
+  border-color: #1d4ed8;
+  transform: translateY(-1px);
+  box-shadow: 0 6px 14px rgba(37, 99, 235, 0.18);
 }
 
 .btn-add-selected:disabled {
@@ -3686,8 +3970,8 @@ export default {
 
 .obi-term-row {
   margin: 8px 0;
-  border-radius: 8px;
-  background: #fafafa;
+  border-radius: 10px;
+  background: #ffffff;
   border: 1px solid #e5e7eb;
   display: grid;
   grid-template-rows: auto 1fr;
@@ -3704,16 +3988,17 @@ export default {
 .obi-checkbox-small {
   width: 16px;
   height: 16px;
-  accent-color: $primary-color;
+  accent-color: #2563eb;
 }
 
 .obi-selected-pill {
-  background: #eef6ff;
-  color: #0b62d6;
-  border: 1px solid #cfe2ff;
+  background: #eef2ff;
+  color: #3730a3;
+  border: 1px solid #c7d2fe;
   border-radius: 9999px;
   padding: 2px 8px;
   font-size: 11px;
+  font-weight: 700;
 }
 
 .obi-term-body {
@@ -3722,7 +4007,7 @@ export default {
 }
 
 .obi-term-label {
-  font-weight: 600;
+  font-weight: 700;
   color: #111827;
   word-break: break-word;
 }
@@ -3734,7 +4019,8 @@ export default {
   word-break: break-all;
 }
 
-.obi-def, .obi-syn {
+.obi-def,
+.obi-syn {
   font-size: 12px;
   color: #374151;
   white-space: normal;
@@ -3753,7 +4039,8 @@ export default {
   margin-top: 6px;
 }
 
-.obi-empty, .obi-hint {
+.obi-empty,
+.obi-hint {
   font-size: 12px;
   color: #6b7280;
   margin-top: 6px;
@@ -3763,15 +4050,18 @@ export default {
   margin-top: 8px;
   display: flex;
   justify-content: center;
+  flex: 0 0 auto;
 }
 
 .btn-more {
   background: #eef2ff;
   border: 1px solid #c7d2fe;
-  border-radius: 6px;
+  color: #3730a3;
+  border-radius: 8px;
   padding: 6px 12px;
   cursor: pointer;
   font-size: 12px;
+  font-weight: 700;
 }
 
 .btn-more:disabled {
@@ -3784,234 +4074,563 @@ export default {
   color: #6b7280;
 }
 
+/* =========================
+   MAIN FORM AREA
+   ========================= */
 .form-area {
+  --builder-sticky-height: 64px;
+
   display: flex;
   flex-direction: column;
-  flex: 1;
-  background: white;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+
+  background: #ffffff;
   border: 1px solid $border-color;
-  border-radius: 8px;
-  height: calc(100vh - 60px);
+  border-radius: 12px;
+
+  overflow-y: auto;
+  overflow-x: hidden;
+
+  box-sizing: border-box;
+  scroll-behavior: smooth;
+}
+
+.form-area-full {
+  width: 100%;
+  min-width: 0;
+  height: calc(100vh - 40px);
+  min-height: calc(100vh - 40px);
+  overflow: visible;
 }
 
 .sections-container {
-  flex: 1;
-  overflow-y: auto;
+  flex: 0 0 auto;
+  min-width: 0;
   position: relative;
-  padding: 10px;
+  padding: 0 14px 18px;
+  overflow: visible;
+  box-sizing: border-box;
 }
 
+.form-area-full .sections-container {
+  overflow: hidden;
+  padding: 0;
+}
+
+.form-area-full .sections-container > div {
+  width: 100%;
+  min-width: 0;
+}
+
+/* =========================
+   STICKY BUILDER TOOLBAR
+   ========================= */
 .sections-topbar {
   display: flex;
-  justify-content: flex-end;
   align-items: center;
-  margin-bottom: 12px;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 16px;
+  min-width: 0;
+}
+
+.builder-sticky-bar {
+  position: sticky;
+  top: 0;
+  z-index: 250;
+
+  min-height: var(--builder-sticky-height);
+  padding: 10px 12px;
+
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius:  0 0 12px 12px;
+  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.10);
+
+  box-sizing: border-box;
+}
+
+.form-actions-inline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+
+  flex: 1 1 auto;
+  min-width: 0;
+
+  /* Keep action buttons, additional options, and expand/collapse controls on one line */
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  overflow-y: visible;
+  padding-bottom: 2px;
+  scrollbar-width: thin;
+}
+
+.form-actions-inline .btn-option,
+.form-actions-inline .btn-primary,
+.form-actions-inline .btn-ellipsis {
+  flex: 0 0 auto;
+  white-space: nowrap;
 }
 
 .sections-topbar-actions {
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
+  flex: 0 0 auto;
+  margin-left: 0;
+  white-space: nowrap;
 }
 
 .sections-list {
-  display: block;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  min-width: 0;
 }
 
 .reorder-move {
   transition: transform 180ms ease;
 }
 
-.form-section {
-  padding: 15px;
-  border-bottom: 1px solid $border-color;
-  background: #f5f5f5;
-  margin-bottom: 10px;
+/* =========================
+   EMPTY STATE
+   ========================= */
+.empty-builder-state {
+  font-style: italic;
+  color: #6b7280;
+  margin-top: 12px;
+  padding: 16px;
+  background: #f9fafb;
+  border: 1px dashed #d1d5db;
   border-radius: 8px;
 }
 
+/* =========================
+   SECTION CARD - ADD DATA STYLE
+   ========================= */
+.form-section {
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+  border: 1px solid #dbe4ee;
+  border-radius: 12px;
+  background: #f8fafc;
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.04);
+  overflow: visible;
+  padding: 0;
+  margin: 0;
+}
+
 .form-section.active {
-  background: #e7f3ff;
-  border-left: 3px solid $text-color;
+  background: #f8fafc;
+  border-left: 3px solid #374151;
 }
 
 .section-header {
+  position: sticky;
+  top: calc(var(--builder-sticky-height));
+  z-index: 160;
+
+  padding: 18px 20px;
+  background: #eef4f9;
+  border-bottom: 1px solid #dbe4ee;
+  border-radius: 12px 12px 0 0;
+
   display: flex;
-  justify-content: space-between;
   align-items: center;
-  margin-bottom: 12px;
+  justify-content: space-between;
+  gap: 12px;
+
+  margin-bottom: 0;
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.12);
 }
 
-.field-actions {
+.section-header h3 {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 800;
+  color: #111827;
+  line-height: 1.25;
+  word-break: break-word;
+}
+
+.section-header .field-actions {
+  flex-shrink: 0;
+}
+
+.section-content-wrapper {
   display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 16px;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+  overflow: visible;
+}
+
+.section-content {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+  overflow: visible;
+}
+
+/* =========================
+   FIELD CARD - ADD DATA STYLE
+   ========================= */
+.form-group {
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+  padding: 14px;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  background: #ffffff;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
+  transition:
+    border-color 0.2s ease,
+    box-shadow 0.2s ease,
+    transform 0.05s ease;
+  overflow: visible;
+}
+
+.form-group:hover {
+  border-color: #d1d5db;
+}
+
+.field-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.field-header > label {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 0;
+  color: #111827;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.checkbox-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.required-asterisk {
+  color: #dc2626;
+  font-weight: 700;
+  line-height: 1;
+}
+
+/* =========================
+   ACTION BUTTONS
+   ========================= */
+.field-actions {
+  display: inline-flex;
   gap: 6px;
   align-items: center;
+  flex-shrink: 0;
+}
+
+.icon-button {
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  background: #ffffff;
+  color: #374151;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  line-height: 1;
+  transition:
+    background 0.18s ease,
+    border-color 0.18s ease,
+    color 0.18s ease,
+    transform 0.12s ease,
+    box-shadow 0.18s ease;
+}
+
+.icon-button:hover:not(:disabled) {
+  background: #f3f4f6;
+  border-color: #9ca3af;
+  color: #111827;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 10px rgba(15, 23, 42, 0.08);
+}
+
+.icon-button:active {
+  transform: translateY(0);
+}
+
+.icon-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.icon-button i {
+  font-size: 13px;
+  color: currentColor;
 }
 
 .drag-handle {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
-  border-radius: 8px;
+  width: 30px;
+  height: 30px;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
   cursor: grab;
   user-select: none;
   color: #374151;
-  background: rgba(0,0,0,0.04);
+  background: #ffffff;
+  transition:
+    background 0.18s ease,
+    border-color 0.18s ease,
+    color 0.18s ease,
+    transform 0.12s ease,
+    box-shadow 0.18s ease;
 }
 
 .drag-handle:hover {
-  background: rgba(0,0,0,0.08);
+  background: #f3f4f6;
+  border-color: #9ca3af;
+  color: #111827;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 10px rgba(15, 23, 42, 0.08);
 }
 
 .drag-handle:active {
   cursor: grabbing;
+  transform: translateY(0);
 }
 
 .drag-handle-right {
   margin-left: 2px;
 }
 
-.drop-before {
-  box-shadow: 0 -3px 0 0 rgba($primary-color, 0.55) inset;
+/* =========================
+   FIELD BODY / INPUTS
+   ========================= */
+.field-box {
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+  overflow-x: auto;
+  overflow-y: visible;
 }
 
-.drop-after {
-  box-shadow: 0 3px 0 0 rgba($primary-color, 0.55) inset;
-}
-
-.section-content-wrapper {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.section-content {
-  display:flex;
-  flex-direction:column;
-  gap:14px;
-}
-
-.form-group {
-  background: #ffffff;
-  border: 1px solid $border-color;
-  border-radius: 10px;
-  padding: 12px;
-  box-shadow: 0 1px 2px rgba(0,0,0,0.04);
-  transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.05s ease;
-}
-
-.field-header {
-  display:flex;
-  justify-content:space-between;
-  align-items:flex-start;
-  gap:8px;
-  margin-bottom:8px;
-}
-
-.field-header > label {
-  font-weight: 600;
-  color: #111827;
-  line-height: 1.25;
-}
-
-.icon-button {
-  border:none;
-  background:transparent;
-  padding:6px;
-  border-radius:8px;
-  cursor:pointer;
-  line-height:0;
-  transition: background 0.15s ease, transform 0.02s ease;
-}
-
-.icon-button:hover {
-  background: rgba(0,0,0,0.06);
-}
-
-.icon-button:active {
-  transform: scale(0.98);
-}
-
-.icon-button i {
-  font-size:14px;
-  color:#374151;
-}
-
-input, textarea, select {
-  width: 96%;
-  padding: 10px;
-  border: 1px solid $border-color;
+input,
+textarea,
+select {
+  width: 100%;
+  min-height: 44px;
+  padding: 10px 12px;
+  border: 1px solid #d1d5db;
   border-radius: 8px;
   margin-top: 5px;
-  background: #fff;
+  background: #ffffff;
+  color: #1f2937;
+  box-sizing: border-box;
+  font-size: 14px;
+}
+
+textarea {
+  min-height: 88px;
+  resize: vertical;
+}
+
+input:focus,
+textarea:focus,
+select:focus {
+  outline: none;
+  border-color: #6b7280;
+  box-shadow: 0 0 0 3px rgba(107, 114, 128, 0.1);
 }
 
 .help-text {
-  display:block;
-  margin-top:6px;
-  color:#6b7280;
+  display: block;
+  margin-top: 8px;
+  padding: 8px 10px;
+  background: #f9fafb;
+  border: 1px dashed #d1d5db;
+  border-radius: 8px;
+  font-size: 12px;
+  color: #6b7280;
+  line-height: 1.5;
+  white-space: pre-line;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+/* =========================
+   TABLE WIDTH FIX INSIDE SCRATCH
+   ========================= */
+.field-box :deep(.field-table-root) {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.field-box :deep(.table-runtime-shell),
+.field-box :deep(.table-runtime-wrap) {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.field-box :deep(.table-runtime-wrap) {
+  overflow-x: auto;
+  overflow-y: visible;
+  border-radius: 10px;
+}
+
+.field-box :deep(.table-runtime) {
+  width: max-content;
+  min-width: 100%;
+}
+
+/* =========================
+   DROP INDICATORS
+   ========================= */
+.drop-before {
+  box-shadow: 0 -3px 0 0 rgba(37, 99, 235, 0.55) inset;
+}
+
+.drop-after {
+  box-shadow: 0 3px 0 0 rgba(37, 99, 235, 0.55) inset;
 }
 
 .field-drop-end {
-  border: 1px dashed rgba($primary-color, 0.35);
+  border: 1px dashed rgba(37, 99, 235, 0.35);
   border-radius: 10px;
   padding: 10px;
   font-size: 12px;
   color: #6b7280;
   text-align: center;
-  background: rgba($primary-color, 0.04);
+  background: rgba(37, 99, 235, 0.04);
 }
 
 .field-drop-end.drop-active {
-  border-color: rgba($primary-color, 0.7);
-  background: rgba($primary-color, 0.08);
+  border-color: rgba(37, 99, 235, 0.7);
+  background: rgba(37, 99, 235, 0.08);
   color: #374151;
 }
 
-.form-actions {
-  position: sticky;
-  bottom: 0;
-  background: white;
-  padding: 15px 0;
-  border-top: 1px solid $border-color;
-  display: flex;
+/* =========================
+   BUILDER ACTION BUTTONS
+   ========================= */
+.btn-option,
+.btn-primary,
+.btn-ellipsis {
+  min-height: 36px;
+  display: inline-flex;
+  align-items: center;
   justify-content: center;
-  gap: 15px;
-  z-index: 10;
+  border-radius: 8px;
+  padding: 7px 10px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+  transition:
+    background 0.18s ease,
+    border-color 0.18s ease,
+    color 0.18s ease,
+    transform 0.12s ease,
+    box-shadow 0.18s ease;
+}
+
+.btn-option {
+  background: #ffffff;
+  color: #374151;
+  border: 1px solid #d1d5db;
+  flex: 0 0 auto;
+}
+
+.btn-option:hover:not(:disabled) {
+  background: #f3f4f6;
+  border-color: #9ca3af;
+  color: #111827;
+  transform: translateY(-1px);
+  box-shadow: 0 6px 14px rgba(15, 23, 42, 0.08);
+}
+
+.btn-primary {
+  background: #2563eb;
+  color: #ffffff;
+  border: 1px solid #2563eb;
+  flex: 0 0 auto;
+}
+
+.btn-primary:hover:not(:disabled) {
+  background: #1d4ed8;
+  border-color: #1d4ed8;
+  transform: translateY(-1px);
+  box-shadow: 0 6px 14px rgba(37, 99, 235, 0.18);
+}
+
+.btn-option:disabled,
+.btn-primary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .additional-options {
   position: relative;
   flex: 0 0 auto;
-  display: flex;
+  display: inline-flex;
   align-items: center;
 }
 
 .btn-ellipsis {
-  background: $secondary-color;
-  border: 1px solid $border-color;
-  border-radius: $button-border-radius;
-  cursor: pointer;
-  padding: $button-padding;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  background: #ffffff;
+  color: #374151;
+  border: 1px solid #d1d5db;
   flex: 0 0 auto;
+}
+
+.btn-ellipsis:hover {
+  background: #f3f4f6;
+  border-color: #9ca3af;
+  color: #111827;
+  transform: translateY(-1px);
+  box-shadow: 0 6px 14px rgba(15, 23, 42, 0.08);
 }
 
 .options-menu {
   position: absolute;
   right: 0;
-  bottom: calc(100% + 8px);
-  min-width: 200px;
-  background: white;
-  border: 1px solid $border-color;
+  top: calc(100% + 8px);
+  min-width: 220px;
+  background: #ffffff;
+  border: 1px solid #d1d5db;
   border-radius: 10px;
-  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.12);
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.12);
   padding: 6px;
-  z-index: 50;
+  z-index: 400;
 }
 
 .options-item {
@@ -4023,57 +4642,44 @@ input, textarea, select {
   padding: 10px 12px;
   cursor: pointer;
   font-size: 14px;
-  color: $text-color;
+  color: #374151;
 }
 
 .options-item:hover {
-  background: rgba(0, 0, 0, 0.06);
-}
-
-.btn-option {
-  background: $secondary-color;
-  padding: $button-padding;
-  border: 1px solid $border-color;
-  border-radius: $button-border-radius;
-  cursor: pointer;
-  flex: 1;
+  background: #f3f4f6;
+  color: #111827;
 }
 
 .options-item.danger {
   color: #b91c1c;
 }
 
-.protocol-btn::after {
-  content: ' →';
-}
-
-.btn-primary {
-  background: $primary-color;
-  color: white;
-  padding: $button-padding;
-  border-radius: $button-border-radius;
-  cursor: pointer;
-  flex: 1;
-}
-
+/* =========================
+   MODALS
+   ========================= */
 .modal-overlay {
-  position:fixed;
-  inset:0;
-  background:rgba(0,0,0,0.5);
-  display:flex;
-  align-items:center;
-  justify-content:center;
-  z-index:1000;
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 24px;
+  box-sizing: border-box;
 }
 
 .modal {
-  background:white;
-  padding:20px;
-  border-radius:8px;
-  max-width:90%;
-  max-height:90%;
-  overflow-y:auto;
+  background: #ffffff;
+  padding: 20px;
+  border-radius: 12px;
+  max-width: 90%;
+  max-height: 90%;
+  overflow-y: auto;
+  box-shadow: 0 18px 48px rgba(15, 23, 42, 0.22);
+  box-sizing: border-box;
 }
+
 .modal p {
   margin: 0;
   white-space: pre-line;
@@ -4082,45 +4688,59 @@ input, textarea, select {
   line-height: 1.6;
   color: #374151;
 }
+
 .modal.model-dialog {
-  width:400px;
+  width: min(92vw, 720px);
   max-height: 80vh;
   padding: 20px 16px;
 }
 
 .preview-modal {
-  width:500px;
-  height:80vh;
-  display:flex;
-  flex-direction:column;
+  width: min(92vw, 720px);
+  height: 80vh;
+  display: flex;
+  flex-direction: column;
 }
 
 .preview-header {
-  display:flex;
-  justify-content:space-between;
-  align-items:center;
-  background:#f2f3f4;
-  padding:10px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: #f8fafc;
+  padding: 10px;
 }
 
 .preview-content {
-  flex:1;
-  background:white;
-  padding:10px;
-  overflow-y:auto;
+  flex: 1;
+  background: #ffffff;
+  padding: 10px;
+  overflow-y: auto;
 }
 
 .modal-actions {
-  display:flex;
-  justify-content:flex-end;
-  gap:10px;
-  margin-top:10px;
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 14px;
 }
 
 .input-dialog-field {
-  width:100%;
-  padding:8px;
-  margin-top:5px;
+  width: 100%;
+  padding: 8px;
+  margin-top: 8px;
+}
+
+/* =========================
+   MODEL PROPERTY DIALOG
+   ========================= */
+.model-prop-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 8px;
+}
+
+.btn-select-all {
+  flex: 0 0 auto;
 }
 
 .model-prop-list {
@@ -4135,16 +4755,29 @@ input, textarea, select {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  padding: 8px 10px;
-  border-radius: 6px;
+  padding: 10px 12px;
+  border-radius: 10px;
   border: 1px solid #e5e7eb;
   background: #f9fafb;
   box-sizing: border-box;
   cursor: pointer;
+  transition:
+    background 0.18s ease,
+    border-color 0.18s ease;
 }
 
 .prop-cell:hover {
   background: #f3f4f6;
+}
+
+.prop-cell.selected {
+  border-color: #2563eb;
+  background: #eef4ff;
+}
+
+.prop-cell.disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
 }
 
 .prop-info {
@@ -4155,7 +4788,7 @@ input, textarea, select {
 
 .prop-label {
   display: block;
-  font-weight: 600;
+  font-weight: 700;
   color: #111827;
   word-break: break-word;
 }
@@ -4179,14 +4812,6 @@ input, textarea, select {
   border-radius: 0;
 }
 
-.model-prop-list .prop-cell {
-  align-items: center;
-}
-
-.model-prop-list .prop-info {
-  text-align: left;
-}
-
 .model-target {
   margin-top: 10px;
   padding-top: 10px;
@@ -4205,6 +4830,7 @@ input, textarea, select {
 .model-target-hint {
   margin: 0;
   padding: 0;
+  color: #374151;
 }
 
 .model-target-check {
@@ -4220,40 +4846,6 @@ input, textarea, select {
   line-height: 1.1;
 }
 
-.scratch-form-content-full {
-  margin-top: 0;
-}
-/* ========= Protocol Matrix parent layout fix ========= */
-/* When ProtocolMatrix is open, do not trap it inside the builder scroll area */
-.scratch-form-content-full {
-  display: block;
-  width: 100%;
-  min-width: 0;
-}
-
-.form-area-full {
-  width: 100%;
-  min-width: 0;
-  height: auto;
-  min-height: calc(100vh - 40px);
-  overflow: visible;
-}
-
-/* Important: ProtocolMatrix needs to manage its own horizontal/vertical scroll */
-.form-area-full .sections-container {
-  overflow: hidden;
-  padding: 0;
-}
-
-/* Make sure the direct ProtocolMatrix wrapper does not restrict width */
-.form-area-full .sections-container > div {
-  width: 100%;
-  min-width: 0;
-}
-.form-area-full {
-  height: calc(100vh - 40px);
-}
-
 .model-target-check input[type="checkbox"] {
   width: auto !important;
   padding: 0 !important;
@@ -4265,12 +4857,12 @@ input, textarea, select {
   transform: translateY(1px);
 }
 
+/* =========================
+   IMPORT / TABLE MODALS
+   ========================= */
 .modal-overlay.import-overlay {
   position: fixed;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
+  inset: 0;
   background: rgba(0, 0, 0, 0.45);
   backdrop-filter: blur(2px);
   display: flex;
@@ -4319,7 +4911,7 @@ input, textarea, select {
   overflow: auto;
   border: 1px solid #d1d5db;
   border-radius: 10px;
-  background: #fff;
+  background: #ffffff;
 }
 
 .table-preview-table {
@@ -4337,7 +4929,7 @@ input, textarea, select {
 }
 
 .table-head-title {
-  font-weight: 600;
+  font-weight: 700;
   color: #111827;
 }
 
@@ -4353,12 +4945,56 @@ input, textarea, select {
   font-size: 13px;
 }
 
-.field-actions .icon-button,
-.section-header .icon-button {
+/* =========================
+   FLOATING SCROLL BUTTON
+   ========================= */
+.floating-scroll-btn {
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+  z-index: 900;
+  width: 44px;
+  height: 44px;
+  border: 1px solid #d1d5db;
+  border-radius: 999px;
+  background: #ffffff;
+  color: #374151;
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  cursor: pointer;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.16);
+  transition:
+    background 0.18s ease,
+    border-color 0.18s ease,
+    color 0.18s ease,
+    transform 0.12s ease,
+    box-shadow 0.18s ease;
 }
+
+.floating-scroll-btn:hover {
+  background: #f3f4f6;
+  border-color: #9ca3af;
+  color: #111827;
+  transform: translateY(-1px);
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.2);
+}
+
+.floating-scroll-btn:active {
+  transform: translateY(0);
+}
+
+.floating-scroll-btn i {
+  font-size: 16px;
+}
+
+.floating-scroll-btn.is-up {
+  background: #f8fafc;
+}
+
+/* =========================
+   LABEL HELPERS
+   ========================= */
 .field-label-with-required {
   display: inline-flex;
   align-items: center;
@@ -4368,28 +5004,183 @@ input, textarea, select {
   line-height: 1.25;
 }
 
-.required-asterisk {
-  color: #dc2626;
-  font-weight: 700;
-  line-height: 1;
-}
-.model-prop-toolbar {
-  display: flex;
-  justify-content: flex-end;
-  margin-top: 8px;
+/* =========================
+   RESPONSIVE
+   ========================= */
+@media (max-width: 1100px) {
+  .create-form-container {
+    padding: 16px;
+  }
+
+  .scratch-form-content {
+    flex-direction: column;
+    height: 100%;
+    overflow: hidden;
+  }
+
+  .available-fields {
+    width: 100%;
+    min-width: 0;
+    flex: 0 0 34vh;
+    height: 34vh;
+    max-height: 34vh;
+  }
+
+  .form-area {
+    --builder-sticky-height: 64px;
+    flex: 1 1 auto;
+    height: auto;
+    min-height: 0;
+  }
+
+  .builder-sticky-bar {
+    align-items: center;
+  }
+
+  .form-actions-inline {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    overflow-y: visible;
+  }
 }
 
-.btn-select-all {
-  flex: 0 0 auto;
+@media (max-width: 900px) {
+  .create-form-container {
+    height: 100vh;
+    padding: 12px;
+  }
+
+  .scratch-form-content {
+    flex-direction: column;
+    height: 100%;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .available-fields {
+    width: 100%;
+    flex: 0 0 34vh;
+    height: 34vh;
+    max-height: 34vh;
+  }
+
+  .form-area {
+    --builder-sticky-height: 64px;
+    flex: 1 1 auto;
+    min-height: 0;
+  }
+
+  .sections-topbar {
+    align-items: center;
+    flex-direction: row;
+  }
+
+  .form-actions-inline {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    overflow-y: visible;
+  }
+
+  .form-actions-inline .btn-option,
+  .form-actions-inline .btn-primary,
+  .form-actions-inline .btn-ellipsis {
+    flex: 0 0 auto;
+  }
+
+  .sections-topbar-actions {
+    width: auto;
+    justify-content: flex-end;
+    flex: 0 0 auto;
+  }
+
+  .floating-scroll-btn {
+    right: 16px;
+    bottom: 16px;
+    width: 42px;
+    height: 42px;
+  }
 }
 
-.prop-cell.selected {
-  border-color: $primary-color;
-  background: #eef4ff;
-}
+@media (max-width: 768px) {
+  .create-form-container {
+    padding: 12px;
+  }
 
-.prop-cell.disabled {
-  opacity: 0.65;
-  cursor: not-allowed;
+  .form-area {
+    --builder-sticky-height: 64px;
+  }
+
+  .sections-topbar {
+    flex-direction: row;
+    align-items: center;
+  }
+
+  .sections-topbar-actions {
+    width: auto;
+    justify-content: flex-end;
+    flex: 0 0 auto;
+  }
+
+  .section-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .section-header h3 {
+    font-size: 20px;
+  }
+
+  .field-header {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .field-actions {
+    justify-content: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .form-actions-inline {
+    width: auto;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    overflow-y: visible;
+  }
+
+  .form-actions-inline .btn-option,
+  .form-actions-inline .btn-primary,
+  .form-actions-inline .btn-ellipsis {
+    width: auto;
+    flex: 0 0 auto;
+  }
+
+  .additional-options {
+    width: auto;
+    flex: 0 0 auto;
+  }
+
+  .btn-ellipsis {
+    width: 36px;
+    height: 36px;
+  }
+
+  .options-menu {
+    right: 0;
+    left: auto;
+    width: auto;
+    min-width: 220px;
+  }
+
+  .modal-overlay {
+    padding: 12px;
+  }
+
+  .modal {
+    max-width: 100%;
+  }
+
+  .model-prop-list {
+    grid-template-columns: 1fr;
+  }
 }
 </style>
