@@ -665,6 +665,9 @@ function evaluateSingleVisibilityRule(rule, sourceValue, sourceField) {
     }
 
     if (operator === "neq") {
+      // Blank / no selection should NOT satisfy "not equal"
+      if (sourceValue.length === 0) return false;
+
       if (Array.isArray(compareValue)) return !compareArraysHasAny(sourceValue, compareValue);
       return !sourceValue.includes(compareValue);
     }
@@ -678,6 +681,9 @@ function evaluateSingleVisibilityRule(rule, sourceValue, sourceField) {
     }
 
     if (operator === "neq") {
+      // Blank / no selection should NOT satisfy "not equal"
+      if (isBlankValue(sourceValue)) return false;
+
       if (Array.isArray(compareValue)) {
         return !compareValue.map(String).includes(String(sourceValue ?? ""));
       }
@@ -764,12 +770,28 @@ function evaluateSingleVisibilityRule(rule, sourceValue, sourceField) {
   return false;
 }
 
-export function evaluateFieldVisibility(study, selectedModels, currentCellData, targetMIdx, targetFIdx) {
+export function evaluateFieldVisibility(
+  study,
+  selectedModels,
+  currentCellData,
+  targetMIdx,
+  targetFIdx,
+  visiting = new Set()
+) {
   const targetField = selectedModels?.[targetMIdx]?.fields?.[targetFIdx];
   if (!targetField) return true;
 
   const logic = targetField?.constraints?.visibilityLogic;
   if (!logic || !Array.isArray(logic.rules) || !logic.rules.length) return true;
+
+  const targetKey = `${targetMIdx}:${targetFIdx}`;
+  if (visiting.has(targetKey)) {
+    // Prevent infinite recursion if someone creates circular visibility rules.
+    return false;
+  }
+
+  const nextVisiting = new Set(visiting);
+  nextVisiting.add(targetKey);
 
   const lookup = buildFieldLookup(selectedModels);
 
@@ -779,6 +801,20 @@ export function evaluateFieldVisibility(study, selectedModels, currentCellData, 
 
     const meta = lookup.get(srcKey);
     if (!meta) return false;
+
+    // IMPORTANT:
+    // If the source field itself is hidden, this rule must be false.
+    // Example: C depends on B != Tablet, but B is hidden because A = No.
+    const sourceVisible = evaluateFieldVisibility(
+      study,
+      selectedModels,
+      currentCellData,
+      meta.mIdx,
+      meta.fIdx,
+      nextVisiting
+    );
+
+    if (!sourceVisible) return false;
 
     const sourceField = meta.field;
     const sourceValue = currentCellData?.[meta.mIdx]?.[meta.fIdx];
