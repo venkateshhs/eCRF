@@ -1872,7 +1872,98 @@ export default {
 .esc-title { font-weight: 800; color: #111827; margin-bottom: 4px; }
 .esc-desc { color: #6b7280; font-size: 13px; }
 .edit-hint { margin-top: 10px; text-align: center; }
+/* ============================================================
+   VIEW DATA FULLSCREEN HEIGHT FIX
+   Ensures the embedded dashboard receives real available height
+   when the enlarge / fit-to-screen button is clicked.
+   ============================================================ */
 
+.study-view-layout.sv-dashboard-fullscreen {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  min-height: 0;
+  padding: 0;
+  gap: 0;
+  background: #fff;
+  z-index: 3000;
+  overflow: hidden;
+}
+
+.study-view-layout.sv-dashboard-fullscreen > .sv-content.card {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  border-radius: 0;
+  border: none;
+  box-shadow: none;
+  overflow: hidden;
+  grid-template-columns: 1fr;
+}
+
+.study-view-layout.sv-dashboard-fullscreen .v-panel {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
+.study-view-layout.sv-dashboard-fullscreen .v-panel-tight {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
+.study-view-layout.sv-dashboard-fullscreen .viewdata-host {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.study-view-layout.sv-dashboard-fullscreen .viewdata-host > * {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+}
+/* ============================================================
+   VIEW DATA NORMAL MODE HEIGHT CONTAINMENT
+   Required so StudyDataDashboard's table-wrapper becomes the
+   actual vertical scroll container.
+   ============================================================ */
+
+.card.sv-viewdata {
+  height: calc(100vh - 120px);
+  min-height: 520px;
+  overflow: hidden;
+}
+
+.card.sv-viewdata.sv-sidebar-collapsed {
+  height: calc(100vh - 120px);
+  min-height: 520px;
+  overflow: hidden;
+}
+
+.card.sv-viewdata .v-panel-tight {
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.card.sv-viewdata .viewdata-host {
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.card.sv-viewdata .viewdata-host > * {
+  height: 100%;
+  min-height: 0;
+}
 /* Responsive */
 @media (max-width: 900px) {
   .edit-steps-grid { grid-template-columns: 1fr; }

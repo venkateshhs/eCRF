@@ -1,6 +1,7 @@
 /* eslint-disable */
 <template>
-  <div class="study-dashboard-container" :class="{ embedded, fullscreen }" v-if="study">
+  <div class="study-dashboard-container" :class="{ embedded, fullscreen, 'has-group-column': canViewGroupColumn }"
+  v-if="study">
     <div class="dashboard-header-controls">
       <div class="left-controls">
         <div class="version-dropdown">
@@ -42,7 +43,7 @@
               <strong>Red cell:</strong> Required field was <em>skipped</em> when saving.
             </p>
             <p>
-              Table fields are expanded into multiple rows. Subject / Group / Visit and other non-table values are repeated for clarity.
+              Table fields are expanded horizontally as TableName.rowNumber.ColumnName.
             </p>
           </div>
         </div>
@@ -82,39 +83,70 @@
       <table class="dashboard-table" v-else>
         <thead>
           <tr>
-            <th rowspan="2" @click="sortTable('subjectId')">
-              Subject ID
-              <i :class="sortIcon('subjectId')"></i>
-            </th>
-
-            <th v-if="canViewGroupColumn" rowspan="2" @click="sortTable('group')">
-              Group
-              <i :class="sortIcon('group')"></i>
-            </th>
-
-            <th rowspan="2" @click="sortTable('visit')">
-              Visit
-              <i :class="sortIcon('visit')"></i>
-            </th>
-
-            <template v-for="group in headerGroups" :key="'hdr-group-'+group.key">
-              <th :colspan="group.colspan">{{ group.title }}</th>
-            </template>
-          </tr>
-
-          <tr>
-            <template v-for="col in dashboardColumns" :key="'hdr-col-'+col.key">
-              <th @click="sortTable(col.key)">
-                {{ col.label }}
-                <i :class="sortIcon(col.key)"></i>
+              <th
+                class="sticky-col sticky-subject identity-header"
+                @click="sortTable('subjectId')"
+              >
+                Subject ID
+                <i :class="sortIcon('subjectId')"></i>
               </th>
-            </template>
-          </tr>
+
+              <th
+                v-if="canViewGroupColumn"
+                class="sticky-col sticky-group identity-header"
+                @click="sortTable('group')"
+              >
+                Group
+                <i :class="sortIcon('group')"></i>
+              </th>
+
+              <th
+                class="sticky-col sticky-visit identity-header"
+                @click="sortTable('visit')"
+              >
+                Visit
+                <i :class="sortIcon('visit')"></i>
+              </th>
+
+              <template v-for="group in headerGroups" :key="'hdr-group-'+group.key">
+                <th class="section-header-cell" :colspan="group.colspan">
+                  <span class="section-header-label">
+                    {{ group.title }}
+                  </span>
+                </th>
+              </template>
+            </tr>
+
+            <tr>
+              <th class="sticky-col sticky-subject identity-subheader"></th>
+
+              <th
+                v-if="canViewGroupColumn"
+                class="sticky-col sticky-group identity-subheader"
+              ></th>
+
+              <th class="sticky-col sticky-visit identity-subheader"></th>
+
+              <template v-for="col in dashboardColumns" :key="'hdr-col-'+col.key">
+                <th @click="sortTable(col.key)">
+                  {{ col.label }}
+                  <i :class="sortIcon(col.key)"></i>
+                </th>
+              </template>
+            </tr>
 
           <tr class="filter-row">
-            <th><input v-model="filters.subjectId" placeholder="Filter Subject ID"></th>
-            <th v-if="canViewGroupColumn"><input v-model="filters.group" placeholder="Filter Group"></th>
-            <th><input v-model="filters.visit" placeholder="Filter Visit"></th>
+              <th class="sticky-col sticky-subject">
+                <input v-model="filters.subjectId" placeholder="Filter Subject ID">
+              </th>
+
+              <th v-if="canViewGroupColumn" class="sticky-col sticky-group">
+                <input v-model="filters.group" placeholder="Filter Group">
+              </th>
+
+              <th class="sticky-col sticky-visit">
+                <input v-model="filters.visit" placeholder="Filter Visit">
+              </th>
 
             <template v-for="col in dashboardColumns" :key="'filter-'+col.key">
               <th>
@@ -130,9 +162,9 @@
         <tbody>
           <template v-for="(row, rowIdx) in paginatedData" :key="'row-'+rowIdx">
             <tr>
-              <td class="fixed-col">{{ row.subjectId }}</td>
-              <td v-if="canViewGroupColumn" class="fixed-col">{{ row.group }}</td>
-              <td class="fixed-col">{{ row.visit }}</td>
+              <td class="fixed-col sticky-col sticky-subject">{{ row.subjectId }}</td>
+              <td v-if="canViewGroupColumn" class="fixed-col sticky-col sticky-group">{{ row.group }}</td>
+              <td class="fixed-col sticky-col sticky-visit">{{ row.visit }}</td>
 
               <template v-for="col in dashboardColumns" :key="'cell-'+rowIdx+'-'+col.key">
                 <td :class="dashboardCellClass(row, col)">
@@ -166,7 +198,6 @@
 <script>
 import axios from "axios";
 import icons from "@/assets/styles/icons";
-
 
 export default {
   name: "StudyDataDashboard",
@@ -212,7 +243,11 @@ export default {
     },
 
     totalGridRows() {
-      return this.flattenedRowsCountEstimate;
+      return this.baseRowsCountEstimate;
+    },
+
+    baseRowsCountEstimate() {
+      return this.subjects.length * this.visits.length;
     },
 
     canViewAll() {
@@ -259,242 +294,24 @@ export default {
     },
 
     dashboardColumns() {
-      const cols = [];
-
-      this.sections.forEach((section, sIdx) => {
-        const sectionTitle = section?.title || `Section ${sIdx + 1}`;
-        (section.fields || []).forEach((field, fIdx) => {
-          const fieldLabel = field?.label || field?.name || field?.title || `Field ${fIdx + 1}`;
-          const type = String(field?.type || "").toLowerCase();
-
-          if (type === "table") {
-            const tableCols = Array.isArray(field?.tableConfig?.columns)
-              ? field.tableConfig.columns
-              : [];
-
-            cols.push({
-              kind: "tableRowIndex",
-              key: `s${sIdx}_f${fIdx}__row`,
-              label: "Row",
-              groupTitle: fieldLabel,
-              sectionTitle,
-              sIdx,
-              fIdx,
-              fieldType: "table",
-            });
-
-            tableCols.forEach((tc, tIdx) => {
-              cols.push({
-                kind: "tableCell",
-                key: `s${sIdx}_f${fIdx}__tc${tIdx}`,
-                label: tc?.label || `Column ${tIdx + 1}`,
-                groupTitle: fieldLabel,
-                sectionTitle,
-                sIdx,
-                fIdx,
-                tIdx,
-                tableKey: tc?.key || `column_${tIdx + 1}`,
-                fieldType: "table",
-              });
-            });
-          } else {
-            cols.push({
-              kind: "normal",
-              key: `s${sIdx}_f${fIdx}`,
-              label: fieldLabel,
-              groupTitle: sectionTitle,
-              sectionTitle,
-              sIdx,
-              fIdx,
-              fieldType: type,
-            });
-          }
-        });
+      return this.buildDashboardColumns({
+        entries: this.entries,
+        forceAllPairs: this.viewAll,
       });
-
-      return cols;
     },
 
     headerGroups() {
-      const groups = [];
-      let current = null;
-
-      this.dashboardColumns.forEach((col) => {
-        const title = col.groupTitle || col.sectionTitle || "";
-        const key = `${col.sectionTitle}__${title}`;
-
-        if (!current || current.key !== key) {
-          current = { key, title, colspan: 1 };
-          groups.push(current);
-        } else {
-          current.colspan += 1;
-        }
-      });
-
-      return groups;
-    },
-
-    flattenedRowsCountEstimate() {
-      const { subjectIdxPageSet, visitIdxPageSet } = this.currentWindowIndexSets();
-      let count = 0;
-
-      this.subjects.forEach((subject, subjIdx) => {
-        if (!subjectIdxPageSet.has(subjIdx)) return;
-        const groupIdx = this.resolveGroup(subjIdx);
-
-        this.visits.forEach((visit, vIdx) => {
-          if (!visitIdxPageSet.has(vIdx)) return;
-          const maxRows = this.getMaxTableRowsForSubjectVisit(subjIdx, vIdx, groupIdx);
-          count += Math.max(1, maxRows);
-        });
-      });
-
-      return count;
+      return this.buildHeaderGroupsForColumns(this.dashboardColumns);
     },
 
     filteredData() {
-      let data = [];
-      const { subjectIdxPageSet, visitIdxPageSet } = this.currentWindowIndexSets();
-
-      this.subjects.forEach((subject, subjIdx) => {
-        if (!subjectIdxPageSet.has(subjIdx)) return;
-
-        const groupIdx = this.resolveGroup(subjIdx);
-        const groupName = this.resolveGroupName(subjIdx);
-
-        this.visits.forEach((visit, vIdx) => {
-          if (!visitIdxPageSet.has(vIdx)) return;
-
-          const baseRow = {
-            subjectId: subject.id,
-            group: groupName,
-            visit: visit.name,
-            __sIdx: subjIdx,
-            __vIdx: vIdx,
-            __gIdx: groupIdx,
-          };
-
-          this.dashboardColumns.forEach((col) => {
-            if (col.kind === "normal") {
-              const assigned = this.isAssigned(col.sIdx, vIdx, groupIdx);
-
-              if (!assigned) {
-                baseRow[col.key] = "";
-                return;
-              }
-
-              const field = this.sections?.[col.sIdx]?.fields?.[col.fIdx];
-              const raw = this.getValue(subjIdx, vIdx, col.sIdx, col.fIdx);
-              const type = String(field?.type || "").toLowerCase();
-
-              if (type === "checkbox") {
-                baseRow[col.key] = raw === true ? "Yes" : raw === false ? "No" : "";
-              } else if (type === "file") {
-                baseRow[col.key] = this.formatFileCell(raw);
-              } else {
-                baseRow[col.key] = raw == null || raw === "" ? "" : raw;
-              }
-            }
-          });
-
-          const maxTableRows = Math.max(1, this.getMaxTableRowsForSubjectVisit(subjIdx, vIdx, groupIdx));
-
-          for (let tableRowIdx = 0; tableRowIdx < maxTableRows; tableRowIdx += 1) {
-            const row = {
-              ...baseRow,
-              __tableRowIdx: tableRowIdx,
-            };
-
-            this.dashboardColumns.forEach((col) => {
-              if (col.kind === "tableRowIndex") {
-                const assigned = this.isAssigned(col.sIdx, vIdx, groupIdx);
-                if (!assigned) {
-                  row[col.key] = "";
-                  return;
-                }
-
-                const tableRows = this.getTableRows(subjIdx, vIdx, col.sIdx, col.fIdx);
-                row[col.key] = tableRows.length ? tableRowIdx + 1 : "";
-              } else if (col.kind === "tableCell") {
-                const assigned = this.isAssigned(col.sIdx, vIdx, groupIdx);
-                if (!assigned) {
-                  row[col.key] = "";
-                  return;
-                }
-
-                const field = this.sections?.[col.sIdx]?.fields?.[col.fIdx];
-                const tableRows = this.getTableRows(subjIdx, vIdx, col.sIdx, col.fIdx);
-                const tableRow = tableRows[tableRowIdx] || null;
-                const raw = tableRow ? tableRow[col.tableKey] : "";
-                const tableColDef = field?.tableConfig?.columns?.[col.tIdx] || {};
-                const tableColType = String(tableColDef?.type || "").toLowerCase();
-
-                if (tableColType === "checkbox") {
-                  row[col.key] = raw === true ? "Yes" : raw === false ? "No" : "";
-                } else if (tableColType === "file") {
-                  row[col.key] = this.formatFileCell(raw);
-                } else if (Array.isArray(raw)) {
-                  row[col.key] = raw.join(", ");
-                } else {
-                  row[col.key] = raw == null || raw === "" ? "" : raw;
-                }
-              }
-            });
-
-            data.push(row);
-          }
-        });
+      return this.buildDashboardRows({
+        entries: this.entries,
+        columns: this.dashboardColumns,
+        forceAllPairs: this.viewAll,
+        applyFilters: true,
+        applySort: true,
       });
-
-      data = data.filter((row) => {
-        if (this.filters.subjectId && !String(row.subjectId).toLowerCase().includes(this.filters.subjectId.toLowerCase())) return false;
-        if (this.canViewGroupColumn && this.filters.group && !String(row.group).toLowerCase().includes(this.filters.group.toLowerCase())) return false;
-        if (this.filters.visit && !String(row.visit).toLowerCase().includes(this.filters.visit.toLowerCase())) return false;
-
-        for (const col of this.dashboardColumns) {
-          const filterVal = this.filters[col.key];
-          if (!filterVal) continue;
-          if (!String(row[col.key] ?? "").toLowerCase().includes(String(filterVal).toLowerCase())) {
-            return false;
-          }
-        }
-
-        return true;
-      });
-
-      if (this.sortConfig.key) {
-        const key = this.sortConfig.key;
-        const dir = this.sortConfig.direction === "asc" ? 1 : -1;
-
-        data.sort((a, b) => {
-          let valA = a[key] ?? "";
-          let valB = b[key] ?? "";
-
-          if (key === "group" && !this.canViewGroupColumn) {
-            valA = "";
-            valB = "";
-          }
-
-          if (typeof valA === "number" && typeof valB === "number") {
-            return (valA - valB) * dir;
-          }
-
-          const aNum = Number(valA);
-          const bNum = Number(valB);
-          if (!Number.isNaN(aNum) && !Number.isNaN(bNum) && String(valA).trim() !== "" && String(valB).trim() !== "") {
-            return (aNum - bNum) * dir;
-          }
-
-          valA = String(valA).toLowerCase();
-          valB = String(valB).toLowerCase();
-
-          if (valA < valB) return -1 * dir;
-          if (valA > valB) return 1 * dir;
-          return 0;
-        });
-      }
-
-      return data;
     },
 
     totalPages() {
@@ -522,6 +339,11 @@ export default {
       this.currentPage = 1;
       this.fetchPageEntries();
     },
+    fullscreen() {
+      this.$nextTick(() => {
+        this.updateStickyColumnOffsets?.();
+      });
+    },
     filters: {
       handler() {
         if (!this.viewAll) this.fetchPageEntries();
@@ -540,10 +362,69 @@ export default {
   },
 
   async created() {
-    await this.bootstrap();
-  },
+      await this.bootstrap();
+    },
+
+  mounted() {
+      this.updateStickyColumnOffsets();
+      window.addEventListener("resize", this.updateStickyColumnOffsets);
+    },
+
+  updated() {
+      this.$nextTick(() => {
+        this.updateStickyColumnOffsets();
+      });
+    },
+
+  beforeUnmount() {
+      window.removeEventListener("resize", this.updateStickyColumnOffsets);
+    },
 
   methods: {
+    updateStickyColumnOffsets() {
+      this.$nextTick(() => {
+        const root = this.$el;
+        if (!root) return;
+
+        const table = root.querySelector(".dashboard-table");
+        if (!table) return;
+
+        const subjectCell = table.querySelector("thead .sticky-subject");
+        const groupCell = table.querySelector("thead .sticky-group");
+        const visitCell = table.querySelector("thead .sticky-visit");
+
+        const headerRow1 = table.querySelector("thead tr:nth-child(1)");
+        const headerRow2 = table.querySelector("thead tr:nth-child(2)");
+
+        const subjectWidth = subjectCell
+          ? Math.ceil(subjectCell.getBoundingClientRect().width)
+          : 0;
+
+        const groupWidth = groupCell && this.canViewGroupColumn
+          ? Math.ceil(groupCell.getBoundingClientRect().width)
+          : 0;
+
+        const visitWidth = visitCell
+          ? Math.ceil(visitCell.getBoundingClientRect().width)
+          : 0;
+
+        const row1Height = headerRow1
+          ? Math.ceil(headerRow1.getBoundingClientRect().height)
+          : 40;
+
+        const row2Height = headerRow2
+          ? Math.ceil(headerRow2.getBoundingClientRect().height)
+          : 40;
+
+        root.style.setProperty("--sticky-subject-left", "0px");
+        root.style.setProperty("--sticky-group-left", `${subjectWidth}px`);
+        root.style.setProperty("--sticky-visit-left", `${subjectWidth + groupWidth}px`);
+        root.style.setProperty("--sticky-section-left", `${subjectWidth + groupWidth + visitWidth}px`);
+
+        root.style.setProperty("--header-row-1-h", `${row1Height}px`);
+        root.style.setProperty("--header-row-2-h", `${row2Height}px`);
+      });
+    },
     getStudyId() {
       return this.studyId != null ? String(this.studyId) : String(this.$route.params.id);
     },
@@ -646,11 +527,26 @@ export default {
       };
 
       const next = { ...base };
+
       this.dashboardColumns.forEach((col) => {
         next[col.key] = this.filters[col.key] || "";
       });
 
       if (!this.canViewGroupColumn) next.group = "";
+
+      const currentKeys = Object.keys(this.filters).sort();
+      const nextKeys = Object.keys(next).sort();
+
+      const sameKeys =
+        currentKeys.length === nextKeys.length &&
+        currentKeys.every((key, idx) => key === nextKeys[idx]);
+
+      const sameValues =
+        sameKeys &&
+        nextKeys.every((key) => String(this.filters[key] ?? "") === String(next[key] ?? ""));
+
+      if (sameValues) return;
+
       this.filters = next;
     },
 
@@ -708,14 +604,19 @@ export default {
       else this.study.content.study_data = normalized;
     },
 
-    currentWindowIndexSets() {
+    currentWindowIndexSets(options = {}) {
+      const forceAll = options.forceAll === true;
       const S = this.subjects.length;
       const V = this.visits.length;
 
-      if (this.viewAll || S === 0 || V === 0) {
+      const allSubjectIndexes = new Set([...Array(S).keys()]);
+      const allVisitIndexes = new Set([...Array(V).keys()]);
+
+      if (forceAll || this.viewAll || S === 0 || V === 0) {
         return {
-          subjectIdxPageSet: new Set([...Array(S).keys()]),
-          visitIdxPageSet: new Set([...Array(V).keys()]),
+          subjectIdxPageSet: allSubjectIndexes,
+          visitIdxPageSet: allVisitIndexes,
+          pairKeySet: null,
           totalRowsInWindow: S * V,
         };
       }
@@ -725,19 +626,27 @@ export default {
 
       const subjSet = new Set();
       const visitSet = new Set();
+      const pairKeySet = new Set();
 
       for (let idx = pageStart; idx < pageEndExcl; idx++) {
         const subjIdx = Math.floor(idx / V);
         const visitIdx = idx % V;
         subjSet.add(subjIdx);
         visitSet.add(visitIdx);
+        pairKeySet.add(`${subjIdx}:${visitIdx}`);
       }
 
       return {
         subjectIdxPageSet: subjSet,
         visitIdxPageSet: visitSet,
+        pairKeySet,
         totalRowsInWindow: pageEndExcl - pageStart,
       };
+    },
+
+    isPairInWindow(windowInfo, subjIdx, visitIdx) {
+      if (!windowInfo?.pairKeySet) return true;
+      return windowInfo.pairKeySet.has(`${subjIdx}:${visitIdx}`);
     },
 
     async fetchPageEntries() {
@@ -804,7 +713,11 @@ export default {
     },
 
     findBestEntry(subjIdx, visitIdx, groupIdx) {
-      const all = (this.entries || []).filter(
+      return this.findBestEntryFromEntries(this.entries, subjIdx, visitIdx, groupIdx);
+    },
+
+    findBestEntryFromEntries(entries, subjIdx, visitIdx, groupIdx) {
+      const all = (entries || []).filter(
         (e) =>
           e.subject_index === subjIdx &&
           e.visit_index === visitIdx &&
@@ -825,8 +738,12 @@ export default {
     },
 
     getValue(subjIdx, visitIdx, sectionIdx, fieldIdx) {
+      return this.getValueFromEntries(this.entries, subjIdx, visitIdx, sectionIdx, fieldIdx);
+    },
+
+    getValueFromEntries(entries, subjIdx, visitIdx, sectionIdx, fieldIdx) {
       const groupIdx = this.resolveGroup(subjIdx);
-      const entry = this.findBestEntry(subjIdx, visitIdx, groupIdx);
+      const entry = this.findBestEntryFromEntries(entries, subjIdx, visitIdx, groupIdx);
       if (!entry || !entry.data) return "";
 
       const d = entry.data;
@@ -840,28 +757,295 @@ export default {
     },
 
     getTableRows(subjIdx, visitIdx, sectionIdx, fieldIdx) {
-      const raw = this.getValue(subjIdx, visitIdx, sectionIdx, fieldIdx);
+      return this.getTableRowsFromEntries(this.entries, subjIdx, visitIdx, sectionIdx, fieldIdx);
+    },
+
+    getTableRowsFromEntries(entries, subjIdx, visitIdx, sectionIdx, fieldIdx) {
+      const raw = this.getValueFromEntries(entries, subjIdx, visitIdx, sectionIdx, fieldIdx);
       if (!raw || typeof raw !== "object") return [];
       if (!Array.isArray(raw.rows)) return [];
       return raw.rows;
     },
+    readTableCellValue(tableRow, tableColDef, fallbackIndex) {
+      if (!tableRow || typeof tableRow !== "object") return "";
 
-    getMaxTableRowsForSubjectVisit(subjIdx, visitIdx, groupIdx) {
+      const candidates = [
+        tableColDef?.id,
+        tableColDef?._id,
+        tableColDef?.key,
+        tableColDef?.name,
+        tableColDef?.label,
+        `column_${fallbackIndex + 1}`,
+      ].filter(Boolean);
+
+      for (const candidate of candidates) {
+        if (Object.prototype.hasOwnProperty.call(tableRow, candidate)) {
+          return tableRow[candidate];
+        }
+      }
+
+      const normalizedCandidates = candidates.map((c) => this.normalizeKey(c));
+      const hitKey = Object.keys(tableRow).find((k) =>
+        normalizedCandidates.includes(this.normalizeKey(k))
+      );
+
+      if (hitKey) return tableRow[hitKey];
+
+      return "";
+    },
+
+    getMaxTableRowsForTableField(sectionIdx, fieldIdx, entries, forceAllPairs = false) {
       let maxRows = 0;
+      const windowInfo = this.currentWindowIndexSets({ forceAll: forceAllPairs });
 
-      this.sections.forEach((section, sIdx) => {
-        if (!this.isAssigned(sIdx, visitIdx, groupIdx)) return;
+      this.subjects.forEach((subject, subjIdx) => {
+        if (!windowInfo.subjectIdxPageSet.has(subjIdx)) return;
 
-        (section.fields || []).forEach((field, fIdx) => {
-          const type = String(field?.type || "").toLowerCase();
-          if (type !== "table") return;
+        const groupIdx = this.resolveGroup(subjIdx);
 
-          const rows = this.getTableRows(subjIdx, visitIdx, sIdx, fIdx);
+        this.visits.forEach((visit, vIdx) => {
+          if (!windowInfo.visitIdxPageSet.has(vIdx)) return;
+          if (!this.isPairInWindow(windowInfo, subjIdx, vIdx)) return;
+          if (!this.isAssigned(sectionIdx, vIdx, groupIdx)) return;
+
+          const rows = this.getTableRowsFromEntries(entries, subjIdx, vIdx, sectionIdx, fieldIdx);
           if (rows.length > maxRows) maxRows = rows.length;
         });
       });
 
       return maxRows;
+    },
+
+    buildDashboardColumns(options = {}) {
+      const entries = options.entries || this.entries;
+      const forceAllPairs = options.forceAllPairs === true;
+      const cols = [];
+
+      this.sections.forEach((section, sIdx) => {
+        const sectionTitle = section?.title || `Section ${sIdx + 1}`;
+
+        (section.fields || []).forEach((field, fIdx) => {
+          const fieldLabel = field?.label || field?.name || field?.title || `Field ${fIdx + 1}`;
+          const type = String(field?.type || "").toLowerCase();
+
+          if (type === "table") {
+            const tableCols = Array.isArray(field?.tableConfig?.columns)
+              ? field.tableConfig.columns
+              : [];
+
+            const maxRowsForThisTable = this.getMaxTableRowsForTableField(
+              sIdx,
+              fIdx,
+              entries,
+              forceAllPairs
+            );
+
+            const visibleRowCount = Math.max(1, maxRowsForThisTable);
+
+            for (let tableRowIdx = 0; tableRowIdx < visibleRowCount; tableRowIdx += 1) {
+              tableCols.forEach((tc, tIdx) => {
+                const tableColLabel = tc?.label || `Column ${tIdx + 1}`;
+
+                cols.push({
+                  kind: "tableCell",
+                  key: `s${sIdx}_f${fIdx}__r${tableRowIdx}__tc${tIdx}`,
+                  label: `${fieldLabel} [${tableRowIdx + 1}] - ${tableColLabel}`,
+                  groupTitle: sectionTitle,
+                  sectionTitle,
+                  sIdx,
+                  fIdx,
+                  tIdx,
+                  tableRowIdx,
+                  tableKey: tc?.key || tc?.id || `column_${tIdx + 1}`,
+                  tableKeyCandidates: [
+                    tc?.id,
+                    tc?._id,
+                    tc?.key,
+                    tc?.name,
+                    tc?.label,
+                    `column_${tIdx + 1}`,
+                  ].filter(Boolean),
+                  fieldType: "table",
+                });
+              });
+            }
+          } else {
+            cols.push({
+              kind: "normal",
+              key: `s${sIdx}_f${fIdx}`,
+              label: fieldLabel,
+              groupTitle: sectionTitle,
+              sectionTitle,
+              sIdx,
+              fIdx,
+              fieldType: type,
+            });
+          }
+        });
+      });
+
+      return cols;
+    },
+
+    buildHeaderGroupsForColumns(columns) {
+      const groups = [];
+      let current = null;
+
+      columns.forEach((col) => {
+        const title = col.sectionTitle || col.groupTitle || "";
+        const key = `${col.sectionTitle}`;
+
+        if (!current || current.key !== key) {
+          current = { key, title, colspan: 1 };
+          groups.push(current);
+        } else {
+          current.colspan += 1;
+        }
+      });
+
+      return groups;
+    },
+
+    buildDashboardRows(options = {}) {
+      const entries = options.entries || this.entries;
+      const columns = options.columns || this.dashboardColumns;
+      const forceAllPairs = options.forceAllPairs === true;
+      const applyFilters = options.applyFilters !== false;
+      const applySort = options.applySort !== false;
+
+      let data = [];
+      const windowInfo = this.currentWindowIndexSets({ forceAll: forceAllPairs });
+
+      this.subjects.forEach((subject, subjIdx) => {
+        if (!windowInfo.subjectIdxPageSet.has(subjIdx)) return;
+
+        const groupIdx = this.resolveGroup(subjIdx);
+        const groupName = this.resolveGroupName(subjIdx);
+
+        this.visits.forEach((visit, vIdx) => {
+          if (!windowInfo.visitIdxPageSet.has(vIdx)) return;
+          if (!this.isPairInWindow(windowInfo, subjIdx, vIdx)) return;
+
+          const row = {
+            subjectId: subject.id,
+            group: groupName,
+            visit: visit.name,
+            __sIdx: subjIdx,
+            __vIdx: vIdx,
+            __gIdx: groupIdx,
+          };
+
+          columns.forEach((col) => {
+            const assigned = this.isAssigned(col.sIdx, vIdx, groupIdx);
+
+            if (!assigned) {
+              row[col.key] = "";
+              return;
+            }
+
+            if (col.kind === "normal") {
+              const field = this.sections?.[col.sIdx]?.fields?.[col.fIdx];
+              const raw = this.getValueFromEntries(entries, subjIdx, vIdx, col.sIdx, col.fIdx);
+              const type = String(field?.type || "").toLowerCase();
+
+              if (type === "checkbox") {
+                row[col.key] = raw === true ? "Yes" : raw === false ? "No" : "";
+              } else if (type === "file") {
+                row[col.key] = this.formatFileCell(raw);
+              } else if (Array.isArray(raw)) {
+                row[col.key] = raw.join(", ");
+              } else {
+                row[col.key] = raw == null || raw === "" ? "" : raw;
+              }
+
+              return;
+            }
+
+            if (col.kind === "tableCell") {
+                const field = this.sections?.[col.sIdx]?.fields?.[col.fIdx];
+                const tableRows = this.getTableRowsFromEntries(entries, subjIdx, vIdx, col.sIdx, col.fIdx);
+                const tableRow = tableRows[col.tableRowIdx] || null;
+                const tableColDef = field?.tableConfig?.columns?.[col.tIdx] || {};
+                const raw = this.readTableCellValue(tableRow, tableColDef, col.tIdx);
+                const tableColType = String(tableColDef?.type || "").toLowerCase();
+
+              if (tableColType === "checkbox") {
+                row[col.key] = raw === true ? "Yes" : raw === false ? "No" : "";
+              } else if (tableColType === "file") {
+                row[col.key] = this.formatFileCell(raw);
+              } else if (Array.isArray(raw)) {
+                row[col.key] = raw.join(", ");
+              } else {
+                row[col.key] = raw == null || raw === "" ? "" : raw;
+              }
+            }
+          });
+
+          data.push(row);
+        });
+      });
+
+      if (applyFilters) {
+        data = this.applyDashboardFilters(data, columns);
+      }
+
+      if (applySort) {
+        data = this.applyDashboardSort(data);
+      }
+
+      return data;
+    },
+
+    applyDashboardFilters(data, columns) {
+      return data.filter((row) => {
+        if (this.filters.subjectId && !String(row.subjectId).toLowerCase().includes(this.filters.subjectId.toLowerCase())) return false;
+        if (this.canViewGroupColumn && this.filters.group && !String(row.group).toLowerCase().includes(this.filters.group.toLowerCase())) return false;
+        if (this.filters.visit && !String(row.visit).toLowerCase().includes(this.filters.visit.toLowerCase())) return false;
+
+        for (const col of columns) {
+          const filterVal = this.filters[col.key];
+          if (!filterVal) continue;
+          if (!String(row[col.key] ?? "").toLowerCase().includes(String(filterVal).toLowerCase())) {
+            return false;
+          }
+        }
+
+        return true;
+      });
+    },
+
+    applyDashboardSort(data) {
+      if (!this.sortConfig.key) return data;
+
+      const key = this.sortConfig.key;
+      const dir = this.sortConfig.direction === "asc" ? 1 : -1;
+
+      return [...data].sort((a, b) => {
+        let valA = a[key] ?? "";
+        let valB = b[key] ?? "";
+
+        if (key === "group" && !this.canViewGroupColumn) {
+          valA = "";
+          valB = "";
+        }
+
+        if (typeof valA === "number" && typeof valB === "number") {
+          return (valA - valB) * dir;
+        }
+
+        const aNum = Number(valA);
+        const bNum = Number(valB);
+        if (!Number.isNaN(aNum) && !Number.isNaN(bNum) && String(valA).trim() !== "" && String(valB).trim() !== "") {
+          return (aNum - bNum) * dir;
+        }
+
+        valA = String(valA).toLowerCase();
+        valB = String(valB).toLowerCase();
+
+        if (valA < valB) return -1 * dir;
+        if (valA > valB) return 1 * dir;
+        return 0;
+      });
     },
 
     isCellSkipped(subjIdx, visitIdx, sectionIdx, fieldIdx) {
@@ -885,7 +1069,7 @@ export default {
         };
       }
 
-      if (col.kind === "tableRowIndex" || col.kind === "tableCell") {
+      if (col.kind === "tableCell") {
         const assigned = this.isAssigned(col.sIdx, row.__vIdx, row.__gIdx);
         return {
           "cell-unassigned": !assigned,
@@ -950,14 +1134,14 @@ export default {
     },
 
     async exportCSV() {
-      const allRows = await this.ensureAllEntriesForExport();
-      this.downloadDelimited(allRows, "csv");
+      const { rows, columns, headerGroups } = await this.ensureAllEntriesForExport();
+      this.downloadDelimited(rows, columns, headerGroups, "csv");
       this.showExportMenu = false;
     },
 
     async exportExcel() {
-      const allRows = await this.ensureAllEntriesForExport();
-      this.downloadDelimited(allRows, "xls");
+      const { rows, columns, headerGroups } = await this.ensureAllEntriesForExport();
+      this.downloadDelimited(rows, columns, headerGroups, "xls");
       this.showExportMenu = false;
     },
 
@@ -965,7 +1149,7 @@ export default {
       const studyId = this.getStudyId();
       let entriesForExport = this.entries;
 
-      if (!this.viewAll && !this.canViewAll) {
+      if (!this.viewAll || !this.canViewAll) {
         try {
           const resp = await axios.get(
             `/forms/studies/${studyId}/data_entries?all=true&version=${this.selectedVersion}`,
@@ -978,25 +1162,34 @@ export default {
         }
       }
 
-      const original = this.entries;
-      this.entries = entriesForExport;
+      const columns = this.buildDashboardColumns({
+        entries: entriesForExport,
+        forceAllPairs: true,
+      });
 
-      const rows = this.filteredData.map((r) => ({ ...r }));
+      const headerGroups = this.buildHeaderGroupsForColumns(columns);
 
-      this.entries = original;
-      return rows;
+      const rows = this.buildDashboardRows({
+        entries: entriesForExport,
+        columns,
+        forceAllPairs: true,
+        applyFilters: true,
+        applySort: true,
+      }).map((r) => ({ ...r }));
+
+      return { rows, columns, headerGroups };
     },
 
-    downloadDelimited(rows, kind) {
+    downloadDelimited(rows, columns, headerGroups, kind) {
       const quote = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
 
       const headerTop = this.canViewGroupColumn
-        ? ["Subject ID", "Group", "Visit", ...this.headerGroups.flatMap((g) => Array(g.colspan).fill(g.title))]
-        : ["Subject ID", "Visit", ...this.headerGroups.flatMap((g) => Array(g.colspan).fill(g.title))];
+        ? ["Subject ID", "Group", "Visit", ...headerGroups.flatMap((g) => Array(g.colspan).fill(g.title))]
+        : ["Subject ID", "Visit", ...headerGroups.flatMap((g) => Array(g.colspan).fill(g.title))];
 
       const headerBottom = this.canViewGroupColumn
-        ? ["", "", "", ...this.dashboardColumns.map((c) => c.label)]
-        : ["", "", ...this.dashboardColumns.map((c) => c.label)];
+        ? ["", "", "", ...columns.map((c) => c.label)]
+        : ["", "", ...columns.map((c) => c.label)];
 
       const lines = [];
       lines.push(headerTop.map(quote).join(","));
@@ -1007,7 +1200,7 @@ export default {
           ? [row.subjectId, row.group, row.visit]
           : [row.subjectId, row.visit];
 
-        this.dashboardColumns.forEach((col) => {
+        columns.forEach((col) => {
           cells.push(row[col.key]);
         });
 
@@ -1065,11 +1258,13 @@ export default {
   align-items: center;
   gap: 6px;
 }
+
 .btn-minimal:hover {
   background: #f3f4f6;
   border-color: #9ca3af;
   color: #1f2937;
 }
+
 .icon-only {
   padding: 6px 10px;
   font-size: 1rem;
@@ -1080,6 +1275,7 @@ export default {
   font-size: 0.9rem;
   color: #374151;
 }
+
 .version-dropdown select {
   padding: 6px 10px;
   border: 1px solid #d1d5db;
@@ -1103,11 +1299,12 @@ export default {
   background: white;
   border: 1px solid #d1d5db;
   border-radius: 4px;
-  box-shadow: 0 2px 6px rgba(0,0,0,0.1);
-  z-index: 20;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
+  z-index: 300;
   padding: 12px;
   min-width: 240px;
 }
+
 .export-menu button {
   display: block;
   width: 100%;
@@ -1118,6 +1315,7 @@ export default {
   font-size: 0.9rem;
   cursor: pointer;
 }
+
 .export-menu button:hover {
   background: #f3f4f6;
 }
@@ -1131,14 +1329,17 @@ export default {
   vertical-align: -2px;
   background: #ffffff;
 }
+
 .swatch-none {
   background: #ffffff;
   border-color: #d1d5db;
 }
+
 .swatch-gray {
   background: #e5e7eb;
   border-color: #9ca3af;
 }
+
 .swatch-red {
   background: #fee2e2;
   border-color: #ef4444;
@@ -1154,11 +1355,24 @@ export default {
   gap: 10px;
   flex-wrap: wrap;
 }
+
 .table-controls .view-all {
   margin-left: 12px;
 }
 
 .study-dashboard-container {
+  --sticky-subject-left: 0px;
+  --sticky-group-left: 0px;
+  --sticky-visit-left: 0px;
+  --sticky-section-left: 0px;
+
+  --sticky-subject-min-w: 150px;
+  --sticky-group-min-w: 120px;
+  --sticky-visit-min-w: 160px;
+
+  --header-row-1-h: 40px;
+  --header-row-2-h: 40px;
+
   display: flex;
   flex-direction: column;
   width: 100%;
@@ -1168,65 +1382,253 @@ export default {
   padding: 12px;
 }
 
+.study-dashboard-container.embedded,
+.study-dashboard-container.fullscreen {
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.study-dashboard-container.fullscreen {
+  width: 100%;
+}
+
 .table-wrapper {
   flex: 1 1 auto;
   min-height: 0;
   overflow: auto;
   width: 100%;
   max-width: 100%;
+  position: relative;
+}
+
+.study-dashboard-container.embedded .table-wrapper,
+.study-dashboard-container.fullscreen .table-wrapper {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
 }
 
 .dashboard-table {
   width: max-content;
   min-width: 100%;
-  border-collapse: collapse;
+  border-collapse: separate;
+  border-spacing: 0;
   margin-top: 8px;
 }
+
 .dashboard-table th,
 .dashboard-table td {
   border: 1px solid #e5e7eb;
+  border-right: 0;
+  border-bottom: 0;
   padding: 8px 12px;
   font-size: 0.9rem;
   text-align: center;
   white-space: nowrap;
+  box-sizing: border-box;
 }
+
+.dashboard-table th:last-child,
+.dashboard-table td:last-child {
+  border-right: 1px solid #e5e7eb;
+}
+
+.dashboard-table tbody tr:last-child td {
+  border-bottom: 1px solid #e5e7eb;
+}
+
 .dashboard-table th {
   cursor: pointer;
 }
+
 .dashboard-table th i {
   font-size: 0.8rem;
   color: #1f2937;
   margin-left: 4px;
 }
+
+/* ============================================================
+   STICKY HEADER STRUCTURE
+   Expected thead:
+   Row 1: Subject / Group / Visit + Section headers
+   Row 2: blank identity placeholders + Field headers
+   Row 3: Filters
+   ============================================================ */
+
 .dashboard-table thead tr:nth-child(1) th {
+  position: sticky;
+  top: 0;
+  height: var(--header-row-1-h);
   background: #e5e7eb;
+  color: #1f2937;
+  font-weight: 600;
+  z-index: 40;
+}
+
+.dashboard-table thead tr:nth-child(2) th {
+  position: sticky;
+  top: var(--header-row-1-h);
+  height: var(--header-row-2-h);
+  background: #f3f4f6;
+  color: #374151;
+  font-weight: 600;
+  z-index: 30;
+}
+
+.dashboard-table thead tr.filter-row th {
+  position: sticky;
+  top: calc(var(--header-row-1-h) + var(--header-row-2-h));
+  background: #ffffff;
+  z-index: 35;
+}
+
+/* ============================================================
+   STICKY LEFT IDENTITY COLUMNS
+   Subject / Group / Visit remain fixed during horizontal scroll.
+   ============================================================ */
+
+.dashboard-table .sticky-col {
+  position: sticky;
+  box-sizing: border-box;
+  white-space: nowrap;
+  background-clip: padding-box;
+}
+
+.dashboard-table .sticky-subject {
+  left: var(--sticky-subject-left);
+  min-width: var(--sticky-subject-min-w);
+}
+
+.dashboard-table .sticky-group {
+  left: var(--sticky-group-left);
+  min-width: var(--sticky-group-min-w);
+}
+
+.dashboard-table .sticky-visit {
+  left: var(--sticky-visit-left);
+  min-width: var(--sticky-visit-min-w);
+}
+
+/* Row 1 identity headers */
+.dashboard-table thead tr:nth-child(1) th.identity-header {
+  position: sticky;
+  top: 0;
+  z-index: 160;
+  background: #e5e7eb;
+}
+
+/* Row 2 blank identity placeholders */
+.dashboard-table thead tr:nth-child(2) th.identity-subheader {
+  position: sticky;
+  top: var(--header-row-1-h);
+  z-index: 150;
+  background: #f3f4f6;
+  padding: 0;
+  cursor: default;
+}
+
+/* Row 3 identity filter cells */
+.dashboard-table thead tr.filter-row th.sticky-col {
+  z-index: 145;
+  background: #ffffff;
+}
+
+/* Body sticky identity cells */
+.dashboard-table tbody td.sticky-col {
+  position: sticky;
+  z-index: 60;
+  background: #f9fafb;
   font-weight: 600;
   color: #1f2937;
 }
-.dashboard-table thead tr:nth-child(2) th {
-  background: #f3f4f6;
-  font-weight: 600;
-  color: #374151;
+
+/* Strong visual separation after the last sticky identity column */
+.dashboard-table thead th.sticky-visit,
+.dashboard-table tbody td.sticky-visit {
+  box-shadow: 2px 0 0 #d1d5db;
 }
+
+/* ============================================================
+   SECTION HEADER STICKY BEHAVIOR
+   Section names stick after Subject / Group / Visit.
+   Next section naturally replaces the current section.
+   ============================================================ */
+
+.dashboard-table thead tr:nth-child(1) th.section-header-cell {
+  position: sticky;
+  left: var(--sticky-section-left);
+  top: 0;
+  z-index: 120;
+  background: #e5e7eb;
+  text-align: left;
+  padding: 0;
+  overflow: hidden;
+  box-shadow: 2px 0 0 #d1d5db;
+}
+
+.dashboard-table thead tr:nth-child(1) th.section-header-cell .section-header-label {
+  position: static;
+  display: inline-flex;
+  align-items: center;
+  max-width: calc(100vw - var(--sticky-section-left) - 32px);
+  height: 100%;
+  padding: 8px 12px;
+  box-sizing: border-box;
+  background: #e5e7eb;
+  color: #1f2937;
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Normal field headers should pass behind identity columns */
+.dashboard-table thead tr:nth-child(2) th:not(.sticky-col) {
+  z-index: 80;
+}
+
+/* Normal filter headers should pass behind identity filter cells */
+.dashboard-table thead tr.filter-row th:not(.sticky-col) {
+  z-index: 75;
+}
+
+/* Ensure sticky cells visually cover content moving underneath */
+.dashboard-table thead th.sticky-col,
+.dashboard-table tbody td.sticky-col {
+  background-clip: padding-box;
+}
+
+/* ============================================================
+   BODY CELLS
+   ============================================================ */
 
 .dashboard-table tbody td.fixed-col {
   background: #f9fafb;
   font-weight: 600;
   color: #1f2937;
 }
+
 .dashboard-table tbody td:not(.fixed-col) {
   background: #ffffff;
   color: #4b5563;
 }
+
 .dashboard-table tbody tr:hover td {
   background: #f1f5f9;
 }
 
+.dashboard-table tbody tr:hover td.sticky-col {
+  background: #f1f5f9;
+}
+
+/* Preserve skipped/unassigned colors even with sticky cells */
 .cell-unassigned {
   background: #e5e7eb !important;
   color: #374151;
   border-color: #d1d5db !important;
 }
+
 .cell-skipped {
   background: #fee2e2 !important;
   color: #991b1b;
@@ -1234,20 +1636,21 @@ export default {
   font-weight: 600;
 }
 
-.loading {
-  text-align: center;
-  padding: 24px;
-  color: #6b7280;
+.dashboard-table tbody td.cell-unassigned.sticky-col {
+  background: #e5e7eb !important;
 }
-.no-data {
-  text-align: center;
-  padding: 16px;
-  color: #6b7280;
-  font-style: italic;
+
+.dashboard-table tbody td.cell-skipped.sticky-col {
+  background: #fee2e2 !important;
 }
+
+/* ============================================================
+   FILTER ROW
+   ============================================================ */
 
 .filter-row input {
   width: 100%;
+  min-width: 120px;
   padding: 4px;
   box-sizing: border-box;
   border: 1px solid #d1d5db;
@@ -1255,22 +1658,68 @@ export default {
   font-size: 0.9rem;
 }
 
+/* ============================================================
+   LOADING / EMPTY STATES
+   ============================================================ */
+
+.loading {
+  text-align: center;
+  padding: 24px;
+  color: #6b7280;
+}
+
+.no-data {
+  text-align: center;
+  padding: 16px;
+  color: #6b7280;
+  font-style: italic;
+}
+
+/* ============================================================
+   STICKY PAGINATION
+   Keeps pagination visible while horizontally scrolling.
+   ============================================================ */
+
 .pagination-controls {
+  position: sticky;
+  left: 0;
+  bottom: 0;
+  z-index: 150;
+
+  width: 100%;
+  min-width: 100%;
+
   display: flex;
   justify-content: center;
+  align-items: center;
   gap: 8px;
-  margin: 12px 0 0;
+
+  margin: 0;
+  padding: 10px 12px;
+
+  background: #ffffff;
+  border-top: 1px solid #e5e7eb;
+  box-shadow: 0 -2px 8px rgba(0, 0, 0, 0.04);
+
+  box-sizing: border-box;
   flex-wrap: wrap;
 }
+
 .pagination-controls button {
   background: #f3f4f6;
   border: 1px solid #d1d5db;
   padding: 6px 12px;
   cursor: pointer;
   border-radius: 4px;
+  white-space: nowrap;
 }
+
 .pagination-controls button:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+.pagination-controls span {
+  white-space: nowrap;
 }
 </style>
