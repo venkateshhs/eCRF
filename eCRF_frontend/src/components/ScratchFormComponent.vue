@@ -2849,10 +2849,18 @@ export default {
 
     onSectionClick(i) {
       this.ensureCurrentFormExists();
-      this.activeSection = i;
+
       const section = this.currentForm.sections[i];
-      if (section && section.collapsed) section.collapsed = false;
-      this.focusSection(i);
+      if (!section) return;
+
+      this.activeSection = i;
+
+      // If user clicks a collapsed section, expand it.
+      // Do not call focusSection here, because the user already clicked
+      // the section in its current viewport position.
+      if (section.collapsed) {
+        section.collapsed = false;
+      }
     },
 
     openConfirmDialog(msg, cb) {
