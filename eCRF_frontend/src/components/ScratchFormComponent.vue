@@ -394,7 +394,7 @@
                           <button
                             class="icon-button"
                             title="Delete Field"
-                            @click.stop.prevent="setActiveSection(si, fi); removeField(si, fi)"
+                            @click.stop.prevent="setActiveSection(si, fi); confirmDeleteField(si, fi)"
                           ><i :class="icons.delete"></i></button>
 
                           <button
@@ -3088,6 +3088,17 @@ export default {
         this.currentForm.sections.splice(i, 1);
         this.activeSection = Math.max(0, this.activeSection - 1);
         this.adjustAssignments();
+      });
+    },
+    confirmDeleteField(si, fi) {
+      this.ensureCurrentFormExists();
+
+      const field = this.currentForm.sections?.[si]?.fields?.[fi];
+      if (!field) return;
+
+      this.openConfirmDialog("Delete this field?", () => {
+        this.ensureCurrentFormExists();
+        this.removeField(si, fi);
       });
     },
 
