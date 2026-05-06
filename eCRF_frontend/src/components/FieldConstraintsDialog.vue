@@ -509,6 +509,11 @@
             <div class="quick">
               <button type="button" class="btn-option" @click="addOption()">+ Add</button>
               <button type="button" class="btn-option" @click="removeLastOption()" :disabled="localOptions.length <= 1">− Remove</button>
+              <button type="button" class="btn-option sort-option-btn" @click="sortChoiceOptions"
+              :disabled="localOptions.length <= 1"
+              :title="optionSortDirection === 'asc' ? 'Sort ascending' : 'Sort descending'">
+              {{ optionSortDirection === "asc" ? "↑ Sort" : "↓ Sort" }}
+  </button>
             </div>
           </div>
         </div>
@@ -1019,6 +1024,7 @@ export default {
       BIDS_MODALITIES,
       customMod: "",
       allowedFormatsText: allowedFormats.join(", "),
+      optionSortDirection: "asc",
 
       localType: (this.currentFieldType || "text").toLowerCase(),
       FIELD_TYPE_OPTIONS,
@@ -1851,6 +1857,29 @@ export default {
       this.localOptions.push(`Option ${this.localOptions.length + 1}`);
       this.optionsCount = this.localOptions.length;
     },
+    compareOptionLabels(a, b) {
+      return String(a ?? "").trim().localeCompare(
+        String(b ?? "").trim(),
+        undefined,
+        {
+          numeric: true,
+          sensitivity: "base",
+        }
+      );
+    },
+
+    sortChoiceOptions() {
+      if (!Array.isArray(this.localOptions) || this.localOptions.length <= 1) return;
+
+      const dir = this.optionSortDirection === "asc" ? 1 : -1;
+
+      const sorted = [...this.localOptions].sort((a, b) => {
+        return this.compareOptionLabels(a, b) * dir;
+      });
+
+      this.localOptions.splice(0, this.localOptions.length, ...sorted);
+      this.optionSortDirection = this.optionSortDirection === "asc" ? "desc" : "asc";
+    },
 
     removeLastOption() {
       if (this.localOptions.length > 1) {
@@ -2465,5 +2494,16 @@ select {
 
 .conversion-confirm {
   margin-top: 8px;
+}
+
+.sort-option-btn {
+  min-width: 76px;
+}
+
+
+.sort-option-btn:disabled,
+.sort-mark-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 </style>
