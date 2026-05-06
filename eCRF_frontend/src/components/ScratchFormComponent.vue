@@ -197,94 +197,98 @@
             <!-- Sticky builder toolbar -->
             <div class="sections-topbar builder-sticky-bar">
               <div class="form-actions-inline">
-                <button @click.prevent="addNewSection" class="btn-option">
-                  Add Section
-                </button>
-
-                <button
-                  @click.prevent="openRearrangeDialog()"
-                  class="btn-option"
-                  title="Rearrange sections and fields"
-                >
-                  Rearrange
-                </button>
-
-                <button
-                  @click.prevent="openLogicAndCalculations"
-                  class="btn-option"
-                  title="Configure conditional logic and calculations"
-                >
-                  Logic & Calculations
-                </button>
-
-                <button
-                  @click.prevent="onUnsavedSaveAndExit"
-                  class="btn-option"
-                  :disabled="unsavedBusy"
-                >
-                  {{ unsavedBusy ? "Saving…" : "Save Draft and Leave" }}
-                </button>
-
-                <button
-                  @click.prevent="handleProtocolClick"
-                  class="btn-option protocol-btn"
-                >
-                  Create Visit Schedule
-                </button>
-
-                <div class="additional-options" @click.stop>
-                  <button
-                    ref="additionalOptionsBtn"
-                    class="btn-ellipsis"
-                    title="Additional options"
-                    @click.prevent="toggleAdditionalOptions"
-                  >
-                    <i :class="icons.ellipsisV || 'fas fa-ellipsis-v'"></i>
+                  <button @click.prevent="addNewSection" class="btn-option">
+                    Add Section
                   </button>
 
-                  <div
-                    v-if="showAdditionalOptions"
-                    ref="additionalOptionsMenu"
-                    class="options-menu"
-                    role="menu"
-                    aria-label="Additional options"
+                  <button
+                    @click.prevent="openRearrangeDialog()"
+                    class="btn-option"
+                    title="Rearrange sections and fields"
                   >
-                    <button class="options-item" role="menuitem" @click.prevent="openImportCsvDialog">
-                      Import CSV / Excel Template
+                    Rearrange
+                  </button>
+
+                  <button
+                    @click.prevent="openLogicAndCalculations"
+                    class="btn-option"
+                    title="Configure conditional logic and calculations"
+                  >
+                    Logic & Calculations
+                  </button>
+
+                  <button
+                    @click.prevent="onUnsavedSaveAndExit"
+                    class="btn-option"
+                    :disabled="unsavedBusy"
+                  >
+                    {{ unsavedBusy ? "Saving…" : "Save Draft and Leave" }}
+                  </button>
+
+                  <button
+                    @click.prevent="handleProtocolClick"
+                    class="btn-option protocol-btn"
+                  >
+                    Create Visit Schedule
+                  </button>
+                </div>
+
+                <div class="builder-toolbar-right">
+                  <div class="additional-options" @click.stop>
+                    <button
+                      ref="additionalOptionsBtn"
+                      class="btn-ellipsis"
+                      title="Additional options"
+                      @click.prevent="toggleAdditionalOptions"
+                    >
+                      <i :class="icons.ellipsisV || 'fas fa-ellipsis-v'"></i>
                     </button>
 
-                    <button class="options-item" role="menuitem" @click.prevent="onDownloadTemplate">
-                      Download Template
+                    <div
+                      v-if="showAdditionalOptions"
+                      ref="additionalOptionsMenu"
+                      class="options-menu"
+                      role="menu"
+                      aria-label="Additional options"
+                    >
+                      <button class="options-item" role="menuitem" @click.prevent="openImportCsvDialog">
+                        Import CSV / Excel Template
+                      </button>
+
+                      <button class="options-item" role="menuitem" @click.prevent="onDownloadTemplate">
+                        Download Template
+                      </button>
+
+                      <button class="options-item" role="menuitem" @click.prevent="onUploadTemplate">
+                        Upload Template
+                      </button>
+
+                      <button class="options-item danger" role="menuitem" @click.prevent="confirmClearForm">
+                        Clear All
+                      </button>
+                    </div>
+                  </div>
+
+                  <div class="sections-topbar-actions">
+                    <button
+                      class="icon-button"
+                      title="Expand all sections"
+                      @click.prevent="expandAllSections"
+                    >
+                      <i :class="icons.toggleDown"></i>
                     </button>
 
-                    <button class="options-item" role="menuitem" @click.prevent="onUploadTemplate">
-                      Upload Template
-                    </button>
-
-                    <button class="options-item danger" role="menuitem" @click.prevent="confirmClearForm">
-                      Clear All
+                    <button
+                      class="icon-button"
+                      title="Collapse all sections"
+                      @click.prevent="collapseAllSections"
+                    >
+                      <i :class="icons.toggleUp"></i>
                     </button>
                   </div>
                 </div>
-              </div>
 
-              <div class="sections-topbar-actions">
-                <button
-                  class="icon-button"
-                  title="Expand all sections"
-                  @click.prevent="expandAllSections"
-                >
-                  <i :class="icons.toggleDown"></i>
-                </button>
 
-                <button
-                  class="icon-button"
-                  title="Collapse all sections"
-                  @click.prevent="collapseAllSections"
-                >
-                  <i :class="icons.toggleUp"></i>
-                </button>
-              </div>
             </div>
             <div v-if="!currentForm.sections || currentForm.sections.length === 0" class="empty-builder-state">
               Add your first section to start building this form. You can add a section manually or choose fields from the left panel.
@@ -4129,28 +4133,31 @@ export default {
    STICKY BUILDER TOOLBAR
    ========================= */
 .sections-topbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  margin-bottom: 16px;
-  min-width: 0;
-}
-
-.builder-sticky-bar {
   position: sticky;
   top: 0;
   z-index: 250;
 
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+
+  min-width: 0;
   min-height: var(--builder-sticky-height);
+  margin-bottom: 16px;
   padding: 10px 12px;
 
   background: #ffffff;
   border: 1px solid #e5e7eb;
-  border-radius:  0 0 12px 12px;
+  border-radius: 0 0 12px 12px;
   box-shadow: 0 8px 18px rgba(15, 23, 42, 0.10);
 
   box-sizing: border-box;
+  overflow: visible;
+}
+
+.builder-sticky-bar {
+  overflow: visible;
 }
 
 .form-actions-inline {
@@ -4161,19 +4168,34 @@ export default {
   flex: 1 1 auto;
   min-width: 0;
 
-  /* Keep action buttons, additional options, and expand/collapse controls on one line */
   flex-wrap: nowrap;
   overflow-x: auto;
-  overflow-y: visible;
+  overflow-y: hidden;
   padding-bottom: 2px;
   scrollbar-width: thin;
 }
 
 .form-actions-inline .btn-option,
-.form-actions-inline .btn-primary,
-.form-actions-inline .btn-ellipsis {
+.form-actions-inline .btn-primary {
   flex: 0 0 auto;
   white-space: nowrap;
+}
+
+.builder-toolbar-right {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+  position: relative;
+  overflow: visible;
+}
+
+.additional-options {
+  position: relative;
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  overflow: visible;
 }
 
 .sections-topbar-actions {
@@ -4595,13 +4617,6 @@ select:focus {
   cursor: not-allowed;
 }
 
-.additional-options {
-  position: relative;
-  flex: 0 0 auto;
-  display: inline-flex;
-  align-items: center;
-}
-
 .btn-ellipsis {
   width: 36px;
   height: 36px;
@@ -4630,7 +4645,7 @@ select:focus {
   border-radius: 10px;
   box-shadow: 0 10px 24px rgba(15, 23, 42, 0.12);
   padding: 6px;
-  z-index: 400;
+  z-index: 1000;
 }
 
 .options-item {
@@ -5033,14 +5048,14 @@ select:focus {
     min-height: 0;
   }
 
-  .builder-sticky-bar {
+  .sections-topbar {
     align-items: center;
   }
 
   .form-actions-inline {
     flex-wrap: nowrap;
     overflow-x: auto;
-    overflow-y: visible;
+    overflow-y: hidden;
   }
 }
 
@@ -5078,19 +5093,25 @@ select:focus {
   .form-actions-inline {
     flex-wrap: nowrap;
     overflow-x: auto;
-    overflow-y: visible;
+    overflow-y: hidden;
   }
 
   .form-actions-inline .btn-option,
-  .form-actions-inline .btn-primary,
-  .form-actions-inline .btn-ellipsis {
+  .form-actions-inline .btn-primary {
+    flex: 0 0 auto;
+  }
+
+  .builder-toolbar-right {
     flex: 0 0 auto;
   }
 
   .sections-topbar-actions {
-    width: auto;
-    justify-content: flex-end;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
     flex: 0 0 auto;
+    margin-left: 0;
+    white-space: nowrap;
   }
 
   .floating-scroll-btn {
@@ -5113,6 +5134,11 @@ select:focus {
   .sections-topbar {
     flex-direction: row;
     align-items: center;
+  }
+
+  .builder-toolbar-right {
+    width: auto;
+    flex: 0 0 auto;
   }
 
   .sections-topbar-actions {
@@ -5144,12 +5170,11 @@ select:focus {
     width: auto;
     flex-wrap: nowrap;
     overflow-x: auto;
-    overflow-y: visible;
+    overflow-y: hidden;
   }
 
   .form-actions-inline .btn-option,
-  .form-actions-inline .btn-primary,
-  .form-actions-inline .btn-ellipsis {
+  .form-actions-inline .btn-primary {
     width: auto;
     flex: 0 0 auto;
   }
