@@ -3428,6 +3428,10 @@ applyImportedRowFromDialog(payload) {
         this.runAllCalculationsForCurrentCell();
         this.showSelection = false;
         this.validationErrors = {};
+        this.$nextTick(() => {
+          this.allSectionsCollapsed = false;
+          this.toggleAllSectionsCollapse();
+        });
       } catch (e) {
         console.error("[Shared] load error", e);
         this.showDialogMessage(
@@ -3857,6 +3861,10 @@ applyImportedRowFromDialog(payload) {
       this.visitLoading = true;
       await this.loadCurrentSlotState();
       this.runAllCalculationsForCurrentCell();
+      this.$nextTick(() => {
+          this.allSectionsCollapsed = false;
+          this.toggleAllSectionsCollapse();
+        });
       this.visitLoading = false;
     },
 
