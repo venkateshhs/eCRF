@@ -91,25 +91,30 @@
       </div>
 
       <SelectionMatrixView
-        v-if="!isMergeMode"
-        :matrixReady="matrixReady"
-        :visitList="visitList"
-        :selectedVisitIndex="selectedVisitIndex"
-        :displayedVisitIndices="displayedVisitIndices"
-        :subjects="sd.subjects"
-        :visitLoading="visitLoading"
-        :isFluidMatrix="isFluidMatrix"
-        :subjectColStyle="subjectColStyle"
-        :visitColStyle="visitColStyle"
-        :statusClass="statusClassFast"
-        :selectedVersion="selectedVersion"
-        :infoIcon="icons.info"
-        :showGroupColumn="canSeeGroupColumn"
-        @update:selectedVisitIndex="selectedVisitIndex = $event"
-        @add-subjects="openSubjectDialog"
-        @select-cell="selectCell"
-        @open-status-legend="openStatusLegend"
-      />
+          v-if="!isMergeMode && matrixReady"
+          :key="selectionMatrixKey"
+          :matrixReady="matrixReady"
+          :visitList="visitList"
+          :selectedVisitIndex="selectedVisitIndex"
+          :displayedVisitIndices="displayedVisitIndices"
+          :subjects="sd.subjects"
+          :visitLoading="visitLoading"
+          :isFluidMatrix="isFluidMatrix"
+          :subjectColStyle="subjectColStyle"
+          :visitColStyle="visitColStyle"
+          :statusClass="statusClassFast"
+          :selectedVersion="selectedVersion"
+          :infoIcon="icons.info"
+          :showGroupColumn="canSeeGroupColumn"
+          @update:selectedVisitIndex="selectedVisitIndex = $event"
+          @add-subjects="openSubjectDialog"
+          @select-cell="selectCell"
+          @open-status-legend="openStatusLegend"
+        />
+
+        <div v-else-if="!isMergeMode" class="loading">
+          <p>Loading selection matrix…</p>
+        </div>
 
       <section v-else class="merge-panel">
         <MergeStudy :studyId="studyId" :returnTo="`/dashboard/studies/${studyId}/add-data`" />
@@ -970,6 +975,16 @@ export default {
         this.visitList.length - 1
       );
       return [idx];
+    },
+    selectionMatrixKey() {
+      return [
+        this.selectedVisitIndex,
+        this.displayedVisitIndices.join("_"),
+        this.canSeeGroupColumn ? "group" : "nogroup",
+        this.selectedVersion || "v0",
+        this.numberOfSubjects,
+        this.visitList.length,
+      ].join("|");
     },
 
     isFluidMatrix() {
