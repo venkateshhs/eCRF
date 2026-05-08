@@ -10,7 +10,7 @@
         <button v-if="showSelection" @click="goToDashboard" class="btn-back">
           Back to Dashboard
         </button>
-        <button v-else @click="backToSelection" class="btn-back">
+        <button v-else @click="requestBackToSelection" class="btn-back">
           Back to Selection
         </button>
       </template>
@@ -602,6 +602,54 @@
       @close="closePreviousVisitImportDialog"
       @select="applyPreviousVisitImport"
     />
+    <div
+      v-if="showUnsavedExitDialog"
+      class="unsaved-exit-backdrop"
+      role="dialog"
+      aria-modal="true"
+      @click.self="cancelUnsavedExit"
+    >
+      <div class="unsaved-exit-dialog">
+        <div class="unsaved-exit-header">
+          <h3>Unsaved changes</h3>
+          <button
+            type="button"
+            class="unsaved-exit-close"
+            aria-label="Close"
+            @click="cancelUnsavedExit"
+          >
+            ×
+          </button>
+        </div>
+
+        <div class="unsaved-exit-body">
+          <p>
+            You have unsaved changes in this data-entry form.
+          </p>
+          <p>
+            Please save before leaving, or exit anyway and lose the changes.
+          </p>
+        </div>
+
+        <div class="unsaved-exit-actions">
+          <button
+            type="button"
+            class="btn-clear"
+            @click="cancelUnsavedExit"
+          >
+            Cancel
+          </button>
+
+          <button
+            type="button"
+            class="btn-unsaved-exit"
+            @click="confirmUnsavedExit"
+          >
+            Exit anyway
+          </button>
+        </div>
+      </div>
+    </div>
     <button
       v-if="!showSelection"
       type="button"
@@ -793,10 +841,20 @@ export default {
       previousVisitImportOptions: [],
       previousVisitImportContext: null,
       importedPreviousVisitLocks: {},
+      entryBaselineSnapshot: "",
+      pendingNavigationAction: null,
+      showUnsavedExitDialog: false,
     };
   },
 
   computed: {
+    hasUnsavedEntryChanges() {
+      if (this.showSelection) return false;
+      if (!this.canEdit) return false;
+
+      const current = this.buildCurrentEntrySnapshot();
+      return current !== this.entryBaselineSnapshot;
+    },
     importDialogSubjects() {
       const subjects = Array.isArray(this.sd?.subjects) ? this.sd.subjects : [];
 
@@ -1044,16 +1102,24 @@ export default {
 },
 
   async created() {
-    this.ajv = createAjv();
+      this.ajv = createAjv();
 
-    if (this.isShared) {
-      const token = this.$route.params.token;
-      await this.loadShared(token);
-      this.matrixReady = true;
-    } else {
+      if (this.isShared) {
+        const token = this.$route.params.token;
+        await this.loadShared(token);
+        this.matrixReady = true;
+        return;
+      }
+
+      const authOk = await this.ensureAuthReadyForAddData();
+      if (!authOk) return;
+
       const studyId = this.$route.params.id;
 
       await this.loadStudy(studyId);
+
+      if (!this.study) return;
+
       await this.loadVersions(studyId);
 
       this.selectedVersion =
@@ -1074,10 +1140,10 @@ export default {
       this.visitLoading = false;
 
       this.matrixReady = true;
-    }
-  },
+    },
   beforeUnmount() {
       this.detachFloatingScrollListener();
+      window.onbeforeunload = null;
     },
   watch: {
     // Merge mode is controlled by query param: ?merge=1
@@ -1089,6 +1155,15 @@ export default {
         this.isMergeMode = next;
         if (next) this.showDetails = false; // keep header compact in merge view
       },
+    },
+    hasUnsavedEntryChanges(val) {
+      window.onbeforeunload = val
+        ? (event) => {
+            event.preventDefault();
+            event.returnValue = "";
+            return "";
+          }
+        : null;
     },
 
     existingEntries: {
@@ -1119,17 +1194,113 @@ export default {
     showSelection(val) {
       if (val) {
         this.detachFloatingScrollListener();
+        window.onbeforeunload = null;
         return;
       }
 
       this.$nextTick(() => {
         this.attachFloatingScrollListener();
         this.updateFloatingScrollMode();
+        this.captureEntryBaseline();
       });
     },
   },
+  beforeRouteLeave(to, from, next) {
+      if (!this.hasUnsavedEntryChanges) {
+        window.onbeforeunload = null;
+        next();
+        return;
+      }
+
+      this.pendingNavigationAction = () => {
+        window.onbeforeunload = null;
+        next();
+      };
+
+      this.showUnsavedExitDialog = true;
+  },
 
   methods: {
+    buildCurrentEntrySnapshot() {
+      const s = this.currentSubjectIndex;
+      const v = this.currentVisitIndex;
+      const g = this.currentGroupIndex;
+
+      if (s == null || v == null || g == null) return "";
+
+      this.ensureSlot(s, v, g);
+
+      const data = this.entryData?.[s]?.[v]?.[g] || [];
+      const skips = this.skipFlags?.[s]?.[v]?.[g] || [];
+      const locks = this.importedPreviousVisitLocks || {};
+
+      return JSON.stringify({
+        data,
+        skips,
+        locks,
+      });
+    },
+
+    captureEntryBaseline() {
+      this.entryBaselineSnapshot = this.buildCurrentEntrySnapshot();
+    },
+
+    requestBackToSelection() {
+      if (this.hasUnsavedEntryChanges) {
+        this.pendingNavigationAction = () => {
+          this.forceBackToSelection();
+        };
+        this.showUnsavedExitDialog = true;
+        return;
+      }
+
+      this.forceBackToSelection();
+    },
+
+    forceBackToSelection() {
+      window.onbeforeunload = null;
+      this.showUnsavedExitDialog = false;
+      this.pendingNavigationAction = null;
+      this.backToSelection();
+    },
+
+    cancelUnsavedExit() {
+      this.showUnsavedExitDialog = false;
+      this.pendingNavigationAction = null;
+    },
+
+    confirmUnsavedExit() {
+      const action = this.pendingNavigationAction;
+
+      this.showUnsavedExitDialog = false;
+      this.pendingNavigationAction = null;
+      this.entryBaselineSnapshot = this.buildCurrentEntrySnapshot();
+      window.onbeforeunload = null;
+
+      if (typeof action === "function") {
+        action();
+      }
+    },
+    async ensureAuthReadyForAddData() {
+      if (this.isShared) return true;
+
+      if (this.$store.state.token && this.$store.state.user) {
+        return true;
+      }
+
+      const ok = await this.$store.dispatch("initAuth");
+
+      if (!ok) {
+        this.$router.replace({
+          path: "/login",
+          query: { redirect: this.$route.fullPath },
+        }).catch(() => null);
+
+        return false;
+      }
+
+      return true;
+    },
     getScrollRoot() {
       const candidates = [
         this.$el?.closest?.(".dashboard-main"),
@@ -3411,14 +3582,23 @@ applyImportedRowFromDialog(payload) {
 
     async loadStudy(studyId) {
       try {
-        const resp = await axios.get(
-          `/forms/studies/${studyId}`,
-          { headers: { Authorization: `Bearer ${this.token}` } }
-        );
+        const resp = await axios.get(`/forms/studies/${studyId}`, {
+          headers: { Authorization: `Bearer ${this.token}` },
+        });
+
         this.study = resp.data;
         this.initializeEntryData();
       } catch (err) {
         console.error("[Entry] loadStudy error", err);
+
+        if (err?.response?.status === 401 || err?.response?.status === 403) {
+          this.$router.replace({
+            path: "/login",
+            query: { redirect: this.$route.fullPath },
+          }).catch(() => null);
+          return;
+        }
+
         this.showDialogMessage("Failed to load study details.");
       }
     },
@@ -3443,10 +3623,11 @@ applyImportedRowFromDialog(payload) {
         this.runAllCalculationsForCurrentCell();
         this.showSelection = false;
         this.validationErrors = {};
-        this.$nextTick(() => {
-          this.allSectionsCollapsed = false;
-          this.toggleAllSectionsCollapse();
-        });
+        this.$nextTick();
+        this.allSectionsCollapsed = false;
+        this.toggleAllSectionsCollapse();
+        this.captureEntryBaseline();
+
       } catch (e) {
         console.error("[Shared] load error", e);
         this.showDialogMessage(
@@ -3876,10 +4057,10 @@ applyImportedRowFromDialog(payload) {
       this.visitLoading = true;
       await this.loadCurrentSlotState();
       this.runAllCalculationsForCurrentCell();
-      this.$nextTick(() => {
-          this.allSectionsCollapsed = false;
-          this.toggleAllSectionsCollapse();
-        });
+      await this.$nextTick();
+      this.allSectionsCollapsed = false;
+      this.toggleAllSectionsCollapse();
+      this.captureEntryBaseline();
       this.visitLoading = false;
     },
 
@@ -4539,6 +4720,7 @@ applyImportedRowFromDialog(payload) {
       (this.existingEntries = this.existingEntries || []).push(saved);
 
       this.showDialogMessage(this.buildSaveSuccessMessage("saved"));
+      this.captureEntryBaseline();
       this.rebuildEntriesIndex();
       this.hydrateCache.delete(`${s}|${v}|${g}|${this.selectedVersion}`);
       this.applyVersionView();
@@ -4616,7 +4798,7 @@ applyImportedRowFromDialog(payload) {
     if (latestSlot) {
       this.applyLoadedSlotState(latestSlot);
     }
-
+    this.captureEntryBaseline();
     this.rebuildEntriesIndex();
     this.hydrateCache.delete(`${s}|${v}|${g}|${this.selectedVersion}`);
     this.applyVersionView();
@@ -6101,6 +6283,94 @@ select:focus {
 .details-value {
   font-weight: 400;
   color: #374151;
+}
+.unsaved-exit-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  background: rgba(15, 23, 42, 0.42);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 18px;
+}
+
+.unsaved-exit-dialog {
+  width: 100%;
+  max-width: 460px;
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 14px;
+  box-shadow: 0 24px 70px rgba(15, 23, 42, 0.28);
+  overflow: hidden;
+}
+
+.unsaved-exit-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px;
+  border-bottom: 1px solid #e5e7eb;
+  background: #fff7ed;
+}
+
+.unsaved-exit-header h3 {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 800;
+  color: #9a3412;
+}
+
+.unsaved-exit-close {
+  width: 32px;
+  height: 32px;
+  border: none;
+  background: transparent;
+  color: #9a3412;
+  font-size: 24px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.unsaved-exit-close:hover {
+  color: #7c2d12;
+}
+
+.unsaved-exit-body {
+  padding: 16px;
+}
+
+.unsaved-exit-body p {
+  margin: 0 0 10px;
+  color: #374151;
+  line-height: 1.45;
+}
+
+.unsaved-exit-body p:last-child {
+  margin-bottom: 0;
+}
+
+.unsaved-exit-actions {
+  padding: 12px 16px 16px;
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.btn-unsaved-exit {
+  background: #b91c1c;
+  color: #ffffff;
+  border: none;
+  padding: 8px 16px;
+  border-radius: 6px;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.btn-unsaved-exit:hover {
+  background: #991b1b;
 }
 @media (max-width: 768px) {
  .study-header-container {
