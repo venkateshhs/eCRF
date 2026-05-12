@@ -23,6 +23,42 @@
             </select>
           </div>
 
+          <!-- Subject search: scrolls to the matching subject, does NOT filter rows -->
+          <div class="subject-search">
+            <label>Search subject</label>
+
+            <div class="subject-search-box">
+              <input
+                type="search"
+                class="subject-search-input"
+                v-model.trim="subjectSearch"
+                placeholder="Search subject ID…"
+                @input="onSubjectSearchInput"
+                @keydown.enter.prevent="goToNextSubjectMatch"
+                @keydown.esc.prevent="clearSubjectSearch"
+              />
+
+              <button
+                v-if="subjectSearch"
+                type="button"
+                class="subject-search-clear"
+                title="Clear search"
+                @click="clearSubjectSearch"
+              >
+                ×
+              </button>
+            </div>
+
+            <div v-if="subjectSearch" class="subject-search-result">
+              <template v-if="matchedSubjectIndices.length">
+                {{ activeMatchPosition + 1 }} / {{ matchedSubjectIndices.length }}
+              </template>
+              <template v-else>
+                No match
+              </template>
+            </div>
+          </div>
+
           <!-- Helper message: to which version we add data -->
           <div
             v-if="selectedVersion"
@@ -53,7 +89,7 @@
         </button>
       </div>
 
-      <div class="matrix-wrap">
+      <div ref="matrixWrap" class="matrix-wrap">
         <!-- Loading overlay while (re)hydrating visits -->
         <div v-if="visitLoading" class="busy-overlay"><div class="spinner"></div></div>
 
@@ -81,7 +117,16 @@
             </tr>
           </thead>
           <tbody>
-            <tr v-for="(subject, sIdx) in subjects" :key="'sv-row-'+sIdx">
+            <tr
+              v-for="(subject, sIdx) in subjects"
+              :key="'sv-row-'+sIdx"
+              :ref="el => setSubjectRowRef(el, sIdx)"
+              class="subject-row"
+              :class="{
+                'subject-row-search-match': isSearchMatchedSubject(sIdx),
+                'subject-row-search-active': activeMatchedSubjectIndex === sIdx
+              }"
+            >
 
               <td class="subject-cell" :style="subjectColStyle">
                 {{ subject.id }}
@@ -158,10 +203,129 @@ export default {
     "select-cell",
     "open-status-legend",
   ],
+
+  data() {
+    return {
+      subjectSearch: "",
+      matchedSubjectIndices: [],
+      activeMatchPosition: 0,
+      subjectRowRefs: {},
+    };
+  },
+
+  computed: {
+    activeMatchedSubjectIndex() {
+      if (!this.matchedSubjectIndices.length) return null;
+      return this.matchedSubjectIndices[this.activeMatchPosition] ?? null;
+    },
+  },
+
   methods: {
     onVisitChange(event) {
       const val = parseInt(event.target.value, 10);
       this.$emit("update:selectedVisitIndex", Number.isNaN(val) ? -1 : val);
+    },
+
+    setSubjectRowRef(el, sIdx) {
+      if (el) {
+        this.subjectRowRefs[sIdx] = el;
+      } else if (this.subjectRowRefs && sIdx in this.subjectRowRefs) {
+        delete this.subjectRowRefs[sIdx];
+      }
+    },
+
+    normalizeSearchText(value) {
+      return String(value || "")
+        .trim()
+        .toLowerCase();
+    },
+
+    getSubjectSearchLabel(subject, index) {
+      return String(
+        subject?.id ||
+        subject?.subject_id ||
+        subject?.name ||
+        `Subject ${index + 1}`
+      );
+    },
+
+    rebuildSubjectMatches() {
+      const query = this.normalizeSearchText(this.subjectSearch);
+
+      if (!query) {
+        this.matchedSubjectIndices = [];
+        this.activeMatchPosition = 0;
+        return;
+      }
+
+      const subjects = Array.isArray(this.subjects) ? this.subjects : [];
+
+      this.matchedSubjectIndices = subjects
+        .map((subject, index) => {
+          const label = this.normalizeSearchText(
+            this.getSubjectSearchLabel(subject, index)
+          );
+
+          return label.includes(query) ? index : null;
+        })
+        .filter((index) => index !== null);
+
+      this.activeMatchPosition = 0;
+    },
+
+    onSubjectSearchInput() {
+      this.rebuildSubjectMatches();
+
+      this.$nextTick(() => {
+        this.scrollToActiveSubjectMatch();
+      });
+    },
+
+    goToNextSubjectMatch() {
+      if (!this.subjectSearch) return;
+
+      if (!this.matchedSubjectIndices.length) {
+        this.rebuildSubjectMatches();
+      }
+
+      if (!this.matchedSubjectIndices.length) return;
+
+      this.activeMatchPosition =
+        (this.activeMatchPosition + 1) % this.matchedSubjectIndices.length;
+
+      this.$nextTick(() => {
+        this.scrollToActiveSubjectMatch();
+      });
+    },
+
+    scrollToActiveSubjectMatch() {
+      const sIdx = this.activeMatchedSubjectIndex;
+      if (sIdx == null) return;
+
+      const wrap = this.$refs.matrixWrap;
+      const row = this.subjectRowRefs?.[sIdx];
+
+      if (!wrap || !row) return;
+
+      const header = wrap.querySelector("thead");
+      const headerHeight = header?.offsetHeight || 0;
+
+      const targetTop = Math.max(0, row.offsetTop - headerHeight - 10);
+
+      wrap.scrollTo({
+        top: targetTop,
+        behavior: "smooth",
+      });
+    },
+
+    isSearchMatchedSubject(sIdx) {
+      return this.matchedSubjectIndices.includes(sIdx);
+    },
+
+    clearSubjectSearch() {
+      this.subjectSearch = "";
+      this.matchedSubjectIndices = [];
+      this.activeMatchPosition = 0;
     },
   },
 
@@ -171,6 +335,33 @@ export default {
       if (!val) return;
       this.$nextTick(() => {
         if (this._updateSubjectWidth) this._updateSubjectWidth();
+
+        if (this.subjectSearch) {
+          this.rebuildSubjectMatches();
+          this.scrollToActiveSubjectMatch();
+        }
+      });
+    },
+
+    subjects: {
+      deep: true,
+      handler() {
+        this.$nextTick(() => {
+          if (this.subjectSearch) {
+            this.rebuildSubjectMatches();
+            this.scrollToActiveSubjectMatch();
+          }
+        });
+      },
+    },
+
+    selectedVisitIndex() {
+      this.$nextTick(() => {
+        if (this._updateSubjectWidth) this._updateSubjectWidth();
+
+        if (this.subjectSearch) {
+          this.scrollToActiveSubjectMatch();
+        }
       });
     },
   },
@@ -269,6 +460,86 @@ export default {
   outline: none;
   border-color: #6b7280;
   box-shadow: 0 0 0 3px rgba(107, 114, 128, 0.12);
+}
+
+/* Subject search: scrolls to the matching subject, does NOT filter rows */
+.subject-search {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 220px;
+}
+
+.subject-search label {
+  font-size: 13px;
+  font-weight: 700;
+  color: #374151;
+}
+
+.subject-search-box {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.subject-search-input {
+  width: 240px;
+  min-height: 40px;
+  padding: 8px 34px 8px 12px;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #1f2937;
+  font-size: 14px;
+  box-sizing: border-box;
+  transition:
+    border-color 0.18s ease,
+    box-shadow 0.18s ease,
+    background 0.18s ease;
+}
+
+.subject-search-input:hover {
+  border-color: #9ca3af;
+}
+
+.subject-search-input:focus {
+  outline: none;
+  border-color: #6b7280;
+  box-shadow: 0 0 0 3px rgba(107, 114, 128, 0.12);
+}
+
+.subject-search-clear {
+  position: absolute;
+  right: 8px;
+  width: 22px;
+  height: 22px;
+  border: none;
+  border-radius: 999px;
+  background: #e5e7eb;
+  color: #374151;
+  cursor: pointer;
+  font-size: 17px;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  transition:
+    background 0.18s ease,
+    color 0.18s ease;
+}
+
+.subject-search-clear:hover {
+  background: #d1d5db;
+  color: #111827;
+}
+
+.subject-search-result {
+  min-height: 14px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #6b7280;
+  line-height: 1;
 }
 
 /* Version badge */
@@ -534,6 +805,28 @@ export default {
   background: #f1f5f9;
 }
 
+/* Subject search row highlight */
+.subject-row-search-match td {
+  background: #eff6ff !important;
+}
+
+.subject-row-search-match .subject-cell,
+.subject-row-search-match .group-cell {
+  background: #dbeafe !important;
+}
+
+.subject-row-search-active td {
+  background: #dbeafe !important;
+}
+
+.subject-row-search-active .subject-cell,
+.subject-row-search-active .group-cell {
+  background: #bfdbfe !important;
+}
+
+.subject-row-search-active .subject-cell {
+  box-shadow: inset 4px 0 0 #3b82f6;
+}
 /* ========= Select/status button ========= */
 .select-btn {
   display: inline-flex;
@@ -724,6 +1017,12 @@ export default {
   .btn-add-subject,
   .version-helper {
     width: 100%;
+  }
+
+  .subject-search,
+  .subject-search-input {
+    width: 100%;
+    min-width: 0;
   }
 
   .legend-icon-btn {
