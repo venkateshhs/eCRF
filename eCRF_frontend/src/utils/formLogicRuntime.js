@@ -770,6 +770,142 @@ function evaluateSingleVisibilityRule(rule, sourceValue, sourceField) {
   return false;
 }
 
+/* ============================================================
+   POPUP / INLINE REMINDER RUNTIME
+   ============================================================ */
+
+function normalizePopupLogic(raw) {
+  const src = raw && typeof raw === "object" ? raw : {};
+
+  return {
+    enabled: src.enabled === true,
+    operator: String(src.operator || "eq").toLowerCase(),
+    message: String(src.message || "").trim(),
+    value: src.value,
+    valueTo: src.valueTo,
+
+    // Optional future support:
+    // If this exists, the same reminder can also be shown under the target field.
+    targetFieldKey: String(
+      src.targetFieldKey ||
+      src.targetFieldId ||
+      src.target ||
+      ""
+    ).trim(),
+  };
+}
+
+function fieldHasKey(field, key) {
+  const needle = String(key || "").trim();
+  if (!needle) return false;
+
+  return [
+    field?._id,
+    field?.id,
+    field?.field_id,
+    field?.uid,
+    field?.key,
+    field?.name,
+    field?.label,
+    field?.title,
+  ]
+    .filter(Boolean)
+    .map(String)
+    .includes(needle);
+}
+
+export function evaluatePopupLogic(
+  study,
+  selectedModels,
+  currentCellData,
+  sourceMIdx,
+  sourceFIdx
+) {
+  const sourceField = selectedModels?.[sourceMIdx]?.fields?.[sourceFIdx];
+  if (!sourceField) return false;
+
+  const popupLogic = normalizePopupLogic(sourceField?.constraints?.popupLogic);
+
+  if (!popupLogic.enabled) return false;
+  if (!popupLogic.message) return false;
+
+  // If the source field itself is hidden, do not show reminders for it.
+  const sourceVisible = evaluateFieldVisibility(
+    study,
+    selectedModels,
+    currentCellData,
+    sourceMIdx,
+    sourceFIdx
+  );
+
+  if (!sourceVisible) return false;
+
+  const sourceValue = currentCellData?.[sourceMIdx]?.[sourceFIdx];
+
+  return evaluateSingleVisibilityRule(
+    {
+      operator: popupLogic.operator,
+      value: popupLogic.value,
+      valueTo: popupLogic.valueTo,
+    },
+    sourceValue,
+    sourceField
+  );
+}
+
+export function getPopupReminderMessage(selectedModels, sourceMIdx, sourceFIdx) {
+  const sourceField = selectedModels?.[sourceMIdx]?.fields?.[sourceFIdx];
+  const popupLogic = normalizePopupLogic(sourceField?.constraints?.popupLogic);
+
+  return popupLogic.enabled ? popupLogic.message : "";
+}
+
+export function getPopupReminderMessagesForField(
+  study,
+  selectedModels,
+  currentCellData,
+  displayMIdx,
+  displayFIdx
+) {
+  const displayField = selectedModels?.[displayMIdx]?.fields?.[displayFIdx];
+  if (!displayField) return [];
+
+  const messages = [];
+
+  (selectedModels || []).forEach((section, sourceMIdx) => {
+    (section?.fields || []).forEach((sourceField, sourceFIdx) => {
+      const popupLogic = normalizePopupLogic(sourceField?.constraints?.popupLogic);
+
+      if (!popupLogic.enabled || !popupLogic.message) return;
+
+      const shouldShowSourceMessage =
+        sourceMIdx === displayMIdx && sourceFIdx === displayFIdx;
+
+      const shouldShowTargetMessage =
+        !!popupLogic.targetFieldKey &&
+        fieldHasKey(displayField, popupLogic.targetFieldKey);
+
+      if (!shouldShowSourceMessage && !shouldShowTargetMessage) return;
+
+      const matched = evaluatePopupLogic(
+        study,
+        selectedModels,
+        currentCellData,
+        sourceMIdx,
+        sourceFIdx
+      );
+
+      if (!matched) return;
+
+      if (!messages.includes(popupLogic.message)) {
+        messages.push(popupLogic.message);
+      }
+    });
+  });
+
+  return messages;
+}
+
 export function evaluateFieldVisibility(
   study,
   selectedModels,

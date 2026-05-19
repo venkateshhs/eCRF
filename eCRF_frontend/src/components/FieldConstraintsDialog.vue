@@ -797,6 +797,268 @@
           </button>
         </div>
       </section>
+
+      <section class="group">
+        <div class="row">
+          <label class="chk">
+            <input type="checkbox" v-model="local.popupLogic.enabled" />
+            Enable pop-up message
+          </label>
+        </div>
+
+        <template v-if="local.popupLogic.enabled">
+          <div class="row note">
+            <span>
+              Configure a reminder message based on this field’s own value. The source field is the current field:
+              <b>{{ currentFieldLabel || fieldDefinition?.label || fieldDefinition?.name || "Current field" }}</b>.
+            </span>
+          </div>
+
+          <div class="row">
+            <label>Operator</label>
+            <select v-model="local.popupLogic.operator" @change="onPopupOperatorChanged">
+              <option
+                v-for="op in availablePopupOperatorsForCurrentField()"
+                :key="op.value"
+                :value="op.value"
+              >
+                {{ op.label }}
+              </option>
+            </select>
+          </div>
+
+          <template v-if="popupNeedsNoValue(local.popupLogic.operator)">
+            <div class="row note">
+              <span>No compare value needed for this operator.</span>
+            </div>
+          </template>
+
+          <template v-else-if="local.popupLogic.operator === 'between'">
+            <div class="row two">
+              <div>
+                <label>From</label>
+
+                <input
+                  v-if="popupSourceType() === 'number' || popupSourceType() === 'slider'"
+                  type="number"
+                  v-model.number="local.popupLogic.value"
+                />
+
+                <FieldTime
+                  v-else-if="popupSourceType() === 'time'"
+                  v-model="local.popupLogic.value"
+                  :hourCycle="local.hourCycle || '24'"
+                  :readonly="false"
+                  :disabled="false"
+                />
+
+                <DateFormatPicker
+                  v-else-if="popupSourceType() === 'date'"
+                  v-model="local.popupLogic.value"
+                  :format="local.dateFormat || 'dd.MM.yyyy'"
+                  :placeholder="local.dateFormat || 'dd.MM.yyyy'"
+                />
+
+                <input
+                  v-else
+                  type="text"
+                  v-model="local.popupLogic.value"
+                />
+              </div>
+
+              <div>
+                <label>To</label>
+
+                <input
+                  v-if="popupSourceType() === 'number' || popupSourceType() === 'slider'"
+                  type="number"
+                  v-model.number="local.popupLogic.valueTo"
+                />
+
+                <FieldTime
+                  v-else-if="popupSourceType() === 'time'"
+                  v-model="local.popupLogic.valueTo"
+                  :hourCycle="local.hourCycle || '24'"
+                  :readonly="false"
+                  :disabled="false"
+                />
+
+                <DateFormatPicker
+                  v-else-if="popupSourceType() === 'date'"
+                  v-model="local.popupLogic.valueTo"
+                  :format="local.dateFormat || 'dd.MM.yyyy'"
+                  :placeholder="local.dateFormat || 'dd.MM.yyyy'"
+                />
+
+                <input
+                  v-else
+                  type="text"
+                  v-model="local.popupLogic.valueTo"
+                />
+              </div>
+            </div>
+          </template>
+
+          <template v-else-if="popupSourceIsChoiceSingle()">
+            <div class="row">
+              <label>Compare value</label>
+              <select v-model="local.popupLogic.value">
+                <option value="">Select…</option>
+                <option
+                  v-for="opt in localOptions"
+                  :key="opt"
+                  :value="opt"
+                >
+                  {{ opt }}
+                </option>
+              </select>
+              <small class="note">Options from this field.</small>
+            </div>
+          </template>
+
+          <template v-else-if="popupSourceIsChoiceMulti()">
+            <div class="row">
+              <label>Compare value(s)</label>
+              <div class="chips">
+                <div class="chip-input-row">
+                  <input
+                    type="text"
+                    v-model="local.popupLogic._chipInput"
+                    placeholder="Type option and press Enter"
+                    @keydown.enter.prevent="addPopupChip"
+                    list="popup-current-field-options"
+                  />
+                  <datalist id="popup-current-field-options">
+                    <option v-for="opt in localOptions" :key="opt" :value="opt" />
+                  </datalist>
+                </div>
+                <div class="chip-group">
+                  <span
+                    v-for="(val, i) in (Array.isArray(local.popupLogic.value) ? local.popupLogic.value : [])"
+                    :key="i"
+                    class="chip"
+                  >
+                    {{ val }}
+                    <button class="chip-x" @click.prevent="removePopupChip(i)">×</button>
+                  </span>
+                </div>
+              </div>
+            </div>
+          </template>
+
+          <template v-else-if="popupSourceType() === 'checkbox'">
+            <div class="row">
+              <label>Compare value</label>
+              <select v-model="local.popupLogic.value">
+                <option :value="true">Checked</option>
+                <option :value="false">Unchecked</option>
+              </select>
+            </div>
+          </template>
+
+          <template v-else>
+            <div class="row">
+              <label>Compare value</label>
+
+              <input
+                v-if="popupSourceType() === 'number' || popupSourceType() === 'slider'"
+                type="number"
+                v-model.number="local.popupLogic.value"
+              />
+
+              <FieldTime
+                v-else-if="popupSourceType() === 'time'"
+                v-model="local.popupLogic.value"
+                :hourCycle="local.hourCycle || '24'"
+                :readonly="false"
+                :disabled="false"
+              />
+
+              <DateFormatPicker
+                v-else-if="popupSourceType() === 'date'"
+                v-model="local.popupLogic.value"
+                :format="local.dateFormat || 'dd.MM.yyyy'"
+                :placeholder="local.dateFormat || 'dd.MM.yyyy'"
+              />
+
+              <input
+                v-else
+                type="text"
+                v-model="local.popupLogic.value"
+                placeholder="Enter compare value"
+              />
+            </div>
+          </template>
+
+          <div class="row">
+            <label>Pop-up message</label>
+            <BaseTextarea
+              id="field-popup-message"
+              label=""
+              v-model="local.popupLogic.message"
+              placeholder="Example: Please also document this medication in the Medication section."
+              :rows="3"
+            />
+          </div>
+          <div class="row">
+              <label class="chk">
+                <input
+                  type="checkbox"
+                  v-model="local.popupLogic.showInTargetField"
+                  @change="onPopupTargetToggle"
+                />
+                Do you want the message to be shown in target field too?
+              </label>
+            </div>
+
+            <template v-if="local.popupLogic.showInTargetField">
+              <div class="row two">
+                <div>
+                  <label>Target section</label>
+                  <select
+                    v-model="local.popupLogic._targetSectionKey"
+                    @change="onPopupTargetSectionChanged"
+                  >
+                    <option value="">Select section…</option>
+                    <option
+                      v-for="section in availableTargetSections"
+                      :key="section.key"
+                      :value="section.key"
+                    >
+                      {{ section.title }}
+                    </option>
+                  </select>
+                </div>
+
+                <div>
+                  <label>Target field</label>
+                  <select
+                    v-model="local.popupLogic.targetFieldKey"
+                    :disabled="!local.popupLogic._targetSectionKey"
+                  >
+                    <option value="">Select field…</option>
+                    <option
+                      v-for="f in fieldsForSelectedPopupTargetSection()"
+                      :key="f.key"
+                      :value="f.key"
+                    >
+                      {{ f.label }}
+                    </option>
+                  </select>
+                </div>
+              </div>
+
+              <div class="row note">
+                <span>
+                  The same reminder will be shown below the current source field and the selected target field.
+                </span>
+              </div>
+            </template>
+          <div class="row note">
+            <span>{{ popupSummary() }}</span>
+          </div>
+        </template>
+      </section>
     </template>
 
     <div class="modal-actions">
@@ -984,6 +1246,7 @@ function buildInitialLocal(vm, constraintsForm, currentFieldType) {
       : [],
 
     visibilityLogic: vm.normalizeVisibilityLogic(base.visibilityLogic),
+    popupLogic: vm.normalizePopupLogic(base.popupLogic, type, !!base.allowMultiple),
   };
 }
 
@@ -1209,6 +1472,50 @@ export default {
 
       return groups;
     },
+    availableTargetFields() {
+      const currentKey = String(this.currentFieldKey || "");
+      const out = [];
+
+      (this.form?.sections || []).forEach((section, si) => {
+        (section.fields || []).forEach((field, fi) => {
+          const key = field._id || field.id || field.field_id || field.uid || field.key || field.name || `section_${si}_field_${fi}`;
+
+          if (String(key) === currentKey) return;
+
+          out.push({
+            key: String(key),
+            sectionKey: `section_${si}`,
+            label: field.label || field.name || field.title || `Field ${fi + 1}`,
+            sectionTitle: section.title || `Section ${si + 1}`,
+            pathLabel: `${section.title || `Section ${si + 1}`}.${field.label || field.name || field.title || `Field ${fi + 1}`}`,
+            type: field.type || "text",
+          });
+        });
+      });
+
+      return out;
+    },
+
+    availableTargetSections() {
+      const groups = [];
+      const seen = new Map();
+
+      (this.availableTargetFields || []).forEach((f) => {
+        const sectionKey = String(f.sectionKey || "");
+        if (!seen.has(sectionKey)) {
+          const entry = {
+            key: sectionKey,
+            title: f.sectionTitle || "Untitled Section",
+            fields: [],
+          };
+          seen.set(sectionKey, entry);
+          groups.push(entry);
+        }
+        seen.get(sectionKey).fields.push(f);
+      });
+
+      return groups;
+    },
   },
 
   watch: {
@@ -1270,9 +1577,20 @@ export default {
           : this.local.defaultValue && this.localOptions.includes(this.local.defaultValue)
           ? [this.local.defaultValue]
           : [];
+        if (this.local.popupLogic?.enabled && !Array.isArray(this.local.popupLogic.value)) {
+          this.local.popupLogic.value =
+            this.local.popupLogic.value === "" ||
+            this.local.popupLogic.value === null ||
+            this.local.popupLogic.value === undefined
+              ? []
+              : [String(this.local.popupLogic.value).trim()].filter(Boolean);
+        }
       } else {
         if (Array.isArray(this.local.defaultValue)) {
           this.local.defaultValue = this.local.defaultValue[0] || "";
+        }
+        if (this.local.popupLogic && Array.isArray(this.local.popupLogic.value)) {
+          this.local.popupLogic.value = this.local.popupLogic.value[0] || "";
         }
       }
     },
@@ -1292,9 +1610,29 @@ export default {
           this.local.defaultValue = this.local.defaultValue.filter((v) =>
             this.localOptions.includes(v)
           );
+
+          if (this.local.popupLogic?.enabled) {
+            if (!Array.isArray(this.local.popupLogic.value)) {
+              this.local.popupLogic.value = this.local.popupLogic.value
+                ? [String(this.local.popupLogic.value).trim()]
+                : [];
+            }
+
+            this.local.popupLogic.value = this.local.popupLogic.value.filter((v) =>
+              this.localOptions.includes(v)
+            );
+          }
         } else {
           if (!this.localOptions.includes(this.local.defaultValue)) {
             this.local.defaultValue = "";
+          }
+
+          if (
+            this.local.popupLogic?.enabled &&
+            this.local.popupLogic.value &&
+            !this.localOptions.includes(this.local.popupLogic.value)
+          ) {
+            this.local.popupLogic.value = "";
           }
         }
         this.optionsCount = this.localOptions.length;
@@ -1303,6 +1641,91 @@ export default {
   },
 
   methods: {
+    operatorsForType(type) {
+      const t = String(type || "text").toLowerCase();
+
+      if (t === "number" || t === "slider") {
+        return [
+          { value: "eq", label: "Equals" },
+          { value: "neq", label: "Does not equal" },
+          { value: "gt", label: "Greater than" },
+          { value: "gte", label: "Greater than or equal" },
+          { value: "lt", label: "Less than" },
+          { value: "lte", label: "Less than or equal" },
+          { value: "between", label: "Between" },
+          { value: "is_empty", label: "Is empty" },
+          { value: "is_not_empty", label: "Is not empty" },
+        ];
+      }
+
+      if (t === "date" || t === "time") {
+        return [
+          { value: "eq", label: "Equals" },
+          { value: "neq", label: "Does not equal" },
+          { value: "gt", label: "After / Greater than" },
+          { value: "gte", label: "On or after / Greater than or equal" },
+          { value: "lt", label: "Before / Less than" },
+          { value: "lte", label: "On or before / Less than equal" },
+          { value: "between", label: "Between" },
+          { value: "is_empty", label: "Is empty" },
+          { value: "is_not_empty", label: "Is not empty" },
+        ];
+      }
+
+      if (t === "checkbox") {
+        return [
+          { value: "eq", label: "Equals" },
+          { value: "neq", label: "Does not equal" },
+        ];
+      }
+
+      return [
+        { value: "eq", label: "Equals" },
+        { value: "neq", label: "Does not equal" },
+        { value: "contains", label: "Contains" },
+        { value: "not_contains", label: "Does not contain" },
+        { value: "is_empty", label: "Is empty" },
+        { value: "is_not_empty", label: "Is not empty" },
+      ];
+    },
+    fieldsForSelectedPopupTargetSection() {
+      const sectionKey = String(this.local?.popupLogic?._targetSectionKey || "");
+      if (!sectionKey) return [];
+
+      return this.availableTargetFields.filter(
+        (f) => String(f.sectionKey) === sectionKey
+      );
+    },
+
+    onPopupTargetToggle() {
+      const popup = this.local.popupLogic;
+      if (!popup) return;
+
+      if (!popup.showInTargetField) {
+        popup._targetSectionKey = "";
+        popup.targetFieldKey = "";
+      }
+    },
+
+    onPopupTargetSectionChanged() {
+      const popup = this.local.popupLogic;
+      if (!popup) return;
+
+      const fields = this.fieldsForSelectedPopupTargetSection();
+
+      if (!fields.length) {
+        popup.targetFieldKey = "";
+        return;
+      }
+
+      const stillValid = fields.some(
+        (f) => String(f.key) === String(popup.targetFieldKey || "")
+      );
+
+      if (!stillValid) {
+        popup.targetFieldKey = "";
+      }
+    },
     buildCurrentFieldSnapshot() {
       return {
         ...(this.fieldDefinition || {}),
@@ -1319,6 +1742,7 @@ export default {
           ...(this.fieldDefinition?.constraints || {}),
           ...(this.local || {}),
           visibilityLogic: this.cleanedVisibilityLogic(),
+          popupLogic: this.cleanedPopupLogic(),
         },
       };
     },
@@ -1334,6 +1758,10 @@ export default {
             rules: [this.makeLogicRule()],
           };
 
+      const existingPopupLogic = this.local?.popupLogic
+        ? JSON.parse(JSON.stringify(this.local.popupLogic))
+        : this.normalizePopupLogic(null, report.nextType || this.localType, !!this.local?.allowMultiple);
+
       const existingRuleSectionKeys = Array.isArray(existingVisibilityLogic.rules)
         ? existingVisibilityLogic.rules.map((r) => ({
             sourceFieldKey: String(r?.sourceFieldKey || ""),
@@ -1345,6 +1773,7 @@ export default {
         ...this.local,
         ...(report.nextConstraints || {}),
         visibilityLogic: existingVisibilityLogic, // preserve advanced tab exactly
+        popupLogic: existingPopupLogic, // preserve pop-up reminder settings during type conversion preview
       };
 
       this.localOptions =
@@ -1436,6 +1865,18 @@ export default {
               : [String(rule.value).trim()].filter(Boolean);
         }
       });
+      const popup = this.local?.popupLogic;
+      if (popup?.targetFieldKey) {
+          const targetFields = Array.isArray(this.availableTargetFields)
+            ? this.availableTargetFields
+            : [];
+
+          const matchedTarget =
+            targetFields.find((f) => String(f.key) === String(popup.targetFieldKey)) || null;
+
+          popup._targetSectionKey = matchedTarget?.sectionKey || "";
+          popup.showInTargetField = !!matchedTarget;
+      }
     },
     fieldsForSelectedSection(rule) {
       const sectionKey = String(rule?._sectionKey || "");
@@ -1553,6 +1994,52 @@ export default {
       };
     },
 
+    normalizePopupLogic(raw, currentType = "text", allowMultiple = false) {
+      const src = raw && typeof raw === "object" ? raw : {};
+      const type = String(currentType || "text").toLowerCase();
+      const isMultiChoice = type === "radio" && !!allowMultiple;
+
+      let value;
+
+      if (isMultiChoice) {
+        value = Array.isArray(src.value)
+          ? src.value.map((v) => String(v ?? "").trim()).filter(Boolean)
+          : src.value === "" || src.value === null || src.value === undefined
+          ? []
+          : [String(src.value).trim()].filter(Boolean);
+      } else if (type === "checkbox") {
+        value =
+          src.value === false ||
+          src.value === "false" ||
+          src.value === 0 ||
+          src.value === "0"
+            ? false
+            : true;
+      } else {
+        value = Array.isArray(src.value) ? src.value[0] || "" : src.value ?? "";
+      }
+
+      const targetFieldKey = String(
+          src.targetFieldKey ||
+          src.targetFieldId ||
+          src.target ||
+          ""
+        ).trim();
+
+      return {
+          enabled: !!src.enabled,
+          operator: String(src.operator || "eq"),
+          value,
+          valueTo: src.valueTo ?? "",
+          message: String(src.message || ""),
+
+          showInTargetField: !!targetFieldKey || !!src.showInTargetField,
+          targetFieldKey,
+          _targetSectionKey: "",
+          _chipInput: "",
+      };
+    },
+
     cleanedVisibilityLogic() {
       const src = this.local.visibilityLogic || {};
       const cleanedRules = (Array.isArray(src.rules) ? src.rules : [])
@@ -1604,6 +2091,70 @@ export default {
       };
     },
 
+    cleanedPopupLogic() {
+      const src = this.local.popupLogic || {};
+      const enabled = !!src.enabled;
+      const operator = String(src.operator || "eq");
+
+      if (!enabled) {
+        return {
+          enabled: false,
+          operator: "eq",
+          value: "",
+          valueTo: "",
+          message: "",
+          showInTargetField: false,
+          targetFieldKey: "",
+        };
+      }
+
+      const cleaned = {
+        enabled: true,
+        operator,
+        message: String(src.message || "").trim(),
+      };
+      const targetFieldKey = String(src.targetFieldKey || "").trim();
+
+      cleaned.showInTargetField = !!src.showInTargetField && !!targetFieldKey;
+      cleaned.targetFieldKey = cleaned.showInTargetField ? targetFieldKey : "";
+      if (this.popupNeedsNoValue(operator)) {
+        cleaned.value = "";
+        cleaned.valueTo = "";
+        return cleaned;
+      }
+
+      if (operator === "between") {
+        cleaned.value = src.value;
+        cleaned.valueTo = src.valueTo;
+        return cleaned;
+      }
+
+      if (this.popupSourceIsChoiceMulti()) {
+        const values = [];
+
+        if (Array.isArray(src.value)) {
+          src.value.forEach((v) => {
+            const val = String(v ?? "").trim();
+            if (val && !values.includes(val)) values.push(val);
+          });
+        } else {
+          const val = String(src.value ?? "").trim();
+          if (val) values.push(val);
+        }
+
+        const pending = String(src._chipInput || "").trim();
+        if (pending && !values.includes(pending)) values.push(pending);
+
+        cleaned.value = values;
+        cleaned.valueTo = "";
+        return cleaned;
+      }
+
+      cleaned.value = Array.isArray(src.value) ? src.value[0] || "" : src.value;
+      cleaned.valueTo = "";
+      return cleaned;
+    },
+
     addLogicRule() {
       if (!Array.isArray(this.local.visibilityLogic.rules)) {
         this.local.visibilityLogic.rules = [];
@@ -1653,6 +2204,22 @@ export default {
       return !!f && f.type === "radio" && !!f.allowMultiple;
     },
 
+    popupSourceType() {
+      return this.type || "text";
+    },
+
+    popupSourceIsChoiceSingle() {
+      return (this.isSelect || this.isRadio) && !this.local.allowMultiple;
+    },
+
+    popupSourceIsChoiceMulti() {
+      return this.isRadio && !!this.local.allowMultiple;
+    },
+
+    popupNeedsNoValue(operator) {
+      return this.needsNoValue(operator);
+    },
+
     sourceOptions(rule) {
       const f = this.findSourceField(rule);
       return Array.isArray(f?.options) ? f.options : [];
@@ -1671,51 +2238,11 @@ export default {
     },
 
     availableOperatorsForRule(rule) {
-      const type = this.ruleSourceType(rule);
+      return this.operatorsForType(this.ruleSourceType(rule));
+    },
 
-      if (type === "number" || type === "slider") {
-        return [
-          { value: "eq", label: "Equals" },
-          { value: "neq", label: "Does not equal" },
-          { value: "gt", label: "Greater than" },
-          { value: "gte", label: "Greater than or equal" },
-          { value: "lt", label: "Less than" },
-          { value: "lte", label: "Less than or equal" },
-          { value: "between", label: "Between" },
-          { value: "is_empty", label: "Is empty" },
-          { value: "is_not_empty", label: "Is not empty" },
-        ];
-      }
-
-      if (type === "date" || type === "time") {
-        return [
-          { value: "eq", label: "Equals" },
-          { value: "neq", label: "Does not equal" },
-          { value: "gt", label: "After / Greater than" },
-          { value: "gte", label: "On or after / Greater than or equal" },
-          { value: "lt", label: "Before / Less than" },
-          { value: "lte", label: "On or before / Less than equal" },
-          { value: "between", label: "Between" },
-          { value: "is_empty", label: "Is empty" },
-          { value: "is_not_empty", label: "Is not empty" },
-        ];
-      }
-
-      if (type === "checkbox") {
-        return [
-          { value: "eq", label: "Equals" },
-          { value: "neq", label: "Does not equal" },
-        ];
-      }
-
-      return [
-        { value: "eq", label: "Equals" },
-        { value: "neq", label: "Does not equal" },
-        { value: "contains", label: "Contains" },
-        { value: "not_contains", label: "Does not contain" },
-        { value: "is_empty", label: "Is empty" },
-        { value: "is_not_empty", label: "Is not empty" },
-      ];
+    availablePopupOperatorsForCurrentField() {
+      return this.operatorsForType(this.popupSourceType());
     },
 
     onSourceFieldChanged(rule) {
@@ -1759,6 +2286,32 @@ export default {
       }
     },
 
+    onPopupOperatorChanged() {
+      const popup = this.local.popupLogic;
+      if (!popup) return;
+
+      if (this.popupNeedsNoValue(popup.operator)) {
+        popup.value = "";
+        popup.valueTo = "";
+        return;
+      }
+
+      if (popup.operator === "between") {
+        popup.value = "";
+        popup.valueTo = "";
+        return;
+      }
+
+      if (this.popupSourceIsChoiceMulti()) {
+        popup.value = Array.isArray(popup.value) ? popup.value : [];
+      } else if (this.popupSourceType() === "checkbox") {
+        popup.value = true;
+      } else {
+        popup.valueTo = "";
+        if (Array.isArray(popup.value)) popup.value = popup.value[0] || "";
+      }
+    },
+
     addRuleChip(rule) {
       const val = String(rule?._chipInput || "").trim();
       if (!val) return;
@@ -1775,6 +2328,26 @@ export default {
     removeRuleChip(rule, idx) {
       if (!Array.isArray(rule?.value)) return;
       rule.value.splice(idx, 1);
+    },
+
+    addPopupChip() {
+      const popup = this.local.popupLogic;
+      const val = String(popup?._chipInput || "").trim();
+      if (!val) return;
+
+      const allowed = Array.isArray(this.localOptions) ? this.localOptions : [];
+      if (allowed.length && !allowed.includes(val)) return;
+
+      if (!Array.isArray(popup.value)) popup.value = [];
+      if (!popup.value.includes(val)) popup.value.push(val);
+
+      popup._chipInput = "";
+    },
+
+    removePopupChip(idx) {
+      const popup = this.local.popupLogic;
+      if (!Array.isArray(popup?.value)) return;
+      popup.value.splice(idx, 1);
     },
 
     logicSummary(rule) {
@@ -1797,6 +2370,43 @@ export default {
       }
 
       return `${fieldName} ${op} ${rule.value ?? ""}`;
+    },
+
+    popupSummary() {
+      const popup = this.local.popupLogic || {};
+      if (!popup.enabled) return "Pop-up message is disabled.";
+
+      const fieldName =
+        this.currentFieldLabel ||
+        this.fieldDefinition?.label ||
+        this.fieldDefinition?.name ||
+        "Current field";
+
+      const op = popup.operator || "eq";
+
+      const targetText = (() => {
+        const key = String(popup.targetFieldKey || "");
+        if (!popup.showInTargetField || !key) return "";
+
+        const target = this.availableTargetFields.find((f) => String(f.key) === key);
+        if (!target) return "";
+
+        return ` Message will also be shown under target field: ${target.pathLabel || target.label}.`;
+      })();
+
+      if (this.popupNeedsNoValue(op)) {
+        return `${fieldName} ${op.replaceAll("_", " ")} → show message.${targetText}`;
+      }
+
+      if (op === "between") {
+        return `${fieldName} between ${popup.value ?? ""} and ${popup.valueTo ?? ""} → show message.${targetText}`;
+      }
+
+      if (Array.isArray(popup.value)) {
+        return `${fieldName} ${op} [${popup.value.join(", ")}] → show message.${targetText}`;
+      }
+
+      return `${fieldName} ${op} ${popup.value ?? ""} → show message.${targetText}`;
     },
 
     addOrUpdateMark(kind) {
@@ -1889,6 +2499,15 @@ export default {
         } else if (this.local.defaultValue === removed) {
           this.local.defaultValue = "";
         }
+
+        if (this.local.popupLogic?.enabled) {
+          if (Array.isArray(this.local.popupLogic.value)) {
+            this.local.popupLogic.value = this.local.popupLogic.value.filter((v) => v !== removed);
+          } else if (this.local.popupLogic.value === removed) {
+            this.local.popupLogic.value = "";
+          }
+        }
+
         this.optionsCount = this.localOptions.length;
       }
     },
@@ -1901,6 +2520,15 @@ export default {
       } else if (this.local.defaultValue === removed) {
         this.local.defaultValue = "";
       }
+
+      if (this.local.popupLogic?.enabled) {
+        if (Array.isArray(this.local.popupLogic.value)) {
+          this.local.popupLogic.value = this.local.popupLogic.value.filter((v) => v !== removed);
+        } else if (this.local.popupLogic.value === removed) {
+          this.local.popupLogic.value = "";
+        }
+      }
+
       this.optionsCount = this.localOptions.length;
     },
 
@@ -1926,6 +2554,7 @@ export default {
       if (this.conversionReport?.lossy && !this.lossyConversionConfirmed) return;
 
       const visibilityLogic = this.cleanedVisibilityLogic();
+      const popupLogic = this.cleanedPopupLogic();
       const nextType = String(this.localType || this.currentFieldType || "text").toLowerCase();
       const originalType = String(this.currentFieldType || "text").toLowerCase();
       if (!this.allowTypeChange) {
@@ -1947,6 +2576,7 @@ export default {
           ...(fieldPayload.constraints || {}),
           ...(this.local || {}),
           visibilityLogic,
+          popupLogic,
         };
 
         if (this.isChoice) {
@@ -1972,6 +2602,7 @@ export default {
         required: !!this.local.required,
         readonly: !!this.local.readonly,
         visibilityLogic,
+        popupLogic,
       };
 
       this.$emit("updateConstraints", {
@@ -2008,6 +2639,7 @@ export default {
             ? Array.from(new Set(this.local.modalities.filter(Boolean).map(String)))
             : [],
           visibilityLogic,
+          popupLogic,
         };
 
         this.$emit("updateConstraints", {
@@ -2058,6 +2690,7 @@ export default {
         }
         cleaned.hourCycle = this.local.hourCycle || "24";
         cleaned.visibilityLogic = visibilityLogic;
+        cleaned.popupLogic = popupLogic;
 
         const updatedField = {
           ...this.fieldDefinition,
@@ -2107,6 +2740,7 @@ export default {
           step,
           marks,
           visibilityLogic,
+          popupLogic,
         };
 
         this.$emit("updateConstraints", {
@@ -2138,6 +2772,7 @@ export default {
         leftLabel: this.local.leftLabel || "",
         rightLabel: this.local.rightLabel || "",
         visibilityLogic,
+        popupLogic,
       };
 
       this.$emit("updateConstraints", {
@@ -2175,6 +2810,7 @@ export default {
         match: "all",
         rules: [this.makeLogicRule()],
       };
+      this.local.popupLogic = this.normalizePopupLogic(null, t, !!this.local.allowMultiple);
 
       this.activeTab = "basic";
       this.chipInput = "";
@@ -2231,6 +2867,7 @@ export default {
         match: "all",
         rules: [this.makeLogicRule()],
       };
+      this.local.popupLogic = this.normalizePopupLogic(null, t, !!this.local.allowMultiple);
 
       this.activeTab = "basic";
       this.chipInput = "";

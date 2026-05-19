@@ -219,9 +219,10 @@
                     :key="'f-' + mIdx + '-' + fIdx"
                     class="field-card"
                     :class="{
-                            'field-card-has-error': !!fieldErrors(mIdx, fIdx),
-                            'field-card-error-highlight': highlightedErrorKey === errorKey(mIdx, fIdx)
-                          }"
+                        'field-card-has-error': !!fieldErrors(mIdx, fIdx),
+                        'field-card-error-highlight': highlightedErrorKey === errorKey(mIdx, fIdx),
+                        'field-card-has-reminder': hasPopupReminder(mIdx, fIdx)
+                      }"
                           :data-error-key="errorKey(mIdx, fIdx)"
                   >
                     <div class="field-card-header">
@@ -314,12 +315,12 @@
                         :max="field.constraints?.max"
                         :step="field.constraints?.step"
                         @blur="() => {
-                            $nextTick(() => {
-                              validateField(mIdx, fIdx);
-                            });
-                          }"
+                        $nextTick(() => {
+                          validateField(mIdx, fIdx);
+                        });
+                      }"
                         @input="() => { clearError(mIdx, fIdx); onRuntimeFieldChanged(mIdx, fIdx); }"
-                      />
+                       />
 
                       <!-- CHECKBOX -->
                       <FieldCheckbox
@@ -461,7 +462,17 @@
                         Skipped
                       </span>
                     </div>
-
+                    <div
+                      v-if="hasPopupReminder(mIdx, fIdx)"
+                      class="popup-reminder-message"
+                    >
+                      <div
+                        v-for="(msg, reminderIdx) in popupReminderMessages(mIdx, fIdx)"
+                        :key="'popup-reminder-' + reminderIdx"
+                      >
+                        {{ msg }}
+                      </div>
+                    </div>
                     <div v-if="fieldCalcWarning(mIdx, fIdx)" class="calc-warning-message">
                       {{ fieldCalcWarning(mIdx, fIdx) }}
                     </div>
@@ -702,6 +713,7 @@ import {
   computeCalculation,
   sectionHasVisibleFields,
   evaluateFieldVisibility,
+  getPopupReminderMessagesForField,
 } from "@/utils/formLogicRuntime";
 
 export default {
@@ -2356,6 +2368,21 @@ applyImportedRowFromDialog(payload) {
       if (!field) return "";
 
       return getCalculationFormulaForField(this.study, this.selectedModels, field) || "";
+    },
+    popupReminderMessages(mIdx, fIdx) {
+      const cellData = this.getCurrentCellData();
+
+      return getPopupReminderMessagesForField(
+        this.study,
+        this.selectedModels,
+        cellData,
+        mIdx,
+        fIdx
+      );
+    },
+
+    hasPopupReminder(mIdx, fIdx) {
+      return this.popupReminderMessages(mIdx, fIdx).length > 0;
     },
     /* ============================================================
        CALC RUNTIME HELPERS
@@ -6371,6 +6398,21 @@ select:focus {
 
 .btn-unsaved-exit:hover {
   background: #991b1b;
+}
+.field-card-has-reminder {
+  border-color: #f59e0b;
+  background: #fffbeb;
+}
+
+.popup-reminder-message {
+  margin-top: 8px;
+  padding: 8px 10px;
+  border: 1px solid #fbbf24;
+  border-radius: 8px;
+  background: #fffbeb;
+  color: #92400e;
+  font-size: 13px;
+  line-height: 1.4;
 }
 @media (max-width: 768px) {
  .study-header-container {
