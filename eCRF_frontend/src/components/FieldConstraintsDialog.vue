@@ -1,8 +1,16 @@
 <template>
   <div class="constraints-edit-modal">
     <div class="head">
-      <h3>Field Settings & Constraints</h3>
-      <span class="type-chip">{{ currentTypeLabel }}</span>
+      <div class="field-settings-title-wrap">
+        <h3>Field Settings & Constraints</h3>
+
+        <div class="field-settings-current-field" :title="currentEditingFieldTitle">
+          Editing field: <strong>{{ currentEditingFieldTitle }}</strong>
+          <span class="field-settings-type-inline">
+            Type of field: <strong>{{ currentTypeLabel }}</strong>
+          </span>
+        </div>
+      </div>
     </div>
 
     <div class="dialog-tabs">
@@ -1308,6 +1316,15 @@ export default {
     },
 
   computed: {
+    currentEditingFieldTitle() {
+      return (
+        this.currentFieldLabel ||
+        this.fieldDefinition?.label ||
+        this.fieldDefinition?.name ||
+        this.fieldDefinition?.title ||
+        "Current field"
+      );
+    },
     type() {
       return (this.localType || this.currentFieldType || "text").toLowerCase();
     },
@@ -2881,47 +2898,71 @@ export default {
 
 <style scoped>
 .constraints-edit-modal {
-  width: 560px;
+  width: 600px;
   background: #fff;
-  padding: 16px 16px 12px;
-  border-radius: 8px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
-  max-height: 80vh;
+  padding: 18px 18px 14px;
+  border-radius: 14px;
+  box-shadow: 0 18px 45px rgba(15, 23, 42, 0.22);
+  max-height: 82vh;
   overflow-y: auto;
   box-sizing: border-box;
 }
 .head {
   display: flex;
+  flex-direction: column;
   align-items: center;
-  justify-content: space-between;
-  margin-bottom: 8px;
+  justify-content: center;
+  gap: 8px;
+  text-align: center;
+  margin-bottom: 14px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid #eef2f7;
 }
-.type-chip {
-  background: #eef2ff;
-  color: #3730a3;
-  border: 1px solid #c7d2fe;
-  padding: 2px 8px;
-  border-radius: 999px;
-  font-size: 12px;
+
+.head h3 {
+  margin: 0;
+  color: #111827;
+  font-size: 18px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
 }
 
 .dialog-tabs {
-  display: flex;
-  gap: 8px;
-  margin-bottom: 12px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  margin: 0 0 14px;
+  padding: 4px;
+  background: #f3f4f6;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
 }
 .dialog-tab {
-  padding: 8px 12px;
-  border: 1px solid #d1d5db;
-  border-radius: 8px;
-  background: #f9fafb;
+  width: 100%;
+  padding: 9px 12px;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  background: transparent;
+  color: #4b5563;
   cursor: pointer;
   font-size: 13px;
+  font-weight: 700;
+  transition:
+    background 0.18s ease,
+    color 0.18s ease,
+    border-color 0.18s ease,
+    box-shadow 0.18s ease,
+    transform 0.18s ease;
+}
+.dialog-tab:hover {
+  background: #fff;
+  color: #111827;
 }
 .dialog-tab.active {
-  background: #2563eb;
-  color: #fff;
-  border-color: #2563eb;
+  background: #fff;
+  color: #1d4ed8;
+  border-color: #bfdbfe;
+  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.14);
 }
 
 .group {
@@ -3142,5 +3183,38 @@ select {
 .sort-mark-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+.field-settings-title-wrap {
+  min-width: 0;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+}
+
+.field-settings-current-field {
+  max-width: 100%;
+  font-size: 13px;
+  color: #4b5563;
+  line-height: 1.45;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.field-settings-current-field strong {
+  color: #111827;
+  font-weight: 800;
+}
+
+.field-settings-type-inline {
+  margin-left: 10px;
+  color: #6b7280;
+}
+
+.field-settings-type-inline strong {
+  color: #111827;
+  font-weight: 800;
 }
 </style>
