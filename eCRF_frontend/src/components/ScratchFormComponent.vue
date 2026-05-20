@@ -25,6 +25,12 @@
             @click="activeTab = 'obi'"
           >Ontology (OBI)</button>
           <button
+            :class="{ active: activeTab === 'savedTemplates' }"
+            @click="activeTab = 'savedTemplates'"
+          >
+            Saved Templates
+          </button>
+          <button
             v-if="false"
             :class="{ active: activeTab === 'shacl' }"
             @click="activeTab = 'shacl'"
@@ -177,6 +183,80 @@
             </button>
           </div>
         </div>
+        <div v-else-if="activeTab === 'savedTemplates'" class="saved-template-fields">
+          <div class="available-fields-search">
+            <input
+              type="text"
+              v-model="savedTemplateQuery"
+              placeholder="Search saved templates..."
+              class="search-input"
+              aria-label="Search saved templates"
+            />
+          </div>
+
+          <div class="saved-template-toolbar">
+            <button
+              class="btn-add-selected"
+              :disabled="savedTemplatesLoading"
+              @click="loadSavedTemplates"
+            >
+              {{ savedTemplatesLoading ? "Loading…" : "Refresh" }}
+            </button>
+
+            <span class="obi-count">
+              {{ filteredSavedTemplates.length }} result{{ filteredSavedTemplates.length === 1 ? "" : "s" }}
+            </span>
+          </div>
+
+          <div class="tab-results saved-template-list">
+            <div
+              v-for="template in filteredSavedTemplates"
+              :key="`${template._savedTemplateId}_${template._savedSectionIndex}`"
+              class="template-button saved-template-card"
+            >
+              <div @click="openModelDialog(template)">
+                <div class="template-header">
+                  <i :class="template.sourceType === 'form' ? 'fas fa-file-alt' : 'fas fa-layer-group'"></i>
+                  <span>{{ template.title }}</span>
+                </div>
+
+                <div class="saved-template-section-name">
+                  {{ template.sectionTitle }}
+                </div>
+
+                <div class="template-description">
+                  {{ template.description || "No description available." }}
+                </div>
+
+                <ul v-if="savedTemplateQuery && template.fields?.length" class="match-preview">
+                  <li v-for="field in previewMatches(template.fields)" :key="field.name">
+                    {{ field.label || prettyModelTitle(field.name) }}
+                  </li>
+                </ul>
+              </div>
+
+              <button
+                  v-if="canDeleteSavedTemplate(template)"
+                  class="saved-template-delete"
+                  title="Delete saved template"
+                  @click.stop.prevent="openDeleteSavedTemplateDialog(template)"
+                >
+                  <i :class="icons.delete"></i>
+                </button>
+            </div>
+
+            <div v-if="savedTemplatesError" class="obi-error">
+              {{ savedTemplatesError }}
+            </div>
+
+            <div
+              v-if="!savedTemplatesLoading && filteredSavedTemplates.length === 0"
+              class="no-matches"
+            >
+              No saved templates found.
+            </div>
+          </div>
+        </div>
 
         <!-- SHACL -->
         <div v-else-if="false && activeTab === 'shacl'">
@@ -261,6 +341,9 @@
 
                       <button class="options-item" role="menuitem" @click.prevent="onUploadTemplate">
                         Upload Template
+                      </button>
+                      <button class="options-item" role="menuitem" @click.prevent="openSaveTemplateFormDialog">
+                          Save template/form
                       </button>
 
                       <button class="options-item danger" role="menuitem" @click.prevent="confirmClearForm">
@@ -751,6 +834,21 @@
         />
       </div>
     </div>
+    <SaveTemplateFormDialog
+      :visible="showSaveTemplateFormDialog"
+      :form="currentForm"
+      :saving="saveTemplateBusy"
+      @save="handleSaveTemplateForm"
+      @close="closeSaveTemplateFormDialog"
+    />
+    <SaveTemplateFormDialog
+      :visible="showDeleteSavedTemplateDialog"
+      mode="delete"
+      :form="selectedSavedTemplateForDelete?.form_schema || { sections: [] }"
+      :saving="deleteTemplateBusy"
+      @delete="handleDeleteSavedTemplate"
+      @close="closeDeleteSavedTemplateDialog"
+    />
 
     <!-- Upload Dialog -->
     <div v-if="showUploadDialog" class="modal-overlay">
@@ -852,6 +950,7 @@ import ImportCsvTemplateDialog from "./ImportCsvTemplateDialog.vue";
 import RearrangeStructureDialog from "@/components/RearrangeStructureDialog.vue";
 import FieldTable from "@/components/FieldTable.vue";
 import FieldOptionRemapDialog from "@/components/FieldOptionRemapDialog.vue";
+import SaveTemplateFormDialog from "@/components/SaveTemplateFormDialog.vue";
 export default {
   name: "ScratchFormComponent",
   components: {
@@ -871,6 +970,7 @@ export default {
     FieldTable,
     RearrangeStructureDialog,
     FieldOptionRemapDialog,
+    SaveTemplateFormDialog,
   },
 
   beforeRouteLeave(to, from, next) {
@@ -1023,10 +1123,46 @@ export default {
       pendingFieldOptionRemapNextOptions: [],
       scratchScrollDirection: "down",
       hasScratchScrollableContent: false,
+
+      showSaveTemplateFormDialog: false,
+      saveTemplateBusy: false,
+
+      savedTemplates: [],
+      savedTemplateQuery: "",
+      savedTemplatesLoading: false,
+      savedTemplatesError: "",
+
+      showDeleteSavedTemplateDialog: false,
+      selectedSavedTemplateForDelete: null,
+      deleteTemplateBusy: false,
     };
   },
 
   computed: {
+    filteredSavedTemplates() {
+      const q = String(this.savedTemplateQuery || "").trim().toLowerCase();
+      const templates = Array.isArray(this.savedTemplates) ? this.savedTemplates : [];
+
+      if (!q) return templates;
+
+      return templates.filter(template => {
+        const text = [
+          template.title,
+          template.description,
+          ...(template.fields || []).flatMap(field => [
+            field.label,
+            field.name,
+            field.type,
+            field.description
+          ])
+        ]
+          .filter(Boolean)
+          .join(" ")
+          .toLowerCase();
+
+        return text.includes(q);
+      });
+    },
     currentEditingFieldDefinition() {
       const { sectionIndex, fieldIndex } = this.currentFieldIndices || {};
       const field = this.currentForm.sections?.[sectionIndex]?.fields?.[fieldIndex];
@@ -1141,6 +1277,13 @@ export default {
     activeTab(newVal) {
       if (newVal !== "template" && this.searchQuery) this.searchQuery = "";
       if (newVal !== "obi") this.resetObiState();
+      if (newVal !== "savedTemplates" && this.savedTemplateQuery) {
+        this.savedTemplateQuery = "";
+      }
+
+      if (newVal === "savedTemplates") {
+        this.loadSavedTemplates();
+      }
     },
 
     modelAddToExisting() {
@@ -1227,7 +1370,7 @@ export default {
     }
 
     await this.loadDataModels();
-
+    await this.loadSavedTemplates();
     this.$nextTick(() => {
       this.hydratingScratch = false;
       this.updateScratchScrollState();
@@ -1241,6 +1384,282 @@ export default {
   },
 
   methods: {
+    openDeleteSavedTemplateDialog(template) {
+      const record = template?._savedTemplateRecord;
+
+      if (!record) {
+        this.openGenericDialog("Could not find saved template details.");
+        return;
+      }
+
+      this.selectedSavedTemplateForDelete = record;
+      this.showDeleteSavedTemplateDialog = true;
+    },
+
+    closeDeleteSavedTemplateDialog() {
+      if (this.deleteTemplateBusy) return;
+
+      this.showDeleteSavedTemplateDialog = false;
+      this.selectedSavedTemplateForDelete = null;
+    },
+
+    async handleDeleteSavedTemplate(payload) {
+      if (this.deleteTemplateBusy) return;
+
+      const record = this.selectedSavedTemplateForDelete;
+
+      if (!record?.id) {
+        this.openGenericDialog("Could not identify saved template.");
+        return;
+      }
+
+      try {
+        this.deleteTemplateBusy = true;
+
+        if (payload.type === "all") {
+          await axios.delete(`/forms/saved-templates/${record.id}`, {
+            headers: this.authHeader
+          });
+        } else {
+          const sections = Array.isArray(record?.form_schema?.sections)
+            ? record.form_schema.sections
+            : [];
+
+          const deleteIndexes = new Set(payload.sectionIndexes || []);
+
+          const remainingSections = sections.filter((_, index) => !deleteIndexes.has(index));
+
+          if (!remainingSections.length) {
+            await axios.delete(`/forms/saved-templates/${record.id}`, {
+              headers: this.authHeader
+            });
+          } else {
+            await axios.patch(
+              `/forms/saved-templates/${record.id}`,
+              {
+                form_schema: {
+                  ...record.form_schema,
+                  sections: remainingSections
+                },
+                source_type: remainingSections.length === 1 ? "section_subset" : record.source_type
+              },
+              {
+                headers: this.authHeader
+              }
+            );
+          }
+        }
+
+        this.showDeleteSavedTemplateDialog = false;
+        this.selectedSavedTemplateForDelete = null;
+
+        await this.loadSavedTemplates();
+
+        this.openGenericDialog("Saved template updated successfully.");
+      } catch (e) {
+        console.error("Failed to delete saved template/sections", e);
+
+        const message =
+          e?.response?.data?.detail ||
+          e?.response?.data?.message ||
+          "Failed to delete saved template.";
+
+        this.openGenericDialog(message);
+      } finally {
+        this.deleteTemplateBusy = false;
+      }
+    },
+    canDeleteSavedTemplate(template) {
+      const role = String(this.$store.state.user?.profile?.role || this.$store.state.user?.role || "")
+        .trim()
+        .toLowerCase();
+
+      const isAdmin = role === "admin";
+      const isOwner = Number(template?._createdBy) === Number(this.currentUserId);
+
+      return isAdmin || isOwner;
+    },
+    openSaveTemplateFormDialog() {
+      this.closeAdditionalOptions();
+      this.ensureCurrentFormExists();
+      this.showSaveTemplateFormDialog = true;
+    },
+
+    closeSaveTemplateFormDialog() {
+      if (this.saveTemplateBusy) return;
+      this.showSaveTemplateFormDialog = false;
+    },
+
+    async handleSaveTemplateForm(meta) {
+      if (this.saveTemplateBusy) return;
+
+      try {
+        this.saveTemplateBusy = true;
+
+        const payload = this.buildSavedTemplatePayload(meta);
+
+        await axios.post("/forms/saved-templates", payload, {
+          headers: this.authHeader
+        });
+
+        this.showSaveTemplateFormDialog = false;
+        await this.loadSavedTemplates();
+        this.activeTab = "savedTemplates";
+
+        this.openGenericDialog("Template saved successfully.");
+      } catch (e) {
+        console.error("Failed to save reusable template", e);
+
+        const message =
+          e?.response?.data?.detail ||
+          e?.response?.data?.message ||
+          "Failed to save template.";
+
+        this.openGenericDialog(message);
+      } finally {
+        this.saveTemplateBusy = false;
+      }
+    },
+
+    buildSavedTemplatePayload(meta) {
+      this.ensureCurrentFormExists();
+
+      const isSelectedSections = meta.type === "sections";
+
+      const selectedSections = isSelectedSections
+        ? (meta.sectionIndexes || []).map(index => this.currentForm.sections?.[index])
+        : this.currentForm.sections;
+
+      const sections = (selectedSections || [])
+        .filter(Boolean)
+        .map(section => this.toReusableBasicSection(section));
+
+      return {
+        title: meta.title,
+        description: meta.description,
+        source_type: isSelectedSections ? "section_subset" : "form",
+        form_schema: {
+          sections
+        }
+      };
+    },
+    toReusableBasicSection(section) {
+      return {
+        _id: section._id || this.uuidForLogic(),
+        title: section.title || "Untitled Section",
+        description: section.description || "",
+        collapsed: false,
+        fields: Array.isArray(section.fields)
+          ? section.fields.map(field => this.toReusableBasicField(field))
+          : []
+      };
+    },
+
+    toReusableBasicField(field) {
+      const cloned = JSON.parse(JSON.stringify(field || {}));
+
+      return {
+        ...cloned,
+        _id: cloned._id || this.uuidForLogic(),
+        value: this.emptyReusableFieldValue(cloned),
+        constraints: this.getBasicConstraintsForCopiedField(cloned)
+      };
+    },
+
+    emptyReusableFieldValue(field) {
+      const type = String(field?.type || "").toLowerCase();
+
+      if (type === "checkbox") return false;
+      if (type === "file") return [];
+      if (type === "table") return { rows: [] };
+
+      return "";
+    },
+
+    async loadSavedTemplates() {
+      if (this.savedTemplatesLoading) return;
+
+      try {
+        this.savedTemplatesLoading = true;
+        this.savedTemplatesError = "";
+
+        const res = await axios.get("/forms/saved-templates", {
+          headers: this.authHeader
+        });
+
+        const records = Array.isArray(res.data)
+          ? res.data
+          : Array.isArray(res.data?.items)
+            ? res.data.items
+            : [];
+
+        this.savedTemplates = records.flatMap(record =>
+          this.savedTemplateRecordToModels(record)
+        );
+      } catch (e) {
+        console.error("Failed to load reusable templates", e);
+        this.savedTemplatesError = "Failed to load saved templates.";
+        this.savedTemplates = [];
+      } finally {
+        this.savedTemplatesLoading = false;
+      }
+    },
+
+    savedTemplateRecordToModels(record) {
+      const sections = Array.isArray(record?.form_schema?.sections)
+        ? record.form_schema.sections
+        : [];
+
+      if (!sections.length) return [];
+
+      return sections.map((section, index) => ({
+        _savedTemplateId: record.id,
+        _savedSectionIndex: index,
+        _createdBy: record.created_by,
+
+        // keep full original record for delete/edit
+        _savedTemplateRecord: record,
+
+        sourceType: record.source_type,
+
+        // Keep saved template title same
+        title: record.title,
+
+        // Add section name separately so cards are distinguishable
+        sectionTitle: section.title || `Section ${index + 1}`,
+
+        description: record.description,
+        fields: Array.isArray(section.fields) ? section.fields : []
+      }));
+    },
+
+    async deleteSavedTemplate(template) {
+      const id = template?._savedTemplateId || template?.id;
+
+      if (!id) {
+        this.openGenericDialog("Could not identify saved template.");
+        return;
+      }
+
+      try {
+        await axios.delete(`/forms/saved-templates/${id}`, {
+          headers: this.authHeader
+        });
+
+        await this.loadSavedTemplates();
+
+        this.openGenericDialog("Template deleted successfully.");
+      } catch (e) {
+        console.error("Failed to delete saved template", e);
+
+        const message =
+          e?.response?.data?.detail ||
+          e?.response?.data?.message ||
+          "Failed to delete template.";
+
+        this.openGenericDialog(message);
+      }
+    },
     getScratchScrollEl() {
       const el = this.$refs.scratchScrollEl;
       return Array.isArray(el) ? el[0] : el;
@@ -5037,7 +5456,88 @@ select:focus {
   color: #111827;
   line-height: 1.25;
 }
+.saved-template-card {
+  position: relative;
+}
 
+.saved-template-delete {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: 8px;
+  background: #fee2e2;
+  color: #b91c1c;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.saved-template-delete:hover {
+  background: #fecaca;
+}
+.saved-template-fields {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.saved-template-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 8px 0 10px;
+}
+
+.saved-template-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.saved-template-card {
+  cursor: pointer;
+}
+
+.saved-template-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+  font-size: 11px;
+  color: #6b7280;
+}
+
+.saved-template-meta span {
+  border: 1px solid #e5e7eb;
+  background: #f9fafb;
+  border-radius: 999px;
+  padding: 3px 8px;
+}
+
+.saved-template-meta .saved-template-type {
+  border-color: #bfdbfe;
+  background: #eff6ff;
+  color: #1d4ed8;
+  font-weight: 700;
+}
+
+.saved-template-card mark {
+  background: #fef3c7;
+  color: #92400e;
+  padding: 0 2px;
+  border-radius: 3px;
+}
+.saved-template-section-name {
+  margin-top: 4px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #374151;
+}
 /* =========================
    RESPONSIVE
    ========================= */

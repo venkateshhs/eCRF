@@ -15,7 +15,7 @@ from .logger import logger
 from .obi_api import router as obi_router
 from .settings import get_settings
 from .users import router as users_router
-
+from .saved_form_templates import router as saved_form_templates
 settings = get_settings()
 cfg = get_datalad_config()
 
@@ -39,7 +39,7 @@ app.include_router(api_router)
 app.include_router(audit_router)
 app.include_router(obi_router)
 app.include_router(datalad_ops_router)
-
+app.include_router(saved_form_templates)
 
 @app.on_event("startup")
 async def _startup():

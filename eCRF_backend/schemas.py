@@ -327,3 +327,46 @@ class RoleUpdate(BaseModel):
 
 class BulkPayload(BaseModel):
     entries: List[StudyDataEntryCreate]
+
+
+# -------------------- Saved Reusable Form Templates --------------------
+
+class SavedFormTemplateBase(BaseModel):
+    title: constr(min_length=1, max_length=255)
+    description: constr(min_length=1)
+
+    # Always form-shaped.
+    # Example:
+    # {
+    #   "sections": [
+    #     {
+    #       "title": "Demographics",
+    #       "fields": [...]
+    #     }
+    #   ]
+    # }
+    form_schema: Dict[str, Any] = Field(default_factory=dict)
+
+    # "form" = full form saved
+    # "section_subset" = selected section(s) saved, but still wrapped as form_schema
+    source_type: Literal["form", "section_subset"] = "form"
+
+
+class SavedFormTemplateCreate(SavedFormTemplateBase):
+    pass
+
+
+class SavedFormTemplateOut(SavedFormTemplateBase):
+    id: int
+    created_by: int
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+class SavedFormTemplateUpdate(BaseModel):
+    title: Optional[constr(min_length=1, max_length=255)] = None
+    description: Optional[constr(min_length=1)] = None
+    form_schema: Optional[Dict[str, Any]] = None
+    source_type: Optional[Literal["form", "section_subset"]] = None

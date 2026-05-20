@@ -143,6 +143,31 @@ class SharedFormAccess(Base):
     allowed_section_ids = Column(JSON, nullable=True)
     study = relationship("StudyMetadata", back_populates="shared_links")
 
+class SavedFormTemplate(Base):
+    __tablename__ = "saved_form_templates"
+
+    id = Column(Integer, primary_key=True, index=True)
+
+    title = Column(String(255), nullable=False, index=True)
+    description = Column(Text, nullable=False)
+
+    # Always store as a form-like structure.
+    # If user saved only one/few sections, form_schema["sections"] will contain only those sections.
+    form_schema = Column(JSON, nullable=False)
+
+    # Optional metadata for frontend/UI.
+    # Examples:
+    # "form" -> user saved whole form
+    # "section_subset" -> user saved selected section(s), still wrapped as form_schema
+    source_type = Column(String(30), nullable=False, server_default="form", index=True)
+
+    created_by = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+
+    created_at = Column(DateTime(timezone=True), default=local_now, nullable=False)
+    updated_at = Column(DateTime(timezone=True), default=local_now, onupdate=local_now, nullable=False)
+
+    creator = relationship("User", foreign_keys=[created_by])
+
 class StudyTemplateVersion(Base):
     __tablename__ = "study_template_versions"
 
