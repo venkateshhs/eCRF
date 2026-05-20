@@ -15,7 +15,7 @@
           <button
             :class="{ active: activeTab === 'template' }"
             @click="activeTab = 'template'"
-          >Available Template</button>
+          >Standard Template</button>
           <button
             :class="{ active: activeTab === 'custom' }"
             @click="activeTab = 'custom'"
