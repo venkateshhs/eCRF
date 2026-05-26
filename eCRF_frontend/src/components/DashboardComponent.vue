@@ -216,6 +216,36 @@
               <h2 class="existing-studies-title">Existing Studies</h2>
             </div>
 
+            <div class="study-search-row">
+              <div class="study-search-box">
+                <i :class="icons.search || 'fas fa-search'" class="study-search-icon" aria-hidden="true"></i>
+                <input
+                  v-model.trim="studySearchQuery"
+                  type="search"
+                  class="study-search-input"
+                  placeholder="Search by study name or description"
+                  aria-label="Search studies by name or description"
+                />
+                <button
+                  v-if="studySearchQuery"
+                  type="button"
+                  class="study-search-clear"
+                  @click="clearStudySearch"
+                  aria-label="Clear study search"
+                >
+                  ×
+                </button>
+              </div>
+              <div class="study-search-count" aria-live="polite">
+                <template v-if="studySearchQuery">
+                  Showing {{ filteredStudies.length }} of {{ studies.length }} studies
+                </template>
+                <template v-else>
+                  {{ studies.length }} studies
+                </template>
+              </div>
+            </div>
+
             <table class="study-table">
               <thead>
                 <tr>
@@ -227,16 +257,20 @@
                 </tr>
               </thead>
               <tbody>
-                <tr v-for="study in studies" :key="study.id">
+                <tr
+                  v-for="study in filteredStudies"
+                  :key="study.id"
+                  :class="{ 'study-row-search-match': studySearchQuery }"
+                >
                   <td>
-                    <span class="study-name-cell">
-                      <span>{{ study.study_name }}</span>
-                      <span v-if="isDraftStudy(study)" class="status-tag status-tag--draft">DRAFT</span>
-                    </span>
-                  </td>
-                  <td>{{ study.study_description }}</td>
-                  <td>{{ formatDateTime(study.created_at) }}</td>
-                  <td>{{ formatDateTime(study.updated_at) }}</td>
+                      <span class="study-name-cell">
+                        <span v-html="highlightStudyMatch(study.study_name)"></span>
+                        <span v-if="isDraftStudy(study)" class="status-tag status-tag--draft">DRAFT</span>
+                      </span>
+                    </td>
+                    <td v-html="highlightStudyMatch(study.study_description)"></td>
+                    <td>{{ formatDateTime(study.created_at) }}</td>
+                    <td>{{ formatDateTime(study.updated_at) }}</td>
 
                   <td class="actions-cell">
                     <div class="action-buttons">
@@ -257,6 +291,16 @@
                           View Study
                         </button>
                     </div>
+                  </td>
+                </tr>
+                <tr v-if="!filteredStudies.length">
+                  <td colspan="5" class="no-studies-cell">
+                    <template v-if="studySearchQuery">
+                      No studies found for “{{ studySearchQuery }}”.
+                    </template>
+                    <template v-else>
+                      No studies found.
+                    </template>
                   </td>
                 </tr>
               </tbody>
@@ -405,6 +449,7 @@ export default {
       activeSection: "study-management",
       showStudyOptions: false,
       studies: [],
+      studySearchQuery: "",
       icons,
       actionStyle: "cards",
 
@@ -451,6 +496,22 @@ export default {
     },
   },
   computed: {
+    filteredStudies() {
+      const q = this.normalizeSearchText(this.studySearchQuery);
+      if (!q) return this.studies;
+
+      return this.studies.filter((study) => {
+        const searchable = [
+          study?.study_name,
+          study?.study_description,
+        ]
+          .map((v) => this.normalizeSearchText(v))
+          .join(" ");
+
+        return searchable.includes(q);
+      });
+    },
+
     // Hide dashboard sidebar on View Study + Add Data + Scratch Form
     hideSidebar() {
       return (
@@ -543,6 +604,42 @@ export default {
       // Otherwise: only if permission says view OR add_data (add implies view)
       const perms = this.studyPerms(study);
       return perms ? (perms.view === true || perms.add_data === true) : false;
+    },
+
+    normalizeSearchText(value) {
+      return String(value ?? "").toLowerCase().trim();
+    },
+
+    escapeHtml(value) {
+      return String(value ?? "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+    },
+
+    escapeRegExp(value) {
+      return String(value ?? "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    },
+
+
+    highlightStudyMatch(value) {
+      const text = this.escapeHtml(value);
+      const q = this.studySearchQuery;
+      if (!q) return text;
+
+      const normalized = this.normalizeSearchText(q);
+      if (!normalized) return text;
+
+      const pattern = this.escapeRegExp(q.trim());
+      if (!pattern) return text;
+
+      return text.replace(new RegExp(`(${pattern})`, "gi"), '<mark class="study-search-highlight">$1</mark>');
+    },
+
+    clearStudySearch() {
+      this.studySearchQuery = "";
     },
 
     setPageNoXScroll(on) {
@@ -1299,6 +1396,86 @@ export default {
   text-align: center;
 }
 
+.study-search-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0 0 14px 0;
+  flex-wrap: wrap;
+}
+.study-search-box {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: min(520px, 100%);
+}
+.study-search-icon {
+  position: absolute;
+  left: 12px;
+  color: #6b7280;
+  font-size: 13px;
+  pointer-events: none;
+}
+.study-search-input {
+  width: 100%;
+  min-height: 40px;
+  padding: 9px 38px 9px 36px;
+  border: 1px solid #e0e0e0;
+  border-radius: 10px;
+  background: #fff;
+  color: #333;
+  font-size: 14px;
+  outline: none;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
+}
+.study-search-input::placeholder {
+  color: #9ca3af;
+}
+.study-search-input:focus {
+  border-color: #2f6fed;
+  box-shadow: 0 0 0 3px rgba(47, 111, 237, 0.12);
+}
+.study-search-clear {
+  position: absolute;
+  right: 8px;
+  width: 26px;
+  height: 26px;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: #6b7280;
+  cursor: pointer;
+  font-size: 20px;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.2s ease, color 0.2s ease;
+}
+.study-search-clear:hover {
+  background: #f3f4f6;
+  color: #111827;
+}
+.study-search-count {
+  color: #666;
+  font-size: 13px;
+  white-space: nowrap;
+}
+:deep(.study-search-highlight) {
+  background: #bfdbfe;
+  color: #1d4ed8;
+  border-radius: 4px;
+  padding: 0 2px;
+  font-weight: 800;
+}
+.no-studies-cell {
+  text-align: center !important;
+  color: #666 !important;
+  padding: 22px 12px !important;
+  background: #fafafa;
+}
+
 /* Table */
 .study-table {
   width: 100%;
@@ -1321,6 +1498,17 @@ export default {
 }
 .study-table tr:hover {
   background-color: #f9f9f9;
+}
+.study-table tbody tr.study-row-search-match {
+  background: #eff6ff;
+}
+
+.study-table tbody tr.study-row-search-match:hover {
+  background: #dbeafe;
+}
+
+.study-table tbody tr.study-row-search-match td:first-child {
+  box-shadow: inset 4px 0 0 #3b82f6;
 }
 
 /* draft tag */
@@ -1675,6 +1863,14 @@ export default {
   .study-table td {
     padding: 16px;
     font-size: 15px;
+  }
+
+  .study-search-input {
+    font-size: 15px;
+  }
+
+  .study-search-count {
+    font-size: 14px;
   }
 
 }
