@@ -549,6 +549,8 @@
       v-if="showSubjectDialog"
       :subjectCount="subjectCountDraft"
       :assignmentMethod="assignmentMethodDraft"
+      :subjectIdConfig="sd.subjectIdConfig"
+      :subjectIdFormatEditable="false"
       :subjects="subjectDrafts"
       :groupData="groupList"
       :saving="savingSubjects"
@@ -645,10 +647,12 @@
         <div class="unsaved-exit-actions">
           <button
             type="button"
-            class="btn-clear"
-            @click="cancelUnsavedExit"
+            class="btn-save"
+            @click="saveAndLeaveFromUnsavedDialog"
+            :disabled="blockingErrorsPresent || !canEdit"
+            :title="!canEdit ? 'This shared link is view-only' : (blockingErrorsPresent ? 'Fix validation errors before saving' : 'Save and leave')"
           >
-            Cancel
+            Save and Leave
           </button>
 
           <button
@@ -1279,6 +1283,11 @@ export default {
     cancelUnsavedExit() {
       this.showUnsavedExitDialog = false;
       this.pendingNavigationAction = null;
+    },
+    saveAndLeaveFromUnsavedDialog() {
+      this.showUnsavedExitDialog = false;
+      this.pendingNavigationAction = null;
+      this.submitData();
     },
 
     confirmUnsavedExit() {
@@ -4642,211 +4651,211 @@ applyImportedRowFromDialog(payload) {
     },
 
     async submitData() {
-  if (!this.canEdit) {
-    this.showDialogMessage("This shared link is view-only.");
-    return;
-  }
+      if (!this.canEdit) {
+        this.showDialogMessage("This shared link is view-only.");
+        return;
+      }
 
-  this.applyTransformsForSection();
-  this.runAllCalculationsForCurrentCell();
+      this.applyTransformsForSection();
+      this.runAllCalculationsForCurrentCell();
 
-  const ok = this.validateCurrentSection();
-  const tableFieldsInvalid = this.assignedModelIndices.some((mIdx) => {
-  const fields = this.selectedModels?.[mIdx]?.fields || [];
-  return fields.some((field, fIdx) => {
-    if (field?.type !== "table") return false;
-    if (!this.isFieldVisible(mIdx, fIdx)) return false;
-    return !this.validateField(mIdx, fIdx);
+      const ok = this.validateCurrentSection();
+      const tableFieldsInvalid = this.assignedModelIndices.some((mIdx) => {
+      const fields = this.selectedModels?.[mIdx]?.fields || [];
+      return fields.some((field, fIdx) => {
+        if (field?.type !== "table") return false;
+        if (!this.isFieldVisible(mIdx, fIdx)) return false;
+        return !this.validateField(mIdx, fIdx);
+            });
         });
-    });
-  const blocking = Object.entries(this.validationErrors).filter(([k, msg]) => {
-    if (!msg) return false;
-    const idx = this.parseKey(k);
-    if (!idx) return true;
-    const { s, v, g, m, f } = idx;
-    const isSkipped = !!(this.skipFlags[s]?.[v]?.[g]?.[m]?.[f]);
-    if (isSkipped) return false;
-    return !/ is required\.$/.test(msg);
-  });
-
-  if ((!ok && blocking.length) || tableFieldsInvalid) {
-      this.$nextTick(() => {
-        this.goToFirstValidationError();
+      const blocking = Object.entries(this.validationErrors).filter(([k, msg]) => {
+        if (!msg) return false;
+        const idx = this.parseKey(k);
+        if (!idx) return true;
+        const { s, v, g, m, f } = idx;
+        const isSkipped = !!(this.skipFlags[s]?.[v]?.[g]?.[m]?.[f]);
+        if (isSkipped) return false;
+        return !/ is required\.$/.test(msg);
       });
 
-      this.showDialogMessage("Please fix validation errors before saving.");
-      return;
-    }
+      if ((!ok && blocking.length) || tableFieldsInvalid) {
+          this.$nextTick(() => {
+            this.goToFirstValidationError();
+          });
 
-  const requiredFailures = this.computeRequiredFailures();
-  if (requiredFailures.length) {
-      this.highlightedErrorKey = "";
+          this.showDialogMessage("Please fix validation errors before saving.");
+          return;
+        }
 
-      this.skipCandidates = requiredFailures;
-      this.skipSelections = requiredFailures.reduce((acc, it) => {
-        acc[it.key] = false;
-        return acc;
-      }, {});
-      this.showSkipDialog = true;
-      return;
-    }
+      const requiredFailures = this.computeRequiredFailures();
+      if (requiredFailures.length) {
+          this.highlightedErrorKey = "";
 
-  try {
-    await this.uploadPendingFilesForCurrentSection();
-  } catch (e) {
-    console.error("File upload/register failed:", e);
-    this.showDialogMessage("File upload failed. Please try again.");
-    return;
-  }
+          this.skipCandidates = requiredFailures;
+          this.skipSelections = requiredFailures.reduce((acc, it) => {
+            acc[it.key] = false;
+            return acc;
+          }, {});
+          this.showSkipDialog = true;
+          return;
+        }
 
-  const s = this.currentSubjectIndex,
-    v = this.currentVisitIndex,
-    g = this.currentGroupIndex;
-  this.ensureSlot(s, v, g);
+      try {
+        await this.uploadPendingFilesForCurrentSection();
+      } catch (e) {
+        console.error("File upload/register failed:", e);
+        this.showDialogMessage("File upload failed. Please try again.");
+        return;
+      }
 
-  const dictData = this.arrayToDict(this.entryData[s][v][g]);
+      const s = this.currentSubjectIndex,
+        v = this.currentVisitIndex,
+        g = this.currentGroupIndex;
+      this.ensureSlot(s, v, g);
 
-  const rawSkipFlags = this.normalizeSkipFlagsShape(this.skipFlags[s][v][g]);
-  this.skipFlags[s][v][g] = rawSkipFlags;
+      const dictData = this.arrayToDict(this.entryData[s][v][g]);
 
-  const flagsPayload = this.isShared
-      ? this.flagsArrayToDict(rawSkipFlags)
-      : rawSkipFlags;
+      const rawSkipFlags = this.normalizeSkipFlagsShape(this.skipFlags[s][v][g]);
+      this.skipFlags[s][v][g] = rawSkipFlags;
 
-  const hasAnySkip = !!(
-    Array.isArray(rawSkipFlags) && rawSkipFlags.some((row) => Array.isArray(row) && row.some((x) => !!x))
-  );
+      const flagsPayload = this.isShared
+          ? this.flagsArrayToDict(rawSkipFlags)
+          : rawSkipFlags;
 
-  const payload = {
-    study_id: this.study?.metadata?.id,
-    subject_index: s,
-    visit_index: v,
-    group_index: g,
-    data: dictData,
-    skipped_required_flags: flagsPayload,
-  };
+      const hasAnySkip = !!(
+        Array.isArray(rawSkipFlags) && rawSkipFlags.some((row) => Array.isArray(row) && row.some((x) => !!x))
+      );
 
-  try {
-    if (this.isShared) {
-      const auditLabel = hasAnySkip ? "Shared link data Entry (Skipped Required)" : "Shared link data Entry";
-      const resp = await axios.post(`/forms/shared/${this.shareToken}/data`, payload, {
-        params: { audit_label: auditLabel },
-      });
-
-      const saved = {
-        id: resp?.data?.id,
-        study_id: payload.study_id,
+      const payload = {
+        study_id: this.study?.metadata?.id,
         subject_index: s,
         visit_index: v,
         group_index: g,
         data: dictData,
-        skipped_required_flags: resp?.data?.skipped_required_flags ?? rawSkipFlags,
-        form_version: resp?.data?.form_version ?? this.selectedVersion,
-        created_at: resp?.data?.created_at ?? new Date().toISOString(),
+        skipped_required_flags: flagsPayload,
       };
-      (this.existingEntries = this.existingEntries || []).push(saved);
 
-      this.showDialogMessage(this.buildSaveSuccessMessage("saved"));
-      this.captureEntryBaseline();
-      this.rebuildEntriesIndex();
-      this.hydrateCache.delete(`${s}|${v}|${g}|${this.selectedVersion}`);
-      this.applyVersionView();
-      this.updateStatusCacheFor(s, v, g);
-      return;
-    }
+      try {
+        if (this.isShared) {
+          const auditLabel = hasAnySkip ? "Shared link data Entry (Skipped Required)" : "Shared link data Entry";
+          const resp = await axios.post(`/forms/shared/${this.shareToken}/data`, payload, {
+            params: { audit_label: auditLabel },
+          });
 
-    const headers = {
-      headers: { Authorization: `Bearer ${this.token}` },
-    };
-    const existingId = this.entryIds[s][v][g];
+          const saved = {
+            id: resp?.data?.id,
+            study_id: payload.study_id,
+            subject_index: s,
+            visit_index: v,
+            group_index: g,
+            data: dictData,
+            skipped_required_flags: resp?.data?.skipped_required_flags ?? rawSkipFlags,
+            form_version: resp?.data?.form_version ?? this.selectedVersion,
+            created_at: resp?.data?.created_at ?? new Date().toISOString(),
+          };
+          (this.existingEntries = this.existingEntries || []).push(saved);
 
-    if (!this.currentRevisionToken) {
-      const slot = await this.fetchRevisionTokenForSlot(s, v, g, this.selectedVersion);
-      this.currentRevisionToken = String(slot?.revision_token || "");
-    }
-
-    if (existingId) {
-      const auditLabel = hasAnySkip ? "Update/Edit Data Entry (Skipped Required)" : "Update/Edit Data Entry";
-      const resp = await axios.put(
-        `/forms/studies/${this.study.metadata.id}/data_entries/${existingId}`,
-        payload,
-        {
-          ...headers,
-          params: {
-            audit_label: auditLabel,
-            expected_revision_token: this.currentRevisionToken,
-          },
+          this.showDialogMessage(this.buildSaveSuccessMessage("saved"));
+          this.captureEntryBaseline();
+          this.rebuildEntriesIndex();
+          this.hydrateCache.delete(`${s}|${v}|${g}|${this.selectedVersion}`);
+          this.applyVersionView();
+          this.updateStatusCacheFor(s, v, g);
+          return;
         }
-      );
 
-      this.showDialogMessage(
-          this.buildSaveSuccessMessage("updated"),
+        const headers = {
+          headers: { Authorization: `Bearer ${this.token}` },
+        };
+        const existingId = this.entryIds[s][v][g];
+
+        if (!this.currentRevisionToken) {
+          const slot = await this.fetchRevisionTokenForSlot(s, v, g, this.selectedVersion);
+          this.currentRevisionToken = String(slot?.revision_token || "");
+        }
+
+        if (existingId) {
+          const auditLabel = hasAnySkip ? "Update/Edit Data Entry (Skipped Required)" : "Update/Edit Data Entry";
+          const resp = await axios.put(
+            `/forms/studies/${this.study.metadata.id}/data_entries/${existingId}`,
+            payload,
+            {
+              ...headers,
+              params: {
+                audit_label: auditLabel,
+                expected_revision_token: this.currentRevisionToken,
+              },
+            }
+          );
+
+          this.showDialogMessage(
+              this.buildSaveSuccessMessage("updated"),
+              "backToSelection"
+            );
+          const idx = this.existingEntries.findIndex((x) => x.id === existingId);
+          if (idx >= 0) this.existingEntries.splice(idx, 1, resp.data);
+        } else {
+          const params = this.safeVersionParams(this.selectedVersion);
+          const auditLabel = hasAnySkip ? "New Data Entry (Skipped Required)" : params ? "New Data Entry (Versioned)" : "New Data Entry";
+          const resp = await axios.post(
+            `/forms/studies/${this.study.metadata.id}/data`,
+            payload,
+            {
+              ...headers,
+              params: {
+                ...(params || {}),
+                audit_label: auditLabel,
+                expected_revision_token: this.currentRevisionToken,
+              },
+            }
+          );
+
+          const newId = resp?.data?.id;
+          this.entryIds[s][v][g] = newId;
+          const saved = {
+            id: newId,
+            study_id: this.study.metadata.id,
+            subject_index: s,
+            visit_index: v,
+            group_index: g,
+            data: dictData,
+            skipped_required_flags: resp?.data?.skipped_required_flags ?? rawSkipFlags,
+            form_version: resp?.data?.form_version ?? this.selectedVersion,
+            created_at: resp?.data?.created_at ?? new Date().toISOString(),
+          };
+          (this.existingEntries = this.existingEntries || []).push(saved);
+          this.showDialogMessage(
+          this.buildSaveSuccessMessage("saved"),
           "backToSelection"
         );
-      const idx = this.existingEntries.findIndex((x) => x.id === existingId);
-      if (idx >= 0) this.existingEntries.splice(idx, 1, resp.data);
-    } else {
-      const params = this.safeVersionParams(this.selectedVersion);
-      const auditLabel = hasAnySkip ? "New Data Entry (Skipped Required)" : params ? "New Data Entry (Versioned)" : "New Data Entry";
-      const resp = await axios.post(
-        `/forms/studies/${this.study.metadata.id}/data`,
-        payload,
-        {
-          ...headers,
-          params: {
-            ...(params || {}),
-            audit_label: auditLabel,
-            expected_revision_token: this.currentRevisionToken,
-          },
         }
-      );
 
-      const newId = resp?.data?.id;
-      this.entryIds[s][v][g] = newId;
-      const saved = {
-        id: newId,
-        study_id: this.study.metadata.id,
-        subject_index: s,
-        visit_index: v,
-        group_index: g,
-        data: dictData,
-        skipped_required_flags: resp?.data?.skipped_required_flags ?? rawSkipFlags,
-        form_version: resp?.data?.form_version ?? this.selectedVersion,
-        created_at: resp?.data?.created_at ?? new Date().toISOString(),
-      };
-      (this.existingEntries = this.existingEntries || []).push(saved);
-      this.showDialogMessage(
-      this.buildSaveSuccessMessage("saved"),
-      "backToSelection"
-    );
-    }
+        const latestSlot = await this.fetchRevisionTokenForSlot(s, v, g, this.selectedVersion);
+        if (latestSlot) {
+          this.applyLoadedSlotState(latestSlot);
+        }
+        this.captureEntryBaseline();
+        this.rebuildEntriesIndex();
+        this.hydrateCache.delete(`${s}|${v}|${g}|${this.selectedVersion}`);
+        this.applyVersionView();
+        this.updateStatusCacheFor(s, v, g);
+      } catch (err) {
+        console.error(err);
 
-    const latestSlot = await this.fetchRevisionTokenForSlot(s, v, g, this.selectedVersion);
-    if (latestSlot) {
-      this.applyLoadedSlotState(latestSlot);
-    }
-    this.captureEntryBaseline();
-    this.rebuildEntriesIndex();
-    this.hydrateCache.delete(`${s}|${v}|${g}|${this.selectedVersion}`);
-    this.applyVersionView();
-    this.updateStatusCacheFor(s, v, g);
-  } catch (err) {
-    console.error(err);
+        if (err?.response?.status === 409) {
+          const latest = err?.response?.data?.detail?.latest || null;
+          if (latest) {
+            await this.reloadLatestAfterConflict(latest);
+          }
+          this.showDialogMessage(
+            "This entry was changed in the backend after you opened it. Latest values were reloaded. Please review your values and save again."
+          );
+          return;
+        }
 
-    if (err?.response?.status === 409) {
-      const latest = err?.response?.data?.detail?.latest || null;
-      if (latest) {
-        await this.reloadLatestAfterConflict(latest);
+        this.showDialogMessage("Failed to save data. Check console for details.");
       }
-      this.showDialogMessage(
-        "This entry was changed in the backend after you opened it. Latest values were reloaded. Please review your values and save again."
-      );
-      return;
-    }
-
-    this.showDialogMessage("Failed to save data. Check console for details.");
-  }
-},
+    },
 
         updateStatusCacheFor(s, v, g) {
       const e = this.getBestEntryFor(s, v, g);
