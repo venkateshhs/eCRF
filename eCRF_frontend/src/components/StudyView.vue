@@ -1413,7 +1413,8 @@ export default {
           description: meta.study_description,
           created_at: meta.created_at,
           updated_at: meta.updated_at,
-          created_by: meta.created_by
+          created_by: meta.created_by,
+          status: meta.status,
         };
 
         const normalizedForms =
@@ -1464,6 +1465,7 @@ export default {
           visits: sd.visits || [],
           subjectCount: sd.subjectCount || 0,
           assignmentMethod: sd.assignmentMethod || "random",
+          subjectIdConfig: sd.subjectIdConfig || null,
           subjects: sd.subjects || [],
           assignments: assignments,
           forms: normalizedForms
@@ -1481,25 +1483,25 @@ export default {
 
     // open single step edit
     async openEditStep(stepNumber) {
-      if (!this.canEditStudy) return;
+  if (!this.canEditStudy) return;
 
-      const ok = await this.loadStudyIntoStoreForEdit();
-      if (!ok) return;
+  const ok = await this.loadStudyIntoStoreForEdit();
+  if (!ok) return;
 
-      const step = Number(stepNumber);
-      this.$router.push({
-        name: "CreateStudy",
-        params: { id: this.studyId },
-        query: {
-          mode: "edit",
-          single: "true",
-          step: String(step),
-          returnTo: "StudyView",
-          returnId: String(this.studyId),
-          returnTab: "edit",
-        },
-      });
+  const step = Number(stepNumber);
+  this.$router.push({
+    name: "CreateStudy",
+    params: { id: this.studyId },
+    query: {
+      mode: "edit",
+      single: "true",
+      step: String(step),
+      returnTo: "StudyView",
+      returnId: String(this.studyId),
+      returnTab: "edit",
     },
+  });
+},
 
     // attach handlers
     onAttachTempChange(val) {
