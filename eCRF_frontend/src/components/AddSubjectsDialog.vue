@@ -3,8 +3,8 @@
     <div class="dialog dialog-subjects">
       <h3>Add subjects</h3>
       <p class="dialog-subtitle">
-        Enter how many new subjects to create, then assign each subject to a group.
-        Existing subjects are not changed.
+        Enter how many new subjects to create, choose the ID pattern for these new subjects,
+        then assign each subject to a group. Existing subjects are not changed.
       </p>
 
       <!-- Subject count + assignment method -->
@@ -13,8 +13,14 @@
         :subjectCount="subjectCount"
         :assignmentMethod="assignmentMethod"
         :assignmentOptions="['Random', 'Manual']"
+        :subjectIdConfig="subjectIdConfig"
+        :subjectSetupEditable="true"
+        :subjectIdFormatEditable="true"
+        :hasExistingSubjects="true"
+        :isPublished="false"
         @update:subjectCount="$emit('update:subjectCount', $event)"
         @update:assignmentMethod="$emit('update:assignmentMethod', $event)"
+        @update:subjectIdConfig="$emit('update:subjectIdConfig', $event)"
       />
 
       <!-- Subjects table (scrolls when there are many subjects) -->
@@ -43,7 +49,7 @@
           @click="$emit('save')"
           :disabled="saving || !subjects || !subjects.length"
         >
-          {{ saving ? 'Saving…' : 'Save subjects' }}
+          {{ saving ? "Saving…" : "Save subjects" }}
         </button>
       </div>
     </div>
@@ -67,10 +73,19 @@ export default {
     groupData: { type: Array, default: () => [] },
     saving: { type: Boolean, default: false },
     error: { type: String, default: "" },
+
+    // Temporary generator config only.
+    // This should be inferred by parent from existing subject IDs.
+    // It should not be saved as study config.
+    subjectIdConfig: {
+      type: Object,
+      default: () => null,
+    },
   },
   emits: [
     "update:subjectCount",
     "update:assignmentMethod",
+    "update:subjectIdConfig",
     "update:subjects",
     "close",
     "save",

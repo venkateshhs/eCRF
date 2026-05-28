@@ -183,8 +183,20 @@
         </label>
       </div>
 
-      <SubjectForm v-model:subjectCount="subjectCount" v-model:assignmentMethod="assignmentMethod" @changed="onSubjectSetupChanged"/>
+      <div v-if="isPublishedStudy" class="published-step-note">
+          This study is published. Subject ID format is inferred from existing subject IDs and locked, but subject count and assignment method can still be updated.
+        </div>
 
+      <SubjectForm
+          v-model:subjectCount="subjectCount"
+          v-model:assignmentMethod="assignmentMethod"
+          v-model:subjectIdConfig="subjectIdConfig"
+          :subjectSetupEditable="true"
+          :subjectIdFormatEditable="!isPublishedStudy"
+          :hasExistingSubjects="hasExistingSubjects"
+          :isPublished="isPublishedStudy"
+          @changed="onSubjectSetupChanged"
+        />
       <div class="form-actions">
           <button @click="step = 2" class="btn-option">Back</button>
 
@@ -313,6 +325,13 @@ import GroupForm from "./GroupForm.vue";
 import VisitForm from "./VisitForm.vue";
 import SubjectForm from "./SubjectForm.vue";
 import SubjectAssignmentForm from "./SubjectAssignmentForm.vue";
+import {
+  createDefaultSubjectIdConfig,
+  normalizeSubjectIdConfig,
+  inferSubjectIdConfigFromExistingSubjects,
+  buildUniqueSubjectId,
+  subjectIdPatternValidationMessage,
+} from "@/utils/subjectIdUtils";
 
 export default {
   name: "StudyCreationComponent",
@@ -344,7 +363,7 @@ export default {
     const subjectCount = ref(1);
     const assignmentMethod = ref("Random");
     const assignments = ref([]);
-
+    const subjectIdConfig = ref(createDefaultSubjectIdConfig({}, "Study"));
     const studySchema = ref([]);
     const groupSchema = ref([]);
     const visitSchema = ref([]);
@@ -382,6 +401,19 @@ export default {
 
     const editId = computed(() => props.id || route.params.id || null);
     const isEditing = computed(() => !!editId.value);
+    const isPublishedStudy = computed(() => {
+      const status =
+        store.state.studyDetails?.study_metadata?.status ||
+        store.state.studyDetails?.metadata?.status ||
+        store.state.studyDetails?.status ||
+        "";
+
+      return String(status).trim().toUpperCase() === "PUBLISHED";
+    });
+
+    const hasExistingSubjects = computed(() => {
+      return Array.isArray(subjectData.value) && subjectData.value.some((s) => s?.id || s?.subject_id);
+    });
 
     const saveExitLabel = computed(() => {
       // keep wording stable, but behavior is now: save (draft if new; update if editing) then exit
@@ -511,6 +543,26 @@ export default {
       }
     }
 
+    function getSubjectSequenceNumberForIndex(index) {
+      const cfg = normalizeSubjectIdConfig(
+        subjectIdConfig.value,
+        studyData.value || {},
+        headerStudyName.value || "Study"
+      );
+
+      return Number(cfg.startNumber || 1) + Number(index || 0);
+    }
+
+    function buildUniqueSubjectIdForCurrentStudy(config, sequenceNumber, existingIds) {
+      return buildUniqueSubjectId(
+        config,
+        sequenceNumber,
+        existingIds,
+        studyData.value || {},
+        headerStudyName.value || "Study"
+      );
+    }
+
     function uuidForImport() {
       if (typeof crypto !== "undefined" && crypto.randomUUID) return crypto.randomUUID();
       return `id_${Date.now()}_${Math.random().toString(16).slice(2)}`;
@@ -558,6 +610,7 @@ export default {
         visitData: visitData.value || [],
         subjectCount: subjectCount.value,
         assignmentMethod: assignmentMethod.value,
+        subjectIdConfig: subjectIdConfig.value || null,
         assignments: assignments.value || [],
         skipSubjectCreationNow: !!skipSubjectCreationNow.value,
         draftStudyId: draftStudyId.value,
@@ -697,6 +750,15 @@ export default {
       subjectData.value = Array.isArray(details.subjects) ? [...details.subjects] : [];
       visitData.value = Array.isArray(details.visits) ? [...details.visits] : [];
       skipSubjectCreationNow.value = !!details.skipSubjectCreationNow;
+
+      subjectIdConfig.value = inferSubjectIdConfigFromExistingSubjects(
+        subjectData.value,
+        studyData.value || {},
+        headerStudyName.value || "Study",
+        { useLast: false }
+      );
+
+      subjectIdConfig.value.locked = !!isPublishedStudy.value;
 
       assignments.value = Array.isArray(details.assignments)
         ? JSON.parse(JSON.stringify(details.assignments))
@@ -1199,6 +1261,17 @@ export default {
     function checkSubjectsSetup(opts = { advance: true, silent: false }) {
       if (skipSubjectCreationNow.value) {
         stepErrors.value[3] = false;
+
+        commitStudyDetailsPreservingForms({
+          study: studyData.value,
+          groups: groupData.value,
+          subjectCount: Number(subjectCount.value || 0),
+          assignmentMethod: assignmentMethod.value || "Random",
+          subjects: subjectData.value,
+          assignments: assignments.value,
+          skipSubjectCreationNow: skipSubjectCreationNow.value,
+        });
+
         if (opts.advance) step.value = 5;
         return true;
       }
@@ -1218,85 +1291,121 @@ export default {
       }
 
       const N = Number(subjectCount.value || 0);
-      const prefix =
-        (studyData.value.title || "ST")
-          .replace(/[^A-Za-z\s]/g, "")
-          .trim()
-          .split(/\s+/)
-          .map((w) => w[0]?.toUpperCase() || "")
-          .join("") || "ST";
-
-      const groupNames = groupData.value.map((g) => g.name || g.label || "Unnamed");
-      const hasExistingSubjects = Array.isArray(subjectData.value) && subjectData.value.length > 0;
-
-      // IMPORTANT FIX:
-      // Preserve already-created/manual-assigned subjects in BOTH create mode and edit mode.
-      // Only resize when subject count changes.
-      if (hasExistingSubjects) {
-        const currentCount = subjectData.value.length;
-
-        if (N > currentCount) {
-          let additionalSubjects = [];
-
-          if (assignmentMethod.value === "Random" && groupNames.length > 0) {
-            additionalSubjects = Array(N - currentCount)
-              .fill()
-              .map((_, idx) => ({
-                id: `SUBJ-${prefix}-${String(currentCount + idx + 1).padStart(3, "0")}`,
-                group: groupNames[Math.floor(Math.random() * groupNames.length)],
-              }));
-          } else {
-            additionalSubjects = Array(N - currentCount)
-              .fill()
-              .map((_, idx) => ({
-                id: `SUBJ-${prefix}-${String(currentCount + idx + 1).padStart(3, "0")}`,
-                group: "",
-              }));
-          }
-
-          subjectData.value = [...subjectData.value, ...additionalSubjects];
-        } else if (N < currentCount) {
-          subjectData.value = subjectData.value.slice(0, N);
-        }
-
-        // keep ids consistent in case title/prefix changed
-        subjectData.value = subjectData.value.map((s, idx) => ({
-          ...s,
-          id: s?.id || `SUBJ-${prefix}-${String(idx + 1).padStart(3, "0")}`,
-          group: s?.group || "",
-        }));
-      } else {
-        let assignedGroups = [];
-        if (assignmentMethod.value === "Random" && groupNames.length > 0) {
-          const G = groupNames.length;
-          const base = Math.floor(N / G);
-          const rem = N % G;
-          const idx = Array.from({ length: G }, (_, i) => i);
-          for (let i = G - 1; i > 0; i--) {
-            const j = Math.floor(Math.random() * (i + 1));
-            [idx[i], idx[j]] = [idx[j], idx[i]];
-          }
-          const extra = new Set(idx.slice(0, rem));
-          for (let gi = 0; gi < G; gi++) {
-            const cnt = base + (extra.has(gi) ? 1 : 0);
-            for (let k = 0; k < cnt; k++) assignedGroups.push(groupNames[gi]);
-          }
-          for (let i = assignedGroups.length - 1; i > 0; i--) {
-            const j = Math.floor(Math.random() * (i + 1));
-            [assignedGroups[i], assignedGroups[j]] = [assignedGroups[j], assignedGroups[i]];
-          }
-        } else {
-          assignedGroups = Array(N).fill("");
-        }
-
-        subjectData.value = assignedGroups.map((grp, idx) => ({
-          id: `SUBJ-${prefix}-${String(idx + 1).padStart(3, "0")}`,
-          group: grp,
-        }));
+      if (!Number.isFinite(N) || N < 0) {
+        dialogMessage.value = "Please provide a valid subject count.";
+        dialogMode.value = "default";
+        showDialog.value = true;
+        stepErrors.value[3] = true;
+        return false;
       }
 
+      const cfg = normalizeSubjectIdConfig(
+        subjectIdConfig.value,
+        studyData.value || {},
+        headerStudyName.value || "Study"
+      );
+
+      subjectIdConfig.value = {
+        ...cfg,
+        locked: !!isPublishedStudy.value,
+      };
+
+      const validationMessage = subjectIdPatternValidationMessage(cfg);
+
+      if (validationMessage) {
+        dialogMessage.value = validationMessage;
+        dialogMode.value = "default";
+        showDialog.value = true;
+        stepErrors.value[3] = true;
+        return false;
+      }
+
+      const groupNames = groupData.value.map((g) => g.name || g.label || "Unnamed");
+      const existingSubjects = Array.isArray(subjectData.value)
+        ? _deepClone(subjectData.value)
+        : [];
+      const currentCount = existingSubjects.length;
+
+      if (isPublishedStudy.value) {
+        const nextSubjects = existingSubjects.slice(0, N).map((s) => ({
+          ...s,
+          id: String(s?.id || s?.subject_id || "").trim(),
+          group: s?.group || "",
+        }));
+
+        const existingIds = new Set(
+          nextSubjects
+            .map((s) => String(s?.id || s?.subject_id || "").trim())
+            .filter(Boolean)
+        );
+
+        if (N > currentCount) {
+          for (let idx = currentCount; idx < N; idx += 1) {
+            const sequenceNumber = getSubjectSequenceNumberForIndex(idx);
+            const nextId = buildUniqueSubjectIdForCurrentStudy(
+              subjectIdConfig.value,
+              sequenceNumber,
+              existingIds
+            );
+
+            existingIds.add(nextId);
+
+            nextSubjects.push({
+              id: nextId,
+              group:
+                assignmentMethod.value === "Random" && groupNames.length > 0
+                  ? groupNames[Math.floor(Math.random() * groupNames.length)]
+                  : "",
+            });
+          }
+        }
+
+        subjectData.value = nextSubjects;
+      } else {
+        const regeneratedIds = new Set();
+        const nextSubjects = [];
+
+        for (let idx = 0; idx < N; idx += 1) {
+          const existing = existingSubjects[idx] || {};
+          const sequenceNumber = getSubjectSequenceNumberForIndex(idx);
+          const nextId = buildUniqueSubjectIdForCurrentStudy(
+            subjectIdConfig.value,
+            sequenceNumber,
+            regeneratedIds
+          );
+
+          regeneratedIds.add(nextId);
+
+          nextSubjects.push({
+            ...existing,
+            id: nextId,
+            group:
+              existing?.group ||
+              (assignmentMethod.value === "Random" && groupNames.length > 0
+                ? groupNames[Math.floor(Math.random() * groupNames.length)]
+                : ""),
+          });
+        }
+
+        subjectData.value = nextSubjects;
+      }
+
+      commitStudyDetailsPreservingForms({
+        study: studyData.value,
+        groups: groupData.value,
+        subjectCount: N,
+        assignmentMethod: assignmentMethod.value || "Random",
+        subjects: _deepClone(subjectData.value),
+        assignments: assignments.value,
+        skipSubjectCreationNow: skipSubjectCreationNow.value,
+      });
+
       stepErrors.value[3] = false;
-      if (opts.advance) step.value = assignmentMethod.value === "Skip" ? 5 : 4;
+
+      if (opts.advance) {
+        step.value = assignmentMethod.value === "Skip" ? 5 : 4;
+      }
+
       return true;
     }
 
@@ -1499,6 +1608,7 @@ export default {
             subjectCount.value = 1;
             assignmentMethod.value = "Random";
             assignments.value = [];
+            subjectIdConfig.value = createDefaultSubjectIdConfig(base, "Study");
             skipSubjectCreationNow.value = false;
             step.value = 1;
             draftStudyId.value = null;
@@ -1626,6 +1736,7 @@ export default {
         const base = {};
         (studySchema.value || []).forEach((f) => (base[f.field] = ""));
         studyData.value = base;
+        subjectIdConfig.value = createDefaultSubjectIdConfig(base, "Study");
         applyInitialStepFromQuery();
       }
 
@@ -1649,6 +1760,9 @@ export default {
       subjectData,
       visitData,
       subjectCount,
+      subjectIdConfig,
+      hasExistingSubjects,
+      isPublishedStudy,
       assignmentMethod,
       assignments,
       studySchema,
@@ -1710,7 +1824,6 @@ export default {
   },
 };
 </script>
-
 <style scoped>
 .study-creation-container {
   max-width: none;
@@ -1913,6 +2026,16 @@ export default {
   cursor: pointer;
   outline: none;
   transition: background 0.15s ease, border-color 0.15s ease;
+}
+.published-step-note {
+  margin: 0 0 14px;
+  padding: 10px 12px;
+  border: 1px solid #fed7aa;
+  border-radius: 8px;
+  background: #fff7ed;
+  color: #9a3412;
+  font-size: 13px;
+  font-weight: 600;
 }
 .toggle-button .toggle-knob {
   position: absolute;

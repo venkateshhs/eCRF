@@ -549,14 +549,14 @@
       v-if="showSubjectDialog"
       :subjectCount="subjectCountDraft"
       :assignmentMethod="assignmentMethodDraft"
-      :subjectIdConfig="sd.subjectIdConfig"
-      :subjectIdFormatEditable="false"
+      :subjectIdConfig="subjectIdConfigDraft"
       :subjects="subjectDrafts"
       :groupData="groupList"
       :saving="savingSubjects"
       :error="subjectDialogError"
       @update:subjectCount="onSubjectCountChange"
       @update:assignmentMethod="onAssignmentMethodChange"
+      @update:subjectIdConfig="onSubjectIdConfigDraftChange"
       @update:subjects="onSubjectsUpdate"
       @close="closeSubjectDialog"
       @save="saveNewSubjects"
@@ -719,6 +719,12 @@ import {
   evaluateFieldVisibility,
   getPopupReminderMessagesForField,
 } from "@/utils/formLogicRuntime";
+import {
+  inferSubjectIdConfigFromExistingSubjects,
+  normalizeSubjectIdConfig,
+  buildUniqueSubjectId,
+  getNextSubjectSequenceNumber,
+} from "@/utils/subjectIdUtils";
 
 export default {
   name: "StudyDataEntryComponent",
@@ -860,6 +866,7 @@ export default {
       entryBaselineSnapshot: "",
       pendingNavigationAction: null,
       showUnsavedExitDialog: false,
+      subjectIdConfigDraft: null,
     };
   },
 
@@ -5039,8 +5046,21 @@ applyImportedRowFromDialog(payload) {
       this.assignmentMethodDraft = "Random";
       this.subjectDialogError = "";
 
-      this.generateSubjectDrafts();
+      const existingSubjects = this.sd.subjects || [];
+      const inferred = inferSubjectIdConfigFromExistingSubjects(
+        existingSubjects,
+        this.sd.study || {},
+        this.study?.metadata?.study_name || "Study",
+        { useLast: true }
+      );
 
+      this.subjectIdConfigDraft = {
+        ...inferred,
+        startNumber: getNextSubjectSequenceNumber(existingSubjects, inferred),
+        locked: false,
+      };
+
+      this.generateSubjectDrafts();
       this.showSubjectDialog = true;
     },
 
@@ -5054,72 +5074,80 @@ applyImportedRowFromDialog(payload) {
       this.subjectCountDraft = n < 0 ? 0 : n;
       this.generateSubjectDrafts();
     },
+    onSubjectIdConfigDraftChange(config) {
+      this.subjectIdConfigDraft = {
+        ...normalizeSubjectIdConfig(
+          config || {},
+          this.sd.study || {},
+          this.study?.metadata?.study_name || "Study"
+        ),
+        locked: false,
+      };
+
+      this.generateSubjectDrafts();
+    },
 
     onAssignmentMethodChange(val) {
-      this.assignmentMethodDraft = val;
-      this.applyAssignmentMethod();
+      this.assignmentMethodDraft = val || "Random";
+      this.generateSubjectDrafts();
     },
-
-    onSubjectsUpdate(list) {
-      this.subjectDrafts = Array.isArray(list) ? list : [];
-    },
-
-    inferSubjectIdPattern() {
-      const subjects = this.sd.subjects || [];
-      if (!subjects.length) {
-        return { prefix: "S", startIndex: 1, width: 3 };
-      }
-
-      const last = String(subjects[subjects.length - 1].id || "").trim();
-      const match = /^(\D*?)(\d+)$/.exec(last);
-
-      if (!match) {
-        return {
-          prefix: "S",
-          startIndex: subjects.length + 1,
-          width: 3,
-        };
-      }
-
-      const prefix = match[1] || "";
-      const width = match[2].length;
-      const startIndex = parseInt(match[2], 10) + 1;
-
-      return { prefix, startIndex, width };
-    },
-
     generateSubjectDrafts() {
       const count = Number(this.subjectCountDraft) || 0;
+
       if (count <= 0) {
         this.subjectDrafts = [];
         return;
       }
 
-      const existing = this.sd.subjects || [];
+      const existingSubjects = this.sd.subjects || [];
+
       const existingIds = new Set(
-        existing
+        existingSubjects
           .map((s) => String(s.id || s.subject_id || "").trim())
           .filter(Boolean)
       );
 
-      const { prefix, startIndex, width } = this.inferSubjectIdPattern();
+      const cfg = normalizeSubjectIdConfig(
+        this.subjectIdConfigDraft ||
+          inferSubjectIdConfigFromExistingSubjects(
+            existingSubjects,
+            this.sd.study || {},
+            this.study?.metadata?.study_name || "Study",
+            { useLast: true }
+          ),
+        this.sd.study || {},
+        this.study?.metadata?.study_name || "Study"
+      );
+
+      const draftIds = new Set(existingIds);
       const drafts = [];
 
-      let num = startIndex;
-      while (drafts.length < count) {
-        const id = `${prefix}${String(num).padStart(width, "0")}`;
-        if (!existingIds.has(id)) {
-          drafts.push({
-            id,
-            group: null,
-          });
-        }
-        num += 1;
+      for (let idx = 0; idx < count; idx += 1) {
+        const sequenceNumber = Number(cfg.startNumber || 1) + idx;
+
+        const id = buildUniqueSubjectId(
+          cfg,
+          sequenceNumber,
+          draftIds,
+          this.sd.study || {},
+          this.study?.metadata?.study_name || "Study"
+        );
+
+        draftIds.add(id);
+
+        drafts.push({
+          id,
+          group: null,
+        });
       }
 
       this.subjectDrafts = drafts;
       this.applyAssignmentMethod();
     },
+    onSubjectsUpdate(list) {
+      this.subjectDrafts = Array.isArray(list) ? list : [];
+    },
+
 
     defaultGroupForIndex(index) {
       if (!this.groupList.length) return null;
