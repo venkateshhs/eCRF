@@ -127,7 +127,26 @@
         <div class="crumb-left">
           <strong>Study:</strong> {{ study.metadata.study_name }}
           <strong>Subject:</strong> {{ sd.subjects?.[currentSubjectIndex]?.id }}
-          <strong>Visit:</strong> {{ visitList[currentVisitIndex].name }}
+          <strong>Visit:</strong>
+            <select
+              v-if="!isShared && visitList.length > 1"
+              class="entry-visit-select"
+              :value="currentVisitIndex"
+              :disabled="visitLoading || slotLoading"
+              @change="onEntryVisitSelectorChange"
+            >
+              <option
+                v-for="(visit, visitIdx) in visitList"
+                :key="'entry-visit-' + visitIdx"
+                :value="visitIdx"
+              >
+                {{ visit.name || `Visit ${visitIdx + 1}` }}
+              </option>
+            </select>
+
+            <span v-else>
+              {{ visitList[currentVisitIndex]?.name }}
+            </span>
           <span v-if="!isShared && selectedVersion" class="version-helper">
             Saving to Version {{ selectedVersion }}
           </span>
@@ -1445,7 +1464,10 @@ export default {
 
       return `Data ${actionText} successfully for:
     Subject: ${subjectLabel}
-    Visit: ${visitLabel}`;
+    Visit: ${visitLabel}
+
+    To add data for another visit of this subject, use the Visit selector at the top.
+    To add data for a different subject, go back to the selection table.`;
     },
     getCurrentValidationErrorItems() {
       const s0 = this.currentSubjectIndex;
@@ -4064,6 +4086,86 @@ applyImportedRowFromDialog(payload) {
 
       return resp?.data || null;
     },
+    onEntryVisitSelectorChange(event) {
+      const nextVisitIndex = Number(event?.target?.value);
+      const previousVisitIndex = this.currentVisitIndex;
+
+      if (
+        !Number.isInteger(nextVisitIndex) ||
+        nextVisitIndex < 0 ||
+        nextVisitIndex >= this.visitList.length
+      ) {
+        if (event?.target) event.target.value = previousVisitIndex;
+        return;
+      }
+
+      if (nextVisitIndex === previousVisitIndex) return;
+
+      if (this.hasUnsavedEntryChanges) {
+        if (event?.target) event.target.value = previousVisitIndex;
+
+        this.showDialogMessage(
+          "Please save the current data before changing the visit."
+        );
+        return;
+      }
+
+      this.switchEntryVisitForCurrentSubject(nextVisitIndex);
+    },
+
+    async switchEntryVisitForCurrentSubject(nextVisitIndex) {
+      if (this.isShared) return;
+
+      const s = this.currentSubjectIndex;
+      const g = this.currentGroupIndex;
+
+      if (s == null || g == null || g < 0) return;
+
+      this.currentVisitIndex = nextVisitIndex;
+
+      this.ensureSlot(s, this.currentVisitIndex, g);
+      this.prepareAssignmentsLookup();
+
+      this.validationErrors = {};
+      this.calcWarnings = {};
+      this.tableValidationStates = {};
+      this.highlightedErrorKey = "";
+      this.collapsedSections = {};
+      this.allSectionsCollapsed = false;
+      this.currentRevisionToken = "";
+
+      this.visitLoading = true;
+
+      try {
+        await this.loadCurrentSlotState();
+
+        this.runAllCalculationsForCurrentCell();
+
+        await this.$nextTick();
+
+        this.allSectionsCollapsed = false;
+        this.toggleAllSectionsCollapse();
+
+        this.captureEntryBaseline();
+        this.updateFloatingScrollMode();
+
+        const root = this.getScrollRoot();
+        if (
+          root === document.scrollingElement ||
+          root === document.documentElement ||
+          root === document.body
+        ) {
+          window.scrollTo({ top: 0, behavior: "smooth" });
+        } else {
+          root.scrollTo({ top: 0, behavior: "smooth" });
+        }
+      } catch (e) {
+        console.error("Failed to switch entry visit", e);
+        this.showDialogMessage("Failed to load data for the selected visit.");
+      } finally {
+        this.visitLoading = false;
+      }
+    },
     async selectCell(sIdx, vIdx) {
       const nS = this.numberOfSubjects;
       const nV = this.visitList.length;
@@ -4796,8 +4898,7 @@ applyImportedRowFromDialog(payload) {
           );
 
           this.showDialogMessage(
-              this.buildSaveSuccessMessage("updated"),
-              "backToSelection"
+              this.buildSaveSuccessMessage("updated")
             );
           const idx = this.existingEntries.findIndex((x) => x.id === existingId);
           if (idx >= 0) this.existingEntries.splice(idx, 1, resp.data);
@@ -4832,8 +4933,7 @@ applyImportedRowFromDialog(payload) {
           };
           (this.existingEntries = this.existingEntries || []).push(saved);
           this.showDialogMessage(
-          this.buildSaveSuccessMessage("saved"),
-          "backToSelection"
+          this.buildSaveSuccessMessage("saved")
         );
         }
 
@@ -6069,7 +6169,31 @@ applyImportedRowFromDialog(payload) {
   flex-direction: column;
   gap: 0;
 }
+.entry-visit-select {
+  min-width: 160px;
+  max-width: 260px;
+  height: 34px;
+  padding: 6px 34px 6px 10px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #111827;
+  font-size: 14px;
+  font-weight: 600;
+  outline: none;
+  cursor: pointer;
+}
 
+.entry-visit-select:focus {
+  border-color: #2563eb;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.14);
+}
+
+.entry-visit-select:disabled {
+  background: #f3f4f6;
+  color: #6b7280;
+  cursor: not-allowed;
+}
 /* Inputs */
 input[type="text"],
 input[type="number"],
