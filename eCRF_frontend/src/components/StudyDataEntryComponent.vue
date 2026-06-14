@@ -709,6 +709,10 @@
       <i :class="scrollFloatingMode === 'top' ? 'fas fa-arrow-up' : 'fas fa-arrow-down'"></i>
     </button>
   </div>
+    <div v-else-if="pageError" class="loading load-error-state">
+    <p>{{ pageError }}</p>
+  </div>
+
   <div v-else class="loading">
     <p>Loading study details…</p>
   </div>
@@ -786,6 +790,7 @@ export default {
   data() {
     return {
       study: null,
+      pageError: "",
       showSelection: true,
       showDetails: false,
 
@@ -1335,6 +1340,36 @@ export default {
   },
 
   methods: {
+    getApiErrorDetail(err) {
+      const detail = err?.response?.data?.detail;
+
+      if (Array.isArray(detail)) {
+        return detail.map((d) => d?.msg || String(d)).join(", ");
+      }
+
+      if (detail) return String(detail);
+
+      return "";
+    },
+
+    getSharedLoadErrorMessage(err) {
+      const status = err?.response?.status;
+      const detail = this.getApiErrorDetail(err).toLowerCase();
+
+      if (status === 403 && detail.includes("usage limit")) {
+        return "This shared link has reached its usage limit.";
+      }
+
+      if (status === 403 && detail.includes("expired")) {
+        return "This shared link has expired.";
+      }
+
+      if (status === 404) {
+        return "This shared link is invalid or no longer available.";
+      }
+
+      return "Unable to open this shared link.";
+    },
     buildCurrentEntrySnapshot() {
       const s = this.currentSubjectIndex;
       const v = this.currentVisitIndex;
@@ -3720,6 +3755,7 @@ applyImportedRowFromDialog(payload) {
 
     async loadStudy(studyId) {
       try {
+        this.pageError = "";
         const resp = await axios.get(`/forms/studies/${studyId}`, {
           headers: { Authorization: `Bearer ${this.token}` },
         });
@@ -3737,7 +3773,9 @@ applyImportedRowFromDialog(payload) {
           return;
         }
 
-        this.showDialogMessage("Failed to load study details.");
+        this.study = null;
+        this.matrixReady = false;
+        this.pageError = this.getApiErrorDetail(err) || "Failed to load study details.";
       }
     },
 
@@ -3768,9 +3806,10 @@ applyImportedRowFromDialog(payload) {
 
       } catch (e) {
         console.error("[Shared] load error", e);
-        this.showDialogMessage(
-          "Shared link is invalid or expired."
-        );
+
+        this.study = null;
+        this.matrixReady = false;
+        this.pageError = this.getSharedLoadErrorMessage(e);
       }
     },
 
@@ -6576,6 +6615,17 @@ select:focus {
   font-size: 14px;
   cursor: pointer;
   transition: background 0.2s;
+}
+.load-error-state {
+  color: #991b1b;
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  border-radius: 8px;
+  padding: 16px;
+  margin: 24px auto;
+  max-width: 520px;
+  text-align: center;
+  font-weight: 600;
 }
 
 .btn-clear:hover {
