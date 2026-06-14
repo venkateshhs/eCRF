@@ -1386,7 +1386,7 @@ def list_share_links_for_study(
     if not meta:
         raise HTTPException(status_code=404, detail="Study not found")
 
-    _assert_owner_or_admin(meta, current_user)
+    _assert_has_study_permission(db, meta, current_user, required="add_data")
 
     content_row = _get_content_row_or_404(db, study_id)
     study_data = content_row.study_data or {}
@@ -1507,7 +1507,7 @@ def create_share_link(
     if not meta:
         raise HTTPException(status_code=404, detail="Study not found")
 
-    _assert_owner_or_admin(meta, current_user)
+    _assert_has_study_permission(db, meta, current_user, required="add_data")
     _assert_not_locked_by_other(meta, current_user)
 
     content_row = _get_content_row_or_404(db, payload.study_id)
