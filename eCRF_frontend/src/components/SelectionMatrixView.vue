@@ -869,46 +869,53 @@ export default {
   transform: translateY(0);
 }
 
-/* Status colors matching add-data soft style */
+/* Status colors - stronger clinician visibility, keeping no-data as grey */
 .select-btn.status-none {
-  background: #f3f4f6;
-  color: #4b5563;
-  border-color: #e5e7eb;
+  background: #e5e7eb;
+  color: #374151;
+  border-color: #9ca3af;
 }
 
 .select-btn.status-none:hover {
-  background: #e5e7eb;
-  color: #374151;
+  background: #d1d5db;
+  color: #111827;
+  border-color: #6b7280;
 }
 
 .select-btn.status-partial {
-  background: #fffbeb;
-  color: #92400e;
-  border-color: #fde68a;
+  background: #fde68a;
+  color: #78350f;
+  border-color: #f59e0b;
 }
 
 .select-btn.status-partial:hover {
-  background: #fef3c7;
+  background: #fcd34d;
+  color: #78350f;
+  border-color: #d97706;
 }
 
 .select-btn.status-complete {
-  background: #ecfdf5;
-  color: #166534;
-  border-color: #bbf7d0;
+  background: #bbf7d0;
+  color: #14532d;
+  border-color: #16a34a;
 }
 
 .select-btn.status-complete:hover {
-  background: #dcfce7;
+  background: #86efac;
+  color: #14532d;
+  border-color: #15803d;
 }
 
 .select-btn.status-skipped {
-  background: #fff7ed;
-  color: #ef4444;
-  border-color: #fed7aa;
+  background: #fecaca;
+  color: #7f1d1d;
+  border-color: #dc2626;
 }
 
 .select-btn.status-skipped:hover {
-  background: #ffedd5;
+  background: #fca5a5;
+  color: #7f1d1d;
+  border-color: #b91c1c;
 }
 
 /* ========= Scrollbars ========= */
