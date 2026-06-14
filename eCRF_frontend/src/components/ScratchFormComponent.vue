@@ -3512,9 +3512,36 @@ export default {
     confirmDeleteSection(i) {
       this.openConfirmDialog("Delete this section?", () => {
         this.ensureCurrentFormExists();
-        this.currentForm.sections.splice(i, 1);
-        this.activeSection = Math.max(0, this.activeSection - 1);
+
+        const sectionIndex = Number(i);
+        const sections = this.currentForm.sections || [];
+
+        if (
+          !Number.isInteger(sectionIndex) ||
+          sectionIndex < 0 ||
+          sectionIndex >= sections.length
+        ) {
+          return;
+        }
+
+        // Keep assignment rows aligned with section rows.
+        // ProtocolMatrix uses selectedModels index (mIdx) to read assignments[mIdx],
+        // so when a section is deleted, its assignment row must be deleted too.
+        sections.splice(sectionIndex, 1);
+
+        if (Array.isArray(this.assignments) && sectionIndex < this.assignments.length) {
+          this.assignments.splice(sectionIndex, 1);
+        }
+
+        this.activeSection = sections.length
+          ? Math.max(0, Math.min(sectionIndex, sections.length - 1))
+          : 0;
+
         this.adjustAssignments();
+
+        if (!this.hydratingScratch) {
+          this.$store.commit("setStudyCreationDirty", true);
+        }
       });
     },
     confirmDeleteField(si, fi) {
