@@ -1339,6 +1339,162 @@ def revoke_study_access(
     )
     return
 
+def _section_title_lookup(study_data: Dict[str, Any]) -> Dict[str, str]:
+    out: Dict[str, str] = {}
+
+    for idx, sec in enumerate((study_data or {}).get("selectedModels") or []):
+        if not isinstance(sec, dict):
+            continue
+
+        sec_id = str(sec.get("_id") or sec.get("id") or sec.get("uuid") or "").strip()
+        title = str(sec.get("title") or f"Section {idx + 1}").strip()
+
+        if sec_id:
+            out[sec_id] = title
+
+    return out
+
+
+def _shared_link_status(access: models.SharedFormAccess) -> str:
+    now = datetime.utcnow()
+
+    if access.expires_at and access.expires_at < now:
+        return "Expired"
+
+    if int(access.used_count or 0) >= int(access.max_uses or 0):
+        return "Usage limit reached"
+
+    return "Active"
+
+
+def _frontend_base_from_request(request: Request) -> str:
+    frontend_base = os.getenv("FRONTEND_BASE_URL", "").rstrip("/")
+    if frontend_base:
+        return frontend_base
+
+    return f"{request.url.scheme}://{request.headers.get('host', request.url.netloc)}"
+
+
+@router.get("/studies/{study_id}/share-links")
+def list_share_links_for_study(
+    study_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    meta = db.query(models.StudyMetadata).filter(models.StudyMetadata.id == study_id).first()
+    if not meta:
+        raise HTTPException(status_code=404, detail="Study not found")
+
+    _assert_owner_or_admin(meta, current_user)
+
+    content_row = _get_content_row_or_404(db, study_id)
+    study_data = content_row.study_data or {}
+
+    subjects = study_data.get("subjects") or []
+    visits = study_data.get("visits") or []
+    section_titles = _section_title_lookup(study_data)
+
+    base = _frontend_base_from_request(request)
+
+    rows = (
+        db.query(models.SharedFormAccess)
+        .filter(models.SharedFormAccess.study_id == study_id)
+        .order_by(models.SharedFormAccess.created_at.desc())
+        .all()
+    )
+
+    out = []
+
+    for access in rows:
+        subject = subjects[access.subject_index] if 0 <= int(access.subject_index) < len(subjects) else {}
+        visit = visits[access.visit_index] if 0 <= int(access.visit_index) < len(visits) else {}
+
+        allowed_section_ids = access.allowed_section_ids or []
+        used_count = int(access.used_count or 0)
+        max_uses = int(access.max_uses or 0)
+
+        out.append({
+            "token": access.token,
+            "study_id": access.study_id,
+            "study_name": meta.study_name,
+            "subject_index": access.subject_index,
+            "subject_id": subject.get("id") or subject.get("subject_id") or f"Subject {access.subject_index + 1}",
+            "group_index": access.group_index,
+            "group": subject.get("group") or "",
+            "visit_index": access.visit_index,
+            "visit_name": visit.get("name") or f"Visit {access.visit_index + 1}",
+            "permission": access.permission,
+            "max_uses": max_uses,
+            "used_count": used_count,
+            "remaining_uses": max(0, max_uses - used_count),
+            "expires_at": access.expires_at.isoformat() if access.expires_at else None,
+            "created_at": access.created_at.isoformat() if getattr(access, "created_at", None) else None,
+            "allowed_section_ids": allowed_section_ids,
+            "section_titles": [section_titles.get(sec_id, sec_id) for sec_id in allowed_section_ids],
+            "status": _shared_link_status(access),
+            "link": f"{base}/shared/{access.token}",
+        })
+
+    return out
+
+
+@router.post("/studies/{study_id}/share-links/{token}/revoke")
+def revoke_share_link(
+    study_id: int,
+    token: str,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    meta = db.query(models.StudyMetadata).filter(models.StudyMetadata.id == study_id).first()
+    if not meta:
+        raise HTTPException(status_code=404, detail="Study not found")
+
+    _assert_owner_or_admin(meta, current_user)
+    _assert_not_locked_by_other(meta, current_user)
+
+    access = (
+        db.query(models.SharedFormAccess)
+        .filter(
+            models.SharedFormAccess.study_id == study_id,
+            models.SharedFormAccess.token == token,
+        )
+        .first()
+    )
+
+    if not access:
+        raise HTTPException(status_code=404, detail="Shared link not found")
+
+    # No schema migration needed: invalidating by forcing usage limit reached.
+    access.max_uses = int(access.used_count or 0)
+    db.commit()
+
+    try:
+        repo.update_share_link(
+            study_id=study_id,
+            study_name=meta.study_name,
+            token=token,
+            row={
+                "token": access.token,
+                "study_id": access.study_id,
+                "subject_index": access.subject_index,
+                "visit_index": access.visit_index,
+                "group_index": access.group_index,
+                "permission": access.permission,
+                "max_uses": access.max_uses,
+                "used_count": access.used_count,
+                "expires_at": access.expires_at.isoformat() if access.expires_at else None,
+                "allowed_section_ids": access.allowed_section_ids or [],
+                "created_at": access.created_at.isoformat() if getattr(access, "created_at", None) else None,
+                "status": "Invalidated",
+                "revoked_by": _actor_identifier(current_user),
+                "revoked_at": datetime.utcnow().isoformat(),
+            },
+        )
+    except Exception:
+        pass
+
+    return {"ok": True}
 
 @router.post("/share-link/", status_code=201)
 def create_share_link(

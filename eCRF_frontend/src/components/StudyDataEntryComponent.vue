@@ -532,17 +532,30 @@
     <StudyShareDialog
       v-if="showShareDialog && !isShared"
       :visible="showShareDialog"
+      :study-name="study?.metadata?.study_name || ''"
       :subject-label="shareParams.subjectIndex != null ? sd.subjects?.[shareParams.subjectIndex]?.id : 'N/A'"
       :visit-label="visitList[shareParams.visitIndex]?.name || 'N/A'"
+      :group-label="shareDialogGroupLabel"
       :available-sections="shareDialogSections"
+      :section-availability-by-visit="shareDialogSectionAvailabilityByVisit"
+      :same-group-subjects="shareDialogSameGroupSubjects"
+      :visits="visitList"
       :permission="shareConfig.permission"
       :max-uses="shareConfig.maxUses"
       :expires-in-days="shareConfig.expiresInDays"
       :generated-link="generatedLink"
+      :generated-links="generatedLinks"
       :copy-status="copyStatus"
+      :shared-links="sharedLinks"
+      :shared-links-loading="sharedLinksLoading"
       @close="showShareDialog = false"
       @copy="copyGeneratedLink"
+      @copy-link="copyAnySharedLink"
       @generate="onShareDialogGenerate"
+      @bulk-generate="onBulkShareDialogGenerate"
+      @load-shared-links="loadSharedLinks"
+      @revoke-link="revokeSharedLink"
+      @export-links="exportSharedLinksCsv"
     />
 
     <PermissionDeniedDialog
@@ -805,7 +818,9 @@ export default {
       showShareDialog: false,
       shareParams: { subjectIndex: null, visitIndex: null, groupIndex: null },
       shareConfig: { permission: "view", maxUses: 1, expiresInDays: 7, allowed_section_ids: [] },
-      generatedLink: "",
+      generatedLinks: [],
+      sharedLinks: [],
+      sharedLinksLoading: false,
       copyStatus: "",
       permissionError: false,
 
@@ -890,6 +905,63 @@ export default {
   },
 
   computed: {
+    shareDialogGroupLabel() {
+      const sIdx = Number(this.shareParams?.subjectIndex);
+      const subject = this.sd.subjects?.[sIdx];
+
+      return String(subject?.group || "").trim() || "Unassigned";
+    },
+
+    shareDialogSameGroupSubjects() {
+      const currentGroup = this.shareDialogGroupLabel;
+      const subjects = Array.isArray(this.sd.subjects) ? this.sd.subjects : [];
+
+      return subjects
+        .map((subject, index) => ({
+          index,
+          id: String(subject?.id || subject?.subject_id || `Subject ${index + 1}`).trim(),
+          group: String(subject?.group || "").trim() || "Unassigned",
+        }))
+        .filter((subject) => subject.group === currentGroup);
+    },
+
+    shareDialogSectionAvailabilityByVisit() {
+      const gIdx = Number(this.shareParams?.groupIndex);
+      const visits = Array.isArray(this.visitList) ? this.visitList : [];
+      const selectedModels = Array.isArray(this.selectedModels) ? this.selectedModels : [];
+      const assignments = Array.isArray(this.assignments) ? this.assignments : [];
+
+      if (!Number.isInteger(gIdx) || gIdx < 0) return {};
+
+      const out = {};
+
+      visits.forEach((visit, vIdx) => {
+        const validSections = [];
+
+        selectedModels.forEach((section, mIdx) => {
+          const assigned = !!assignments?.[mIdx]?.[vIdx]?.[gIdx];
+          if (!assigned) return;
+
+          const sectionId = String(
+            section?._id ||
+            section?.id ||
+            section?.uuid ||
+            ""
+          ).trim();
+
+          if (!sectionId) return;
+
+          validSections.push({
+            id: sectionId,
+            title: section?.title || `Section ${mIdx + 1}`,
+          });
+        });
+
+        out[vIdx] = validSections;
+      });
+
+      return out;
+    },
     hasUnsavedEntryChanges() {
       if (this.showSelection) return false;
       if (!this.canEdit) return false;
@@ -2373,9 +2445,10 @@ applyImportedRowFromDialog(payload) {
         permission: cfg.permission,
         maxUses: cfg.maxUses,
         expiresInDays: cfg.expiresInDays,
-        allowed_section_ids: cfg.allowed_section_ids || []
+        allowed_section_ids: cfg.allowed_section_ids || [],
       };
 
+      this.generatedLinks = [];
       this.createShareLink();
     },
     getCurrentCellData() {
@@ -5093,21 +5166,226 @@ applyImportedRowFromDialog(payload) {
         .map((sec, mIdx) => ({ sec, mIdx }))
         .filter(({ mIdx }) => !!this.assignments?.[mIdx]?.[vIdx]?.[gIdx])
         .map(({ sec }) => ({
-          id: String(sec?._id || sec?.id || "").trim(),
-          title: sec?.title || "Untitled Section"
+          id: String(sec?._id || sec?.id || sec?.uuid || "").trim(),
+          title: sec?.title || "Untitled Section",
         }))
-        .filter(s => s.id);
+        .filter((s) => s.id);
 
       this.shareConfig = {
         permission: "view",
         maxUses: 1,
         expiresInDays: 7,
-        allowed_section_ids: available.map(x => x.id)
+        allowed_section_ids: available.map((x) => x.id),
       };
 
       this.generatedLink = "";
+      this.generatedLinks = [];
       this.copyStatus = "";
       this.showShareDialog = true;
+
+      this.loadSharedLinks();
+    },
+    async loadSharedLinks() {
+      if (!this.study?.metadata?.id || this.isShared) return;
+
+      this.sharedLinksLoading = true;
+
+      try {
+        const resp = await axios.get(`/forms/studies/${this.study.metadata.id}/share-links`, {
+          headers: { Authorization: `Bearer ${this.token}` },
+        });
+
+        this.sharedLinks = Array.isArray(resp.data) ? resp.data : [];
+      } catch (err) {
+        console.error("Failed to load shared links", err);
+        this.sharedLinks = [];
+
+        if (err.response?.status === 403) {
+          this.permissionError = true;
+        }
+      } finally {
+        this.sharedLinksLoading = false;
+      }
+    },
+
+    async revokeSharedLink(link) {
+      const token = String(link?.token || "").trim();
+      if (!token) return;
+
+      try {
+        await axios.post(
+          `/forms/studies/${this.study.metadata.id}/share-links/${encodeURIComponent(token)}/revoke`,
+          {},
+          {
+            headers: { Authorization: `Bearer ${this.token}` },
+            params: { audit_label: "Revoke - Shareable Link" },
+          }
+        );
+
+        await this.loadSharedLinks();
+        this.showDialogMessage("Shared link invalidated successfully.");
+      } catch (err) {
+        console.error("Failed to revoke shared link", err);
+
+        if (err.response?.status === 403) {
+          this.permissionError = true;
+        } else {
+          this.showDialogMessage("Failed to invalidate shared link.");
+        }
+      }
+    },
+
+    async copyAnySharedLink(link) {
+      const url = String(link?.link || link?.url || "").trim();
+
+      if (!url) {
+        this.copyStatus = "No link available to copy.";
+        return;
+      }
+
+      try {
+        await navigator.clipboard.writeText(url);
+        this.copyStatus = "Copied!";
+      } catch {
+        this.copyStatus = "Could not copy link.";
+      }
+    },
+
+    exportSharedLinksCsv(rows) {
+      const items = Array.isArray(rows) && rows.length ? rows : this.sharedLinks;
+
+      if (!items.length) {
+        this.showDialogMessage("No shared links available to export.");
+        return;
+      }
+
+      const csvEscape = (value) => {
+        const text = String(value ?? "");
+        return `"${text.replace(/"/g, '""')}"`;
+      };
+
+      const headers = [
+        "Study Name",
+        "Subject ID",
+        "Group",
+        "Visit",
+        "Sections",
+        "Permission",
+        "Status",
+        "Max Uses",
+        "Used Count",
+        "Remaining Uses",
+        "Expires At",
+        "Created At",
+        "Shared Link",
+      ];
+
+      const lines = [headers.map(csvEscape).join(",")];
+
+      items.forEach((item) => {
+        lines.push([
+          item.study_name || this.study?.metadata?.study_name || "",
+          item.subject_id || item.subject_label || "",
+          item.group || "",
+          item.visit_name || item.visit_label || "",
+          Array.isArray(item.section_titles) ? item.section_titles.join("; ") : item.sections || "",
+          item.permission || "",
+          item.status || "",
+          item.max_uses ?? "",
+          item.used_count ?? "",
+          item.remaining_uses ?? "",
+          item.expires_at || "",
+          item.created_at || "",
+          item.link || item.url || "",
+        ].map(csvEscape).join(","));
+      });
+
+      const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8;" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+
+      a.href = url;
+      a.download = `shared-links-${this.study?.metadata?.id || "study"}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    },
+    async onBulkShareDialogGenerate(cfg) {
+      const rows = Array.isArray(cfg?.rows) ? cfg.rows : [];
+      const readyRows = rows.filter((row) => row.status === "Ready");
+
+      if (!readyRows.length) {
+        this.showDialogMessage("No valid subject/visit combinations are available for link generation.");
+        return;
+      }
+
+      this.shareConfig = {
+        permission: cfg.permission,
+        maxUses: cfg.maxUses,
+        expiresInDays: cfg.expiresInDays,
+        allowed_section_ids: cfg.allowed_section_ids || [],
+      };
+
+      this.generatedLink = "";
+      this.generatedLinks = [];
+      this.copyStatus = "";
+
+      const created = [];
+      let failed = 0;
+
+      for (const row of readyRows) {
+        try {
+          const payload = {
+              study_id: this.study.metadata.id,
+              subject_index: row.subjectIndex,
+              visit_index: row.visitIndex,
+              group_index: this.shareParams.groupIndex,
+              permission: cfg.permission,
+              max_uses: cfg.maxUses,
+              expires_in_days: cfg.expiresInDays,
+              allowed_section_ids: row.sectionIds || [],
+            };
+
+          const resp = await axios.post("/forms/share-link/", payload, {
+            headers: { Authorization: `Bearer ${this.token}` },
+            params: { audit_label: "Bulk Create - Shareable Link" },
+          });
+
+          created.push({
+            studyName: this.study?.metadata?.study_name || "",
+            subjectIndex: row.subjectIndex,
+            subjectId: row.subjectId,
+            group: row.group,
+            visitIndex: row.visitIndex,
+            visitName: row.visitName,
+            sections: row.sectionTitles || [],
+            permission: cfg.permission,
+            maxUses: cfg.maxUses,
+            expiresInDays: cfg.expiresInDays,
+            link: resp.data.link,
+            token: resp.data.token,
+            createdAt: new Date().toISOString(),
+          });
+        } catch (err) {
+          failed += 1;
+          console.error("Bulk shared link generation failed", row, err);
+        }
+      }
+
+      this.generatedLinks = created;
+
+      if (created.length === 1) {
+        this.generatedLink = created[0].link;
+      }
+
+      await this.loadSharedLinks();
+
+      if (failed) {
+        this.showDialogMessage(`${created.length} link(s) generated. ${failed} link(s) failed.`);
+      } else {
+        this.showDialogMessage(`${created.length} shared link(s) generated successfully.`);
+      }
     },
     async createShareLink() {
       const { subjectIndex, visitIndex, groupIndex } = this.shareParams;
