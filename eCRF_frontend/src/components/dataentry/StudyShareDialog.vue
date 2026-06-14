@@ -389,24 +389,24 @@
           </button>
 
           <button
-            v-if="!generatedLink && !generatedLinks.length && !bulkEnabled"
-            type="button"
-            class="btn-primary"
-            :disabled="!selectedSectionIds.length"
-            @click="onGenerate"
-          >
-            Generate Link
-          </button>
+              v-if="!generatedLink && !generatedLinks.length && !bulkEnabled"
+              type="button"
+              class="btn-primary"
+              :disabled="generating || !selectedSectionIds.length"
+              @click="onGenerate"
+            >
+              {{ generating ? "Generating Link…" : "Generate Link" }}
+            </button>
 
           <button
-            v-if="!generatedLink && !generatedLinks.length && bulkEnabled"
-            type="button"
-            class="btn-primary"
-            :disabled="readyBulkRowCount === 0"
-            @click="onBulkGenerate"
-          >
-            Generate {{ readyBulkRowCount }} Link(s)
-          </button>
+              v-if="!generatedLink && !generatedLinks.length && bulkEnabled"
+              type="button"
+              class="btn-primary"
+              :disabled="generating || readyBulkRowCount === 0"
+              @click="onBulkGenerate"
+            >
+              {{ generating ? "Generating Link…" : `Generate ${readyBulkRowCount} Link(s)` }}
+            </button>
         </div>
       </div>
 
@@ -543,6 +543,7 @@ export default {
 
     generatedLink: { type: String, default: "" },
     copyStatus: { type: String, default: "" },
+    generating: { type: Boolean, default: false },
   },
 
   emits: [

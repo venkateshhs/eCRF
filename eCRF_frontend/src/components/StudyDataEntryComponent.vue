@@ -545,6 +545,7 @@
       :expires-in-days="shareConfig.expiresInDays"
       :generated-link="generatedLink"
       :generated-links="generatedLinks"
+      :generating="shareLinkGenerating"
       :copy-status="copyStatus"
       :shared-links="sharedLinks"
       :shared-links-loading="sharedLinksLoading"
@@ -821,9 +822,11 @@ export default {
 
       icons,
       showShareDialog: false,
+      shareLinkGenerating: false,
       shareParams: { subjectIndex: null, visitIndex: null, groupIndex: null },
       shareConfig: { permission: "view", maxUses: 1, expiresInDays: 7, allowed_section_ids: [] },
       generatedLinks: [],
+      generatedLink: "",
       sharedLinks: [],
       sharedLinksLoading: false,
       copyStatus: "",
@@ -2475,7 +2478,9 @@ applyImportedRowFromDialog(payload) {
         this.showDialogMessage("Failed to import selected row into the form.");
       }
     },
-    onShareDialogGenerate(cfg) {
+    async onShareDialogGenerate(cfg) {
+      if (this.shareLinkGenerating) return;
+
       this.shareConfig = {
         permission: cfg.permission,
         maxUses: cfg.maxUses,
@@ -2483,8 +2488,16 @@ applyImportedRowFromDialog(payload) {
         allowed_section_ids: cfg.allowed_section_ids || [],
       };
 
+      this.generatedLink = "";
       this.generatedLinks = [];
-      this.createShareLink();
+      this.copyStatus = "";
+      this.shareLinkGenerating = true;
+
+      try {
+        await this.createShareLink();
+      } finally {
+        this.shareLinkGenerating = false;
+      }
     },
     getCurrentCellData() {
       const s = this.currentSubjectIndex;
@@ -5351,6 +5364,8 @@ applyImportedRowFromDialog(payload) {
       URL.revokeObjectURL(url);
     },
     async onBulkShareDialogGenerate(cfg) {
+      if (this.shareLinkGenerating) return;
+
       const rows = Array.isArray(cfg?.rows) ? cfg.rows : [];
       const readyRows = rows.filter((row) => row.status === "Ready");
 
@@ -5369,13 +5384,18 @@ applyImportedRowFromDialog(payload) {
       this.generatedLink = "";
       this.generatedLinks = [];
       this.copyStatus = "";
+      this.shareLinkGenerating = true;
+
+      // Let Vue update the button text/disabled state before starting the bulk loop.
+      await this.$nextTick();
 
       const created = [];
       let failed = 0;
 
-      for (const row of readyRows) {
-        try {
-          const payload = {
+      try {
+        for (const row of readyRows) {
+          try {
+            const payload = {
               study_id: this.study.metadata.id,
               subject_index: row.subjectIndex,
               visit_index: row.visitIndex,
@@ -5386,70 +5406,100 @@ applyImportedRowFromDialog(payload) {
               allowed_section_ids: row.sectionIds || [],
             };
 
-          const resp = await axios.post("/forms/share-link/", payload, {
-            headers: { Authorization: `Bearer ${this.token}` },
-            params: { audit_label: "Bulk Create - Shareable Link" },
-          });
+            const resp = await axios.post("/forms/share-link/", payload, {
+              headers: { Authorization: `Bearer ${this.token}` },
+              params: { audit_label: "Bulk Create - Shareable Link" },
+            });
 
-          created.push({
-            studyName: this.study?.metadata?.study_name || "",
-            subjectIndex: row.subjectIndex,
-            subjectId: row.subjectId,
-            group: row.group,
-            visitIndex: row.visitIndex,
-            visitName: row.visitName,
-            sections: row.sectionTitles || [],
-            permission: cfg.permission,
-            maxUses: cfg.maxUses,
-            expiresInDays: cfg.expiresInDays,
-            link: resp.data.link,
-            token: resp.data.token,
-            createdAt: new Date().toISOString(),
-          });
-        } catch (err) {
-          failed += 1;
-          console.error("Bulk shared link generation failed", row, err);
+            created.push({
+              studyName: this.study?.metadata?.study_name || "",
+              subjectIndex: row.subjectIndex,
+              subjectId: row.subjectId,
+              group: row.group,
+              visitIndex: row.visitIndex,
+              visitName: row.visitName,
+              sections: row.sectionTitles || [],
+              permission: cfg.permission,
+              maxUses: cfg.maxUses,
+              expiresInDays: cfg.expiresInDays,
+              link: resp.data.link,
+              token: resp.data.token,
+              createdAt: new Date().toISOString(),
+            });
+          } catch (err) {
+            failed += 1;
+            console.error("Bulk shared link generation failed", row, err);
+          }
         }
-      }
 
-      this.generatedLinks = created;
+        this.generatedLinks = created;
 
-      if (created.length === 1) {
-        this.generatedLink = created[0].link;
-      }
+        if (created.length === 1) {
+          this.generatedLink = created[0].link;
+        }
 
-      await this.loadSharedLinks();
+        await this.$nextTick();
 
-      if (failed) {
-        this.showDialogMessage(`${created.length} link(s) generated. ${failed} link(s) failed.`);
-      } else {
-        this.showDialogMessage(`${created.length} shared link(s) generated successfully.`);
+        await this.loadSharedLinks();
+
+        if (failed) {
+          this.showDialogMessage(`${created.length} link(s) generated. ${failed} link(s) failed.`);
+        } else {
+          this.showDialogMessage(`${created.length} shared link(s) generated successfully.`);
+        }
+      } finally {
+        this.shareLinkGenerating = false;
       }
     },
     async createShareLink() {
       const { subjectIndex, visitIndex, groupIndex } = this.shareParams;
-      const payload = {
-        study_id: this.study.metadata.id,
-        subject_index: subjectIndex,
-        visit_index: visitIndex,
-        group_index: groupIndex,
-        permission: this.shareConfig.permission,
-        max_uses: this.shareConfig.maxUses,
-        expires_in_days: this.shareConfig.expiresInDays,
-        allowed_section_ids: this.shareConfig.allowed_section_ids || []
-      };
+
+      if (
+        subjectIndex == null ||
+        visitIndex == null ||
+        groupIndex == null
+      ) {
+        this.showDialogMessage("Please select a subject and visit before creating a shared link.");
+        return false;
+      }
+
       try {
+        const payload = {
+          study_id: this.study.metadata.id,
+          subject_index: subjectIndex,
+          visit_index: visitIndex,
+          group_index: groupIndex,
+          permission: this.shareConfig.permission,
+          max_uses: this.shareConfig.maxUses,
+          expires_in_days: this.shareConfig.expiresInDays,
+          allowed_section_ids: this.shareConfig.allowed_section_ids || [],
+        };
+
         const resp = await axios.post("/forms/share-link/", payload, {
           headers: { Authorization: `Bearer ${this.token}` },
           params: { audit_label: "Create - Sharable Link" },
         });
-        this.generatedLink = resp.data.link;
+
+        this.generatedLink = resp.data?.link || "";
+        this.generatedLinks = [];
         this.copyStatus = "";
-        this.showShareDialog = true;
+
+        await this.$nextTick();
+
+        // Refresh manage tab data after the generated card is already reactive.
+        await this.loadSharedLinks();
+
+        return true;
       } catch (err) {
-        this.generatedLink = "";
-        this.copyStatus = "";
-        if (err.response?.status === 403) this.permissionError = true;
+        console.error("Failed to create shared link", err);
+
+        const message =
+          err?.response?.data?.detail ||
+          err?.response?.data?.message ||
+          "Failed to create shared link.";
+
+        this.showDialogMessage(message);
+        return false;
       }
     },
 
