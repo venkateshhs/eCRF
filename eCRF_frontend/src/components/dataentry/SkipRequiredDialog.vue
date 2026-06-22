@@ -7,6 +7,21 @@
         <em>Skip for now</em> to save the rest.
       </p>
 
+      <div class="skip-toolbar">
+        <label
+          class="select-all"
+          :class="{ disabled: !skipCandidates.length }"
+        >
+          <input
+            type="checkbox"
+            :checked="allSelected"
+            :disabled="!skipCandidates.length"
+            @change="toggleAllSkips($event.target.checked)"
+          />
+          <span>{{ allSelected ? "Deselect all" : "Skip all required fields" }}</span>
+        </label>
+      </div>
+
       <div class="skip-list">
         <div class="skip-row" v-for="item in skipCandidates" :key="item.key">
           <div class="skip-left">
@@ -14,6 +29,7 @@
               <strong>{{ item.sectionTitle }}</strong> / {{ item.fieldLabel }}
             </div>
           </div>
+
           <div class="skip-right">
             <label class="skip-chk">
               <input
@@ -23,16 +39,33 @@
               />
               Skip for now
             </label>
-            <button class="btn-jump" @click="$emit('jump', item)">Go to field</button>
+
+            <button
+              type="button"
+              class="btn-jump"
+              @click="$emit('jump', item)"
+            >
+              Go to field
+            </button>
           </div>
         </div>
       </div>
 
       <div class="dialog-actions">
-        <button @click="$emit('confirm', localSelections)" class="btn-primary" :disabled="!canEdit">
+        <button
+          type="button"
+          @click="$emit('confirm', localSelections)"
+          class="btn-primary"
+          :disabled="!canEdit"
+        >
           Skip selected & Save
         </button>
-        <button @click="$emit('cancel')" class="btn-option">
+
+        <button
+          type="button"
+          @click="$emit('cancel')"
+          class="btn-option"
+        >
           Cancel
         </button>
       </div>
@@ -43,18 +76,33 @@
 <script>
 export default {
   name: "SkipRequiredDialog",
+
   props: {
     visible: { type: Boolean, default: false },
     skipCandidates: { type: Array, default: () => [] },
     skipSelections: { type: Object, default: () => ({}) },
     canEdit: { type: Boolean, default: true },
   },
+
   emits: ["confirm", "cancel", "jump"],
+
   data() {
     return {
       localSelections: {},
     };
   },
+
+  computed: {
+    allSelected() {
+      const candidates = this.skipCandidates || [];
+
+      return (
+        candidates.length > 0 &&
+        candidates.every((item) => !!this.localSelections[item.key])
+      );
+    },
+  },
+
   watch: {
     skipSelections: {
       immediate: true,
@@ -64,12 +112,25 @@ export default {
       },
     },
   },
+
   methods: {
     onSelectionChange(key, checked) {
       this.localSelections = {
         ...this.localSelections,
         [key]: checked,
       };
+    },
+
+    toggleAllSkips(checked) {
+      const next = { ...(this.localSelections || {}) };
+
+      (this.skipCandidates || []).forEach((item) => {
+        if (item?.key) {
+          next[item.key] = checked;
+        }
+      });
+
+      this.localSelections = next;
     },
   },
 };
@@ -85,6 +146,7 @@ export default {
   justify-content: center;
   z-index: 1000;
 }
+
 .dialog {
   background: #ffffff;
   padding: 1.5rem;
@@ -93,10 +155,44 @@ export default {
   max-width: 90%;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
 }
+
 .dialog-wide {
   width: 680px;
   max-width: 95%;
 }
+
+.skip-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  margin: 12px 0 8px;
+}
+
+.select-all {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: #111827;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.select-all input {
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+}
+
+.select-all.disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.select-all input:disabled {
+  cursor: not-allowed;
+}
+
 .skip-list {
   max-height: 360px;
   overflow: auto;
@@ -105,6 +201,7 @@ export default {
   border-radius: 8px;
   margin: 10px 0;
 }
+
 .skip-row {
   display: flex;
   align-items: center;
@@ -113,12 +210,15 @@ export default {
   border-bottom: 1px solid #f3f4f6;
   gap: 12px;
 }
+
 .skip-row:last-child {
   border-bottom: none;
 }
+
 .skip-left {
   min-width: 0;
 }
+
 .skip-title {
   font-size: 14px;
   color: #111827;
@@ -126,16 +226,19 @@ export default {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+
 .skip-right {
   display: flex;
   align-items: center;
   gap: 8px;
 }
+
 .skip-chk {
   display: inline-flex;
   align-items: center;
   gap: 8px;
 }
+
 .btn-jump {
   background: #e5e7eb;
   color: #111827;
@@ -144,23 +247,32 @@ export default {
   border-radius: 6px;
   cursor: pointer;
 }
+
 .btn-jump:hover {
   background: #d1d5db;
 }
+
 .dialog-actions {
   display: flex;
   justify-content: flex-end;
   gap: 0.5rem;
   margin-top: 1rem;
 }
+
 .btn-primary {
   background: #2563eb;
-  color: #fff;
+  color: #ffffff;
   border: none;
   padding: 0.5rem 1rem;
   border-radius: 6px;
   cursor: pointer;
 }
+
+.btn-primary:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
 .btn-option {
   background: #e5e7eb;
   color: #111827;
@@ -169,4 +281,14 @@ export default {
   border-radius: 6px;
   cursor: pointer;
 }
+
+.btn-option:hover {
+  background: #d1d5db;
+}
+
+.btn-option:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
 </style>
