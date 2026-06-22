@@ -1886,6 +1886,7 @@ export default {
 }
 
 .model-title {
+  text-align: left;
   font-weight: 700;
   color: #101828;
   white-space: normal;
