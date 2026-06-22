@@ -182,15 +182,72 @@
             Visit: “{{ visitList[currentVisitIndex].name }}”
           </h2>
 
-          <button
-            v-if="assignedModelIndices.length"
-            type="button"
-            class="section-collapse-all-btn"
-            @click="toggleAllSectionsCollapse"
-            :title="allSectionsCollapsed ? 'Unfold all sections' : 'Fold all sections'"
-          >
-            <i :class="allSectionsCollapsed ? 'fas fa-chevron-down' : 'fas fa-chevron-up'"></i>
-          </button>
+          <div class="entry-title-actions">
+            <div
+              v-if="assignedModelIndices.length"
+              class="entry-search"
+              @focusin="openEntrySearchResults"
+              @focusout="closeEntrySearchResults"
+            >
+              <div class="entry-search-input-wrap">
+                <i class="fas fa-search entry-search-icon" aria-hidden="true"></i>
+                <input
+                  v-model="entrySearchQuery"
+                  type="search"
+                  class="entry-search-input"
+                  placeholder="Search Section or Field Name"
+                  aria-label="Search visible sections or fields"
+                  autocomplete="off"
+                  @input="onEntrySearchInput"
+                  @keydown.down.prevent="moveEntrySearchSelection(1)"
+                  @keydown.up.prevent="moveEntrySearchSelection(-1)"
+                  @keydown.enter.prevent="selectActiveEntrySearchResult"
+                  @keydown.esc.prevent="closeEntrySearchImmediately"
+                />
+              </div>
+
+              <div
+                v-if="showEntrySearchResults && entrySearchQuery.trim()"
+                class="entry-search-results"
+                role="listbox"
+                aria-label="Visible section and field search results"
+              >
+                <button
+                  v-for="(result, resultIdx) in entrySearchResults"
+                  :key="result.key"
+                  type="button"
+                  class="entry-search-result"
+                  :class="{ active: entrySearchActiveIndex === resultIdx }"
+                  role="option"
+                  :aria-selected="entrySearchActiveIndex === resultIdx"
+                  @mouseenter="entrySearchActiveIndex = resultIdx"
+                  @mousedown.prevent="selectEntrySearchResult(result)"
+                >
+                  <span class="entry-search-result-type">
+                    {{ result.type === "section" ? "Section" : "Field" }}
+                  </span>
+                  <span class="entry-search-result-text">
+                    <strong>{{ result.label }}</strong>
+                    <small v-if="result.type === 'field'">{{ result.sectionTitle }}</small>
+                  </span>
+                </button>
+
+                <div v-if="!entrySearchResults.length" class="entry-search-empty">
+                  No visible sections or fields found.
+                </div>
+              </div>
+            </div>
+
+            <button
+              v-if="assignedModelIndices.length"
+              type="button"
+              class="section-collapse-all-btn"
+              @click="toggleAllSectionsCollapse"
+              :title="allSectionsCollapsed ? 'Unfold all sections' : 'Fold all sections'"
+            >
+              <i :class="allSectionsCollapsed ? 'fas fa-chevron-down' : 'fas fa-chevron-up'"></i>
+            </button>
+          </div>
         </div>
 
         <div v-if="assignedModelIndices.length" class="sections-stack">
@@ -199,6 +256,10 @@
               v-if="hasVisibleFieldsInSection(mIdx)"
               :key="'sec-' + mIdx"
               class="section-card"
+              :class="{
+                'section-card-search-highlight': entrySearchHighlightedSectionIndex === mIdx
+              }"
+              :data-section-index="mIdx"
             >
               <div class="section-card-header">
                   <h3 class="section-title">
@@ -240,9 +301,11 @@
                     :class="{
                         'field-card-has-error': !!fieldErrors(mIdx, fIdx),
                         'field-card-error-highlight': highlightedErrorKey === errorKey(mIdx, fIdx),
+                        'field-card-search-highlight': entrySearchHighlightedFieldKey === `${mIdx}-${fIdx}`,
                         'field-card-has-reminder': hasPopupReminder(mIdx, fIdx)
                       }"
-                          :data-error-key="errorKey(mIdx, fIdx)"
+                    :data-error-key="errorKey(mIdx, fIdx)"
+                    :data-search-key="`${mIdx}-${fIdx}`"
                   >
                     <div class="field-card-header">
                       <label :for="fieldId(mIdx, fIdx)" class="field-label">
@@ -899,6 +962,13 @@ export default {
       collapsedSections: {},
       allSectionsCollapsed: false,
       highlightedErrorKey: "",
+      entrySearchQuery: "",
+      showEntrySearchResults: false,
+      entrySearchActiveIndex: -1,
+      entrySearchHighlightedSectionIndex: null,
+      entrySearchHighlightedFieldKey: "",
+      entrySearchHighlightTimer: null,
+      entrySearchCloseTimer: null,
       scrollFloatingMode: "bottom",
       scrollListenerAttached: false,
       showPreviousVisitImportDialog: false,
@@ -1191,6 +1261,83 @@ export default {
         .filter((mIdx) => !!this.assignments?.[mIdx]?.[v]?.[g]);
     },
 
+    entrySearchResults() {
+      const query = String(this.entrySearchQuery || "").trim().toLocaleLowerCase();
+      if (!query) return [];
+
+      const results = [];
+
+      const matchRank = (values) => {
+        const normalizedValues = values
+          .map((value) => String(value || "").trim().toLocaleLowerCase())
+          .filter(Boolean);
+
+        if (normalizedValues.some((value) => value === query)) return 0;
+        if (normalizedValues.some((value) => value.startsWith(query))) return 1;
+        if (normalizedValues.some((value) => value.includes(query))) return 2;
+        return -1;
+      };
+
+      this.assignedModelIndices.forEach((mIdx) => {
+        if (!this.hasVisibleFieldsInSection(mIdx)) return;
+
+        const section = this.selectedModels?.[mIdx] || {};
+        const sectionTitle = section.title || `Section ${mIdx + 1}`;
+        const sectionRank = matchRank([sectionTitle]);
+
+        if (sectionRank >= 0) {
+          results.push({
+            key: `section-${mIdx}`,
+            type: "section",
+            label: sectionTitle,
+            sectionTitle,
+            sectionIndex: mIdx,
+            fieldIndex: null,
+            rank: sectionRank,
+          });
+        }
+
+        (section.fields || []).forEach((field, fIdx) => {
+          if (!this.isFieldVisible(mIdx, fIdx)) return;
+
+          const fieldLabel =
+            field?.label ||
+            field?.name ||
+            field?.title ||
+            `Field ${fIdx + 1}`;
+          const fieldRank = matchRank([
+            fieldLabel,
+            field?.label,
+            field?.name,
+            field?.title,
+          ]);
+
+          if (fieldRank < 0) return;
+
+          results.push({
+            key: `field-${mIdx}-${fIdx}`,
+            type: "field",
+            label: fieldLabel,
+            sectionTitle,
+            sectionIndex: mIdx,
+            fieldIndex: fIdx,
+            rank: fieldRank,
+          });
+        });
+      });
+
+      return results
+        .sort((a, b) => {
+          if (a.rank !== b.rank) return a.rank - b.rank;
+          if (a.sectionIndex !== b.sectionIndex) {
+            return a.sectionIndex - b.sectionIndex;
+          }
+          if (a.type !== b.type) return a.type === "section" ? -1 : 1;
+          return (a.fieldIndex ?? -1) - (b.fieldIndex ?? -1);
+        })
+        .slice(0, 50);
+    },
+
     blockingErrorsPresent() {
       const keys = Object.keys(this.validationErrors || {});
       for (const k of keys) {
@@ -1265,6 +1412,7 @@ export default {
     },
   beforeUnmount() {
       this.detachFloatingScrollListener();
+      this.clearEntrySearchTimers();
       window.onbeforeunload = null;
     },
   watch: {
@@ -1315,6 +1463,7 @@ export default {
     },
     showSelection(val) {
       if (val) {
+        this.resetEntrySearch();
         this.detachFloatingScrollListener();
         window.onbeforeunload = null;
         return;
@@ -1325,6 +1474,15 @@ export default {
         this.updateFloatingScrollMode();
         this.captureEntryBaseline();
       });
+    },
+    currentSubjectIndex() {
+      this.resetEntrySearch();
+    },
+    currentVisitIndex() {
+      this.resetEntrySearch();
+    },
+    currentGroupIndex() {
+      this.resetEntrySearch();
     },
   },
   beforeRouteLeave(to, from, next) {
@@ -1343,6 +1501,164 @@ export default {
   },
 
   methods: {
+    clearEntrySearchTimers() {
+      if (this.entrySearchHighlightTimer) {
+        window.clearTimeout(this.entrySearchHighlightTimer);
+        this.entrySearchHighlightTimer = null;
+      }
+
+      if (this.entrySearchCloseTimer) {
+        window.clearTimeout(this.entrySearchCloseTimer);
+        this.entrySearchCloseTimer = null;
+      }
+    },
+
+    clearEntrySearchHighlight() {
+      if (this.entrySearchHighlightTimer) {
+        window.clearTimeout(this.entrySearchHighlightTimer);
+        this.entrySearchHighlightTimer = null;
+      }
+
+      this.entrySearchHighlightedSectionIndex = null;
+      this.entrySearchHighlightedFieldKey = "";
+    },
+
+    resetEntrySearch() {
+      this.clearEntrySearchTimers();
+      this.entrySearchQuery = "";
+      this.showEntrySearchResults = false;
+      this.entrySearchActiveIndex = -1;
+      this.entrySearchHighlightedSectionIndex = null;
+      this.entrySearchHighlightedFieldKey = "";
+    },
+
+    onEntrySearchInput() {
+      this.showEntrySearchResults = true;
+      this.entrySearchActiveIndex = this.entrySearchResults.length ? 0 : -1;
+      this.clearEntrySearchHighlight();
+    },
+
+    openEntrySearchResults() {
+      if (this.entrySearchCloseTimer) {
+        window.clearTimeout(this.entrySearchCloseTimer);
+        this.entrySearchCloseTimer = null;
+      }
+
+      if (String(this.entrySearchQuery || "").trim()) {
+        this.showEntrySearchResults = true;
+      }
+    },
+
+    closeEntrySearchResults() {
+      if (this.entrySearchCloseTimer) {
+        window.clearTimeout(this.entrySearchCloseTimer);
+      }
+
+      this.entrySearchCloseTimer = window.setTimeout(() => {
+        this.showEntrySearchResults = false;
+        this.entrySearchActiveIndex = -1;
+        this.entrySearchCloseTimer = null;
+      }, 150);
+    },
+
+    closeEntrySearchImmediately() {
+      if (this.entrySearchCloseTimer) {
+        window.clearTimeout(this.entrySearchCloseTimer);
+        this.entrySearchCloseTimer = null;
+      }
+
+      this.showEntrySearchResults = false;
+      this.entrySearchActiveIndex = -1;
+    },
+
+    moveEntrySearchSelection(direction) {
+      const count = this.entrySearchResults.length;
+      if (!count) return;
+
+      this.showEntrySearchResults = true;
+
+      const current =
+        this.entrySearchActiveIndex >= 0
+          ? this.entrySearchActiveIndex
+          : direction > 0
+            ? -1
+            : 0;
+
+      this.entrySearchActiveIndex = (current + direction + count) % count;
+    },
+
+    selectActiveEntrySearchResult() {
+      if (!this.entrySearchResults.length) return;
+
+      const index =
+        this.entrySearchActiveIndex >= 0
+          ? this.entrySearchActiveIndex
+          : 0;
+
+      this.selectEntrySearchResult(
+        this.entrySearchResults[index] || this.entrySearchResults[0]
+      );
+    },
+
+    async selectEntrySearchResult(result) {
+      if (!result) return;
+
+      const mIdx = Number(result.sectionIndex);
+      const isFieldResult =
+        result.type === "field" &&
+        Number.isInteger(Number(result.fieldIndex));
+      const fIdx = isFieldResult ? Number(result.fieldIndex) : null;
+
+      if (!Number.isInteger(mIdx) || !this.hasVisibleFieldsInSection(mIdx)) {
+        return;
+      }
+
+      if (isFieldResult && !this.isFieldVisible(mIdx, fIdx)) {
+        return;
+      }
+
+      if (this.isSectionCollapsed(mIdx)) {
+        this.collapsedSections = {
+          ...(this.collapsedSections || {}),
+          [mIdx]: false,
+        };
+        this.syncAllSectionsCollapsedState();
+      }
+
+      this.closeEntrySearchImmediately();
+      this.clearEntrySearchHighlight();
+
+      await this.$nextTick();
+
+      this.entrySearchHighlightedSectionIndex = mIdx;
+      this.entrySearchHighlightedFieldKey = isFieldResult
+        ? `${mIdx}-${fIdx}`
+        : "";
+
+      await this.$nextTick();
+
+      const target = isFieldResult
+        ? this.$el?.querySelector?.(`[data-search-key="${mIdx}-${fIdx}"]`)
+        : this.$el?.querySelector?.(`[data-section-index="${mIdx}"]`);
+
+      if (!target) {
+        this.clearEntrySearchHighlight();
+        return;
+      }
+
+      target.scrollIntoView({
+        behavior: "smooth",
+        block: "center",
+        inline: "nearest",
+      });
+
+      this.entrySearchHighlightTimer = window.setTimeout(() => {
+        this.entrySearchHighlightedSectionIndex = null;
+        this.entrySearchHighlightedFieldKey = "";
+        this.entrySearchHighlightTimer = null;
+      }, 2200);
+    },
+
     getApiErrorDetail(err) {
       const detail = err?.response?.data?.detail;
 
@@ -6321,10 +6637,136 @@ applyImportedRowFromDialog(payload) {
 }
 
 .entry-title {
+  flex: 1 1 auto;
+  min-width: 0;
   font-size: 18px;
   font-weight: 600;
   color: #1f2937;
   margin: 0;
+}
+
+.entry-title-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+.entry-search {
+  position: relative;
+  width: clamp(260px, 32vw, 420px);
+  min-width: 220px;
+}
+
+.entry-search-input-wrap {
+  position: relative;
+}
+
+.entry-search-icon {
+  position: absolute;
+  left: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: #6b7280;
+  font-size: 13px;
+  pointer-events: none;
+}
+
+.entry-search-input {
+  width: 100%;
+  min-height: 38px;
+  box-sizing: border-box;
+  padding: 8px 34px 8px 34px;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #111827;
+  font-size: 13px;
+  outline: none;
+  transition:
+    border-color 0.18s ease,
+    box-shadow 0.18s ease;
+}
+
+.entry-search-input:focus {
+  border-color: #2563eb;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+}
+
+.entry-search-input::placeholder {
+  color: #9ca3af;
+}
+
+.entry-search-results {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  z-index: 300;
+  max-height: 320px;
+  overflow-y: auto;
+  padding: 6px;
+  border: 1px solid #dbe4ee;
+  border-radius: 10px;
+  background: #ffffff;
+  box-shadow: 0 14px 34px rgba(15, 23, 42, 0.16);
+}
+
+.entry-search-result {
+  width: 100%;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 9px 10px;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: #111827;
+  text-align: left;
+  cursor: pointer;
+}
+
+.entry-search-result:hover,
+.entry-search-result.active {
+  background: #eff6ff;
+}
+
+.entry-search-result-type {
+  flex: 0 0 54px;
+  color: #2563eb;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1.4;
+  text-transform: uppercase;
+}
+
+.entry-search-result-text {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.entry-search-result-text strong {
+  overflow-wrap: anywhere;
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.entry-search-result-text small {
+  overflow-wrap: anywhere;
+  color: #6b7280;
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.entry-search-empty {
+  padding: 12px 10px;
+  color: #6b7280;
+  font-size: 13px;
+  text-align: center;
 }
 
 .section-collapse-all-btn {
@@ -6816,6 +7258,43 @@ select:focus {
   background: #fffafa;
 }
 
+.section-card-search-highlight {
+  border-color: #2563eb;
+  box-shadow:
+    0 0 0 3px rgba(37, 99, 235, 0.14),
+    0 10px 26px rgba(37, 99, 235, 0.12);
+  animation: entry-search-pulse 1.1s ease-in-out 2;
+}
+
+.field-card-search-highlight {
+  border-color: #2563eb;
+  background: #f8fbff;
+  box-shadow:
+    0 0 0 3px rgba(37, 99, 235, 0.14),
+    0 8px 22px rgba(37, 99, 235, 0.12);
+  animation: entry-search-pulse 1.1s ease-in-out 2;
+}
+
+@keyframes entry-search-pulse {
+  0% {
+    box-shadow:
+      0 0 0 0 rgba(37, 99, 235, 0.26),
+      0 8px 22px rgba(37, 99, 235, 0.08);
+  }
+
+  50% {
+    box-shadow:
+      0 0 0 7px rgba(37, 99, 235, 0.12),
+      0 8px 22px rgba(37, 99, 235, 0.15);
+  }
+
+  100% {
+    box-shadow:
+      0 0 0 3px rgba(37, 99, 235, 0.14),
+      0 8px 22px rgba(37, 99, 235, 0.12);
+  }
+}
+
 .field-card-error-highlight {
   border-color: #dc2626;
   box-shadow:
@@ -7009,6 +7488,17 @@ select:focus {
   .entry-title-row {
   flex-direction: column;
   align-items: stretch;
+ }
+
+ .entry-title-actions {
+  width: 100%;
+  flex-direction: column;
+  align-items: stretch;
+ }
+
+ .entry-search {
+  width: 100%;
+  min-width: 0;
  }
 
  .section-collapse-all-btn {
