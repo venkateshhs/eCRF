@@ -5335,19 +5335,25 @@ applyImportedRowFromDialog(payload) {
       const lines = [headers.map(csvEscape).join(",")];
 
       items.forEach((item) => {
+        const sectionTitles = Array.isArray(item.section_titles)
+          ? item.section_titles
+          : Array.isArray(item.sections)
+            ? item.sections
+            : [];
+
         lines.push([
-          item.study_name || this.study?.metadata?.study_name || "",
-          item.subject_id || item.subject_label || "",
+          item.study_name || item.studyName || this.study?.metadata?.study_name || "",
+          item.subject_id || item.subjectId || item.subject_label || "",
           item.group || "",
-          item.visit_name || item.visit_label || "",
-          Array.isArray(item.section_titles) ? item.section_titles.join("; ") : item.sections || "",
+          item.visit_name || item.visitName || item.visit_label || "",
+          sectionTitles.length ? sectionTitles.join("; ") : item.sections || "",
           item.permission || "",
           item.status || "",
-          item.max_uses ?? "",
-          item.used_count ?? "",
-          item.remaining_uses ?? "",
-          item.expires_at || "",
-          item.created_at || "",
+          item.max_uses ?? item.maxUses ?? "",
+          item.used_count ?? item.usedCount ?? "",
+          item.remaining_uses ?? item.remainingUses ?? "",
+          item.expires_at || item.expiresAt || "",
+          item.created_at || item.createdAt || "",
           item.link || item.url || "",
         ].map(csvEscape).join(","));
       });
