@@ -250,6 +250,40 @@
           </div>
         </div>
 
+        <div
+          v-if="assignedModelIndices.length && entryProgress.total"
+          class="entry-progress"
+          aria-live="polite"
+        >
+          <div class="entry-progress-summary">
+            <div>
+              <strong>Data entered: {{ entryProgress.percentage }}%</strong>
+              <span>
+                {{ entryProgress.completed }} of {{ entryProgress.total }}
+                visible data point{{ entryProgress.total === 1 ? "" : "s" }}
+              </span>
+            </div>
+
+            <span v-if="entryProgress.skipped" class="entry-progress-skipped">
+              {{ entryProgress.skipped }} skipped
+            </span>
+          </div>
+
+          <div
+            class="entry-progress-track"
+            role="progressbar"
+            aria-label="Visible data entered"
+            aria-valuemin="0"
+            aria-valuemax="100"
+            :aria-valuenow="entryProgress.percentage"
+          >
+            <div
+              class="entry-progress-fill"
+              :style="{ width: `${entryProgress.percentage}%` }"
+            ></div>
+          </div>
+        </div>
+
         <div v-if="assignedModelIndices.length" class="sections-stack">
           <template v-for="mIdx in assignedModelIndices" :key="'sec-wrap-' + mIdx">
             <section
@@ -825,6 +859,7 @@ import {
   buildUniqueSubjectId,
   getNextSubjectSequenceNumber,
 } from "@/utils/subjectIdUtils";
+import { calculateDataEntryProgress } from "@/utils/dataEntryProgress";
 
 export default {
   name: "StudyDataEntryComponent",
@@ -969,6 +1004,14 @@ export default {
       entrySearchHighlightedFieldKey: "",
       entrySearchHighlightTimer: null,
       entrySearchCloseTimer: null,
+      entryProgress: {
+        total: 0,
+        completed: 0,
+        incomplete: 0,
+        skipped: 0,
+        percentage: 0,
+      },
+      entryProgressTimer: null,
       scrollFloatingMode: "bottom",
       scrollListenerAttached: false,
       showPreviousVisitImportDialog: false,
@@ -1413,6 +1456,10 @@ export default {
   beforeUnmount() {
       this.detachFloatingScrollListener();
       this.clearEntrySearchTimers();
+      if (this.entryProgressTimer) {
+        window.clearTimeout(this.entryProgressTimer);
+        this.entryProgressTimer = null;
+      }
       window.onbeforeunload = null;
     },
   watch: {
@@ -1473,16 +1520,20 @@ export default {
         this.attachFloatingScrollListener();
         this.updateFloatingScrollMode();
         this.captureEntryBaseline();
+        this.scheduleEntryProgressUpdate({ immediate: true });
       });
     },
     currentSubjectIndex() {
       this.resetEntrySearch();
+      this.scheduleEntryProgressUpdate({ immediate: true });
     },
     currentVisitIndex() {
       this.resetEntrySearch();
+      this.scheduleEntryProgressUpdate({ immediate: true });
     },
     currentGroupIndex() {
       this.resetEntrySearch();
+      this.scheduleEntryProgressUpdate({ immediate: true });
     },
   },
   beforeRouteLeave(to, from, next) {
@@ -1501,6 +1552,65 @@ export default {
   },
 
   methods: {
+    calculateCurrentEntryProgress() {
+      const s = this.currentSubjectIndex;
+      const v = this.currentVisitIndex;
+      const g = this.currentGroupIndex;
+
+      if (
+        this.showSelection ||
+        s == null ||
+        v == null ||
+        g == null
+      ) {
+        return {
+          total: 0,
+          completed: 0,
+          incomplete: 0,
+          skipped: 0,
+          percentage: 0,
+        };
+      }
+
+      this.ensureSlot(s, v, g);
+
+      return calculateDataEntryProgress({
+        sections: this.selectedModels,
+        assignedSectionIndexes: this.assignedModelIndices,
+        values: this.entryData?.[s]?.[v]?.[g] || [],
+        skips: this.skipFlags?.[s]?.[v]?.[g] || [],
+        isFieldVisible: (mIdx, fIdx) => this.isFieldVisible(mIdx, fIdx),
+        isCalculatedField: (mIdx, fIdx) =>
+          this.isCalculatedRuntimeField(mIdx, fIdx),
+        hasFieldError: (mIdx, fIdx) => !!this.fieldErrors(mIdx, fIdx),
+        getTableCellErrors: (mIdx, fIdx) =>
+          this.getTableValidationState(mIdx, fIdx)?.cellErrors || {},
+      });
+    },
+
+    updateEntryProgress() {
+      this.entryProgress = this.calculateCurrentEntryProgress();
+    },
+
+    scheduleEntryProgressUpdate({ immediate = false } = {}) {
+      if (this.entryProgressTimer) {
+        window.clearTimeout(this.entryProgressTimer);
+        this.entryProgressTimer = null;
+      }
+
+      if (immediate) {
+        this.$nextTick(() => {
+          this.updateEntryProgress();
+        });
+        return;
+      }
+
+      this.entryProgressTimer = window.setTimeout(() => {
+        this.entryProgressTimer = null;
+        this.updateEntryProgress();
+      }, 180);
+    },
+
     clearEntrySearchTimers() {
       if (this.entrySearchHighlightTimer) {
         window.clearTimeout(this.entrySearchHighlightTimer);
@@ -3234,6 +3344,7 @@ applyImportedRowFromDialog(payload) {
 
       this.$nextTick(() => {
         this.runCalculationsForCell(s, v, g, mIdx, fIdx);
+        this.scheduleEntryProgressUpdate();
       });
     },
 
@@ -3714,6 +3825,7 @@ applyImportedRowFromDialog(payload) {
         this.skipFlags[s][v] ??= [];
         this.skipFlags[s][v][g] = cached.skipFlags;
         this.runCalculationsForCell(s, v, g, null, null);
+        this.scheduleEntryProgressUpdate();
         return;
       }
 
@@ -3726,6 +3838,7 @@ applyImportedRowFromDialog(payload) {
           id: null,
         });
         this.runCalculationsForCell(s, v, g, null, null);
+        this.scheduleEntryProgressUpdate();
         return;
       }
 
@@ -3760,6 +3873,7 @@ applyImportedRowFromDialog(payload) {
       });
 
       this.runCalculationsForCell(s, v, g, null, null);
+      this.scheduleEntryProgressUpdate();
     },
 
     setDeepValue(s, v, g, m, f, val) {
@@ -3771,6 +3885,14 @@ applyImportedRowFromDialog(payload) {
         );
       }
       this.entryData[s][v][g][m][f] = val;
+
+      if (
+        s === this.currentSubjectIndex &&
+        v === this.currentVisitIndex &&
+        g === this.currentGroupIndex
+      ) {
+        this.scheduleEntryProgressUpdate();
+      }
     },
     setDeepSkip(s, v, g, m, f, on) {
       this.ensureSlot(s, v, g);
@@ -3779,6 +3901,14 @@ applyImportedRowFromDialog(payload) {
         this.skipFlags[s][v][g][m] = fields.map(() => false);
       }
       this.skipFlags[s][v][g][m][f] = !!on;
+
+      if (
+        s === this.currentSubjectIndex &&
+        v === this.currentVisitIndex &&
+        g === this.currentGroupIndex
+      ) {
+        this.scheduleEntryProgressUpdate();
+      }
     },
 
     setEntryValue(mIdx, fIdx, val) {
@@ -4057,6 +4187,7 @@ applyImportedRowFromDialog(payload) {
         ...this.validationErrors,
         [k]: msg,
       };
+      this.scheduleEntryProgressUpdate();
     },
     clearError(mIdx, fIdx) {
       const k = this.errorKey(mIdx, fIdx);
@@ -4070,6 +4201,8 @@ applyImportedRowFromDialog(payload) {
       if (this.highlightedErrorKey === k) {
         this.highlightedErrorKey = "";
       }
+
+      this.scheduleEntryProgressUpdate();
     },
     fieldErrors(mIdx, fIdx) {
       return this.validationErrors[this.errorKey(mIdx, fIdx)] || "";
@@ -6769,6 +6902,66 @@ applyImportedRowFromDialog(payload) {
   text-align: center;
 }
 
+.entry-progress {
+  margin: -4px 0 18px;
+  padding: 12px 14px;
+  border: 1px solid #dbe4ee;
+  border-radius: 10px;
+  background: #f8fafc;
+}
+
+.entry-progress-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+  color: #374151;
+  font-size: 13px;
+}
+
+.entry-progress-summary > div {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.entry-progress-summary strong {
+  color: #111827;
+  font-size: 14px;
+}
+
+.entry-progress-summary span {
+  color: #6b7280;
+}
+
+.entry-progress-skipped {
+  flex-shrink: 0;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: #fff7ed;
+  color: #c2410c !important;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.entry-progress-track {
+  width: 100%;
+  height: 9px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #e5e7eb;
+}
+
+.entry-progress-fill {
+  height: 100%;
+  min-width: 0;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #2563eb 0%, #16a34a 100%);
+  transition: width 0.28s ease;
+}
+
 .section-collapse-all-btn {
   display: inline-flex;
   align-items: center;
@@ -7499,6 +7692,11 @@ select:focus {
  .entry-search {
   width: 100%;
   min-width: 0;
+ }
+
+ .entry-progress-summary {
+  align-items: flex-start;
+  flex-direction: column;
  }
 
  .section-collapse-all-btn {
