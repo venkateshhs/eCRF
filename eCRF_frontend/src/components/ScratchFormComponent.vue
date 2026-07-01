@@ -275,7 +275,7 @@
           <!-- Sections View -->
           <div v-if="!showMatrix && !showLogic && !showValueAssignments">
             <!-- Sticky builder toolbar -->
-            <div class="sections-topbar builder-sticky-bar">
+            <div ref="builderStickyBar" class="sections-topbar builder-sticky-bar">
               <div class="form-actions-inline">
                   <button @click.prevent="addNewSection" class="btn-option">
                     Add Section
@@ -1142,6 +1142,7 @@ export default {
       pendingFieldOptionRemapNextOptions: [],
       scratchScrollDirection: "down",
       hasScratchScrollableContent: false,
+      builderStickyResizeObserver: null,
 
       showSaveTemplateFormDialog: false,
       saveTemplateBusy: false,
@@ -1392,6 +1393,7 @@ export default {
     await this.loadSavedTemplates();
     this.$nextTick(() => {
       this.hydratingScratch = false;
+      this.refreshBuilderStickyObserver();
       this.updateScratchScrollState();
     });
   },
@@ -1400,6 +1402,10 @@ export default {
     document.removeEventListener("click", this.onGlobalClick);
     window.removeEventListener("beforeunload", this.beforeUnloadHandler);
     window.removeEventListener("resize", this.updateScratchScrollState);
+    if (this.builderStickyResizeObserver) {
+      this.builderStickyResizeObserver.disconnect();
+      this.builderStickyResizeObserver = null;
+    }
   },
 
   methods: {
@@ -1684,7 +1690,44 @@ export default {
       return Array.isArray(el) ? el[0] : el;
     },
 
+    getBuilderStickyBar() {
+      const el = this.$refs.builderStickyBar;
+      return Array.isArray(el) ? el[0] : el;
+    },
+
+    updateBuilderStickyHeight() {
+      this.$nextTick(() => {
+        const scrollEl = this.getScratchScrollEl();
+        const stickyBar = this.getBuilderStickyBar();
+        if (!scrollEl || !stickyBar) return;
+
+        const height = Math.ceil(stickyBar.getBoundingClientRect().height || 64);
+        scrollEl.style.setProperty("--builder-sticky-height", `${height}px`);
+      });
+    },
+
+    refreshBuilderStickyObserver() {
+      this.$nextTick(() => {
+        if (this.builderStickyResizeObserver) {
+          this.builderStickyResizeObserver.disconnect();
+          this.builderStickyResizeObserver = null;
+        }
+
+        const stickyBar = this.getBuilderStickyBar();
+        if (stickyBar && typeof ResizeObserver !== "undefined") {
+          this.builderStickyResizeObserver = new ResizeObserver(() => {
+            this.updateBuilderStickyHeight();
+          });
+          this.builderStickyResizeObserver.observe(stickyBar);
+        }
+
+        this.updateBuilderStickyHeight();
+      });
+    },
+
     updateScratchScrollState() {
+      this.updateBuilderStickyHeight();
+
       this.$nextTick(() => {
         const el = this.getScratchScrollEl();
         if (!el) {
@@ -3476,16 +3519,21 @@ export default {
       this.showValueAssignments = false;
       this.showMatrix = true;
     },
-    editTemplate() { this.showMatrix = false; },
+    editTemplate() {
+      this.showMatrix = false;
+      this.refreshBuilderStickyObserver();
+    },
     closeLogicAndCalculations() {
       this.showMatrix = false;
       this.showLogic = false;
+      this.refreshBuilderStickyObserver();
     },
 
     closeValueAssignments() {
       this.showMatrix = false;
       this.showLogic = false;
       this.showValueAssignments = false;
+      this.refreshBuilderStickyObserver();
     },
 
     onAssignmentUpdated({ mIdx, vIdx, gIdx, checked }) {
