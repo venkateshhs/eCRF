@@ -739,8 +739,12 @@ export default {
 
 <style scoped>
 .assignment-page {
-  min-height: calc(100vh - 40px);
+  height: 100%;
+  min-height: 0;
   padding: 18px;
+  box-sizing: border-box;
+  overflow-y: auto;
+  overflow-x: hidden;
   background: #f6f8fb;
   color: #111827;
 }
@@ -776,6 +780,8 @@ h2, h3, p { margin-top: 0; }
   grid-template-columns: minmax(0, 1.35fr) minmax(320px, 0.65fr);
   gap: 16px;
   margin-top: 16px;
+  min-height: 0;
+  align-items: start;
 }
 
 .panel {
@@ -783,6 +789,11 @@ h2, h3, p { margin-top: 0; }
   border: 1px solid #dbe4ee;
   border-radius: 12px;
   background: #fff;
+}
+
+.editor-panel {
+  align-self: start;
+  min-height: 0;
 }
 
 .grid-two, .condition-grid {
@@ -861,7 +872,7 @@ input, select {
   align-self: start;
   display: flex;
   flex-direction: column;
-  max-height: calc(100vh - 140px);
+  max-height: calc(100vh - 190px);
   min-height: 0;
   overflow: hidden;
 }

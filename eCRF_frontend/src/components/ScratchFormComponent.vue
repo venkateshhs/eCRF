@@ -271,7 +271,7 @@
         :class="{ 'form-area-full': showMatrix || showLogic || showValueAssignments }"
         @scroll.passive="onScratchScroll"
       >
-        <div class="sections-container">
+        <div class="sections-container" :class="{ 'value-assignments-sections-container': showValueAssignments }">
           <!-- Sections View -->
           <div v-if="!showMatrix && !showLogic && !showValueAssignments">
             <!-- Sticky builder toolbar -->
@@ -675,7 +675,7 @@
               @update-logic="applyLogicPayload"
             />
           </div>
-          <div v-else-if="showValueAssignments">
+          <div v-else-if="showValueAssignments" class="value-assignments-route-host">
             <LogicValueAssignmentsRoute
               :form="currentForm"
               @back-to-builder="closeValueAssignments"
@@ -4744,6 +4744,18 @@ export default {
   min-width: 0;
 }
 
+.form-area-full .sections-container > .value-assignments-route-host {
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.form-area-full .sections-container.value-assignments-sections-container {
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
 /* =========================
    STICKY BUILDER TOOLBAR
    ========================= */
@@ -4753,7 +4765,7 @@ export default {
   z-index: 250;
 
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 10px;
 
@@ -4783,16 +4795,14 @@ export default {
   flex: 1 1 auto;
   min-width: 0;
 
-  flex-wrap: nowrap;
-  overflow-x: auto;
-  overflow-y: hidden;
-  padding-bottom: 2px;
-  scrollbar-width: thin;
+  flex-wrap: wrap;
+  overflow: visible;
+  padding-bottom: 0;
 }
 
 .form-actions-inline .btn-option,
 .form-actions-inline .btn-primary {
-  flex: 0 0 auto;
+  flex: 0 1 auto;
   white-space: nowrap;
 }
 
@@ -5745,13 +5755,12 @@ select:focus {
   }
 
   .sections-topbar {
-    align-items: center;
+    align-items: flex-start;
   }
 
   .form-actions-inline {
-    flex-wrap: nowrap;
-    overflow-x: auto;
-    overflow-y: hidden;
+    flex-wrap: wrap;
+    overflow: visible;
   }
 }
 
@@ -5782,19 +5791,18 @@ select:focus {
   }
 
   .sections-topbar {
-    align-items: center;
+    align-items: flex-start;
     flex-direction: row;
   }
 
   .form-actions-inline {
-    flex-wrap: nowrap;
-    overflow-x: auto;
-    overflow-y: hidden;
+    flex-wrap: wrap;
+    overflow: visible;
   }
 
   .form-actions-inline .btn-option,
   .form-actions-inline .btn-primary {
-    flex: 0 0 auto;
+    flex: 0 1 auto;
   }
 
   .builder-toolbar-right {
@@ -5829,7 +5837,7 @@ select:focus {
 
   .sections-topbar {
     flex-direction: row;
-    align-items: center;
+    align-items: flex-start;
   }
 
   .builder-toolbar-right {
@@ -5864,15 +5872,14 @@ select:focus {
 
   .form-actions-inline {
     width: auto;
-    flex-wrap: nowrap;
-    overflow-x: auto;
-    overflow-y: hidden;
+    flex-wrap: wrap;
+    overflow: visible;
   }
 
   .form-actions-inline .btn-option,
   .form-actions-inline .btn-primary {
     width: auto;
-    flex: 0 0 auto;
+    flex: 0 1 auto;
   }
 
   .additional-options {
