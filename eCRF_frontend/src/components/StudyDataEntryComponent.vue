@@ -477,6 +477,8 @@
                         :min-date="field.constraints?.minDate || null"
                         :max-date="field.constraints?.maxDate || null"
                         :readonly="isReadonlyField(field, mIdx, fIdx)"
+                        @update:model-value="() => clearDateManualInputError(mIdx, fIdx)"
+                        @manual-input-state="(state) => onDateManualInputState(mIdx, fIdx, state)"
                         @change="() => { validateField(mIdx, fIdx); onRuntimeFieldChanged(mIdx, fIdx); }"
                         @blur="() => { validateField(mIdx, fIdx); onRuntimeFieldChanged(mIdx, fIdx); }"
                       />
@@ -866,6 +868,7 @@ import {
 } from "@/utils/subjectIdUtils";
 import { calculateDataEntryProgress } from "@/utils/dataEntryProgress";
 import { evaluateValueAssignments } from "@/utils/formValueAssignmentRuntime";
+import { parseDateByConfiguredFormat } from "@/utils/dateFormatParsing";
 
 export default {
   name: "StudyDataEntryComponent",
@@ -920,6 +923,7 @@ export default {
       entryData: [],
       skipFlags: [],
       validationErrors: {},
+      manualDateInputErrors: {},
 
       // calc warnings
       calcWarnings: {},
@@ -2393,6 +2397,7 @@ export default {
   const originalEntryData = this.entryData;
   const originalSkipFlags = this.skipFlags;
   const originalValidationErrors = this.validationErrors;
+  const originalManualDateInputErrors = this.manualDateInputErrors;
   const originalCalcWarnings = this.calcWarnings;
   const originalCurrentSubjectIndex = this.currentSubjectIndex;
   const originalCurrentVisitIndex = this.currentVisitIndex;
@@ -2403,6 +2408,7 @@ export default {
     this.entryData = JSON.parse(JSON.stringify(this.entryData || []));
     this.skipFlags = JSON.parse(JSON.stringify(this.skipFlags || []));
     this.validationErrors = {};
+    this.manualDateInputErrors = {};
     this.calcWarnings = {};
 
     this.currentSubjectIndex = targetSubjectIndex;
@@ -2465,6 +2471,7 @@ export default {
     this.entryData = originalEntryData;
     this.skipFlags = originalSkipFlags;
     this.validationErrors = originalValidationErrors;
+    this.manualDateInputErrors = originalManualDateInputErrors;
     this.calcWarnings = originalCalcWarnings;
     this.currentSubjectIndex = originalCurrentSubjectIndex;
     this.currentVisitIndex = originalCurrentVisitIndex;
@@ -2817,6 +2824,7 @@ applyImportedRowFromDialog(payload) {
 
     this.showSelection = false;
     this.validationErrors = {};
+    this.manualDateInputErrors = {};
     this.calcWarnings = {};
 
     this.runAllCalculationsForCurrentCell();
@@ -4308,6 +4316,35 @@ applyImportedRowFromDialog(payload) {
       return this.validationErrors[this.errorKey(mIdx, fIdx)] || "";
     },
 
+    onDateManualInputState(mIdx, fIdx, state) {
+      if (!state || state.valid || state.empty) {
+        this.clearDateManualInputError(mIdx, fIdx);
+        return;
+      }
+
+      const format =
+        state.format ||
+        this.selectedModels[mIdx]?.fields?.[fIdx]?.constraints?.dateFormat ||
+        "dd.MM.yyyy";
+      const message = `Please add data in this format: ${format}.`;
+      const key = this.errorKey(mIdx, fIdx);
+      this.manualDateInputErrors = {
+        ...this.manualDateInputErrors,
+        [key]: message,
+      };
+      this.setError(mIdx, fIdx, message);
+    },
+
+    clearDateManualInputError(mIdx, fIdx) {
+      const key = this.errorKey(mIdx, fIdx);
+      if (key in this.manualDateInputErrors) {
+        const next = { ...this.manualDateInputErrors };
+        delete next[key];
+        this.manualDateInputErrors = next;
+      }
+      this.clearError(mIdx, fIdx);
+    },
+
     goToDashboard() {
       this.$router.push({
         name: "Dashboard",
@@ -4361,6 +4398,7 @@ applyImportedRowFromDialog(payload) {
         this.runAllCalculationsForCurrentCell();
         this.showSelection = false;
         this.validationErrors = {};
+        this.manualDateInputErrors = {};
         this.$nextTick();
         this.allSectionsCollapsed = false;
         this.toggleAllSectionsCollapse();
@@ -4504,6 +4542,7 @@ applyImportedRowFromDialog(payload) {
       );
 
       this.validationErrors = {};
+      this.manualDateInputErrors = {};
       this.calcWarnings = {};
     },
 
@@ -4739,6 +4778,7 @@ applyImportedRowFromDialog(payload) {
       this.applyLoadedSlotState(latest);
       await this.$nextTick();
       this.validationErrors = {};
+      this.manualDateInputErrors = {};
       this.calcWarnings = {};
     },
 
@@ -4801,6 +4841,7 @@ applyImportedRowFromDialog(payload) {
       this.prepareAssignmentsLookup();
 
       this.validationErrors = {};
+      this.manualDateInputErrors = {};
       this.calcWarnings = {};
       this.tableValidationStates = {};
       this.highlightedErrorKey = "";
@@ -4871,6 +4912,7 @@ applyImportedRowFromDialog(payload) {
 
       this.showSelection = false;
       this.validationErrors = {};
+      this.manualDateInputErrors = {};
       this.calcWarnings = {};
 
       this.visitLoading = true;
@@ -4893,6 +4935,7 @@ applyImportedRowFromDialog(payload) {
       this.currentVisitIndex = null;
       this.currentGroupIndex = 0;
       this.validationErrors = {};
+      this.manualDateInputErrors = {};
       this.calcWarnings = {};
     },
     toggleDetails() {
@@ -4993,6 +5036,18 @@ applyImportedRowFromDialog(payload) {
       };
 
       this.clearError(mIdx, fIdx);
+
+      const manualDateMessage =
+        this.manualDateInputErrors[this.errorKey(mIdx, fIdx)];
+      if (def.type === "date" && manualDateMessage) {
+        const fmt = cons.dateFormat || "dd.MM.yyyy";
+        if (val && parseDateByConfiguredFormat(val, fmt)) {
+          this.clearDateManualInputError(mIdx, fIdx);
+        } else {
+          this.setError(mIdx, fIdx, manualDateMessage);
+          return false;
+        }
+      }
 
       if (isSkipped) {
         if (isEmpty()) return true;
@@ -5098,54 +5153,7 @@ applyImportedRowFromDialog(payload) {
       if (def.type === "date" && val) {
         const cons = (this.selectedModels[mIdx].fields[fIdx] || {}).constraints || {};
         const fmt = cons.dateFormat || "dd.MM.yyyy";
-        const parse = (s) => {
-          const map = {
-            "dd.MM.yyyy": /^(\d{2})\.(\d{2})\.(\d{4})$/,
-            "MM-dd-yyyy": /^(\d{2})-(\d{2})-(\d{4})$/,
-            "dd-MM-yyyy": /^(\d{2})-(\d{2})-(\d{4})$/,
-            "yyyy-MM-dd": /^(\d{4})-(\d{2})-(\d{2})$/,
-            "MM/yyyy": /^(\d{2})\/(\d{4})$/,
-            "MM-yyyy": /^(\d{2})-(\d{4})$/,
-            "yyyy/MM": /^(\d{4})\/(\d{2})$/,
-            "yyyy-MM": /^(\d{4})-(\d{2})$/,
-            yyyy: /^(\d{4})$/,
-          };
-          const rx = map[fmt] || map[fmt.replace(".", "\\.")];
-          if (!rx) return null;
-          const m = rx.exec(String(s));
-          if (!m) return null;
-          let y, M, d;
-          if (fmt === "dd.MM.yyyy") {
-            d = +m[1];
-            M = +m[2];
-            y = +m[3];
-          } else if (fmt === "MM-dd-yyyy") {
-            M = +m[1];
-            d = +m[2];
-            y = +m[3];
-          } else if (fmt === "dd-MM-yyyy") {
-            d = +m[1];
-            M = +m[2];
-            y = +m[3];
-          } else if (fmt === "yyyy-MM-dd") {
-            y = +m[1];
-            M = +m[2];
-            d = +m[3];
-          } else if (fmt === "MM/yyyy" || fmt === "MM-yyyy") {
-            M = +m[1];
-            y = +m[2];
-            d = 1;
-          } else if (fmt === "yyyy/MM" || fmt === "yyyy-MM") {
-            y = +m[1];
-            M = +m[2];
-            d = 1;
-          } else if (fmt === "yyyy") {
-            y = +m[1];
-            M = 1;
-            d = 1;
-          }
-          return new Date(y, M - 1, d);
-        };
+        const parse = (s) => parseDateByConfiguredFormat(s, fmt);
         const d = parse(val);
         if (d) {
           if (cons.minDate) {
@@ -6482,6 +6490,7 @@ applyImportedRowFromDialog(payload) {
 
         this.showSelection = false;
         this.validationErrors = {};
+        this.manualDateInputErrors = {};
         this.calcWarnings = {};
         this.hydrateCell(this.currentSubjectIndex, this.currentVisitIndex, this.currentGroupIndex);
         this.runAllCalculationsForCurrentCell();

@@ -1,3 +1,5 @@
+import { parseDateByConfiguredFormat } from "@/utils/dateFormatParsing";
+
 function getPrimaryForm(study) {
   const forms = study?.content?.study_data?.forms;
   return Array.isArray(forms) ? forms[0] || null : null;
@@ -66,56 +68,8 @@ function toNumber(value) {
 }
 
 function toDate(value, format = "dd.MM.yyyy") {
-  if (!value) return null;
-  const text = String(value).trim();
-  const patterns = {
-    "dd.MM.yyyy": /^(\d{2})\.(\d{2})\.(\d{4})$/,
-    "MM-dd-yyyy": /^(\d{2})-(\d{2})-(\d{4})$/,
-    "dd-MM-yyyy": /^(\d{2})-(\d{2})-(\d{4})$/,
-    "yyyy-MM-dd": /^(\d{4})-(\d{2})-(\d{2})$/,
-    "MM/yyyy": /^(\d{2})\/(\d{4})$/,
-    "MM-yyyy": /^(\d{2})-(\d{4})$/,
-    "yyyy/MM": /^(\d{4})\/(\d{2})$/,
-    "yyyy-MM": /^(\d{4})-(\d{2})$/,
-    "yyyy": /^(\d{4})$/,
-  };
-  const match = patterns[format]?.exec(text);
-  if (match) {
-    let year;
-    let month;
-    let day;
-    if (format === "yyyy-MM-dd") {
-      year = +match[1];
-      month = +match[2];
-      day = +match[3];
-    } else if (format === "MM/yyyy" || format === "MM-yyyy") {
-      month = +match[1];
-      year = +match[2];
-      day = 1;
-    } else if (format === "yyyy/MM" || format === "yyyy-MM") {
-      year = +match[1];
-      month = +match[2];
-      day = 1;
-    } else if (format === "yyyy") {
-      year = +match[1];
-      month = 1;
-      day = 1;
-    } else if (format === "MM-dd-yyyy") {
-      month = +match[1];
-      day = +match[2];
-      year = +match[3];
-    } else {
-      day = +match[1];
-      month = +match[2];
-      year = +match[3];
-    }
-
-    const date = new Date(year, month - 1, day).getTime();
-    return Number.isFinite(date) ? date : null;
-  }
-
-  const parsed = Date.parse(text);
-  return Number.isFinite(parsed) ? parsed : null;
+  const parsed = parseDateByConfiguredFormat(value, format);
+  return parsed ? parsed.getTime() : null;
 }
 
 function toTime(value) {

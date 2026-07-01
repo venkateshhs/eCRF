@@ -1,67 +1,20 @@
 /* eslint-disable */
 import Ajv from "ajv";
+import {
+  SUPPORTED_DATE_FORMATS,
+  parseDateByConfiguredFormat,
+} from "@/utils/dateFormatParsing";
 
 // ---------- helpers ----------
 const rxTime = /^(\d{2}):(\d{2})(?::(\d{2}))?$/;
 
-const DATE_FORMATS = [
-  "dd.MM.yyyy",
-  "MM-dd-yyyy",
-  "dd-MM-yyyy",
-  "yyyy-MM-dd",
-  "MM/yyyy",
-  "MM-yyyy",
-  "yyyy/MM",
-  "yyyy-MM",
-  "yyyy",
-];
+const DATE_FORMATS = SUPPORTED_DATE_FORMATS;
 
 const KB = 1024;
 const MB = 1024 * KB;
 
 function parseDateByFormat(str, fmt) {
-  const s = String(str || "");
-  let m;
-  switch (fmt) {
-    case "dd.MM.yyyy":
-      m = /^(\d{2})\.(\d{2})\.(\d{4})$/.exec(s);
-      if (!m) return null;
-      return new Date(+m[3], +m[2] - 1, +m[1]);
-    case "MM-dd-yyyy":
-      m = /^(\d{2})-(\d{2})-(\d{4})$/.exec(s);
-      if (!m) return null;
-      return new Date(+m[3], +m[1] - 1, +m[2]);
-    case "dd-MM-yyyy":
-      m = /^(\d{2})-(\d{2})-(\d{4})$/.exec(s);
-      if (!m) return null;
-      return new Date(+m[3], +m[2] - 1, +m[1]);
-    case "yyyy-MM-dd":
-      m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
-      if (!m) return null;
-      return new Date(+m[1], +m[2] - 1, +m[3]);
-    case "MM/yyyy":
-      m = /^(\d{2})\/(\d{4})$/.exec(s);
-      if (!m) return null;
-      return new Date(+m[2], +m[1] - 1, 1);
-    case "MM-yyyy":
-      m = /^(\d{2})-(\d{4})$/.exec(s);
-      if (!m) return null;
-      return new Date(+m[2], +m[1] - 1, 1);
-    case "yyyy/MM":
-      m = /^(\d{4})\/(\d{2})$/.exec(s);
-      if (!m) return null;
-      return new Date(+m[1], +m[2] - 1, 1);
-    case "yyyy-MM":
-      m = /^(\d{4})-(\d{2})$/.exec(s);
-      if (!m) return null;
-      return new Date(+m[1], +m[2] - 1, 1);
-    case "yyyy":
-      m = /^(\d{4})$/.exec(s);
-      if (!m) return null;
-      return new Date(+m[1], 0, 1);
-    default:
-      return null;
-  }
+  return parseDateByConfiguredFormat(str, fmt);
 }
 
 function timeToSeconds(str) {
@@ -131,29 +84,7 @@ export function createAjv() {
   // Custom date formats: "date:<fmt>"
   DATE_FORMATS.forEach((fmt) => {
     const name = `date:${fmt}`;
-    let rx;
-    switch (fmt) {
-      case "dd.MM.yyyy":
-        rx = /^\d{2}\.\d{2}\.\d{4}$/; break;
-      case "MM-dd-yyyy":
-      case "dd-MM-yyyy":
-        rx = /^\d{2}-\d{2}-\d{4}$/; break;
-      case "yyyy-MM-dd":
-        rx = /^\d{4}-\d{2}-\d{2}$/; break;
-      case "MM/yyyy":
-        rx = /^\d{2}\/\d{4}$/; break;
-      case "MM-yyyy":
-        rx = /^\d{2}-\d{4}$/; break;
-      case "yyyy/MM":
-        rx = /^\d{4}\/\d{2}$/; break;
-      case "yyyy-MM":
-        rx = /^\d{4}-\d{2}$/; break;
-      case "yyyy":
-        rx = /^\d{4}$/; break;
-      default:
-        rx = /.+/;
-    }
-    ajv.addFormat(name, rx);
+    ajv.addFormat(name, (value) => !!parseDateByFormat(value, fmt));
   });
 
   // ----- Custom keywords -----

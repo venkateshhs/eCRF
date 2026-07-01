@@ -1,5 +1,6 @@
 /* eslint-disable */
 import { create, all } from "mathjs";
+import { parseDateByConfiguredFormat } from "@/utils/dateFormatParsing";
 
 /* ============================================================
    MATHJS RUNTIME
@@ -591,47 +592,8 @@ function compareArraysHasAny(leftArr, rightArr) {
 }
 
 function parseDateLike(value, format = "dd.MM.yyyy") {
-  if (!value) return null;
-  const s = String(value).trim();
-
-  const map = {
-    "dd.MM.yyyy": /^(\d{2})\.(\d{2})\.(\d{4})$/,
-    "MM-dd-yyyy": /^(\d{2})-(\d{2})-(\d{4})$/,
-    "dd-MM-yyyy": /^(\d{2})-(\d{2})-(\d{4})$/,
-    "yyyy-MM-dd": /^(\d{4})-(\d{2})-(\d{2})$/,
-    "MM/yyyy": /^(\d{2})\/(\d{4})$/,
-    "MM-yyyy": /^(\d{2})-(\d{4})$/,
-    "yyyy/MM": /^(\d{4})\/(\d{2})$/,
-    "yyyy-MM": /^(\d{4})-(\d{2})$/,
-    "yyyy": /^(\d{4})$/,
-  };
-
-  const rx = map[format];
-  if (!rx) return null;
-
-  const m = rx.exec(s);
-  if (!m) return null;
-
-  let y, M, d;
-
-  if (format === "dd.MM.yyyy") {
-    d = +m[1]; M = +m[2]; y = +m[3];
-  } else if (format === "MM-dd-yyyy") {
-    M = +m[1]; d = +m[2]; y = +m[3];
-  } else if (format === "dd-MM-yyyy") {
-    d = +m[1]; M = +m[2]; y = +m[3];
-  } else if (format === "yyyy-MM-dd") {
-    y = +m[1]; M = +m[2]; d = +m[3];
-  } else if (format === "MM/yyyy" || format === "MM-yyyy") {
-    M = +m[1]; y = +m[2]; d = 1;
-  } else if (format === "yyyy/MM" || format === "yyyy-MM") {
-    y = +m[1]; M = +m[2]; d = 1;
-  } else if (format === "yyyy") {
-    y = +m[1]; M = 1; d = 1;
-  }
-
-  const dt = new Date(y, M - 1, d);
-  return Number.isNaN(dt.getTime()) ? null : dt.getTime();
+  const parsed = parseDateByConfiguredFormat(value, format);
+  return parsed ? parsed.getTime() : null;
 }
 
 function parseTimeLike(value) {

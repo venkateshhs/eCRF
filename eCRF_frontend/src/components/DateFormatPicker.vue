@@ -12,12 +12,14 @@
       :time-picker="mode === 'time'"
       :month-picker="mode === 'date' && isMonthPicker"
       :year-picker="mode === 'date' && isYearPicker"
+      :text-input="textInputConfig"
       :auto-apply="true"
       :clearable="!isReadonly"
       :disabled="isReadonly"
       :config="pickerConfig"
       input-class="case-date-input"
       class="case-date-picker"
+      @text-input="onTextInput"
       v-bind="$attrs"
     />
 
@@ -29,6 +31,11 @@
 <script>
 import VueDatePicker from "@vuepic/vue-datepicker";
 import "@vuepic/vue-datepicker/dist/main.css";
+import {
+  formatDateByConfiguredFormat,
+  parseDateByConfiguredFormat,
+  toDatePickerFormat,
+} from "@/utils/dateFormatParsing";
 
 export default {
   name: "DateFormatPicker",
@@ -47,7 +54,7 @@ export default {
     mobileBreakpoint: { type: Number, default: 0 },
   },
 
-  emits: ["update:modelValue"],
+  emits: ["update:modelValue", "manual-input-state"],
 
   computed: {
     pickerConfig() {
@@ -59,6 +66,16 @@ export default {
         closeOnScroll: false,
         closeOnAutoApply: true,
         tabOutClosesMenu: true,
+      };
+    },
+
+    textInputConfig() {
+      return {
+        enterSubmit: true,
+        tabSubmit: true,
+        openMenu: "open",
+        selectOnFocus: false,
+        format: (value) => this.parseByFormat(value, this.format),
       };
     },
 
@@ -78,11 +95,7 @@ export default {
     },
 
     resolvedFormat() {
-      return this.format
-        .replace(/yyyy/gi, "yyyy")
-        .replace(/dd/gi, "dd")
-        .replace(/mm/gi, "MM")
-        .replace(/hh/gi, "HH");
+      return toDatePickerFormat(this.format);
     },
 
     isReadonly() {
@@ -161,23 +174,7 @@ export default {
     },
 
     formatDateByFormat(dateObj, fmt) {
-      const y = dateObj.getFullYear();
-      const m = String(dateObj.getMonth() + 1).padStart(2, "0");
-      const d = String(dateObj.getDate()).padStart(2, "0");
-
-      const f = String(fmt || "").toLowerCase();
-
-      if (f === "yyyy") return String(y);
-      if (f === "mm-yyyy") return `${m}-${y}`;
-      if (f === "yyyy-mm") return `${y}-${m}`;
-      if (f === "mm/yyyy") return `${m}/${y}`;
-      if (f === "yyyy/mm") return `${y}/${m}`;
-      if (f === "dd.mm.yyyy") return `${d}.${m}.${y}`;
-      if (f === "dd-mm-yyyy") return `${d}-${m}-${y}`;
-      if (f === "mm-dd-yyyy") return `${m}-${d}-${y}`;
-      if (f === "yyyy-mm-dd") return `${y}-${m}-${d}`;
-
-      return `${d}.${m}.${y}`;
+      return formatDateByConfiguredFormat(dateObj, fmt);
     },
 
     resolveDate(input, kind) {
@@ -188,9 +185,7 @@ export default {
       }
 
       const s = String(input).trim();
-      const d =
-        this.parseByFormat(s, this.format) ||
-        this.parseByFormat(s, this.resolvedFormat);
+      const d = this.parseByFormat(s, this.format);
 
       return d ? this.normalizeBoundary(d, kind) : null;
     },
@@ -212,54 +207,30 @@ export default {
     },
 
     parseByFormat(str, fmt) {
-      if (!str || !fmt) return null;
+      return parseDateByConfiguredFormat(str, fmt);
+    },
 
-      const f = String(fmt).toLowerCase();
-      const s = String(str).trim();
+    onTextInput(event) {
+      const value =
+        typeof event === "string" ? event : event?.target?.value ?? "";
+      const text = String(value ?? "").trim();
 
-      if (f === "yyyy") {
-        const m = /^(\d{4})$/.exec(s);
-        if (!m) return null;
-        return new Date(+m[1], 0, 1);
+      if (!text) {
+        this.$emit("manual-input-state", {
+          valid: true,
+          empty: true,
+          format: this.format,
+        });
+        return;
       }
 
-      if (f === "mm-yyyy" || f === "mm/yyyy") {
-        const m = /^(\d{2})[-/](\d{4})$/.exec(s);
-        if (!m) return null;
-        return new Date(+m[2], +m[1] - 1, 1);
-      }
-
-      if (f === "yyyy-mm" || f === "yyyy/mm") {
-        const m = /^(\d{4})[-/](\d{2})$/.exec(s);
-        if (!m) return null;
-        return new Date(+m[1], +m[2] - 1, 1);
-      }
-
-      if (f === "dd.mm.yyyy") {
-        const m = /^(\d{2})\.(\d{2})\.(\d{4})$/.exec(s);
-        if (!m) return null;
-        return new Date(+m[3], +m[2] - 1, +m[1]);
-      }
-
-      if (f === "dd-mm-yyyy") {
-        const m = /^(\d{2})-(\d{2})-(\d{4})$/.exec(s);
-        if (!m) return null;
-        return new Date(+m[3], +m[2] - 1, +m[1]);
-      }
-
-      if (f === "mm-dd-yyyy") {
-        const m = /^(\d{2})-(\d{2})-(\d{4})$/.exec(s);
-        if (!m) return null;
-        return new Date(+m[3], +m[1] - 1, +m[2]);
-      }
-
-      if (f === "yyyy-mm-dd") {
-        const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
-        if (!m) return null;
-        return new Date(+m[1], +m[2] - 1, +m[3]);
-      }
-
-      return null;
+      const parsed = this.parseByFormat(text, this.format);
+      this.$emit("manual-input-state", {
+        valid: !!parsed,
+        empty: false,
+        format: this.format,
+        value: text,
+      });
     },
   },
 };
