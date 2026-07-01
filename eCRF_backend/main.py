@@ -3,6 +3,7 @@ from fastapi import FastAPI
 from starlette.middleware.cors import CORSMiddleware
 
 from .database import Base, engine, SessionLocal
+from .db_bootstrap import ensure_auth_schema
 from .logger import logger
 from .auth import hash_password
 from . import models
@@ -37,6 +38,7 @@ app.include_router(audit_router)
 app.include_router(obi_router)
 # Tables
 Base.metadata.create_all(bind=engine)
+ensure_auth_schema()
 
 
 def _ensure_default_user(db, username: str, email: str, password: str,

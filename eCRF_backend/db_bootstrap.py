@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from sqlalchemy import inspect, text
 from sqlalchemy.orm import Session
 
 from . import models
@@ -16,7 +17,29 @@ def ensure_tables() -> None:
         logger.info("Database auto-create disabled; skipping Base.metadata.create_all()")
         return
     Base.metadata.create_all(bind=engine)
+    ensure_auth_schema()
     logger.info("Database tables ensured")
+
+
+def ensure_auth_schema() -> None:
+    inspector = inspect(engine)
+    if "users" not in inspector.get_table_names():
+        return
+
+    user_columns = {col["name"] for col in inspector.get_columns("users")}
+    if "must_change_password" in user_columns:
+        return
+
+    dialect = engine.dialect.name
+    default_value = "false" if dialect == "postgresql" else "0"
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "ALTER TABLE users "
+                f"ADD COLUMN must_change_password BOOLEAN NOT NULL DEFAULT {default_value}"
+            )
+        )
+    logger.info("Added users.must_change_password column.")
 
 
 def ensure_admin_user() -> None:

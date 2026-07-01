@@ -183,7 +183,7 @@ const store = createStore({
         const response = await axios.post(
           `${API_BASE_URL}/users/change-password`,
           {
-            username: state.user.username,
+            username: payload.username || state.user.username,
             new_password: payload.newPassword,
           },
           {

@@ -58,6 +58,9 @@
         <!-- CHANGE PASSWORD -->
         <section v-else-if="currentTab === 'password'" class="section">
           <h2 class="section-title">Change Password</h2>
+          <p v-if="mustChangePassword" class="disclaimer">
+            You are using a temporary password. Please set a new password before continuing.
+          </p>
           <div class="section-box scrollable">
             <form @submit.prevent="handleChangePassword" class="form">
               <div class="form-field">
@@ -165,6 +168,7 @@
                     <col />
                     <col />
                     <col style="width: 180px;" />
+                    <col style="width: 160px;" />
                   </colgroup>
                   <thead>
                     <tr>
@@ -172,6 +176,7 @@
                       <th>Email</th>
                       <th>Name</th>
                       <th>Role</th>
+                      <th>Actions</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -192,6 +197,17 @@
                           </select>
                           <span class="select-caret" aria-hidden="true">▾</span>
                         </div>
+                      </td>
+                      <td>
+                        <button
+                          type="button"
+                          class="btn ghost compact"
+                          :disabled="u.id === user.id"
+                          :title="u.id === user.id ? 'Use Change Password for your own account' : 'Generate and set a temporary password'"
+                          @click="openTempPasswordDialog(u)"
+                        >
+                          Reset Password
+                        </button>
                       </td>
                     </tr>
                   </tbody>
@@ -239,6 +255,37 @@
               </div>
             </div>
             <!-- /Role info dialog -->
+
+            <div v-if="showTempPasswordDialog" class="dialog">
+              <div class="dialog-box">
+                <h3 class="dialog-title">Temporary Password</h3>
+                <p class="dialog-text">
+                  Set this temporary password for <strong>{{ tempPasswordUser.username }}</strong>.
+                  Ask the user to change it immediately after logging in.
+                </p>
+                <div class="temp-password-box">{{ tempPassword }}</div>
+                <div class="dialog-actions">
+                  <button class="btn primary" @click="confirmTempPasswordReset">Set Password</button>
+                  <button class="btn ghost" @click="regenerateTempPassword">Regenerate</button>
+                  <button class="btn ghost" @click="closeTempPasswordDialog">Cancel</button>
+                </div>
+              </div>
+            </div>
+
+            <div v-if="showTempPasswordResult" class="dialog">
+              <div class="dialog-box">
+                <h3 class="dialog-title">Password Reset</h3>
+                <p class="dialog-text">
+                  Temporary password set for <strong>{{ tempPasswordUser.username }}</strong>.
+                  Send it to the user through a trusted channel and ask them to change it after login.
+                </p>
+                <div class="temp-password-box">{{ tempPassword }}</div>
+                <div class="dialog-actions">
+                  <button class="btn primary" @click="copyTempPassword">Copy</button>
+                  <button class="btn ghost" @click="closeTempPasswordResult">Done</button>
+                </div>
+              </div>
+            </div>
           </div>
         </section>
 
@@ -434,6 +481,10 @@ export default {
       users: [],
       userMgmtError: null,
       userMgmtMessage: null,
+      showTempPasswordDialog: false,
+      showTempPasswordResult: false,
+      tempPasswordUser: null,
+      tempPassword: "",
 
       // Role dialog
       showRoleDialog: false,
@@ -472,7 +523,13 @@ export default {
     isPI() {
       return this.user?.profile?.role === "Principal Investigator";
     },
+    mustChangePassword() {
+      return this.user?.must_change_password === true;
+    },
     visibleTabs() {
+      if (this.mustChangePassword) {
+        return [{ key: "password", label: "Change Password" }];
+      }
       const tabs = [{ key: "profile", label: "Profile" }];
       if (this.isAdmin || this.isPI) tabs.push({ key: "settings", label: "Study Settings" });
       tabs.push({ key: "password", label: "Change Password" });
@@ -511,7 +568,10 @@ export default {
       await this.$store.dispatch("fetchUserData");
       this.user = this.$store.getters.getUser;
     }
-    if (this.isAdmin) {
+    if (this.mustChangePassword) {
+      this.currentTab = "password";
+    }
+    if (this.isAdmin && !this.mustChangePassword) {
       await Promise.all([this.fetchUsers(), this.fetchAllUsers(), this.fetchStudies()]);
     }
   },
@@ -524,7 +584,7 @@ export default {
       this.showPassword = !this.showPassword;
     },
     validatePassword(pw) {
-      return /^(?=.*[0-9])(?=.*[!@#$%^&*]).{8,}$/.test(pw);
+      return /^(?=.*[0-9])(?=.*[!@#$%^&*])\S{8,}$/.test(pw);
     },
     async handleChangePassword() {
       this.passwordMessage = this.passwordError = null;
@@ -533,7 +593,7 @@ export default {
         return;
       }
       if (!this.validatePassword(this.newPassword)) {
-        this.passwordError = "Must be ≥8 chars, include number & special.";
+        this.passwordError = "Must be at least 8 characters, include a number and a special character.";
         return;
       }
       try {
@@ -543,6 +603,11 @@ export default {
         if (ok) {
           this.passwordMessage = "Password updated.";
           this.newPassword = this.confirmPassword = "";
+          await this.$store.dispatch("fetchUserData");
+          this.user = this.$store.getters.getUser;
+          if (!this.mustChangePassword) {
+            this.$router.push({ name: "Dashboard" }).catch(() => null);
+          }
         } else {
           this.passwordError = "Update failed.";
         }
@@ -632,6 +697,82 @@ export default {
     cancelRoleChange() {
       this.showRoleDialog = false;
       this.pendingUser = this.pendingRole = null;
+    },
+    generateTempPassword() {
+      const upper = "ABCDEFGHJKLMNPQRSTUVWXYZ";
+      const lower = "abcdefghijkmnopqrstuvwxyz";
+      const digits = "23456789";
+      const special = "!@#$%^&*";
+      const all = upper + lower + digits + special;
+      const pick = (chars) => chars[this.randomIndex(chars.length)];
+      const chars = [
+        pick(upper),
+        pick(lower),
+        pick(digits),
+        pick(special),
+      ];
+      while (chars.length < 14) {
+        chars.push(pick(all));
+      }
+      return this.shuffle(chars).join("");
+    },
+    randomIndex(max) {
+      const values = new Uint32Array(1);
+      window.crypto.getRandomValues(values);
+      return values[0] % max;
+    },
+    shuffle(items) {
+      const result = [...items];
+      for (let i = result.length - 1; i > 0; i -= 1) {
+        const j = this.randomIndex(i + 1);
+        [result[i], result[j]] = [result[j], result[i]];
+      }
+      return result;
+    },
+    openTempPasswordDialog(targetUser) {
+      this.userMgmtError = this.userMgmtMessage = null;
+      this.tempPasswordUser = targetUser;
+      this.tempPassword = this.generateTempPassword();
+      this.showTempPasswordDialog = true;
+    },
+    regenerateTempPassword() {
+      this.tempPassword = this.generateTempPassword();
+    },
+    closeTempPasswordDialog() {
+      this.showTempPasswordDialog = false;
+      this.tempPasswordUser = null;
+      this.tempPassword = "";
+    },
+    async confirmTempPasswordReset() {
+      if (!this.tempPasswordUser || !this.tempPassword) return;
+      try {
+        await axios.post(
+          "/users/change-password",
+          {
+            username: this.tempPasswordUser.username,
+            new_password: this.tempPassword,
+          },
+          { headers: this.authHeader() }
+        );
+        this.showTempPasswordDialog = false;
+        this.showTempPasswordResult = true;
+        this.userMgmtMessage = `Temporary password set for ${this.tempPasswordUser.username}.`;
+      } catch (err) {
+        this.userMgmtError = err.response?.data?.detail || err.message;
+      }
+    },
+    async copyTempPassword() {
+      try {
+        await navigator.clipboard.writeText(this.tempPassword);
+        this.userMgmtMessage = "Temporary password copied.";
+      } catch {
+        this.userMgmtError = "Could not copy password. Select it manually.";
+      }
+    },
+    closeTempPasswordResult() {
+      this.showTempPasswordResult = false;
+      this.tempPasswordUser = null;
+      this.tempPassword = "";
     },
 
     async fetchStudies() {
@@ -965,6 +1106,11 @@ export default {
 .btn.primary:hover { background: #4338ca; }
 .btn.ghost { background: #f3f4f6; color: #111827; border-color: #e5e7eb; }
 .btn.ghost:hover { background: #e5e7eb; }
+.btn.compact { padding: 8px 10px; font-size: 0.85rem; }
+.btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
 
 .form-actions { display: flex; gap: 10px; justify-content: center; }
 
@@ -1061,6 +1207,20 @@ export default {
 .dialog-actions { display: flex; gap: 10px; justify-content: center; }
 .role-list { margin: 0; padding-left: 18px; }
 .role-list li { margin: 6px 0; }
+.temp-password-box {
+  margin: 12px 0 16px;
+  padding: 12px;
+  border: 1px solid #c7d2fe;
+  border-radius: 8px;
+  background: #eef2ff;
+  color: #111827;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 1rem;
+  font-weight: 700;
+  letter-spacing: 0;
+  overflow-wrap: anywhere;
+  user-select: all;
+}
 
 /* Responsive (tabs already horizontal; just ensure spacing) */
 @media (max-width: 980px) {

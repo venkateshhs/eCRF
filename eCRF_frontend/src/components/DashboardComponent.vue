@@ -552,12 +552,21 @@ export default {
     isInvestigator() {
       return this.role === "Investigator";
     },
+    mustChangePassword() {
+      return this.currentUser.must_change_password === true;
+    },
   },
   methods: {
+    redirectToPasswordChange() {
+      if (this.$route.name !== "UserInfo") {
+        this.$router.replace({ name: "UserInfo" }).catch(() => null);
+      }
+    },
     async ensureAuth() {
       // already available in memory
       if (this.$store.state.token && this.$store.state.user) {
         this.authReady = true;
+        if (this.mustChangePassword) this.redirectToPasswordChange();
         return true;
       }
 
@@ -571,6 +580,7 @@ export default {
         return false;
       }
 
+      if (this.mustChangePassword) this.redirectToPasswordChange();
       return true;
     },
 
@@ -879,6 +889,14 @@ export default {
     },
 
     syncFromRoute() {
+      if (this.mustChangePassword && this.$route.name !== "UserInfo") {
+        this.showImportData = false;
+        this.importMaximized = false;
+        this.setPageNoXScroll(false);
+        this.redirectToPasswordChange();
+        return;
+      }
+
       // Only apply dashboard home state sync when route is Dashboard itself
       if (this.$route.name !== "Dashboard") {
         // ensure overlay scroll lock never leaks into child routes
@@ -918,6 +936,10 @@ export default {
         this.$router.push("/login").catch(() => null);
         return;
       }
+      if (this.mustChangePassword) {
+        this.redirectToPasswordChange();
+        return;
+      }
 
       await this.$router.push({ name: "Dashboard" });
       this.activeSection = section;
@@ -929,6 +951,10 @@ export default {
     toggleStudyOptions() {
       if (!this.isLoggedIn) {
         this.$router.push("/login").catch(() => null);
+        return;
+      }
+      if (this.mustChangePassword) {
+        this.redirectToPasswordChange();
         return;
       }
 
@@ -947,6 +973,10 @@ export default {
     openImportData() {
       if (!this.isLoggedIn) {
         this.$router.push("/login").catch(() => null);
+        return;
+      }
+      if (this.mustChangePassword) {
+        this.redirectToPasswordChange();
         return;
       }
 
@@ -1008,6 +1038,10 @@ export default {
         this.$router.push("/login").catch(() => null);
         return;
       }
+      if (this.mustChangePassword) {
+        this.redirectToPasswordChange();
+        return;
+      }
       this.$router.push({ name: "DashboardAddData", params: { id: study.id } });
     },
 
@@ -1017,6 +1051,10 @@ export default {
         this.$router.push("/login").catch(() => null);
         return;
       }
+      if (this.mustChangePassword) {
+        this.redirectToPasswordChange();
+        return;
+      }
       this.$router.push({ name: "StudyView", params: { id: study.id } });
     },
 
@@ -1024,6 +1062,10 @@ export default {
     navigate(to) {
       if (!this.isLoggedIn) {
         this.$router.push("/login").catch(() => null);
+        return;
+      }
+      if (this.mustChangePassword) {
+        this.redirectToPasswordChange();
         return;
       }
 

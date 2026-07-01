@@ -2,7 +2,7 @@ from datetime import timedelta, datetime, timezone
 import jwt
 import re
 import secrets
-from fastapi import APIRouter, Depends, HTTPException, Header, status
+from fastapi import APIRouter, Depends, HTTPException, Header, Request, status
 from fastapi.security import OAuth2PasswordBearer
 
 from sqlalchemy.orm import Session
@@ -85,6 +85,7 @@ def _revoke_session(db: Session, sess: models.UserSession) -> None:
 
 def get_current_user(
     authorization: str = Header(None),
+    request: Request = None,
     db: Session = Depends(get_db)
 ) -> models.User:
     """
@@ -135,6 +136,20 @@ def get_current_user(
         )
         if not sess or sess.revoked_at is not None:
             raise HTTPException(status_code=401, detail="Session expired")
+
+        if getattr(user, "must_change_password", False):
+            allowed_paths = {
+                "/users/me",
+                "/users/change-password",
+                "/users/logout",
+                "/users/ping",
+            }
+            request_path = request.url.path if request else ""
+            if request_path and request_path not in allowed_paths:
+                raise HTTPException(
+                    status_code=403,
+                    detail="Password change required before continuing.",
+                )
 
         # Normalize DB datetimes for safe comparisons
         abs_exp = _to_naive_utc(sess.absolute_expires_at)
@@ -332,12 +347,13 @@ class ChangePasswordRequest(BaseModel):
     username: Optional[str] = None
 
 
-PASSWORD_RE = re.compile(r"^(?=.*[0-9])(?=.*[!@#$%^&*])[A-Za-z\d!@#$%^&*]{8,}$")
+PASSWORD_RE = re.compile(r"^(?=.*[0-9])(?=.*[!@#$%^&*])\S{8,}$")
 
 
 @router.post("/change-password")
 def change_password(
     payload: ChangePasswordRequest,
+    authorization: str = Header(None),
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
@@ -368,6 +384,29 @@ def change_password(
         raise HTTPException(status_code=404, detail="User not found.")
 
     _set_user_password_hash(user, hash_password(payload.new_password))
+    is_self_change = user.id == current_user.id
+    user.must_change_password = False if is_self_change else True
+
+    current_jti = None
+    if authorization and authorization.startswith("Bearer "):
+        try:
+            token = authorization.split("Bearer ")[1]
+            current_jti = jwt.decode(
+                token,
+                SECRET_KEY,
+                algorithms=[ALGORITHM],
+                options={"verify_exp": False},
+            ).get("jti")
+        except Exception:
+            current_jti = None
+
+    session_query = db.query(models.UserSession).filter(
+        models.UserSession.user_id == user.id,
+        models.UserSession.revoked_at.is_(None),
+    )
+    if is_self_change and current_jti:
+        session_query = session_query.filter(models.UserSession.jti != current_jti)
+    session_query.update({"revoked_at": local_now()}, synchronize_session=False)
     db.commit()
 
     logger.info("Password successfully changed for user: %s", target_username)

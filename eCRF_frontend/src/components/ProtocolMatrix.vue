@@ -1246,7 +1246,8 @@ export default {
         logic: {
           version: form.logic?.version || 1,
           calculations: Array.isArray(form.logic?.calculations) ? form.logic.calculations : [],
-          conditions: Array.isArray(form.logic?.conditions) ? form.logic.conditions : []
+          conditions: Array.isArray(form.logic?.conditions) ? form.logic.conditions : [],
+          valueAssignments: Array.isArray(form.logic?.valueAssignments) ? form.logic.valueAssignments : []
         }
       }));
 

@@ -21,6 +21,7 @@
         </div>
         <button type="submit" class="btn-login">Login</button>
       </form>
+      <p class="password-help">Forgot your password? Please contact your administrator.</p>
       <p>
         New user? <router-link to="/register" class="register-link">Register here</router-link>
       </p>
@@ -55,8 +56,14 @@ export default {
         });
 
         if (success) {
-          console.log("Login successful, redirecting to dashboard...");
-          this.$router.push("/dashboard");
+          const user = this.$store.getters.getUser;
+          if (user?.must_change_password) {
+            console.log("Login successful, password change required...");
+            this.$router.push("/dashboard/user-info");
+          } else {
+            console.log("Login successful, redirecting to dashboard...");
+            this.$router.push("/dashboard");
+          }
         } else {
           console.log("Login failed: invalid credentials");
           this.error = "Invalid username or password.";
@@ -184,6 +191,11 @@ input:focus {
 
 .register-link:hover {
   text-decoration: underline;
+}
+
+.password-help {
+  color: #555;
+  font-size: 14px;
 }
 
 /* Error Message */

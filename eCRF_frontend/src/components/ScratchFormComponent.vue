@@ -1,8 +1,8 @@
 <template>
   <div class="create-form-container">
-    <div class="scratch-form-content" :class="{ 'scratch-form-content-full': showMatrix || showLogic }">
+    <div class="scratch-form-content" :class="{ 'scratch-form-content-full': showMatrix || showLogic || showValueAssignments }">
       <!-- ───────── Available Fields ───────── -->
-      <div v-if="!showMatrix && !showLogic" class="available-fields">
+      <div v-if="!showMatrix && !showLogic && !showValueAssignments" class="available-fields">
         <div class="available-fields-topbar">
           <button @click="goBack" class="btn-back" title="Go Back">
             Back
@@ -268,12 +268,12 @@
       <div
         ref="scratchScrollEl"
         class="form-area"
-        :class="{ 'form-area-full': showMatrix || showLogic }"
+        :class="{ 'form-area-full': showMatrix || showLogic || showValueAssignments }"
         @scroll.passive="onScratchScroll"
       >
         <div class="sections-container">
           <!-- Sections View -->
-          <div v-if="!showMatrix && !showLogic">
+          <div v-if="!showMatrix && !showLogic && !showValueAssignments">
             <!-- Sticky builder toolbar -->
             <div class="sections-topbar builder-sticky-bar">
               <div class="form-actions-inline">
@@ -295,6 +295,14 @@
                     title="Configure conditional logic and calculations"
                   >
                     Logic & Calculations
+                  </button>
+
+                  <button
+                    @click.prevent="openValueAssignments"
+                    class="btn-option"
+                    title="Configure conditional value assignments"
+                  >
+                    Value Assignments
                   </button>
 
                   <button
@@ -667,6 +675,14 @@
               @update-logic="applyLogicPayload"
             />
           </div>
+          <div v-else-if="showValueAssignments">
+            <LogicValueAssignmentsRoute
+              :form="currentForm"
+              @back-to-builder="closeValueAssignments"
+              @update-form-structure="applyLogicFormUpdate"
+              @update-logic="applyLogicPayload"
+            />
+          </div>
         </div>
       </div>
     </div>
@@ -918,7 +934,7 @@
     </div>
 
     <button
-      v-if="!showMatrix && !showLogic && hasScratchScrollableContent"
+      v-if="!showMatrix && !showLogic && !showValueAssignments && hasScratchScrollableContent"
       type="button"
       class="floating-scroll-btn"
       :class="{ 'is-up': scratchScrollDirection === 'up' }"
@@ -946,6 +962,7 @@ import FieldSlider from "@/components/fields/FieldSlider.vue";
 import FieldLinearScale from "@/components/fields/FieldLinearScale.vue";
 import FieldFileUpload from "@/components/fields/FieldFileUpload.vue";
 import LogicCalculationsRoute from "./LogicCalculationsRoute.vue";
+import LogicValueAssignmentsRoute from "./LogicValueAssignmentsRoute.vue";
 import ImportCsvTemplateDialog from "./ImportCsvTemplateDialog.vue";
 import RearrangeStructureDialog from "@/components/RearrangeStructureDialog.vue";
 import FieldTable from "@/components/FieldTable.vue";
@@ -958,6 +975,7 @@ export default {
     ShaclComponents,
     ProtocolMatrix,
     LogicCalculationsRoute,
+    LogicValueAssignmentsRoute,
     FieldConstraintsDialog,
     FormPreview,
     DateFormatPicker,
@@ -977,7 +995,7 @@ export default {
   // IMPORTANT:
   // When ProtocolMatrix is open, let ProtocolMatrix handle unsaved guard/dialog.
   // This prevents double dialogs (one from Scratch + one from ProtocolMatrix).
-    if (this.showMatrix || this.showLogic) {
+    if (this.showMatrix || this.showLogic || this.showValueAssignments) {
       next();
       return;
     }
@@ -1041,6 +1059,7 @@ export default {
       selectedProps: [],
       showMatrix: false,
       showLogic: false,
+      showValueAssignments: false,
       visits: [],
       groups: [],
       assignments: [],
@@ -1735,7 +1754,8 @@ export default {
           logic: {
             version: safeForm.logic?.version || 1,
             calculations: Array.isArray(safeForm.logic?.calculations) ? safeForm.logic.calculations : [],
-            conditions: Array.isArray(safeForm.logic?.conditions) ? safeForm.logic.conditions : []
+            conditions: Array.isArray(safeForm.logic?.conditions) ? safeForm.logic.conditions : [],
+            valueAssignments: Array.isArray(safeForm.logic?.valueAssignments) ? safeForm.logic.valueAssignments : []
           }
         };
       });
@@ -1743,7 +1763,7 @@ export default {
       if (!this.forms.length) {
         this.forms = [{
           sections: [],
-          logic: { version: 1, calculations: [], conditions: [] }
+          logic: { version: 1, calculations: [], conditions: [], valueAssignments: [] }
         }];
       }
     },
@@ -2052,6 +2072,62 @@ export default {
       });
 
       this.openGenericDialog(messageLines.join("\n"));
+    },
+
+    removeAffectedValueAssignmentRulesForOptions({
+      sourceSectionIndex,
+      sourceFieldIndex,
+      previousField,
+      nextField,
+    }) {
+      const removedOptions = this.collectRemovedChoiceOptions(previousField, nextField);
+      if (!removedOptions.length) return;
+
+      const fieldKey = this.getFieldLogicKey(
+        previousField,
+        sourceSectionIndex,
+        sourceFieldIndex
+      );
+      const rules = this.currentForm?.logic?.valueAssignments;
+      if (!Array.isArray(rules) || !rules.length) return;
+
+      this.currentForm.logic.valueAssignments = rules.filter((rule) => {
+        const targetUsesRemovedOutput =
+          String(rule?.targetFieldKey || "") === String(fieldKey) &&
+          removedOptions.includes(String(rule?.outputValue ?? ""));
+
+        const conditionUsesRemovedValue = (rule?.conditions || []).some(
+          (condition) =>
+            String(condition?.sourceFieldKey || "") === String(fieldKey) &&
+            (
+              this.extractMatchingRemovedValues(condition?.value, removedOptions).length ||
+              this.extractMatchingRemovedValues(condition?.valueTo, removedOptions).length
+            )
+        );
+
+        return !targetUsesRemovedOutput && !conditionUsesRemovedValue;
+      });
+    },
+
+    removeValueAssignmentReferencesForFields(fields = []) {
+      const keys = new Set(
+        fields.flatMap(({ field, sectionIndex, fieldIndex }) => [
+          this.getFieldLogicKey(field, sectionIndex, fieldIndex),
+          field?._id,
+          field?.id,
+          field?.name,
+        ]).filter(Boolean).map(String)
+      );
+
+      const rules = this.currentForm?.logic?.valueAssignments;
+      if (!keys.size || !Array.isArray(rules)) return;
+
+      this.currentForm.logic.valueAssignments = rules.filter((rule) => {
+        if (keys.has(String(rule?.targetFieldKey || ""))) return false;
+        return !(rule?.conditions || []).some((condition) =>
+          keys.has(String(condition?.sourceFieldKey || ""))
+        );
+      });
     },
 
     togglePropSelection(i, prop) {
@@ -2393,13 +2469,14 @@ export default {
       this.ensureCurrentFormExists();
 
       if (!this.forms[this.currentFormIndex].logic || typeof this.forms[this.currentFormIndex].logic !== "object") {
-        this.forms[this.currentFormIndex].logic = { version: 1, calculations: [], conditions: [] };
+        this.forms[this.currentFormIndex].logic = { version: 1, calculations: [], conditions: [], valueAssignments: [] };
       }
 
       this.forms[this.currentFormIndex].logic = {
-        version: 1,
+        version: logicPayload?.version || 2,
         calculations: Array.isArray(logicPayload?.calculations) ? logicPayload.calculations : [],
-        conditions: Array.isArray(logicPayload?.conditions) ? logicPayload.conditions : []
+        conditions: Array.isArray(logicPayload?.conditions) ? logicPayload.conditions : [],
+        valueAssignments: Array.isArray(logicPayload?.valueAssignments) ? logicPayload.valueAssignments : []
       };
 
       try {
@@ -2422,12 +2499,15 @@ export default {
       this.ensureCurrentFormExists();
 
       const safeLogic = {
-        version: 1,
+        version: nextLogic?.version || 2,
         calculations: Array.isArray(nextLogic?.calculations)
           ? JSON.parse(JSON.stringify(nextLogic.calculations))
           : [],
         conditions: Array.isArray(nextLogic?.conditions)
           ? JSON.parse(JSON.stringify(nextLogic.conditions))
+          : [],
+        valueAssignments: Array.isArray(nextLogic?.valueAssignments)
+          ? JSON.parse(JSON.stringify(nextLogic.valueAssignments))
           : []
       };
 
@@ -2455,7 +2535,22 @@ export default {
       }
 
       this.showMatrix = false;
+      this.showValueAssignments = false;
       this.showLogic = true;
+    },
+
+    openValueAssignments() {
+      this.ensurePersistentIdsForLogic();
+
+      try {
+        localStorage.setItem("scratchForms", JSON.stringify(this.forms));
+      } catch (e) {
+        console.error("Failed to persist scratchForms before opening value assignments", e);
+      }
+
+      this.showMatrix = false;
+      this.showLogic = false;
+      this.showValueAssignments = true;
     },
 
     ensurePersistentIdsForLogic() {
@@ -2477,10 +2572,11 @@ export default {
       });
 
       if (!form.logic || typeof form.logic !== "object") {
-        form.logic = { version: 1, calculations: [], conditions: [] };
+        form.logic = { version: 1, calculations: [], conditions: [], valueAssignments: [] };
       }
       if (!Array.isArray(form.logic.calculations)) form.logic.calculations = [];
       if (!Array.isArray(form.logic.conditions)) form.logic.conditions = [];
+      if (!Array.isArray(form.logic.valueAssignments)) form.logic.valueAssignments = [];
       if (!form.logic.version) form.logic.version = 1;
 
       // Mark dirty because IDs/logic are structural metadata
@@ -2537,7 +2633,7 @@ export default {
     },
     ensureCurrentFormExists() {
       if (!Array.isArray(this.forms)) {
-        this.forms = [{ sections: [], logic: { version: 1, calculations: [], conditions: [] } }];
+        this.forms = [{ sections: [], logic: { version: 1, calculations: [], conditions: [], valueAssignments: [] } }];
       }
 
       if (!Number.isInteger(this.currentFormIndex) || this.currentFormIndex < 0) {
@@ -2545,12 +2641,12 @@ export default {
       }
 
       if (!this.forms.length) {
-        this.forms.push({ sections: [], logic: { version: 1, calculations: [], conditions: [] } });
+        this.forms.push({ sections: [], logic: { version: 1, calculations: [], conditions: [], valueAssignments: [] } });
       }
 
       if (!this.forms[this.currentFormIndex]) {
         while (this.forms.length <= this.currentFormIndex) {
-          this.forms.push({ sections: [], logic: { version: 1, calculations: [], conditions: [] } });
+          this.forms.push({ sections: [], logic: { version: 1, calculations: [], conditions: [], valueAssignments: [] } });
         }
       }
 
@@ -2559,12 +2655,12 @@ export default {
         if (this.$set) {
           this.$set(this.forms, this.currentFormIndex, {
             sections: [],
-            logic: { version: 1, calculations: [], conditions: [] }
+            logic: { version: 1, calculations: [], conditions: [], valueAssignments: [] }
           });
         } else {
           this.forms[this.currentFormIndex] = {
             sections: [],
-            logic: { version: 1, calculations: [], conditions: [] }
+            logic: { version: 1, calculations: [], conditions: [], valueAssignments: [] }
           };
         }
       }
@@ -2579,13 +2675,15 @@ export default {
           this.$set(this.forms[this.currentFormIndex], "logic", {
             version: 1,
             calculations: [],
-            conditions: []
+            conditions: [],
+            valueAssignments: []
           });
         } else {
           this.forms[this.currentFormIndex].logic = {
             version: 1,
             calculations: [],
-            conditions: []
+            conditions: [],
+            valueAssignments: []
           };
         }
       }
@@ -2598,6 +2696,11 @@ export default {
       if (!Array.isArray(this.forms[this.currentFormIndex].logic.conditions)) {
         if (this.$set) this.$set(this.forms[this.currentFormIndex].logic, "conditions", []);
         else this.forms[this.currentFormIndex].logic.conditions = [];
+      }
+
+      if (!Array.isArray(this.forms[this.currentFormIndex].logic.valueAssignments)) {
+        if (this.$set) this.$set(this.forms[this.currentFormIndex].logic, "valueAssignments", []);
+        else this.forms[this.currentFormIndex].logic.valueAssignments = [];
       }
 
       if (!this.forms[this.currentFormIndex].logic.version) {
@@ -2628,7 +2731,8 @@ export default {
         logic: {
           version: form.logic?.version || 1,
           calculations: Array.isArray(form.logic?.calculations) ? form.logic.calculations : [],
-          conditions: Array.isArray(form.logic?.conditions) ? form.logic.conditions : []
+          conditions: Array.isArray(form.logic?.conditions) ? form.logic.conditions : [],
+          valueAssignments: Array.isArray(form.logic?.valueAssignments) ? form.logic.valueAssignments : []
         }
       }));
 
@@ -2712,7 +2816,8 @@ export default {
         logic: {
           version: form.logic?.version || 1,
           calculations: Array.isArray(form.logic?.calculations) ? form.logic.calculations : [],
-          conditions: Array.isArray(form.logic?.conditions) ? form.logic.conditions : []
+          conditions: Array.isArray(form.logic?.conditions) ? form.logic.conditions : [],
+          valueAssignments: Array.isArray(form.logic?.valueAssignments) ? form.logic.valueAssignments : []
         }
       }));
 
@@ -3192,6 +3297,11 @@ export default {
         return;
       }
 
+      if (this.showValueAssignments) {
+        this.showValueAssignments = false;
+        return;
+      }
+
       // If ProtocolMatrix is open, just go back to study creation step 5
       if (this.showMatrix) {
         const q = { ...this.$route.query, step: "5" };
@@ -3361,11 +3471,21 @@ export default {
       });
     },
 
-    handleProtocolClick() { this.showLogic = false;this.showMatrix = true; },
+    handleProtocolClick() {
+      this.showLogic = false;
+      this.showValueAssignments = false;
+      this.showMatrix = true;
+    },
     editTemplate() { this.showMatrix = false; },
     closeLogicAndCalculations() {
       this.showMatrix = false;
       this.showLogic = false;
+    },
+
+    closeValueAssignments() {
+      this.showMatrix = false;
+      this.showLogic = false;
+      this.showValueAssignments = false;
     },
 
     onAssignmentUpdated({ mIdx, vIdx, gIdx, checked }) {
@@ -3527,6 +3647,13 @@ export default {
         // Keep assignment rows aligned with section rows.
         // ProtocolMatrix uses selectedModels index (mIdx) to read assignments[mIdx],
         // so when a section is deleted, its assignment row must be deleted too.
+        this.removeValueAssignmentReferencesForFields(
+          (sections[sectionIndex]?.fields || []).map((field, fieldIndex) => ({
+            field,
+            sectionIndex,
+            fieldIndex,
+          }))
+        );
         sections.splice(sectionIndex, 1);
 
         if (Array.isArray(this.assignments) && sectionIndex < this.assignments.length) {
@@ -3560,6 +3687,7 @@ export default {
       this.openConfirmDialog("Do you want to clear all sections?", () => {
         this.ensureCurrentFormExists();
         this.forms[this.currentFormIndex].sections = [];
+        this.forms[this.currentFormIndex].logic.valueAssignments = [];
         this.activeSection = 0;
         this.adjustAssignments();
       });
@@ -3764,6 +3892,12 @@ export default {
 
     removeField(si, fi) {
       this.ensureCurrentFormExists();
+      const field = this.currentForm.sections?.[si]?.fields?.[fi];
+      if (field) {
+        this.removeValueAssignmentReferencesForFields([
+          { field, sectionIndex: si, fieldIndex: fi },
+        ]);
+      }
       this.currentForm.sections[si]?.fields?.splice(fi, 1);
     },
 
@@ -3917,6 +4051,22 @@ export default {
           previousField,
           nextField: mergedField,
         });
+        this.removeAffectedValueAssignmentRulesForOptions({
+          sourceSectionIndex: sectionIndex,
+          sourceFieldIndex: fieldIndex,
+          previousField,
+          nextField: mergedField,
+        });
+      }
+
+      if (["file", "table", "button"].includes(String(mergedField.type || "").toLowerCase())) {
+        this.removeValueAssignmentReferencesForFields([
+          {
+            field: previousField,
+            sectionIndex,
+            fieldIndex,
+          },
+        ]);
       }
 
       this.currentForm.sections[sectionIndex].fields.splice(fieldIndex, 1, mergedField);

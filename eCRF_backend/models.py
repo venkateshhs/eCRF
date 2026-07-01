@@ -14,6 +14,7 @@ class User(Base):
     email = Column(String(255), unique=True, nullable=False)
     password = Column(String(255), nullable=False)
     created_at = Column(DateTime, default=local_now)
+    must_change_password = Column(Boolean, nullable=False, server_default="0", default=False)
 
     studies = relationship(
         "StudyMetadata",

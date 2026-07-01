@@ -284,6 +284,11 @@
           </div>
         </div>
 
+        <div v-if="valueAssignmentWarnings.length" class="value-assignment-warning">
+          <strong>Automatic value assignment needs review:</strong>
+          <span>{{ valueAssignmentWarnings.join(" ") }}</span>
+        </div>
+
         <div v-if="assignedModelIndices.length" class="sections-stack">
           <template v-for="mIdx in assignedModelIndices" :key="'sec-wrap-' + mIdx">
             <section
@@ -860,6 +865,7 @@ import {
   getNextSubjectSequenceNumber,
 } from "@/utils/subjectIdUtils";
 import { calculateDataEntryProgress } from "@/utils/dataEntryProgress";
+import { evaluateValueAssignments } from "@/utils/formValueAssignmentRuntime";
 
 export default {
   name: "StudyDataEntryComponent",
@@ -917,6 +923,7 @@ export default {
 
       // calc warnings
       calcWarnings: {},
+      valueAssignmentWarnings: [],
 
       icons,
       showShareDialog: false,
@@ -3243,15 +3250,16 @@ applyImportedRowFromDialog(payload) {
     },
 
     runCalculationsForCell(s, v, g, changedMIdx = null, changedFIdx = null) {
+      const initialAssignmentResult = this.runValueAssignmentsForCell(s, v, g);
       const rules = this.calculationRules || [];
-      if (!rules.length) return;
+      if (!rules.length) return initialAssignmentResult;
 
       const changedField =
         changedMIdx != null && changedFIdx != null
           ? this.selectedModels?.[changedMIdx]?.fields?.[changedFIdx]
           : null;
 
-      const changedKeys = changedField
+      let changedKeys = changedField
         ? new Set(
             [
               changedField?._id,
@@ -3267,60 +3275,152 @@ applyImportedRowFromDialog(payload) {
           )
         : null;
 
-      const currentCellData = this.entryData?.[s]?.[v]?.[g] || [];
+      if (initialAssignmentResult.changed) changedKeys = null;
 
-      rules.forEach((rule) => {
-        if (!rule?.target) return;
+      const sameValue = (left, right) =>
+        Array.isArray(left) || Array.isArray(right)
+          ? JSON.stringify(left) === JSON.stringify(right)
+          : left === right;
+      const maxPasses = Math.min(12, Math.max(2, rules.length + 2));
+      let anyChanged = initialAssignmentResult.changed;
+      let latestAssignmentResult = initialAssignmentResult;
+      let settled = false;
 
-        // Only re-run affected rules if a field changed
-        if (changedKeys) {
-          let touchesChanged = false;
+      for (let pass = 0; pass < maxPasses; pass += 1) {
+        const currentCellData = this.entryData?.[s]?.[v]?.[g] || [];
+        let calculationsChanged = false;
 
-          if (rule.kind === "calc_expr") {
-            const defs = Object.values(rule.symbolMap || {});
-            touchesChanged = defs.some((def) =>
-              changedKeys.has(String(def?.fieldId || ""))
-            );
-          } else if (Array.isArray(rule.sources)) {
-            touchesChanged = rule.sources.some((src) =>
-              changedKeys.has(String(src))
-            );
+        rules.forEach((rule) => {
+          if (!rule?.target) return;
+
+          // The first pass can stay scoped to the manually changed field.
+          // Later passes evaluate all rules to settle assignment/calculation chains.
+          if (pass === 0 && changedKeys) {
+            let touchesChanged = false;
+
+            if (rule.kind === "calc_expr") {
+              const defs = Object.values(rule.symbolMap || {});
+              touchesChanged = defs.some((def) =>
+                changedKeys.has(String(def?.fieldId || ""))
+              );
+            } else if (Array.isArray(rule.sources)) {
+              touchesChanged = rule.sources.some((src) =>
+                changedKeys.has(String(src))
+              );
+            }
+
+            if (!touchesChanged) return;
           }
 
-          if (!touchesChanged) return;
-        }
-
-        const result = computeCalculation(
-          rule,
-          this.selectedModels,
-          currentCellData
-        );
-
-        if (!result.ok) {
-          this.setCellValueByFieldId(s, v, g, rule.target, null);
-          this.setCalcWarningByRuleTarget(
-            s,
-            v,
-            g,
-            rule.target,
-            result.warning || "Calculation could not be applied."
+          const targetMeta = this.getFieldMetaByRuleFieldId(rule.target);
+          if (!targetMeta) return;
+          const { mIdx, fIdx } = targetMeta;
+          const previousValue = currentCellData?.[mIdx]?.[fIdx];
+          const result = computeCalculation(
+            rule,
+            this.selectedModels,
+            currentCellData
           );
-          return;
+
+          if (!result.ok) {
+            if (!sameValue(previousValue, null)) {
+              this.setDeepValue(s, v, g, mIdx, fIdx, null);
+              calculationsChanged = true;
+            }
+            this.setCalcWarningByRuleTarget(
+              s,
+              v,
+              g,
+              rule.target,
+              result.warning || "Calculation could not be applied."
+            );
+            return;
+          }
+
+          if (!sameValue(previousValue, result.value)) {
+            this.setDeepValue(s, v, g, mIdx, fIdx, result.value);
+            calculationsChanged = true;
+            this.clearError(mIdx, fIdx);
+
+            const fieldDef = this.selectedModels?.[mIdx]?.fields?.[fIdx];
+            if (fieldDef) this.validateField(mIdx, fIdx);
+          }
+          this.setCalcWarningByRuleTarget(s, v, g, rule.target, "");
+        });
+
+        latestAssignmentResult = this.runValueAssignmentsForCell(s, v, g);
+        anyChanged =
+          anyChanged ||
+          calculationsChanged ||
+          latestAssignmentResult.changed;
+
+        if (!calculationsChanged && !latestAssignmentResult.changed) {
+          settled = true;
+          break;
         }
+        changedKeys = null;
+      }
 
-        const targetMeta = this.getFieldMetaByRuleFieldId(rule.target);
-        if (!targetMeta) return;
+      if (!settled) {
+        const warning =
+          "Calculated fields and value assignments did not settle. Check for conflicting rules.";
+        this.valueAssignmentWarnings = Array.from(
+          new Set([...(this.valueAssignmentWarnings || []), warning])
+        );
+      }
 
-        const { mIdx, fIdx } = targetMeta;
-        this.setDeepValue(s, v, g, mIdx, fIdx, result.value);
-        this.clearError(mIdx, fIdx);
-        this.setCalcWarningByRuleTarget(s, v, g, rule.target, "");
+      return {
+        changed: anyChanged,
+        updates: latestAssignmentResult.updates || [],
+        warnings: latestAssignmentResult.warnings || [],
+      };
+    },
 
-        const fieldDef = this.selectedModels?.[mIdx]?.fields?.[fIdx];
-        if (fieldDef) {
-          this.validateField(mIdx, fIdx);
-        }
+    runValueAssignmentsForCell(s, v, g) {
+      if (s == null || v == null || g == null) {
+        return { changed: false, updates: [], warnings: [] };
+      }
+
+      this.ensureSlot(s, v, g);
+      const result = evaluateValueAssignments(
+        this.study,
+        this.selectedModels,
+        this.entryData?.[s]?.[v]?.[g] || []
+      );
+
+      (result.updates || []).forEach((update) => {
+        this.setDeepValue(
+          s,
+          v,
+          g,
+          update.sectionIndex,
+          update.fieldIndex,
+          update.value
+        );
+        this.setDeepSkip(
+          s,
+          v,
+          g,
+          update.sectionIndex,
+          update.fieldIndex,
+          false
+        );
+        this.clearError(update.sectionIndex, update.fieldIndex);
       });
+
+      if (
+        s === this.currentSubjectIndex &&
+        v === this.currentVisitIndex &&
+        g === this.currentGroupIndex
+      ) {
+        this.valueAssignmentWarnings = result.warnings || [];
+      }
+
+      return {
+        changed: (result.updates || []).length > 0,
+        updates: result.updates || [],
+        warnings: result.warnings || [],
+      };
     },
 
     runAllCalculationsForCurrentCell() {
@@ -6960,6 +7060,20 @@ applyImportedRowFromDialog(payload) {
   border-radius: inherit;
   background: linear-gradient(90deg, #2563eb 0%, #16a34a 100%);
   transition: width 0.28s ease;
+}
+
+.value-assignment-warning {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: -4px 0 18px;
+  padding: 10px 12px;
+  border: 1px solid #fcd34d;
+  border-radius: 8px;
+  background: #fffbeb;
+  color: #92400e;
+  font-size: 13px;
+  line-height: 1.4;
 }
 
 .section-collapse-all-btn {

@@ -41,6 +41,7 @@ class AdminUserCreate(BaseModel):
 
 class UserResponse(UserBase):
     id: int
+    must_change_password: bool = False
     profile: UserProfileBase
 
     class Config:

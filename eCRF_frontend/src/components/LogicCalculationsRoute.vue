@@ -472,7 +472,7 @@ export default {
 
   computed: {
     currentForm() {
-      return this.forms[this.formIndex] || { sections: [], logic: { version: 2, calculations: [], conditions: [] } };
+      return this.forms[this.formIndex] || { sections: [], logic: { version: 2, calculations: [], conditions: [], valueAssignments: [] } };
     },
 
     sectionOptions() {
@@ -519,6 +519,15 @@ export default {
       return `${this.newTargetLabel || "New Calculated Field"}${sec ? ` — ${sec.title}` : ""}`;
     },
 
+    targetHasValueAssignment() {
+      if (this.targetMode !== "existing" || !this.targetFieldId) return false;
+      return (this.currentForm?.logic?.valueAssignments || []).some(
+        (rule) =>
+          rule?.enabled !== false &&
+          String(rule?.targetFieldKey || "") === String(this.targetFieldId)
+      );
+    },
+
     warnings() {
       const out = [];
 
@@ -540,6 +549,9 @@ export default {
         const t = this.allFields.find((f) => f.id === this.targetFieldId);
         if (t && t.type && t.type !== "number") {
           out.push(`Existing result field type is "${t.type}". Number field is recommended.`);
+        }
+        if (this.targetHasValueAssignment) {
+          out.push("The result field is already controlled by a value assignment.");
         }
       }
 
@@ -569,7 +581,7 @@ export default {
       if (!this.expressionValidation.ok) return false;
 
       if (this.targetMode === "existing") {
-        return !!this.targetFieldId;
+        return !!this.targetFieldId && !this.targetHasValueAssignment;
       }
 
       return !!this.newTargetSectionId && !!String(this.newTargetLabel || "").trim();
@@ -587,10 +599,11 @@ export default {
 
         const next = JSON.parse(JSON.stringify(newForm));
         if (!next.logic || typeof next.logic !== "object") {
-          next.logic = { version: 2, calculations: [], conditions: [] };
+          next.logic = { version: 2, calculations: [], conditions: [], valueAssignments: [] };
         }
         if (!Array.isArray(next.logic.calculations)) next.logic.calculations = [];
         if (!Array.isArray(next.logic.conditions)) next.logic.conditions = [];
+        if (!Array.isArray(next.logic.valueAssignments)) next.logic.valueAssignments = [];
 
         this.forms[this.formIndex] = next;
         this.ensurePersistentIds();
@@ -637,15 +650,15 @@ export default {
         this.forms = [];
       }
 
-      if (!this.forms.length) this.forms = [{ sections: [], logic: { version: 2, calculations: [], conditions: [] } }];
+      if (!this.forms.length) this.forms = [{ sections: [], logic: { version: 2, calculations: [], conditions: [], valueAssignments: [] } }];
       while (this.forms.length <= this.formIndex) {
-        this.forms.push({ sections: [], logic: { version: 2, calculations: [], conditions: [] } });
+        this.forms.push({ sections: [], logic: { version: 2, calculations: [], conditions: [], valueAssignments: [] } });
       }
 
       if (this.form && typeof this.form === "object") {
         this.forms[this.formIndex] = JSON.parse(JSON.stringify(this.form));
       } else if (!this.forms[this.formIndex]) {
-        this.forms[this.formIndex] = { sections: [], logic: { version: 2, calculations: [], conditions: [] } };
+        this.forms[this.formIndex] = { sections: [], logic: { version: 2, calculations: [], conditions: [], valueAssignments: [] } };
       }
 
       if (!Array.isArray(this.forms[this.formIndex].sections)) {
@@ -653,13 +666,16 @@ export default {
       }
 
       if (!this.forms[this.formIndex].logic || typeof this.forms[this.formIndex].logic !== "object") {
-        this.forms[this.formIndex].logic = { version: 2, calculations: [], conditions: [] };
+        this.forms[this.formIndex].logic = { version: 2, calculations: [], conditions: [], valueAssignments: [] };
       }
       if (!Array.isArray(this.forms[this.formIndex].logic.calculations)) {
         this.forms[this.formIndex].logic.calculations = [];
       }
       if (!Array.isArray(this.forms[this.formIndex].logic.conditions)) {
         this.forms[this.formIndex].logic.conditions = [];
+      }
+      if (!Array.isArray(this.forms[this.formIndex].logic.valueAssignments)) {
+        this.forms[this.formIndex].logic.valueAssignments = [];
       }
 
       console.log("[LogicCalc] loadFormsFromSource current form =", JSON.parse(JSON.stringify(this.forms[this.formIndex] || {})));
@@ -675,7 +691,8 @@ export default {
       const currentLogic = JSON.parse(JSON.stringify(currentForm.logic || {
         version: 2,
         calculations: [],
-        conditions: []
+        conditions: [],
+        valueAssignments: []
       }));
 
       this.$emit("update-form-structure", currentForm);
@@ -702,9 +719,10 @@ export default {
         });
       });
 
-      if (!form.logic) form.logic = { version: 2, calculations: [], conditions: [] };
+      if (!form.logic) form.logic = { version: 2, calculations: [], conditions: [], valueAssignments: [] };
       if (!Array.isArray(form.logic.calculations)) form.logic.calculations = [];
       if (!Array.isArray(form.logic.conditions)) form.logic.conditions = [];
+      if (!Array.isArray(form.logic.valueAssignments)) form.logic.valueAssignments = [];
       if (!form.logic.version) form.logic.version = 2;
 
       this.forms[this.formIndex] = form;
@@ -1045,8 +1063,9 @@ export default {
 
     loadCalcRules() {
       const form = this.currentForm;
-      if (!form.logic) form.logic = { version: 2, calculations: [], conditions: [] };
+      if (!form.logic) form.logic = { version: 2, calculations: [], conditions: [], valueAssignments: [] };
       if (!Array.isArray(form.logic.calculations)) form.logic.calculations = [];
+      if (!Array.isArray(form.logic.valueAssignments)) form.logic.valueAssignments = [];
 
       this.calcRules = JSON.parse(
         JSON.stringify(
@@ -1060,9 +1079,10 @@ export default {
     persistRules() {
       const form = this.currentForm;
 
-      if (!form.logic) form.logic = { version: 2, calculations: [], conditions: [] };
+      if (!form.logic) form.logic = { version: 2, calculations: [], conditions: [], valueAssignments: [] };
       if (!Array.isArray(form.logic.calculations)) form.logic.calculations = [];
       if (!Array.isArray(form.logic.conditions)) form.logic.conditions = [];
+      if (!Array.isArray(form.logic.valueAssignments)) form.logic.valueAssignments = [];
 
       form.logic.calculations = JSON.parse(JSON.stringify(this.calcRules));
       form.logic.version = 2;

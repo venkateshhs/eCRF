@@ -1012,6 +1012,15 @@ export default {
       localStorage.setItem("scratchForms", JSON.stringify(scratchForms));
     }
 
+    function setScratchForms(forms, selectedModels = []) {
+      const normalizedForms = normalizeFormsArray(forms);
+      if (normalizedForms.length) {
+        localStorage.setItem("scratchForms", JSON.stringify(normalizedForms));
+        return;
+      }
+      setScratchFormsFromSelectedModels(selectedModels);
+    }
+
     function mergeMetaIntoStudyNode(studyNode, meta) {
       const base = _deepClone(studyNode || {});
       const metaName = meta?.study_name || meta?.name || "";
@@ -1042,7 +1051,11 @@ export default {
       }
 
       const normalizedSelectedModels = ensureIdsInSelectedModels(sd.selectedModels || []);
-      const normalizedForms = selectedModelsToForms(normalizedSelectedModels);
+      const savedForms = normalizeFormsArray(sd.forms);
+      const normalizedForms =
+        savedForms.length
+          ? savedForms
+          : selectedModelsToForms(normalizedSelectedModels);
 
       const studyInfo = {
         id: meta.id ?? id,
@@ -1070,7 +1083,7 @@ export default {
         forms: _deepClone(normalizedForms),
       });
 
-      setScratchFormsFromSelectedModels(normalizedSelectedModels);
+      setScratchForms(normalizedForms, normalizedSelectedModels);
     }
 
     async function importStudyTemplateFile(file) {
