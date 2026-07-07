@@ -553,6 +553,7 @@
                         stage="runtime"
                         @input="(meta) => setEntryValue(mIdx, fIdx, meta)"
                         @file-selected="(file) => onRawFileSelected(mIdx, fIdx, file)"
+                        @download-file="downloadUploadedFile"
                       />
 
                       <!-- FALLBACK -->
@@ -752,6 +753,7 @@
       @close="closePreviousVisitImportDialog"
       @select="applyPreviousVisitImport"
     />
+
     <div
       v-if="showUnsavedExitDialog"
       class="unsaved-exit-backdrop"
@@ -869,6 +871,11 @@ import {
 import { calculateDataEntryProgress } from "@/utils/dataEntryProgress";
 import { evaluateValueAssignments } from "@/utils/formValueAssignmentRuntime";
 import { parseDateByConfiguredFormat } from "@/utils/dateFormatParsing";
+import {
+  inferUploadedFileFieldContext,
+  uploadedFileId,
+  uploadedFileName,
+} from "@/utils/uploadedFiles";
 
 export default {
   name: "StudyDataEntryComponent",
@@ -970,6 +977,7 @@ export default {
 
       entriesIndex: new Map(),
       hydrateCache: new Map(),
+      studyFiles: [],
       visitLoading: false,
 
       // Add-subjects dialog state
@@ -1454,6 +1462,7 @@ export default {
         this.visitList.length > this.VISIT_THRESHOLD ? 0 : -1;
 
       await this.loadExistingEntries(studyId);
+      await this.loadStudyFiles(studyId);
 
       this.visitLoading = true;
       this.applyVersionView();
@@ -3757,6 +3766,66 @@ applyImportedRowFromDialog(payload) {
       return arr[0];
     },
 
+    studyFileRecordsForCell(sIdx, vIdx) {
+      return (this.studyFiles || []).filter(
+        (file) =>
+          Number(file?.subject_index) === Number(sIdx) &&
+          Number(file?.visit_index) === Number(vIdx)
+      );
+    },
+
+    async downloadUploadedFile(file) {
+      if (!file) return;
+
+      const url =
+        file.source === "url"
+          ? file.url
+          : String(file.storage_option || "").toLowerCase() === "url"
+          ? file.file_path
+          : "";
+
+      if (url) {
+        window.open(url, "_blank", "noopener,noreferrer");
+        return;
+      }
+
+      const fileId = uploadedFileId(file);
+      const studyId = this.study?.metadata?.id;
+
+      if (!fileId || !studyId) {
+        this.showDialogMessage("This file is not available for download yet. Please save the data first.");
+        return;
+      }
+
+      if (!this.token) {
+        this.$router.push("/login");
+        return;
+      }
+
+      try {
+        const response = await axios.get(
+          `/forms/studies/${studyId}/files/${fileId}/download`,
+          {
+            headers: { Authorization: `Bearer ${this.token}` },
+            responseType: "blob",
+          }
+        );
+
+        const blob = new Blob([response.data]);
+        const objectUrl = window.URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = objectUrl;
+        link.download = uploadedFileName(file) || "download";
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        window.URL.revokeObjectURL(objectUrl);
+      } catch (e) {
+        console.error("Failed to download uploaded file", e);
+        this.showDialogMessage("Failed to download file.");
+      }
+    },
+
     applyVersionView() {
       if (this.showSelection) return;
 
@@ -3892,6 +3961,51 @@ applyImportedRowFromDialog(payload) {
       });
     },
 
+    mergeStudyFileRecordsIntoSlotData(sIdx, vIdx, slotData) {
+      if (!Array.isArray(slotData)) return slotData;
+
+      this.studyFileRecordsForCell(sIdx, vIdx).forEach((file) => {
+        const context = inferUploadedFileFieldContext(file, this.selectedModels);
+        if (!context) return;
+
+        const mIdx = Number(context.sectionIndex);
+        const fIdx = Number(context.fieldIndex);
+        const field = this.selectedModels?.[mIdx]?.fields?.[fIdx];
+        if (!field || String(field.type || "").toLowerCase() !== "file") return;
+
+        const fileId = String(file.id || file.dbId || file.file_id || "");
+        if (!fileId) return;
+
+        if (!Array.isArray(slotData[mIdx])) {
+          slotData[mIdx] = (this.selectedModels[mIdx]?.fields || []).map((f) =>
+            this.defaultForField(f)
+          );
+        }
+
+        const current = slotData[mIdx][fIdx];
+        const currentFiles = Array.isArray(current) ? [...current] : current ? [current] : [];
+        const alreadyPresent = currentFiles.some(
+          (item) => String(uploadedFileId(item) || "") === fileId
+        );
+        if (alreadyPresent) return;
+
+        const mergedFile = {
+          source: String(file.storage_option || "").toLowerCase() === "url" ? "url" : "local",
+          name: file.file_name || uploadedFileName(file),
+          dbId: file.id,
+          file_path: file.file_path,
+          storage_option: file.storage_option || "bids",
+          file_name: file.file_name || uploadedFileName(file),
+        };
+
+        slotData[mIdx][fIdx] = field.constraints?.allowMultipleFiles
+          ? [...currentFiles, mergedFile]
+          : mergedFile;
+      });
+
+      return slotData;
+    },
+
     makeSectionFieldSkeleton() {
       return (this.selectedModels || []).map((sec) =>
         (sec.fields || []).map((f) => this.defaultForField(f))
@@ -3967,6 +4081,7 @@ applyImportedRowFromDialog(payload) {
           row[fIdx] !== undefined ? row[fIdx] : this.defaultForField(f)
         );
       });
+      arr = this.mergeStudyFileRecordsIntoSlotData(s, v, arr);
 
       this.entryData[s][v][g] = arr;
       this.entryIds[s][v][g] = best.id;
@@ -4432,6 +4547,24 @@ applyImportedRowFromDialog(payload) {
       }
     },
 
+    async loadStudyFiles(studyId) {
+      if (this.isShared || !studyId) {
+        this.studyFiles = [];
+        return;
+      }
+
+      try {
+        const resp = await axios.get(`/forms/studies/${studyId}/files`, {
+          headers: { Authorization: `Bearer ${this.token}` },
+        });
+        this.studyFiles = Array.isArray(resp.data) ? resp.data : [];
+        this.hydrateCache.clear();
+      } catch (err) {
+        console.warn("Failed to load uploaded files", err?.response?.data || err.message);
+        this.studyFiles = [];
+      }
+    },
+
     defaultForField(f, { ignoreDefaults = false } = {}) {
       const c = f?.constraints || {};
       const t = String(f?.type || "").toLowerCase();
@@ -4629,7 +4762,9 @@ applyImportedRowFromDialog(payload) {
         const g = this.subjectToGroupIdx[s];
 
         if (g == null || g < 0) {
-          for (const v of vIndices) nextMap.set(`${s}|${v}`, "none");
+          for (const v of vIndices) {
+            nextMap.set(`${s}|${v}`, "none");
+          }
           continue;
         }
 
@@ -4755,7 +4890,7 @@ applyImportedRowFromDialog(payload) {
 
       this.ensureSlot(s, v, g);
 
-      const arr = this.dictToArray(slot?.data || {});
+      const arr = this.mergeStudyFileRecordsIntoSlotData(s, v, this.dictToArray(slot?.data || {}));
       const skips = this.normalizeSkipFlagsShape(slot?.skipped_required_flags);
 
       this.entryData[s][v][g] = arr;
@@ -5438,6 +5573,10 @@ applyImportedRowFromDialog(payload) {
             }
           }
         }
+      }
+
+      if (!this.isShared && studyId) {
+        await this.loadStudyFiles(studyId);
       }
     },
 

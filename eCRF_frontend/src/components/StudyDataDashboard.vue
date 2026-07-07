@@ -164,11 +164,46 @@
             <tr>
               <td class="fixed-col sticky-col sticky-subject">{{ row.subjectId }}</td>
               <td v-if="canViewGroupColumn" class="fixed-col sticky-col sticky-group">{{ row.group }}</td>
-              <td class="fixed-col sticky-col sticky-visit">{{ row.visit }}</td>
+              <td class="fixed-col sticky-col sticky-visit">
+                <span class="visit-cell-content">
+                  <span>{{ row.visit }}</span>
+                  <button
+                    v-if="row.__uploadedFiles && row.__uploadedFiles.length"
+                    type="button"
+                    class="uploaded-files-inline-btn"
+                    :title="`${row.__uploadedFiles.length} uploaded file(s)`"
+                    @click.stop="openUploadedFilesDialog(row)"
+                  >
+                    <i class="fas fa-paperclip" aria-hidden="true"></i>
+                  </button>
+                </span>
+              </td>
 
               <template v-for="col in dashboardColumns" :key="'cell-'+rowIdx+'-'+col.key">
                 <td :class="dashboardCellClass(row, col)">
-                  {{ row[col.key] }}
+                  <template v-if="fileItemsForCell(row, col).length">
+                    <span class="file-cell-list">
+                      <span
+                        v-for="(file, fileIdx) in fileItemsForCell(row, col)"
+                        :key="`${col.key}-${fileIdx}-${file.dbId || file.id || file.file_id || file.displayName}`"
+                        class="file-cell-item"
+                      >
+                        <span class="file-cell-name" :title="file.displayName">{{ file.displayName }}</span>
+                        <button
+                          v-if="file.downloadable"
+                          type="button"
+                          class="file-download-inline-btn"
+                          title="Download file"
+                          @click.stop="downloadUploadedFile(file)"
+                        >
+                          <i class="fas fa-download" aria-hidden="true"></i>
+                        </button>
+                      </span>
+                    </span>
+                  </template>
+                  <template v-else>
+                    {{ row[col.key] }}
+                  </template>
                 </td>
               </template>
             </tr>
@@ -188,6 +223,15 @@
     <div v-if="!filteredData.length && !isLoadingEntries" class="no-data">
       No data entries found. Please enter data for the assigned sections using the data entry form.
     </div>
+
+    <UploadedFilesDialog
+      v-if="showUploadedFilesDialog"
+      :files="uploadedFilesDialogFiles"
+      :subject-label="uploadedFilesDialogSubject"
+      :visit-label="uploadedFilesDialogVisit"
+      @close="closeUploadedFilesDialog"
+      @download-file="downloadUploadedFile"
+    />
   </div>
 
   <div v-else class="loading">
@@ -198,9 +242,18 @@
 <script>
 import axios from "axios";
 import icons from "@/assets/styles/icons";
+import UploadedFilesDialog from "@/components/dataentry/UploadedFilesDialog.vue";
+import {
+  collectUploadedFilesForSlot,
+  inferUploadedFileFieldContext,
+  normalizeUploadedFiles,
+  uploadedFileId,
+  uploadedFileName,
+} from "@/utils/uploadedFiles";
 
 export default {
   name: "StudyDataDashboard",
+  components: { UploadedFilesDialog },
   props: {
     studyId: { type: [String, Number], default: null },
     embedded: { type: Boolean, default: false },
@@ -229,6 +282,11 @@ export default {
       studyVersions: [],
       selectedVersion: null,
       templateCache: new Map(),
+      studyFiles: [],
+      showUploadedFilesDialog: false,
+      uploadedFilesDialogFiles: [],
+      uploadedFilesDialogSubject: "",
+      uploadedFilesDialogVisit: "",
     };
   },
   computed: {
@@ -504,6 +562,7 @@ export default {
           this.selectedVersion = this.studyVersions[this.studyVersions.length - 1].version;
         }
         await this.loadTemplateForSelectedVersion();
+        await this.loadStudyFiles(studyId);
 
         this.initDynamicFilters();
 
@@ -516,6 +575,23 @@ export default {
         } else {
           alert("Could not load study data");
         }
+      }
+    },
+
+    async loadStudyFiles(studyId) {
+      if (!studyId) {
+        this.studyFiles = [];
+        return;
+      }
+
+      try {
+        const resp = await axios.get(`/forms/studies/${studyId}/files`, {
+          headers: { Authorization: `Bearer ${this.token}` },
+        });
+        this.studyFiles = Array.isArray(resp.data) ? resp.data : [];
+      } catch (err) {
+        console.warn("Failed to load uploaded files", err?.response?.data || err.message);
+        this.studyFiles = [];
       }
     },
 
@@ -933,7 +1009,12 @@ export default {
             __sIdx: subjIdx,
             __vIdx: vIdx,
             __gIdx: groupIdx,
+            __uploadedFiles: [],
+            __fileItems: {},
           };
+
+          const entry = this.findBestEntryFromEntries(entries, subjIdx, vIdx, groupIdx);
+          row.__uploadedFiles = this.uploadedFilesForRow(subjIdx, vIdx, entry?.data || []);
 
           columns.forEach((col) => {
             const assigned = this.isAssigned(col.sIdx, vIdx, groupIdx);
@@ -952,6 +1033,13 @@ export default {
                 row[col.key] = raw === true ? "Yes" : raw === false ? "No" : "";
               } else if (type === "file") {
                 row[col.key] = this.formatFileCell(raw);
+                row.__fileItems[col.key] = normalizeUploadedFiles(raw).map((file) => ({
+                  ...file,
+                  sectionIndex: col.sIdx,
+                  fieldIndex: col.fIdx,
+                  sectionTitle: col.sectionTitle,
+                  fieldLabel: col.label,
+                }));
               } else if (Array.isArray(raw)) {
                 row[col.key] = raw.join(", ");
               } else {
@@ -973,6 +1061,13 @@ export default {
                 row[col.key] = raw === true ? "Yes" : raw === false ? "No" : "";
               } else if (tableColType === "file") {
                 row[col.key] = this.formatFileCell(raw);
+                row.__fileItems[col.key] = normalizeUploadedFiles(raw).map((file) => ({
+                  ...file,
+                  sectionIndex: col.sIdx,
+                  fieldIndex: col.fIdx,
+                  sectionTitle: col.sectionTitle,
+                  fieldLabel: col.label,
+                }));
               } else if (Array.isArray(raw)) {
                 row[col.key] = raw.join(", ");
               } else {
@@ -1118,6 +1213,112 @@ export default {
       if (val && typeof val === "object") return fromObj(val);
       if (typeof val === "string") return baseName(val);
       return "";
+    },
+
+    studyFileRecordsForCell(sIdx, vIdx) {
+      return (this.studyFiles || []).filter(
+        (file) =>
+          Number(file?.subject_index) === Number(sIdx) &&
+          Number(file?.visit_index) === Number(vIdx)
+      );
+    },
+
+    uploadedFilesForRow(sIdx, vIdx, data) {
+      const collected = collectUploadedFilesForSlot({
+        sections: this.sections,
+        data,
+      });
+      const seenIds = new Set(
+        collected
+          .map((file) => String(uploadedFileId(file) || ""))
+          .filter(Boolean)
+      );
+
+      this.studyFileRecordsForCell(sIdx, vIdx).forEach((file) => {
+        const id = String(file.id || "");
+        if (id && seenIds.has(id)) return;
+        const context = inferUploadedFileFieldContext(file, this.sections) || {};
+        collected.push({
+          ...file,
+          dbId: file.id,
+          displayName: uploadedFileName(file),
+          downloadable: true,
+          sectionIndex: context.sectionIndex ?? -1,
+          fieldIndex: context.fieldIndex ?? -1,
+          sectionTitle: context.sectionTitle || "Uploaded files",
+          fieldLabel: context.fieldLabel || file.description || "File upload",
+        });
+      });
+
+      return collected;
+    },
+
+    fileItemsForCell(row, col) {
+      return row?.__fileItems?.[col?.key] || [];
+    },
+
+    openUploadedFilesDialog(row) {
+      this.uploadedFilesDialogFiles = row?.__uploadedFiles || [];
+      this.uploadedFilesDialogSubject = row?.subjectId || "Subject";
+      this.uploadedFilesDialogVisit = row?.visit || "Visit";
+      this.showUploadedFilesDialog = true;
+    },
+
+    closeUploadedFilesDialog() {
+      this.showUploadedFilesDialog = false;
+      this.uploadedFilesDialogFiles = [];
+      this.uploadedFilesDialogSubject = "";
+      this.uploadedFilesDialogVisit = "";
+    },
+
+    async downloadUploadedFile(file) {
+      if (!file) return;
+
+      const url =
+        file.source === "url"
+          ? file.url
+          : String(file.storage_option || "").toLowerCase() === "url"
+          ? file.file_path
+          : "";
+
+      if (url) {
+        window.open(url, "_blank", "noopener,noreferrer");
+        return;
+      }
+
+      const fileId = uploadedFileId(file);
+      if (!fileId || !this.studyId) {
+        alert("This file is not available for download.");
+        return;
+      }
+
+      if (!this.token) {
+        this.$router.push("/login");
+        return;
+      }
+
+      try {
+        const response = await axios.get(
+          `/forms/studies/${this.studyId}/files/${fileId}/download`,
+          {
+            headers: { Authorization: `Bearer ${this.token}` },
+            responseType: "blob",
+          }
+        );
+
+        const blob = new Blob([response.data]);
+        const objectUrl = window.URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = objectUrl;
+        link.download = uploadedFileName(file) || "download";
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        window.URL.revokeObjectURL(objectUrl);
+      } catch (e) {
+        console.error("Failed to download uploaded file", e);
+        alert("Failed to download file.");
+      }
     },
 
     goFirst() {
@@ -1283,6 +1484,52 @@ export default {
   background: #fff;
   font-size: 0.9rem;
   color: #374151;
+}
+
+.visit-cell-content,
+.file-cell-list,
+.file-cell-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.file-cell-list {
+  flex-wrap: wrap;
+}
+
+.file-cell-item {
+  max-width: 220px;
+  padding: 2px 4px;
+  border-radius: 6px;
+  background: #f8fafc;
+}
+
+.file-cell-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.uploaded-files-inline-btn,
+.file-download-inline-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 24px;
+  border: 1px solid #bfdbfe;
+  border-radius: 7px;
+  background: #eff6ff;
+  color: #2563eb;
+  cursor: pointer;
+}
+
+.uploaded-files-inline-btn:hover,
+.file-download-inline-btn:hover {
+  background: #dbeafe;
 }
 
 .export-dropdown,

@@ -30,6 +30,15 @@
           <span class="size">{{ humanSize(singleLocal.size) }}</span>
           <span class="meta-dot" v-if="singleLocal.type">•</span>
           <span class="mime" v-if="singleLocal.type">{{ singleLocal.type }}</span>
+          <button
+            v-if="canDownload(singleLocal)"
+            class="icon-inline download"
+            type="button"
+            @click="$emit('download-file', singleLocal)"
+            title="Download"
+          >
+            <i class="fas fa-download" />
+          </button>
           <button class="icon-inline danger" type="button" @click="clearValue" title="Remove">
             <i :class="icons.trash" />
           </button>
@@ -51,6 +60,15 @@
           <span class="size">{{ humanSize(it.size) }}</span>
           <span class="meta-dot" v-if="it.type">•</span>
           <span class="mime" v-if="it.type">{{ it.type }}</span>
+          <button
+            v-if="canDownload(it)"
+            class="icon-inline download"
+            type="button"
+            @click="$emit('download-file', it)"
+            title="Download"
+          >
+            <i class="fas fa-download" />
+          </button>
           <button class="icon-inline danger" type="button" @click="removeLocalAt(i)" title="Remove">
             <i :class="icons.trash" />
           </button>
@@ -80,6 +98,15 @@
         <div v-if="urlItems.length" class="meta">
           <div class="file-row" v-for="(it, i) in urlItems" :key="`${it.url}-${i}`">
             <span class="name" :title="it.url">{{ truncate(it.url, 60) }}</span>
+            <button
+              v-if="canDownload(it)"
+              class="icon-inline download"
+              type="button"
+              @click="$emit('download-file', it)"
+              title="Open link"
+            >
+              <i class="fas fa-download" />
+            </button>
             <button class="icon-inline danger" type="button" @click="removeUrlAt(i)" title="Remove">
               <i :class="icons.trash" />
             </button>
@@ -351,6 +378,13 @@ export default {
       this.$emit("input", this.isMultiple ? [] : null);
     },
 
+    canDownload(file) {
+      if (!file || typeof file !== "object") return false;
+      if (file.source === "url" && file.url) return true;
+      if (String(file.storage_option || "").toLowerCase() === "url" && file.file_path) return true;
+      return !!(file.dbId || file.id || file.file_id);
+    },
+
     humanSize(bytes) {
       if (!Number.isFinite(bytes)) return "";
       if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
@@ -411,6 +445,7 @@ export default {
 .url-add-row { display:grid; grid-template-columns:1fr auto; gap:8px; align-items:center; }
 .add-url-btn { padding:10px 14px; border-radius:8px; border:1px solid #d1d5db; background:#f9fafb; cursor:pointer; }
 .icon-inline { border:none; background:transparent; padding:6px; border-radius:8px; cursor:pointer; }
+.icon-inline.download i { color:#2563eb }
 .icon-inline.danger i { color:#b91c1c }
 .meta { display:flex; flex-direction:column; gap:4px }
 .file-row { display:flex; align-items:center; gap:8px; flex-wrap:wrap }
