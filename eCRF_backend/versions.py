@@ -33,7 +33,7 @@
 from __future__ import annotations
 
 import uuid
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 from sqlalchemy.orm import Session
 from sqlalchemy import and_
 
@@ -432,6 +432,370 @@ def _safe_idx(idx: int, limit: int) -> Optional[int]:
     return idx if 0 <= idx < limit else None
 
 
+def _choice_options(field_or_col: Dict[str, Any]) -> List[str]:
+    opts = field_or_col.get("options") or []
+    if not isinstance(opts, list):
+        return []
+
+    out: List[str] = []
+    for opt in opts:
+        if isinstance(opt, dict):
+            val = (
+                opt.get("value")
+                or opt.get("label")
+                or opt.get("name")
+                or opt.get("title")
+                or str(opt)
+            )
+        else:
+            val = opt
+        s = _norm_str(val)
+        if s:
+            out.append(s)
+    return out
+
+
+def _choice_options_changed(old_obj: Dict[str, Any], new_obj: Dict[str, Any]) -> bool:
+    return _choice_options(old_obj) != _choice_options(new_obj)
+
+
+def _is_multi_choice(field_or_col: Dict[str, Any], value: Any) -> bool:
+    cons = field_or_col.get("constraints") or {}
+    return bool(cons.get("allowMultiple")) or isinstance(value, list)
+
+
+def _empty_choice_value(field_or_col: Dict[str, Any], previous_value: Any) -> Any:
+    return [] if _is_multi_choice(field_or_col, previous_value) else ""
+
+
+def _sanitize_choice_value_for_new_options(
+    value: Any,
+    new_field_or_col: Dict[str, Any],
+) -> Tuple[Any, bool]:
+    if value is None or value == "":
+        return value, False
+
+    valid = set(_choice_options(new_field_or_col))
+    if not valid:
+        return _empty_choice_value(new_field_or_col, value), value not in (None, "", [])
+
+    if isinstance(value, list):
+        kept = [v for v in value if _norm_str(v) in valid]
+        changed = len(kept) != len(value)
+        return kept, changed
+
+    if _norm_str(value) in valid:
+        return value, False
+
+    return _empty_choice_value(new_field_or_col, value), True
+
+
+def _identity_values(obj: Dict[str, Any], *, include_label: bool = True) -> List[str]:
+    keys = ["id", "_id", "field_id", "uid", "key", "name", "title"]
+    if include_label:
+        keys.append("label")
+
+    vals: List[str] = []
+    for key in keys:
+        v = _norm_str(obj.get(key))
+        if v:
+            vals.append(v)
+    return vals
+
+
+def _identity_key(obj: Dict[str, Any], *, include_label: bool = True) -> str:
+    vals = _identity_values(obj, include_label=include_label)
+    return vals[0].lower() if vals else ""
+
+
+def _section_data_key(section: Dict[str, Any]) -> str:
+    return section.get("title") or section.get("name") or ""
+
+
+def _field_data_keys(field: Dict[str, Any], fallback_index: int) -> List[str]:
+    keys = _identity_values(field, include_label=True)
+    keys.append(f"f{fallback_index}")
+
+    out: List[str] = []
+    seen = set()
+    for key in keys:
+        s = _norm_str(key)
+        if not s:
+            continue
+        lower = s.lower()
+        if lower in seen:
+            continue
+        seen.add(lower)
+        out.append(s)
+    return out
+
+
+def _find_existing_key(container: Dict[str, Any], candidates: List[str]) -> Optional[str]:
+    for cand in candidates:
+        if cand in container:
+            return cand
+
+    lower_map = {_norm_str(k).lower(): k for k in container.keys()}
+    for cand in candidates:
+        found = lower_map.get(_norm_str(cand).lower())
+        if found is not None:
+            return found
+    return None
+
+
+def _index_fields(fields: Any) -> Dict[str, Dict[str, Any]]:
+    out: Dict[str, Dict[str, Any]] = {}
+    if not isinstance(fields, list):
+        return out
+
+    for idx, field in enumerate(fields):
+        if not isinstance(field, dict):
+            continue
+        key = _identity_key(field)
+        if key:
+            out[key] = {"field": field, "index": idx}
+    return out
+
+
+def _column_data_key(col: Dict[str, Any], fallback_index: int) -> str:
+    return (
+        _norm_str(col.get("id"))
+        or _norm_str(col.get("key"))
+        or _norm_str(col.get("label"))
+        or _norm_str(col.get("name"))
+        or f"column_{fallback_index + 1}"
+    )
+
+
+def _index_table_columns(columns: Any) -> Dict[str, Dict[str, Any]]:
+    out: Dict[str, Dict[str, Any]] = {}
+    if not isinstance(columns, list):
+        return out
+
+    for idx, col in enumerate(columns):
+        if not isinstance(col, dict):
+            continue
+        key = _identity_key(col)
+        if key:
+            out[key] = {"column": col, "index": idx}
+    return out
+
+
+def _sanitize_table_choice_values(
+    table_value: Any,
+    old_field: Dict[str, Any],
+    new_field: Dict[str, Any],
+) -> Tuple[Any, int]:
+    if not isinstance(table_value, dict):
+        return table_value, 0
+
+    rows = table_value.get("rows")
+    if not isinstance(rows, list):
+        return table_value, 0
+
+    old_cols = (old_field.get("tableConfig") or {}).get("columns") or []
+    new_cols = (new_field.get("tableConfig") or {}).get("columns") or []
+    old_by_key = _index_table_columns(old_cols)
+    changed_count = 0
+
+    next_value = _json_clone(table_value)
+    next_rows = next_value.get("rows")
+    if not isinstance(next_rows, list):
+        return table_value, 0
+
+    for new_idx, new_col in enumerate(new_cols if isinstance(new_cols, list) else []):
+        if not isinstance(new_col, dict):
+            continue
+
+        new_type = _norm_str(new_col.get("type")).lower()
+        if new_type not in ("select", "radio"):
+            continue
+
+        match = old_by_key.get(_identity_key(new_col))
+        if not match:
+            continue
+
+        old_col = match["column"]
+        old_type = _norm_str(old_col.get("type")).lower()
+        if old_type not in ("select", "radio"):
+            continue
+        if not _choice_options_changed(old_col, new_col):
+            continue
+
+        old_data_key = _column_data_key(old_col, int(match["index"]))
+        new_data_key = _column_data_key(new_col, new_idx)
+
+        for row in next_rows:
+            if not isinstance(row, dict):
+                continue
+
+            data_key = old_data_key if old_data_key in row else new_data_key
+            if data_key not in row:
+                continue
+
+            sanitized, changed = _sanitize_choice_value_for_new_options(row.get(data_key), new_col)
+            if changed:
+                row[data_key] = sanitized
+                changed_count += 1
+
+    return next_value, changed_count
+
+
+def _sanitize_entry_data_for_new_options(
+    data: Any,
+    old_sd: Dict[str, Any],
+    new_sd: Dict[str, Any],
+) -> Tuple[Any, int]:
+    sanitized = _json_clone(data or {})
+    changed_count = 0
+
+    old_models = _selected_models_list(old_sd)
+    new_models = _selected_models_list(new_sd)
+    old_sections_by_key = {
+        _identity_key(sec): sec
+        for sec in old_models
+        if _identity_key(sec)
+    }
+
+    for new_sec_idx, new_sec in enumerate(new_models):
+        sec_key = _identity_key(new_sec)
+        old_sec = old_sections_by_key.get(sec_key)
+        if not old_sec:
+            continue
+
+        old_fields_by_key = _index_fields(old_sec.get("fields") or [])
+        new_fields = new_sec.get("fields") or []
+
+        for new_field_idx, new_field in enumerate(new_fields if isinstance(new_fields, list) else []):
+            if not isinstance(new_field, dict):
+                continue
+
+            match = old_fields_by_key.get(_identity_key(new_field))
+            if not match:
+                continue
+
+            old_field = match["field"]
+            new_type = _norm_str(new_field.get("type")).lower()
+            old_type = _norm_str(old_field.get("type")).lower()
+
+            if new_type == "table" and old_type == "table":
+                changed_count += _sanitize_table_field_in_entry_data(
+                    sanitized,
+                    new_sec_idx,
+                    old_sec,
+                    new_sec,
+                    old_field,
+                    new_field,
+                    int(match["index"]),
+                    new_field_idx,
+                )
+                continue
+
+            if new_type not in ("select", "radio") or old_type not in ("select", "radio"):
+                continue
+            if not _choice_options_changed(old_field, new_field):
+                continue
+
+            changed_count += _sanitize_regular_choice_field_in_entry_data(
+                sanitized,
+                new_sec_idx,
+                old_sec,
+                new_sec,
+                old_field,
+                new_field,
+                int(match["index"]),
+                new_field_idx,
+            )
+
+    return sanitized, changed_count
+
+
+def _sanitize_regular_choice_field_in_entry_data(
+    data: Any,
+    sec_idx: int,
+    old_sec: Dict[str, Any],
+    new_sec: Dict[str, Any],
+    old_field: Dict[str, Any],
+    new_field: Dict[str, Any],
+    old_field_idx: int,
+    new_field_idx: int,
+) -> int:
+    if isinstance(data, list):
+        if not (0 <= sec_idx < len(data)):
+            return 0
+        row = data[sec_idx]
+        if not isinstance(row, list) or not (0 <= new_field_idx < len(row)):
+            return 0
+        sanitized, changed = _sanitize_choice_value_for_new_options(row[new_field_idx], new_field)
+        if changed:
+            row[new_field_idx] = sanitized
+            return 1
+        return 0
+
+    if not isinstance(data, dict):
+        return 0
+
+    sec_key = _find_existing_key(data, [_section_data_key(new_sec), _section_data_key(old_sec)])
+    sec_data = data.get(sec_key) if sec_key is not None else None
+    if not isinstance(sec_data, dict):
+        return 0
+
+    field_key = _find_existing_key(
+        sec_data,
+        _field_data_keys(new_field, new_field_idx) + _field_data_keys(old_field, old_field_idx),
+    )
+    if field_key is None:
+        return 0
+
+    sanitized, changed = _sanitize_choice_value_for_new_options(sec_data.get(field_key), new_field)
+    if changed:
+        sec_data[field_key] = sanitized
+        return 1
+    return 0
+
+
+def _sanitize_table_field_in_entry_data(
+    data: Any,
+    sec_idx: int,
+    old_sec: Dict[str, Any],
+    new_sec: Dict[str, Any],
+    old_field: Dict[str, Any],
+    new_field: Dict[str, Any],
+    old_field_idx: int,
+    new_field_idx: int,
+) -> int:
+    if isinstance(data, list):
+        if not (0 <= sec_idx < len(data)):
+            return 0
+        row = data[sec_idx]
+        if not isinstance(row, list) or not (0 <= new_field_idx < len(row)):
+            return 0
+        sanitized, changed_count = _sanitize_table_choice_values(row[new_field_idx], old_field, new_field)
+        if changed_count:
+            row[new_field_idx] = sanitized
+        return changed_count
+
+    if not isinstance(data, dict):
+        return 0
+
+    sec_key = _find_existing_key(data, [_section_data_key(new_sec), _section_data_key(old_sec)])
+    sec_data = data.get(sec_key) if sec_key is not None else None
+    if not isinstance(sec_data, dict):
+        return 0
+
+    field_key = _find_existing_key(
+        sec_data,
+        _field_data_keys(new_field, new_field_idx) + _field_data_keys(old_field, old_field_idx),
+    )
+    if field_key is None:
+        return 0
+
+    sanitized, changed_count = _sanitize_table_choice_values(sec_data.get(field_key), old_field, new_field)
+    if changed_count:
+        sec_data[field_key] = sanitized
+    return changed_count
+
+
 class VersionManager:
     @staticmethod
     def latest(db: Session, study_id: int) -> Optional[models.StudyTemplateVersion]:
@@ -719,6 +1083,7 @@ class VersionManager:
 
         clones: List[Dict[str, Any]] = []
         skipped = 0
+        cleaned_choice_values = 0
 
         for r in rows:
             try:
@@ -741,11 +1106,18 @@ class VersionManager:
                 skipped += 1
                 continue
 
+            cloned_data, cleaned_count = _sanitize_entry_data_for_new_options(
+                r.get("data") or {},
+                old_sd,
+                new_sd,
+            )
+            cleaned_choice_values += cleaned_count
+
             clones.append({
                 "subject_index": s_new,
                 "visit_index": v_new,
                 "group_index": g_new,
-                "data": _json_clone(r.get("data") or {}),
+                "data": cloned_data,
                 "skipped_required_flags": _json_clone(r.get("skipped_required_flags") or []),
                 "subject_raw": None,
                 "visit_raw": None,
@@ -767,20 +1139,22 @@ class VersionManager:
 
         if skipped:
             logger.warning(
-                "clone_entries_forward: study_id=%s from v%s→v%s inserted=%s skipped=%s (mapping miss)",
+                "clone_entries_forward: study_id=%s from v%s→v%s inserted=%s skipped=%s cleaned_choice_values=%s (mapping miss)",
                 study_id,
                 from_version,
                 to_version,
                 inserted,
                 skipped,
+                cleaned_choice_values,
             )
         else:
             logger.info(
-                "clone_entries_forward: study_id=%s from v%s→v%s inserted=%s",
+                "clone_entries_forward: study_id=%s from v%s→v%s inserted=%s cleaned_choice_values=%s",
                 study_id,
                 from_version,
                 to_version,
                 inserted,
+                cleaned_choice_values,
             )
 
     @staticmethod
