@@ -103,6 +103,7 @@
           :subjectColStyle="subjectColStyle"
           :visitColStyle="visitColStyle"
           :statusClass="statusClassFast"
+          :statusProgress="statusProgressFast"
           :selectedVersion="selectedVersion"
           :infoIcon="icons.info"
           :showGroupColumn="canSeeGroupColumn"
@@ -924,6 +925,7 @@ export default {
 
       // performance caches
       statusMap: new Map(),
+      statusRowsMap: new Map(),
       assignedLookup: [],
       subjectToGroupIdx: [],
 
@@ -1612,6 +1614,149 @@ export default {
       this.entryProgress = this.calculateCurrentEntryProgress();
     },
 
+    entryProgressStatus(progress) {
+      if (!progress || Number(progress.total || 0) <= 0) return "none";
+      if (Number(progress.skipped || 0) > 0) return "skipped";
+      if (Number(progress.completed || 0) <= 0) return "none";
+      return Number(progress.percentage || 0) >= 100 ? "complete" : "partial";
+    },
+
+    normalizeEntryProgressSnapshot(progress) {
+      const total = Math.max(0, Number(progress?.total || 0));
+      const completed = Math.max(0, Number(progress?.completed || 0));
+      const skipped = Math.max(0, Number(progress?.skipped || 0));
+      const percentage = total > 0
+        ? Math.max(0, Math.min(100, Number(progress?.percentage || 0)))
+        : 0;
+      const incomplete = Math.max(0, Number(progress?.incomplete ?? (total - completed)));
+      const snapshot = {
+        total,
+        completed,
+        incomplete,
+        skipped,
+        percentage,
+      };
+
+      return {
+        ...snapshot,
+        status: this.entryProgressStatus(snapshot),
+      };
+    },
+
+    calculateEntryProgressForSlot(s, v, g) {
+      this.ensureSlot(s, v, g);
+
+      const assignedSectionIndexes = this.assignedLookup?.[v]?.[g] || [];
+      return calculateDataEntryProgress({
+        sections: this.selectedModels,
+        assignedSectionIndexes,
+        values: this.entryData?.[s]?.[v]?.[g] || [],
+        skips: this.skipFlags?.[s]?.[v]?.[g] || [],
+        isFieldVisible: (mIdx, fIdx) => this.isFieldVisible(mIdx, fIdx),
+        isCalculatedField: (mIdx, fIdx) =>
+          this.isCalculatedRuntimeField(mIdx, fIdx),
+        hasFieldError: (mIdx, fIdx) => !!this.fieldErrors(mIdx, fIdx),
+        getTableCellErrors: (mIdx, fIdx) =>
+          this.getTableValidationState(mIdx, fIdx)?.cellErrors || {},
+      });
+    },
+
+    buildEntryProgressPayload(progress) {
+      const snapshot = this.normalizeEntryProgressSnapshot(progress);
+      return {
+        progress_status: snapshot.status,
+        progress_percentage: snapshot.percentage,
+        progress_completed: snapshot.completed,
+        progress_total: snapshot.total,
+        progress_skipped: snapshot.skipped,
+      };
+    },
+
+    getStoredEntryProgress(entry) {
+      const hasProgress =
+        entry?.progress_status != null ||
+        entry?.progress_percentage != null ||
+        entry?.progress_completed != null ||
+        entry?.progress_total != null ||
+        entry?.progress_skipped != null;
+      if (!hasProgress) {
+        return null;
+      }
+
+      return this.normalizeEntryProgressSnapshot({
+        status: entry.progress_status,
+        percentage: entry.progress_percentage,
+        completed: entry.progress_completed,
+        total: entry.progress_total,
+        skipped: entry.progress_skipped,
+      });
+    },
+
+    calculateProgressFromSavedEntry(entry, visitIndex, groupIndex) {
+      if (!entry) return null;
+
+      try {
+        const values = entry.data && !Array.isArray(entry.data) && typeof entry.data === "object"
+          ? this.dictToArray(entry.data)
+          : Array.isArray(entry.data)
+          ? entry.data
+          : [];
+        const skips = this.normalizeSkipFlagsShape(
+          entry.skipped_required_flags || entry.skips || []
+        );
+        const assignedSectionIndexes = this.assignedLookup?.[visitIndex]?.[groupIndex] || [];
+
+        return calculateDataEntryProgress({
+          sections: this.selectedModels,
+          assignedSectionIndexes,
+          values,
+          skips,
+          isFieldVisible: (mIdx, fIdx) =>
+            evaluateFieldVisibility(this.study, this.selectedModels, values, mIdx, fIdx),
+          isCalculatedField: (mIdx, fIdx) =>
+            this.isCalculatedRuntimeField(mIdx, fIdx),
+          hasFieldError: () => false,
+          getTableCellErrors: () => ({}),
+        });
+      } catch (error) {
+        console.warn("Failed to calculate saved entry progress", error);
+        return null;
+      }
+    },
+
+    entryStatusFromSavedEntry(entry, visitIndex, groupIndex) {
+      const row = this.statusRowFromSavedEntry(entry, visitIndex, groupIndex);
+      return row?.status || null;
+    },
+
+    statusRowFromSavedEntry(entry, visitIndex, groupIndex) {
+      const storedProgress = this.getStoredEntryProgress(entry);
+      if (storedProgress) {
+        return {
+          status: storedProgress.status,
+          percentage: storedProgress.percentage,
+          completed: storedProgress.completed,
+          total: storedProgress.total,
+          skipped: storedProgress.skipped,
+        };
+      }
+      const calculatedProgress = this.calculateProgressFromSavedEntry(
+        entry,
+        visitIndex,
+        groupIndex
+      );
+      if (!calculatedProgress) return null;
+
+      const progress = this.normalizeEntryProgressSnapshot(calculatedProgress);
+      return {
+        status: progress.status,
+        percentage: progress.percentage,
+        completed: progress.completed,
+        total: progress.total,
+        skipped: progress.skipped,
+      };
+    },
+
     scheduleEntryProgressUpdate({ immediate = false } = {}) {
       if (this.entryProgressTimer) {
         window.clearTimeout(this.entryProgressTimer);
@@ -1790,6 +1935,10 @@ export default {
     },
 
     getApiErrorDetail(err) {
+      if (err?.response?.status === 503) {
+        return err?.response?.data?.detail || "eCRF is under maintenance. Please try again later.";
+      }
+
       const detail = err?.response?.data?.detail;
 
       if (Array.isArray(detail)) {
@@ -2306,9 +2455,12 @@ export default {
 
         this.runCalculationsForCell(s, v, g, null, null);
 
-        const dictData = this.arrayToDict(this.entryData[s][v][g]);
         const rawSkipFlags = this.normalizeSkipFlagsShape(this.skipFlags[s][v][g]);
         this.skipFlags[s][v][g] = rawSkipFlags;
+        const dictData = this.arrayToDict(this.entryData[s][v][g]);
+        const progressPayload = this.buildEntryProgressPayload(
+          this.calculateEntryProgressForSlot(s, v, g)
+        );
 
         const payload = {
           study_id: this.study?.metadata?.id,
@@ -2317,6 +2469,7 @@ export default {
           group_index: g,
           data: dictData,
           skipped_required_flags: rawSkipFlags,
+          ...progressPayload,
         };
 
         const headers = {
@@ -2341,6 +2494,7 @@ export default {
           );
           const idx = this.existingEntries.findIndex((x) => x.id === existing.id);
           if (idx >= 0) this.existingEntries.splice(idx, 1, resp.data);
+          else this.existingEntries.push(resp.data);
         } else {
           const params = this.safeVersionParams(this.selectedVersion);
           const resp = await axios.post(
@@ -2366,6 +2520,11 @@ export default {
             group_index: g,
             data: dictData,
             skipped_required_flags: rawSkipFlags,
+            progress_status: resp?.data?.progress_status ?? progressPayload.progress_status,
+            progress_percentage: resp?.data?.progress_percentage ?? progressPayload.progress_percentage,
+            progress_completed: resp?.data?.progress_completed ?? progressPayload.progress_completed,
+            progress_total: resp?.data?.progress_total ?? progressPayload.progress_total,
+            progress_skipped: resp?.data?.progress_skipped ?? progressPayload.progress_skipped,
             form_version: resp?.data?.form_version ?? this.selectedVersion,
             created_at: resp?.data?.created_at ?? new Date().toISOString(),
           });
@@ -3707,7 +3866,8 @@ applyImportedRowFromDialog(payload) {
       if (!this.showSelection) {
         await this.loadCurrentSlotState();
       } else {
-        this.applyVersionView();
+        await this.loadExistingEntries(this.study?.metadata?.id);
+        this.buildStatusCache();
       }
 
       const nS = this.numberOfSubjects;
@@ -4530,20 +4690,81 @@ applyImportedRowFromDialog(payload) {
 
     async loadExistingEntries(studyId) {
       try {
-        const resp = await axios.get(
-          `/forms/studies/${studyId}/data_entries`,
+        const statusResp = await axios.get(
+          `/forms/studies/${studyId}/data_entry_statuses`,
           {
             headers: { Authorization: `Bearer ${this.token}` },
-            params: { current_only: true },
+            params: this.safeVersionParams(this.selectedVersion) || {},
           }
         );
-        const payload = Array.isArray(resp.data)
-          ? resp.data
-          : resp.data?.entries || [];
-        this.existingEntries = payload;
-        this.rebuildEntriesIndex();
+
+        const rows = Array.isArray(statusResp.data)
+          ? statusResp.data
+          : statusResp.data?.statuses || [];
+        const nextStatusRows = new Map();
+        const nextStatusMap = new Map();
+
+        rows.forEach((row) => {
+          const key = `${row.subject_index}|${row.visit_index}`;
+          const progress = this.getStoredEntryProgress(row);
+          if (!progress) return;
+          nextStatusRows.set(key, {
+            status: progress.status,
+            percentage: progress.percentage,
+            completed: progress.completed,
+            total: progress.total,
+            skipped: progress.skipped,
+          });
+          nextStatusMap.set(key, progress.status);
+        });
+
+        this.statusRowsMap = nextStatusRows;
+        this.statusMap = nextStatusMap;
+
+        if (statusResp.data?.needs_progress_backfill) {
+          const resp = await axios.get(
+            `/forms/studies/${studyId}/data_entries`,
+            {
+              headers: { Authorization: `Bearer ${this.token}` },
+              params: { current_only: true },
+            }
+          );
+          const payload = Array.isArray(resp.data)
+            ? resp.data
+            : resp.data?.entries || [];
+          this.existingEntries = payload;
+          this.rebuildEntriesIndex();
+        } else {
+          this.existingEntries = [];
+          this.entriesIndex = new Map();
+          this.hydrateCache.clear();
+        }
       } catch (err) {
-        console.error("Failed to load existing entries", err);
+        console.error("Failed to load entry statuses", err);
+
+        if (err?.response?.status === 503) {
+          this.study = null;
+          this.matrixReady = false;
+          this.pageError = this.getApiErrorDetail(err);
+          return;
+        }
+
+        try {
+          const resp = await axios.get(
+            `/forms/studies/${studyId}/data_entries`,
+            {
+              headers: { Authorization: `Bearer ${this.token}` },
+              params: { current_only: true },
+            }
+          );
+          const payload = Array.isArray(resp.data)
+            ? resp.data
+            : resp.data?.entries || [];
+          this.existingEntries = payload;
+          this.rebuildEntriesIndex();
+        } catch (fallbackErr) {
+          console.error("Failed to load existing entries", fallbackErr);
+        }
       }
     },
 
@@ -4561,6 +4782,12 @@ applyImportedRowFromDialog(payload) {
         this.hydrateCache.clear();
       } catch (err) {
         console.warn("Failed to load uploaded files", err?.response?.data || err.message);
+        if (err?.response?.status === 503) {
+          this.study = null;
+          this.matrixReady = false;
+          this.pageError = this.getApiErrorDetail(err);
+          return;
+        }
         this.studyFiles = [];
       }
     },
@@ -4745,6 +4972,7 @@ applyImportedRowFromDialog(payload) {
 
         buildStatusCache() {
       const nextMap = new Map();
+      const nextRowsMap = new Map(this.statusRowsMap || []);
       const nS = this.numberOfSubjects;
       const nV = this.visitList.length;
 
@@ -4763,86 +4991,63 @@ applyImportedRowFromDialog(payload) {
 
         if (g == null || g < 0) {
           for (const v of vIndices) {
-            nextMap.set(`${s}|${v}`, "none");
+            const key = `${s}|${v}`;
+            nextMap.set(key, "none");
+            nextRowsMap.delete(key);
           }
           continue;
         }
 
         for (const v of vIndices) {
-          const e = this.getBestEntryFor(s, v, g);
           const key = `${s}|${v}`;
+          const statusRow = this.statusRowsMap?.get(key);
+          if (statusRow?.status) {
+            nextMap.set(key, statusRow.status);
+            continue;
+          }
+
+          const e = this.getBestEntryFor(s, v, g);
 
           if (!e) {
             nextMap.set(key, "none");
+            nextRowsMap.delete(key);
             continue;
           }
 
-          const flags = e.skipped_required_flags;
-          const hasSkip = !!(
-            Array.isArray(flags) &&
-            flags.some((row) => Array.isArray(row) && row.some((x) => !!x))
-          );
-
-          if (hasSkip) {
-            nextMap.set(key, "skipped");
+          const row = this.statusRowFromSavedEntry(e, v, g);
+          if (row?.status) {
+            nextMap.set(key, row.status);
+            nextRowsMap.set(key, row);
             continue;
           }
 
-          const assigned = this.assignedLookup?.[v]?.[g] || [];
-          let total = 0;
-          let filled = 0;
-
-          if (e.data && !Array.isArray(e.data) && typeof e.data === "object") {
-            for (const mIdx of assigned) {
-              const sec = this.selectedModels[mIdx] || {};
-              const sKey = this.sectionDictKey(sec);
-              const secObj = e.data[sKey] || {};
-
-              (sec.fields || []).forEach((f, fIdx) => {
-                const val = this.getValueFromSectionDict
-                  ? this.getValueFromSectionDict(secObj, f, fIdx)
-                  : secObj[this.fieldDictKey(f, fIdx)];
-
-                total += 1;
-
-                if (Array.isArray(val)) {
-                  if (val.length > 0) filled += 1;
-                } else if (typeof val === "boolean") {
-                  if (val === true) filled += 1;
-                } else if (val != null && String(val).trim() !== "") {
-                  filled += 1;
-                }
-              });
-            }
-          } else if (Array.isArray(e.data)) {
-            for (const mIdx of assigned) {
-              const row = e.data[mIdx] || [];
-              total += row.length;
-              filled += row.filter((vv) => {
-                if (Array.isArray(vv)) return vv.length > 0;
-                if (typeof vv === "boolean") return vv === true;
-                return vv != null && String(vv).trim() !== "";
-              }).length;
-            }
-          }
-
-          if (total === 0 || filled === 0) {
-            nextMap.set(key, "none");
-          } else if (filled === total) {
-            nextMap.set(key, "complete");
-          } else {
-            nextMap.set(key, "partial");
-          }
+          nextMap.set(key, "none");
+          nextRowsMap.delete(key);
         }
       }
 
       this.statusMap = nextMap;
+      this.statusRowsMap = nextRowsMap;
     },
 
     statusClassFast(sIdx, vIdx) {
       const map = this.statusMap instanceof Map ? this.statusMap : new Map();
       const s = map.get(`${sIdx}|${vIdx}`) || "none";
       return s === "skipped" ? "status-skipped" : `status-${s}`;
+    },
+
+    statusProgressFast(sIdx, vIdx) {
+      const row = this.statusRowsMap instanceof Map
+        ? this.statusRowsMap.get(`${sIdx}|${vIdx}`)
+        : null;
+      if (!row) return { percentage: 0, label: "", status: "none" };
+
+      const percentage = Math.max(0, Math.min(100, Number(row.percentage || 0)));
+      return {
+        percentage,
+        label: row.status === "none" ? "" : `${percentage}%`,
+        status: row.status || "none",
+      };
     },
     async loadCurrentSlotState() {
       if (this.isShared) return;
@@ -5643,10 +5848,12 @@ applyImportedRowFromDialog(payload) {
         g = this.currentGroupIndex;
       this.ensureSlot(s, v, g);
 
-      const dictData = this.arrayToDict(this.entryData[s][v][g]);
-
       const rawSkipFlags = this.normalizeSkipFlagsShape(this.skipFlags[s][v][g]);
       this.skipFlags[s][v][g] = rawSkipFlags;
+      const dictData = this.arrayToDict(this.entryData[s][v][g]);
+      const progressPayload = this.buildEntryProgressPayload(
+        this.calculateEntryProgressForSlot(s, v, g)
+      );
 
       const flagsPayload = this.isShared
           ? this.flagsArrayToDict(rawSkipFlags)
@@ -5663,6 +5870,7 @@ applyImportedRowFromDialog(payload) {
         group_index: g,
         data: dictData,
         skipped_required_flags: flagsPayload,
+        ...progressPayload,
       };
 
       try {
@@ -5680,6 +5888,11 @@ applyImportedRowFromDialog(payload) {
             group_index: g,
             data: dictData,
             skipped_required_flags: resp?.data?.skipped_required_flags ?? rawSkipFlags,
+            progress_status: resp?.data?.progress_status ?? progressPayload.progress_status,
+            progress_percentage: resp?.data?.progress_percentage ?? progressPayload.progress_percentage,
+            progress_completed: resp?.data?.progress_completed ?? progressPayload.progress_completed,
+            progress_total: resp?.data?.progress_total ?? progressPayload.progress_total,
+            progress_skipped: resp?.data?.progress_skipped ?? progressPayload.progress_skipped,
             form_version: resp?.data?.form_version ?? this.selectedVersion,
             created_at: resp?.data?.created_at ?? new Date().toISOString(),
           };
@@ -5723,6 +5936,7 @@ applyImportedRowFromDialog(payload) {
             );
           const idx = this.existingEntries.findIndex((x) => x.id === existingId);
           if (idx >= 0) this.existingEntries.splice(idx, 1, resp.data);
+          else this.existingEntries.push(resp.data);
         } else {
           const params = this.safeVersionParams(this.selectedVersion);
           const auditLabel = hasAnySkip ? "New Data Entry (Skipped Required)" : params ? "New Data Entry (Versioned)" : "New Data Entry";
@@ -5749,6 +5963,11 @@ applyImportedRowFromDialog(payload) {
             group_index: g,
             data: dictData,
             skipped_required_flags: resp?.data?.skipped_required_flags ?? rawSkipFlags,
+            progress_status: resp?.data?.progress_status ?? progressPayload.progress_status,
+            progress_percentage: resp?.data?.progress_percentage ?? progressPayload.progress_percentage,
+            progress_completed: resp?.data?.progress_completed ?? progressPayload.progress_completed,
+            progress_total: resp?.data?.progress_total ?? progressPayload.progress_total,
+            progress_skipped: resp?.data?.progress_skipped ?? progressPayload.progress_skipped,
             form_version: resp?.data?.form_version ?? this.selectedVersion,
             created_at: resp?.data?.created_at ?? new Date().toISOString(),
           };
@@ -5781,7 +6000,11 @@ applyImportedRowFromDialog(payload) {
           return;
         }
 
-        this.showDialogMessage("Failed to save data. Check console for details.");
+        this.showDialogMessage(
+          err?.response?.status === 503
+            ? this.getApiErrorDetail(err)
+            : "Failed to save data. Check console for details."
+        );
       }
     },
 
@@ -5793,68 +6016,27 @@ applyImportedRowFromDialog(payload) {
 
       if (!e) {
         nextMap.set(key, "none");
+        const nextRowsMap = new Map(this.statusRowsMap || []);
+        nextRowsMap.delete(key);
+        this.statusRowsMap = nextRowsMap;
         this.statusMap = nextMap;
         return;
       }
 
-      const flags = e.skipped_required_flags;
-      const hasSkip = !!(
-        Array.isArray(flags) &&
-        flags.some((row) => Array.isArray(row) && row.some((x) => !!x))
-      );
-
-      if (hasSkip) {
-        nextMap.set(key, "skipped");
+      const row = this.statusRowFromSavedEntry(e, v, g);
+      if (row?.status) {
+        nextMap.set(key, row.status);
+        const nextRowsMap = new Map(this.statusRowsMap || []);
+        nextRowsMap.set(key, row);
+        this.statusRowsMap = nextRowsMap;
         this.statusMap = nextMap;
         return;
       }
 
-      const assigned = this.assignedLookup?.[v]?.[g] || [];
-      let total = 0;
-      let filled = 0;
-
-      if (e.data && !Array.isArray(e.data) && typeof e.data === "object") {
-        for (const mIdx of assigned) {
-          const sec = this.selectedModels[mIdx] || {};
-          const sKey = this.sectionDictKey(sec);
-          const secObj = e.data[sKey] || {};
-
-          (sec.fields || []).forEach((f, fIdx) => {
-            const val = this.getValueFromSectionDict
-              ? this.getValueFromSectionDict(secObj, f, fIdx)
-              : secObj[this.fieldDictKey(f, fIdx)];
-
-            total += 1;
-
-            if (Array.isArray(val)) {
-              if (val.length > 0) filled += 1;
-            } else if (typeof val === "boolean") {
-              if (val === true) filled += 1;
-            } else if (val != null && String(val).trim() !== "") {
-              filled += 1;
-            }
-          });
-        }
-      } else if (Array.isArray(e.data)) {
-        for (const mIdx of assigned) {
-          const row = e.data[mIdx] || [];
-          total += row.length;
-          filled += row.filter((vv) => {
-            if (Array.isArray(vv)) return vv.length > 0;
-            if (typeof vv === "boolean") return vv === true;
-            return vv != null && String(vv).trim() !== "";
-          }).length;
-        }
-      }
-
-      if (total === 0 || filled === 0) {
-        nextMap.set(key, "none");
-      } else if (filled === total) {
-        nextMap.set(key, "complete");
-      } else {
-        nextMap.set(key, "partial");
-      }
-
+      nextMap.set(key, "none");
+      const nextRowsMap = new Map(this.statusRowsMap || []);
+      nextRowsMap.delete(key);
+      this.statusRowsMap = nextRowsMap;
       this.statusMap = nextMap;
     },
 

@@ -149,9 +149,13 @@
                 <button
                   class="select-btn"
                   :class="statusClass(sIdx, vIdx)"
+                  :style="progressStyle(sIdx, vIdx)"
                   @click="$emit('select-cell', sIdx, vIdx)"
                 >
-                  Select
+                  <span class="select-btn-fill"></span>
+                  <span class="select-btn-label">
+                    {{ progressLabel(sIdx, vIdx) || "Select" }}
+                  </span>
                 </button>
               </td>
             </tr>
@@ -192,6 +196,10 @@ export default {
     visitColStyle: { type: Object, default: () => ({}) },
     // function provided by parent: (sIdx, vIdx) => "status-none" | "status-partial" | ...
     statusClass: { type: Function, required: true },
+    statusProgress: {
+      type: Function,
+      default: () => ({ percentage: 0, label: "", status: "none" }),
+    },
     selectedVersion: { type: [String, Number, null], default: null },
     infoIcon: { type: String, default: "fas fa-info-circle" },
 
@@ -224,6 +232,26 @@ export default {
     onVisitChange(event) {
       const val = parseInt(event.target.value, 10);
       this.$emit("update:selectedVisitIndex", Number.isNaN(val) ? -1 : val);
+    },
+
+    progressInfo(sIdx, vIdx) {
+      const info = this.statusProgress(sIdx, vIdx) || {};
+      const percentage = Math.max(0, Math.min(100, Number(info.percentage || 0)));
+      return {
+        ...info,
+        percentage,
+      };
+    },
+
+    progressStyle(sIdx, vIdx) {
+      const info = this.progressInfo(sIdx, vIdx);
+      return {
+        "--progress-pct": `${info.percentage}%`,
+      };
+    },
+
+    progressLabel(sIdx, vIdx) {
+      return this.progressInfo(sIdx, vIdx).label || "";
     },
 
     setSubjectRowRef(el, sIdx) {
@@ -829,6 +857,7 @@ export default {
 }
 /* ========= Select/status button ========= */
 .select-btn {
+  position: relative;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -847,12 +876,27 @@ export default {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  isolation: isolate;
   transition:
     background 0.18s ease,
     border-color 0.18s ease,
     color 0.18s ease,
     transform 0.12s ease,
     box-shadow 0.18s ease;
+}
+
+.select-btn-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: var(--progress-pct, 0%);
+  border-radius: inherit;
+  z-index: 0;
+  transition: width 0.18s ease;
+}
+
+.select-btn-label {
+  position: relative;
+  z-index: 1;
 }
 
 .selection-matrix.fluid .select-btn {
@@ -876,6 +920,10 @@ export default {
   border-color: #9ca3af;
 }
 
+.select-btn.status-none .select-btn-fill {
+  background: transparent;
+}
+
 .select-btn.status-none:hover {
   background: #d1d5db;
   color: #111827;
@@ -883,33 +931,55 @@ export default {
 }
 
 .select-btn.status-partial {
-  background: #fde68a;
+  background: #e5e7eb;
   color: #78350f;
   border-color: #f59e0b;
 }
 
+.select-btn.status-partial .select-btn-fill {
+  background: #fde68a;
+}
+
 .select-btn.status-partial:hover {
-  background: #fcd34d;
+  background: #d1d5db;
   color: #78350f;
   border-color: #d97706;
 }
 
+.select-btn.status-partial:hover .select-btn-fill {
+  background: #fcd34d;
+}
+
 .select-btn.status-complete {
-  background: #bbf7d0;
+  background: #e5e7eb;
   color: #14532d;
   border-color: #16a34a;
 }
 
+.select-btn.status-complete .select-btn-fill {
+  width: 100%;
+  background: #bbf7d0;
+}
+
 .select-btn.status-complete:hover {
-  background: #86efac;
+  background: #d1d5db;
   color: #14532d;
   border-color: #15803d;
+}
+
+.select-btn.status-complete:hover .select-btn-fill {
+  background: #86efac;
 }
 
 .select-btn.status-skipped {
   background: #fecaca;
   color: #7f1d1d;
   border-color: #dc2626;
+}
+
+.select-btn.status-skipped .select-btn-fill {
+  width: 100%;
+  background: #fecaca;
 }
 
 .select-btn.status-skipped:hover {

@@ -15,6 +15,7 @@ settings = get_settings()
 def ensure_tables() -> None:
     if not settings.db_auto_create:
         logger.info("Database auto-create disabled; skipping Base.metadata.create_all()")
+        ensure_auth_schema()
         return
     Base.metadata.create_all(bind=engine)
     ensure_auth_schema()
@@ -23,11 +24,14 @@ def ensure_tables() -> None:
 
 def ensure_auth_schema() -> None:
     inspector = inspect(engine)
-    if "users" not in inspector.get_table_names():
+    table_names = inspector.get_table_names()
+    if "users" not in table_names:
+        ensure_entry_progress_schema()
         return
 
     user_columns = {col["name"] for col in inspector.get_columns("users")}
     if "must_change_password" in user_columns:
+        ensure_entry_progress_schema()
         return
 
     dialect = engine.dialect.name
@@ -40,6 +44,45 @@ def ensure_auth_schema() -> None:
             )
         )
     logger.info("Added users.must_change_password column.")
+    ensure_entry_progress_schema()
+
+
+def ensure_entry_progress_schema() -> None:
+    ensure_pending_remote_deletes_schema()
+
+    inspector = inspect(engine)
+    if "study_entry_data" not in inspector.get_table_names():
+        return
+
+    existing = {col["name"] for col in inspector.get_columns("study_entry_data")}
+    additions = [
+        ("progress_status", "VARCHAR(20)"),
+        ("progress_percentage", "INTEGER"),
+        ("progress_completed", "INTEGER"),
+        ("progress_total", "INTEGER"),
+        ("progress_skipped", "INTEGER"),
+    ]
+    missing = [(name, sql_type) for name, sql_type in additions if name not in existing]
+    if not missing:
+        return
+
+    with engine.begin() as conn:
+        for name, sql_type in missing:
+            conn.execute(text(f"ALTER TABLE study_entry_data ADD COLUMN {name} {sql_type}"))
+
+    logger.info(
+        "Added study_entry_data progress columns: %s",
+        ", ".join(name for name, _ in missing),
+    )
+
+
+def ensure_pending_remote_deletes_schema() -> None:
+    inspector = inspect(engine)
+    if "pending_remote_deletes" in inspector.get_table_names():
+        return
+
+    models.PendingRemoteDelete.__table__.create(bind=engine, checkfirst=True)
+    logger.info("Created pending_remote_deletes table.")
 
 
 def ensure_admin_user() -> None:

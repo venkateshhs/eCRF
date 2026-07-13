@@ -236,6 +236,11 @@ class StudyDataEntryCreate(BaseModel):
     group_index: int
     data: Dict[str, Any] = Field(default_factory=dict)
     skipped_required_flags: Optional[List[List[bool]]]
+    progress_status: Optional[str] = None
+    progress_percentage: Optional[int] = None
+    progress_completed: Optional[int] = None
+    progress_total: Optional[int] = None
+    progress_skipped: Optional[int] = None
 
 
 class StudyDataEntryOut(BaseModel):
@@ -247,10 +252,36 @@ class StudyDataEntryOut(BaseModel):
     group_index: int
     data: Dict[str, Any]
     skipped_required_flags: Optional[List[List[bool]]]
+    progress_status: Optional[str] = None
+    progress_percentage: Optional[int] = None
+    progress_completed: Optional[int] = None
+    progress_total: Optional[int] = None
+    progress_skipped: Optional[int] = None
     created_at: datetime
 
     class Config:
         from_attributes = True
+
+
+class StudyDataEntryStatusOut(BaseModel):
+    id: int
+    study_id: int
+    form_version: int
+    subject_index: int
+    visit_index: int
+    group_index: int
+    progress_status: Optional[str] = None
+    progress_percentage: Optional[int] = None
+    progress_completed: Optional[int] = None
+    progress_total: Optional[int] = None
+    progress_skipped: Optional[int] = None
+    needs_progress_backfill: bool = False
+
+
+class StudyDataEntryStatusListOut(BaseModel):
+    total: int
+    statuses: List[StudyDataEntryStatusOut]
+    needs_progress_backfill: bool = False
 
 class StudyDataSlotStateOut(BaseModel):
     exists: bool
@@ -297,6 +328,11 @@ class PaginatedStudyDataEntries(BaseModel):
 class SharedStudyDataEntryCreate(BaseModel):
     data: Dict[str, Any]
     skipped_required_flags: Optional[Dict[str, Any]] = None
+    progress_status: Optional[str] = None
+    progress_percentage: Optional[int] = None
+    progress_completed: Optional[int] = None
+    progress_total: Optional[int] = None
+    progress_skipped: Optional[int] = None
 
 
 # -------------------- Access Grants --------------------

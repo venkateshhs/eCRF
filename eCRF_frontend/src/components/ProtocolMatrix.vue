@@ -22,7 +22,7 @@
           <button @click="openPreview" :disabled="!hasAnyAssignment" class="btn-option">Preview</button>
 
           <!-- FIX: explicit publish mode -->
-          <button @click="saveStudy('publish')" class="btn-primary">
+          <button @click="saveStudy('publish')" class="btn-primary" :disabled="isPublishingStudy">
             Publish Study
           </button>
         </div>
@@ -134,6 +134,20 @@
           </tr>
         </tbody>
       </table>
+    </div>
+
+    <div
+      v-if="isPublishingStudy"
+      class="publishing-overlay"
+      role="status"
+      aria-live="polite"
+      aria-busy="true"
+    >
+      <div class="publishing-panel">
+        <div class="publishing-spinner" aria-hidden="true"></div>
+        <div class="publishing-title">Please wait</div>
+        <div class="publishing-text">Study is being published.</div>
+      </div>
     </div>
 
     <!-- 3. Preview Modal -->
@@ -442,6 +456,7 @@ export default {
     const showEmptyVisitsModal = ref(false);
     const emptyVisitIndices = ref([]);
     const isSavingInProgress = ref(false);
+    const isPublishingStudy = ref(false);
 
     // Confirm changes
     const showConfirmChanges = ref(false);
@@ -1296,6 +1311,10 @@ export default {
         }
       }
 
+      if (mode === "publish") {
+        isPublishingStudy.value = true;
+      }
+
       try {
         // audit_label rules:
         // - POST create draft/publish: study did not exist yet
@@ -1373,6 +1392,10 @@ export default {
         console.error(`[ProtocolMatrix saveStudyImpl] Error ${studyId ? "updating" : "saving"} study:`, error);
         showDialogMessage(`Failed to ${studyId ? "update" : "save"} study. Check console for details.`);
         return false;
+      } finally {
+        if (mode === "publish") {
+          isPublishingStudy.value = false;
+        }
       }
     }
 
@@ -1571,6 +1594,7 @@ export default {
       showEmptyVisitsModal,
       emptyVisitIndices,
       isSavingInProgress,
+      isPublishingStudy,
       closeEmptyVisitsModal,
       goToFirstEmptyVisit,
       saveAnyway,
@@ -1608,6 +1632,55 @@ export default {
   min-height: 0;
   min-width: 0;
   box-sizing: border-box;
+}
+
+.publishing-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(17, 24, 39, 0.42);
+}
+
+.publishing-panel {
+  width: min(340px, 100%);
+  padding: 24px;
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 18px 48px rgba(15, 23, 42, 0.22);
+  text-align: center;
+}
+
+.publishing-spinner {
+  width: 38px;
+  height: 38px;
+  margin: 0 auto 14px;
+  border: 4px solid #dbeafe;
+  border-top-color: #2563eb;
+  border-radius: 50%;
+  animation: publishing-spin 0.85s linear infinite;
+}
+
+.publishing-title {
+  margin-bottom: 6px;
+  color: #111827;
+  font-size: 17px;
+  font-weight: 700;
+}
+
+.publishing-text {
+  color: #4b5563;
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+@keyframes publishing-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .matrix-scroll {

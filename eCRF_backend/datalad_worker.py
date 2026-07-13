@@ -17,6 +17,24 @@ except Exception:  # pragma: no cover
     Dataset = None  # type: ignore
 
 
+def _result_has_error(results) -> bool:
+    if results is None:
+        return False
+    if isinstance(results, dict):
+        rows = [results]
+    elif isinstance(results, list):
+        rows = results
+    else:
+        try:
+            rows = list(results)
+        except TypeError:
+            rows = [results]
+    for row in rows:
+        if isinstance(row, dict) and row.get("status") in {"error", "impossible"}:
+            return True
+    return False
+
+
 @dataclass
 class DataladJob:
     dataset_path: Path
@@ -105,8 +123,28 @@ class DataladWorker:
         if data_mode and data_mode != "nothing":
             push_kwargs["data"] = data_mode
 
-        ds.push(**push_kwargs)
+        results = ds.push(**push_kwargs)
+        if _result_has_error(results):
+            raise RuntimeError(f"DataLad push failed for {ds.path} to={to}")
         self.log(f"Pushed dataset: {ds.path} to={to} data_mode={data_mode}")
+
+        if getattr(self.cfg, "verify_push", True):
+            verify_results = ds.push(to=to, data="nothing")
+            if _result_has_error(verify_results):
+                raise RuntimeError(f"DataLad push verification failed for {ds.path} to={to}")
+            self.log(f"Verified pushed dataset: {ds.path} to={to}")
+
+        if getattr(self.cfg, "drop_after_push", False):
+            drop_results = ds.drop(
+                path=str(ds.path),
+                what="filecontent",
+                recursive=True,
+                reckless="availability",
+            )
+            if _result_has_error(drop_results):
+                self.log(f"DataLad drop reported non-fatal errors for {ds.path}: {drop_results}")
+                return
+            self.log(f"Dropped annex content after push: {ds.path}")
 
     def _execute(self, job: DataladJob) -> None:
         if Dataset is None:

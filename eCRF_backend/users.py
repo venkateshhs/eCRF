@@ -1,4 +1,4 @@
-from datetime import timedelta, datetime, timezone
+from datetime import timedelta, datetime
 import jwt
 import re
 import secrets
@@ -15,6 +15,7 @@ from .crud import get_user_by_username
 from .auth import hash_password, verify_password, create_access_token, SECRET_KEY, ALGORITHM
 from .database import get_db
 from .logger import logger
+from .study_activity import release_session_study_activities
 
 # unified audit (DB + optional BIDS)
 from .bids_exporter import audit_change_both
@@ -61,24 +62,34 @@ def _set_user_password_hash(user: models.User, hashed_password: str) -> None:
         raise AttributeError("User model has neither 'password_hash' nor 'password'")
 
 
-def _to_naive_utc(dt: Optional[datetime]) -> Optional[datetime]:
+def _to_naive_local(dt: Optional[datetime]) -> Optional[datetime]:
     """
     Normalize datetimes so comparisons never crash:
-    - If dt is tz-aware => convert to UTC, then strip tzinfo (naive UTC)
+    - If dt is tz-aware => convert to local time, then strip tzinfo
     - If dt is naive => treat it as-is (already naive)
+    SQLite stores local_now() values without timezone information, so local-naive
+    comparisons keep session inactivity checks aligned with stored rows.
     This avoids "offset-naive vs offset-aware" TypeError.
     """
     if dt is None:
         return None
     if dt.tzinfo is not None and dt.utcoffset() is not None:
-        return dt.astimezone(timezone.utc).replace(tzinfo=None)
+        return dt.astimezone().replace(tzinfo=None)
     return dt
 
 
 def _revoke_session(db: Session, sess: models.UserSession) -> None:
     try:
+        user_id = sess.user_id
+        session_jti = sess.jti
         sess.revoked_at = local_now()
         db.commit()
+        release_session_study_activities(
+            db,
+            user_id=user_id,
+            session_jti=session_jti,
+            reason="session_expired",
+        )
     except Exception:
         db.rollback()
 
@@ -116,7 +127,7 @@ def get_current_user(
 
         # Normalize "now" for safe comparisons
         now_raw = local_now()
-        now = _to_naive_utc(now_raw) or datetime.utcnow()
+        now = _to_naive_local(now_raw) or datetime.now()
 
         # Absolute JWT expiry (cap) - compare timestamps (safe for naive/aware)
         if now_raw.timestamp() > float(exp):
@@ -152,9 +163,9 @@ def get_current_user(
                 )
 
         # Normalize DB datetimes for safe comparisons
-        abs_exp = _to_naive_utc(sess.absolute_expires_at)
-        last_act = _to_naive_utc(sess.last_activity_at)
-        created = _to_naive_utc(sess.created_at)
+        abs_exp = _to_naive_local(sess.absolute_expires_at)
+        last_act = _to_naive_local(sess.last_activity_at)
+        created = _to_naive_local(sess.created_at)
 
         # Absolute session cap (server-side)
         if abs_exp and now > abs_exp:
@@ -334,6 +345,13 @@ def logout_user(
             if sess:
                 sess.revoked_at = now
                 db.commit()
+
+            release_session_study_activities(
+                db,
+                user_id=current_user.id,
+                session_jti=jti,
+                reason="logout",
+            )
 
         return
 

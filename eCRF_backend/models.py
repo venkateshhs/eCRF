@@ -192,6 +192,11 @@ class StudyEntryData(Base):
     data = Column(JSON, nullable=False)  # Actual field data per form instance
     created_at = Column(DateTime, default=local_now)
     skipped_required_flags = Column(JSON, nullable=True)
+    progress_status = Column(String(20), nullable=True, index=True)
+    progress_percentage = Column(Integer, nullable=True)
+    progress_completed = Column(Integer, nullable=True)
+    progress_total = Column(Integer, nullable=True)
+    progress_skipped = Column(Integer, nullable=True)
 
     study = relationship("StudyMetadata", back_populates="entry_data")
     form_version = Column(Integer, nullable=False, default=1)
@@ -215,6 +220,55 @@ class StudyAccessGrant(Base):
     study = relationship("StudyMetadata", backref="access_grants")
     user = relationship("User", foreign_keys=[user_id])
     granted_by = relationship("User", foreign_keys=[created_by])
+
+
+class StudyActivity(Base):
+    __tablename__ = "study_activity"
+    __table_args__ = (
+        Index("ix_study_activity_study_state", "study_id", "state"),
+        Index("ix_study_activity_session_state", "session_jti", "state"),
+        Index("ix_study_activity_last_seen_at", "last_seen_at"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    study_id = Column(Integer, ForeignKey("study_metadata.id", ondelete="CASCADE"), nullable=False)
+    dataset_path = Column(String(1000), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    session_jti = Column(String(128), nullable=True)
+    state = Column(String(30), nullable=False, default="active", index=True)
+    purpose = Column(String(50), nullable=False, default="create_study")
+    acquired_at = Column(DateTime(timezone=True), default=local_now, nullable=False)
+    last_seen_at = Column(DateTime(timezone=True), default=local_now, nullable=False)
+    released_at = Column(DateTime(timezone=True), nullable=True)
+    release_reason = Column(String(100), nullable=True)
+    last_sync_status = Column(String(30), nullable=True)
+    last_sync_at = Column(DateTime(timezone=True), nullable=True)
+    last_error = Column(Text, nullable=True)
+    metadata_json = Column(JSON, nullable=True)
+
+    study = relationship("StudyMetadata", backref="activity_rows")
+    user = relationship("User", foreign_keys=[user_id])
+
+
+class PendingRemoteDelete(Base):
+    __tablename__ = "pending_remote_deletes"
+    __table_args__ = (
+        Index("ix_pending_remote_deletes_status", "status"),
+        Index("ix_pending_remote_deletes_study_id", "study_id"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    study_id = Column(Integer, nullable=False)
+    study_name = Column(String(255), nullable=False)
+    dataset_path = Column(String(1000), nullable=False)
+    remote_url = Column(String(1000), nullable=False)
+    status = Column(String(30), nullable=False, default="pending")
+    attempts = Column(Integer, nullable=False, default=0)
+    created_at = Column(DateTime(timezone=True), default=local_now, nullable=False)
+    last_attempt_at = Column(DateTime(timezone=True), nullable=True)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+    last_error = Column(Text, nullable=True)
+
 
 class AuditEvent(Base):
     __tablename__ = "audit_events"

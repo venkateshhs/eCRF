@@ -3,7 +3,30 @@
     class="study-view-layout"
     :class="{ 'sv-dashboard-fullscreen': activeTab === 'viewdata' && dashboardFullscreen }"
   >
-    <header class="sv-header" v-if="!(activeTab === 'viewdata' && dashboardFullscreen)">
+    <div
+      v-if="studyLoading"
+      class="study-loading-overlay"
+      role="status"
+      aria-live="polite"
+      aria-busy="true"
+    >
+      <div class="study-loading-card">
+        <div class="study-loading-spinner" aria-hidden="true"></div>
+        <div class="study-loading-title">Please wait</div>
+        <div class="study-loading-message">Study data is being loaded.</div>
+      </div>
+    </div>
+
+    <div
+      v-if="maintenanceMessage && !studyLoading"
+      class="loading load-error-state"
+      role="alert"
+      aria-live="assertive"
+    >
+      <p>{{ maintenanceMessage }}</p>
+    </div>
+
+    <header class="sv-header" v-if="!maintenanceMessage && !(activeTab === 'viewdata' && dashboardFullscreen)">
       <button class="btn-minimal back-btn" @click="goBackToDashboard" aria-label="Back to Dashboard">Back</button>
       <div class="title-wrap">
         <h1 class="sv-title">{{ studyMeta.study_name || 'Study' }}</h1>
@@ -13,6 +36,7 @@
     </header>
 
     <div
+      v-if="!maintenanceMessage"
       class="sv-content card"
       :class="{
         'sv-viewdata': activeTab === 'viewdata',
@@ -697,6 +721,8 @@ export default {
         visible: false,
         busy: false,
       },
+      studyLoading: true,
+      maintenanceMessage: "",
       studyId: this.$route.params.id,
 
       // meta/content
@@ -1191,6 +1217,7 @@ export default {
       const token = this.token;
       if (!token) { this.$router.push("/login"); return; }
       try {
+        this.maintenanceMessage = "";
         const resp = await axios.get(`/forms/studies/${this.studyId}`, { headers: { Authorization: `Bearer ${token}` } });
         const sd = resp.data?.content?.study_data || {};
         const meta = resp.data?.metadata || {};
@@ -1226,7 +1253,13 @@ export default {
         if (this.activeTab === "edit" && !this.canEditStudy) {
           this.activeTab = "meta";
         }
-      } catch (e) { console.error("Failed to fetch study view:", e); }
+      } catch (e) {
+        if (this.isMaintenanceError(e)) {
+          this.maintenanceMessage = this.apiErrorDetail(e) || "eCRF is under maintenance. Please try again later.";
+          return;
+        }
+        console.error("Failed to fetch study view:", e);
+      }
     },
     async fetchStudyFiles() {
       const token = this.token;
@@ -1234,7 +1267,24 @@ export default {
       try {
         const { data } = await axios.get(`/forms/studies/${this.studyId}/files`, { headers: { Authorization: `Bearer ${token}` } });
         this.allFiles = Array.isArray(data) ? data : [];
-      } catch (e) { console.warn("Failed to fetch study files:", e?.response?.data || e.message); }
+      } catch (e) {
+        if (this.isMaintenanceError(e)) {
+          this.maintenanceMessage = this.apiErrorDetail(e) || "eCRF is under maintenance. Please try again later.";
+          return;
+        }
+        console.warn("Failed to fetch study files:", e?.response?.data || e.message);
+      }
+    },
+
+    apiErrorDetail(e) {
+      const detail = e?.response?.data?.detail;
+      if (Array.isArray(detail)) return detail.map((d) => d?.msg || String(d)).join(", ");
+      if (detail) return String(detail);
+      return "";
+    },
+
+    isMaintenanceError(e) {
+      return e?.response?.status === 503;
     },
 
     async fetchVersionsAndDiffs() {
@@ -1609,22 +1659,30 @@ export default {
     },
   },
   async mounted() {
-    this.scrollToTop?.();
+    this.studyLoading = true;
+    try {
+      this.scrollToTop?.();
 
-    const qTab = this.$route.query?.tab;
-    if (qTab && this.tabs.some(t => t.key === qTab)) this.activeTab = qTab;
+      const qTab = this.$route.query?.tab;
+      if (qTab && this.tabs.some(t => t.key === qTab)) this.activeTab = qTab;
 
-    await this.fetchMe();
-    await this.fetchStudy();
+      await this.fetchMe();
+      await this.fetchStudy();
+      if (this.maintenanceMessage) return;
 
-    // After we know perms, ensure we don't stay on edit without rights
-    if (this.activeTab === "edit" && !this.canEditStudy) this.activeTab = "meta";
+      // After we know perms, ensure we don't stay on edit without rights
+      if (this.activeTab === "edit" && !this.canEditStudy) this.activeTab = "meta";
 
-    if (this.canSeeBidsButton) await this.fetchBidsPath();
-    await Promise.all([this.fetchStudyFiles(), this.fetchVersionsAndDiffs()]);
+      if (this.canSeeBidsButton) await this.fetchBidsPath();
+      await Promise.all([this.fetchStudyFiles(), this.fetchVersionsAndDiffs()]);
+    } finally {
+      this.studyLoading = false;
+    }
   },
   beforeRouteEnter(to, from, next) { next((vm) => vm.scrollToTop?.()); },
   beforeRouteUpdate(to, from, next) {
+    this.studyLoading = true;
+    this.maintenanceMessage = "";
     this.studyId = to.params.id;
 
     const qTab = to.query?.tab;
@@ -1634,14 +1692,22 @@ export default {
     Promise.resolve()
       .then(() => this.fetchStudy())
       .then(() => {
+        if (this.maintenanceMessage) return;
         // If the route query wants edit but user can't, force meta
         if (this.activeTab === "edit" && !this.canEditStudy) this.activeTab = "meta";
       })
       .then(() => {
+        if (this.maintenanceMessage) return;
         if (this.canSeeBidsButton) return this.fetchBidsPath();
       })
-      .then(() => Promise.all([this.fetchStudyFiles(), this.fetchVersionsAndDiffs()]))
-      .finally(() => next());
+      .then(() => {
+        if (this.maintenanceMessage) return;
+        return Promise.all([this.fetchStudyFiles(), this.fetchVersionsAndDiffs()]);
+      })
+      .finally(() => {
+        this.studyLoading = false;
+        next();
+      });
   },
 };
 </script>
@@ -1654,6 +1720,74 @@ export default {
 }
 
 .study-view-layout { display: flex; flex-direction: column; gap: 16px; padding: 24px; background: #f9fafb; min-height: 100%; }
+
+.study-loading-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 5000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(249, 250, 251, 0.82);
+  backdrop-filter: blur(2px);
+}
+
+.study-loading-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  min-width: 260px;
+  padding: 24px 28px;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: 0 18px 45px rgba(15, 23, 42, 0.14);
+  color: #111827;
+  text-align: center;
+}
+
+.load-error-state {
+  color: #991b1b;
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  border-radius: 8px;
+  padding: 16px;
+  margin: 24px auto;
+  max-width: 520px;
+  text-align: center;
+  font-weight: 600;
+}
+
+.loading {
+  text-align: center;
+  padding: 50px;
+  font-size: 16px;
+  color: #6b7280;
+}
+
+.study-loading-spinner {
+  width: 34px;
+  height: 34px;
+  border: 4px solid #e5e7eb;
+  border-top-color: #2563eb;
+  border-radius: 50%;
+  animation: study-loading-spin 0.8s linear infinite;
+}
+
+.study-loading-title {
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.study-loading-message {
+  font-size: 14px;
+  color: #4b5563;
+}
+
+@keyframes study-loading-spin {
+  to { transform: rotate(360deg); }
+}
 
 /* Fullscreen overlay for View Data */
 .study-view-layout.sv-dashboard-fullscreen {

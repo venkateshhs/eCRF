@@ -5,12 +5,15 @@ import hashlib
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
+import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+from urllib.parse import urlparse
 
 from .logger import logger
 from .datalad_config import get_datalad_config
@@ -18,6 +21,10 @@ from .datalad_lock import dataset_lock, LockSpec
 from .datalad_runtime import get_datalad_worker
 from .settings import get_settings
 import tempfile
+
+if os.getenv("ECRF_JUSELESS_SSH_PASSWORD"):
+    os.environ.setdefault("DATALAD_SSH_MULTIPLEX_CONNECTIONS", "0")
+
 try:
     from datalad.api import Dataset  # type: ignore
 except Exception:
@@ -107,6 +114,134 @@ def _run_git(ds_path: Path, args: List[str]) -> str:
     return out.strip()
 
 
+def _ssh_connect_timeout_seconds() -> int:
+    try:
+        return max(1, int(os.getenv("ECRF_JUSELESS_SSH_CONNECT_TIMEOUT_SECONDS", "15")))
+    except Exception:
+        return 15
+
+
+def _configure_local_ssh_password_if_requested() -> None:
+    password = os.getenv("ECRF_JUSELESS_SSH_PASSWORD")
+    connect_timeout = _ssh_connect_timeout_seconds()
+    if not password:
+        os.environ.setdefault(
+            "GIT_SSH_COMMAND",
+            "ssh -o StrictHostKeyChecking=accept-new "
+            "-o BatchMode=yes "
+            "-o NumberOfPasswordPrompts=0 "
+            f"-o ConnectTimeout={connect_timeout} "
+            "-o ServerAliveInterval=30 "
+            "-o ServerAliveCountMax=4",
+        )
+        return
+    if shutil.which("sshpass") is None:
+        raise RuntimeError(
+            "ECRF_JUSELESS_SSH_PASSWORD is set but sshpass is not installed; "
+            "install sshpass or use SSH key authentication."
+        )
+    existing = os.getenv("GIT_SSH_COMMAND", "")
+    if existing and "sshpass" in existing:
+        return
+    os.environ["GIT_SSH_COMMAND"] = (
+        "sshpass -p "
+        f"{shlex.quote(password)} "
+        "ssh -o StrictHostKeyChecking=accept-new "
+        f"-o ConnectTimeout={connect_timeout} "
+        "-o NumberOfPasswordPrompts=1 "
+        "-o ServerAliveInterval=30 "
+        "-o ServerAliveCountMax=4"
+    )
+    os.environ.setdefault("GIT_TERMINAL_PROMPT", "0")
+
+
+def _ssh_command_prefix() -> List[str]:
+    cmd: List[str] = []
+    password = os.getenv("ECRF_JUSELESS_SSH_PASSWORD")
+    connect_timeout = str(_ssh_connect_timeout_seconds())
+    if password:
+        if shutil.which("sshpass") is None:
+            raise RuntimeError(
+                "ECRF_JUSELESS_SSH_PASSWORD is set but sshpass is not installed; "
+                "install sshpass or use SSH key authentication."
+            )
+        cmd.extend(["sshpass", "-p", password])
+        cmd.extend(
+            [
+                "ssh",
+                "-o",
+                "StrictHostKeyChecking=accept-new",
+                "-o",
+                f"ConnectTimeout={connect_timeout}",
+                "-o",
+                "NumberOfPasswordPrompts=1",
+                "-o",
+                "ServerAliveInterval=30",
+                "-o",
+                "ServerAliveCountMax=4",
+            ]
+        )
+    else:
+        cmd.extend(
+            [
+                "ssh",
+                "-o",
+                "StrictHostKeyChecking=accept-new",
+                "-o",
+                "BatchMode=yes",
+                "-o",
+                "NumberOfPasswordPrompts=0",
+                "-o",
+                f"ConnectTimeout={connect_timeout}",
+                "-o",
+                "ServerAliveInterval=30",
+                "-o",
+                "ServerAliveCountMax=4",
+            ]
+        )
+    return cmd
+
+
+def _parse_ria_ssh_url(ria_url: str) -> tuple[str, Optional[int], str]:
+    parsed = urlparse(ria_url)
+    if parsed.scheme != "ria+ssh" or not parsed.hostname or not parsed.path:
+        raise RuntimeError(f"Unsupported ECRF_DATALAD_RIA_URL for Juseless mirror: {ria_url}")
+
+    target = parsed.hostname
+    if parsed.username:
+        target = f"{parsed.username}@{target}"
+    return target, parsed.port, parsed.path
+
+
+def _parse_ssh_url(ssh_url: str) -> tuple[str, Optional[int], str]:
+    parsed = urlparse(ssh_url)
+    if parsed.scheme != "ssh" or not parsed.hostname or not parsed.path:
+        raise RuntimeError(f"Unsupported SSH remote URL: {ssh_url}")
+
+    target = parsed.hostname
+    if parsed.username:
+        target = f"{parsed.username}@{target}"
+    return target, parsed.port, parsed.path
+
+
+def _result_has_error(results: Any) -> bool:
+    if results is None:
+        return False
+    if isinstance(results, dict):
+        rows = [results]
+    elif isinstance(results, list):
+        rows = results
+    else:
+        try:
+            rows = list(results)
+        except TypeError:
+            rows = [results]
+    for row in rows:
+        if isinstance(row, dict) and row.get("status") in {"error", "impossible"}:
+            return True
+    return False
+
+
 def _git_show_json(ds_path: Path, rev: str, rel_path: str, default: Any = None) -> Any:
     try:
         raw = _run_git(ds_path, ["show", f"{rev}:{rel_path}"])
@@ -145,6 +280,7 @@ class StudyPaths:
 
 class DataladStudyRepo:
     def __init__(self, root: Optional[str] = None) -> None:
+        _configure_local_ssh_password_if_requested()
         settings = get_settings()
         base = root or os.environ.get("BIDS_ROOT") or str(settings.bids_root)
         self.root = Path(base).expanduser().resolve()
@@ -167,10 +303,15 @@ class DataladStudyRepo:
         if settings.is_production and not settings.bids_root:
             raise RuntimeError("BIDS_ROOT must be configured in production.")
 
-        if settings.is_production and cfg.require_ria_for_writes and not cfg.ria_url:
+        if (
+            settings.is_production
+            and cfg.require_ria_for_writes
+            and not cfg.ria_url
+            and not cfg.ssh_remote_template
+        ):
             raise RuntimeError(
-                "ECRF_DATALAD_RIA_URL must be configured in production when "
-                "ECRF_DATALAD_REQUIRE_RIA_FOR_WRITES=1."
+                "ECRF_DATALAD_RIA_URL or ECRF_DATALAD_SSH_REMOTE_TEMPLATE must be "
+                "configured in production when ECRF_DATALAD_REQUIRE_RIA_FOR_WRITES=1."
             )
 
     def _set_repo_identity(self, ds) -> None:
@@ -184,14 +325,194 @@ class DataladStudyRepo:
         except Exception:
             pass
 
-    def _ensure_ria_sibling_if_needed(self, dataset_path: Path) -> None:
+    def _ssh_remote_url_for_dataset(self, dataset_path: Path) -> Optional[str]:
+        template = self._cfg().ssh_remote_template
+        if not template:
+            return None
+
+        dataset_name = Path(dataset_path).expanduser().resolve().name
+        return template.format(study=dataset_name, dataset=dataset_name)
+
+    def remote_delete_url_for_dataset(self, dataset_path: Path) -> Optional[str]:
+        return self._ssh_remote_url_for_dataset(dataset_path)
+
+    def _ensure_remote_bare_repo(self, remote_url: str) -> None:
+        ssh_target, ssh_port, remote_path = _parse_ssh_url(remote_url)
+        remote_parent = str(Path(remote_path).parent)
+        remote_cmd = " && ".join(
+            [
+                "set -e",
+                f"mkdir -p {shlex.quote(remote_parent)}",
+                (
+                    f"if [ ! -d {shlex.quote(remote_path)} ]; then "
+                    f"git init --bare {shlex.quote(remote_path)}; fi"
+                ),
+            ]
+        )
+
+        ssh_cmd = _ssh_command_prefix()
+        if ssh_port:
+            ssh_cmd.extend(["-p", str(ssh_port)])
+        ssh_cmd.extend([ssh_target, remote_cmd])
+
+        result = subprocess.run(ssh_cmd, capture_output=True, text=True)
+        if result.returncode != 0:
+            detail = (result.stderr or result.stdout or "").strip()
+            raise RuntimeError(
+                f"Failed to ensure SSH bare repo {remote_url}: "
+                f"{detail or f'exit code {result.returncode}'}"
+            )
+
+    def delete_remote_bare_repo_url(self, remote_url: str, *, expected_dataset_name: Optional[str] = None) -> None:
+        remote_url = str(remote_url or "").strip()
+        if not remote_url:
+            return
+
+        ssh_target, ssh_port, remote_path = _parse_ssh_url(remote_url)
+        remote_name = Path(remote_path).name
+        if not remote_name.startswith("study_") or not remote_name.endswith(".git"):
+            raise RuntimeError(f"Refusing to delete unexpected remote study repo path: {remote_path}")
+        if expected_dataset_name:
+            expected_remote_name = f"{expected_dataset_name}.git"
+            if remote_name != expected_remote_name:
+                raise RuntimeError(
+                    f"Refusing to delete remote repo {remote_path}; expected {expected_remote_name}"
+                )
+
+        remote_parent = str(Path(remote_path).parent)
+        if remote_parent in {"", "/", "."}:
+            raise RuntimeError(f"Refusing to delete remote study repo with unsafe parent: {remote_path}")
+
+        remote_cmd = " && ".join(
+            [
+                "set -e",
+                (
+                    f"if [ -d {shlex.quote(remote_path)} ]; then "
+                    f"rm -rf {shlex.quote(remote_path)}; fi"
+                ),
+            ]
+        )
+
+        ssh_cmd = _ssh_command_prefix()
+        if ssh_port:
+            ssh_cmd.extend(["-p", str(ssh_port)])
+        ssh_cmd.extend([ssh_target, remote_cmd])
+
+        result = subprocess.run(ssh_cmd, capture_output=True, text=True)
+        if result.returncode != 0:
+            detail = (result.stderr or result.stdout or "").strip()
+            raise RuntimeError(
+                f"Failed to delete SSH bare repo {remote_url}: "
+                f"{detail or f'exit code {result.returncode}'}"
+            )
+
+    def delete_remote_worktree_for_dataset(self, dataset_path: Path) -> None:
+        remote_url = self._ssh_remote_url_for_dataset(dataset_path)
+        if not remote_url:
+            return
+
+        dataset_name = Path(dataset_path).expanduser().resolve().name
+        if not dataset_name.startswith("study_"):
+            raise RuntimeError(f"Refusing to delete unexpected remote worktree name: {dataset_name}")
+
+        ssh_target, ssh_port, _remote_repo_path = _parse_ssh_url(remote_url)
+        studies_dir = os.getenv("ECRF_JUSELESS_STUDIES_DIR", "/home/vshivashankar/casee-studies")
+        remote_dataset_path = f"{studies_dir.rstrip('/')}/{dataset_name}"
+        remote_parent = str(Path(remote_dataset_path).parent)
+        if remote_parent in {"", "/", "."}:
+            raise RuntimeError(f"Refusing to delete remote worktree with unsafe parent: {remote_dataset_path}")
+
+        remote_cmd = " && ".join(
+            [
+                "set -e",
+                (
+                    f"if [ -e {shlex.quote(remote_dataset_path)} ] "
+                    f"&& [ ! -d {shlex.quote(remote_dataset_path + '/.git')} ] "
+                    f"&& [ ! -d {shlex.quote(remote_dataset_path + '/.datalad')} ]; then "
+                    f"echo 'Refusing to delete non-repository mirror path: {shlex.quote(remote_dataset_path)}' >&2; "
+                    f"exit 2; fi"
+                ),
+                (
+                    f"if [ -e {shlex.quote(remote_dataset_path)} ]; then "
+                    f"rm -rf {shlex.quote(remote_dataset_path)}; fi"
+                ),
+            ]
+        )
+
+        ssh_cmd = _ssh_command_prefix()
+        if ssh_port:
+            ssh_cmd.extend(["-p", str(ssh_port)])
+        ssh_cmd.extend([ssh_target, remote_cmd])
+
+        result = subprocess.run(ssh_cmd, capture_output=True, text=True)
+        if result.returncode != 0:
+            detail = (result.stderr or result.stdout or "").strip()
+            raise RuntimeError(
+                f"Failed to delete SSH worktree mirror {remote_dataset_path}: "
+                f"{detail or f'exit code {result.returncode}'}"
+            )
+
+    def _delete_remote_bare_repo_if_configured(self, dataset_path: Path) -> None:
+        remote_url = self._ssh_remote_url_for_dataset(dataset_path)
+        if not remote_url:
+            return
+
+        expected_dataset_name = Path(dataset_path).expanduser().resolve().name
+        self.delete_remote_bare_repo_url(
+            remote_url,
+            expected_dataset_name=expected_dataset_name,
+        )
+
+    def _ensure_ssh_sibling_if_needed(self, dataset_path: Path) -> Optional[str]:
+        remote_url = self._ssh_remote_url_for_dataset(dataset_path)
+        if not remote_url:
+            return None
+
+        if Dataset is None:
+            raise RuntimeError("DataLad is not installed")
+
+        ds = Dataset(str(dataset_path))
+        if not ds.is_installed():
+            raise RuntimeError(f"Dataset not installed at {dataset_path}")
+
+        self._ensure_remote_bare_repo(remote_url)
+
+        try:
+            existing_url = _run_git(dataset_path, ["remote", "get-url", "origin"])
+        except Exception:
+            existing_url = ""
+
+        if existing_url:
+            if existing_url != remote_url:
+                logger.info(
+                    "[DataladStudyRepo._ensure_ssh_sibling_if_needed] Updating origin remote dataset=%s old=%s new=%s",
+                    dataset_path,
+                    existing_url,
+                    remote_url,
+                )
+                _run_git(dataset_path, ["remote", "set-url", "origin", remote_url])
+        else:
+            _run_git(dataset_path, ["remote", "add", "origin", remote_url])
+
+        try:
+            ds.repo.set_config("remote.origin.annex-ignore", "false", where="local")
+        except Exception:
+            pass
+
+        return "origin"
+
+    def _ensure_ria_sibling_if_needed(self, dataset_path: Path) -> str:
+        ssh_target = self._ensure_ssh_sibling_if_needed(dataset_path)
+        if ssh_target:
+            return ssh_target
+
         cfg = self._cfg()
         if not cfg.ria_url:
             logger.info(
                 "[DataladStudyRepo._ensure_ria_sibling_if_needed] No RIA URL configured; skipping sibling setup for dataset=%s",
                 dataset_path,
             )
-            return
+            return cfg.ria_name
 
         if Dataset is None:
             logger.error(
@@ -216,7 +537,7 @@ class DataladStudyRepo:
             raise RuntimeError(f"Dataset not installed at {dataset_path}")
 
         try:
-            siblings = ds.siblings(result_renderer="disabled")
+            siblings = ds.siblings()
             logger.info(
                 "[DataladStudyRepo._ensure_ria_sibling_if_needed] Existing siblings loaded for dataset=%s count=%s",
                 dataset_path,
@@ -242,7 +563,20 @@ class DataladStudyRepo:
                 dataset_path,
                 cfg.ria_name,
             )
-            return
+            return cfg.ria_name
+
+        if "ria-storage" in existing_names and "origin" in existing_names:
+            logger.info(
+                "[DataladStudyRepo._ensure_ria_sibling_if_needed] Dataset has RIA storage sibling and origin; using origin as push target for dataset=%s",
+                dataset_path,
+            )
+            return "origin"
+
+        if "ria-storage" in existing_names:
+            raise RuntimeError(
+                f"Dataset {dataset_path} has ria-storage configured but no git push sibling "
+                f"named {cfg.ria_name!r} or 'origin'."
+            )
 
         if create_sibling_ria is None:
             logger.error(
@@ -264,13 +598,13 @@ class DataladStudyRepo:
                 url=cfg.ria_url,
                 name=cfg.ria_name,
                 new_store_ok=True,
-                result_renderer="disabled",
             )
             logger.info(
                 "[DataladStudyRepo._ensure_ria_sibling_if_needed] Configured RIA sibling for dataset=%s sibling=%s",
                 dataset_path,
                 cfg.ria_name,
             )
+            return cfg.ria_name
         except Exception:
             logger.exception(
                 "[DataladStudyRepo._ensure_ria_sibling_if_needed] Failed to create RIA sibling for dataset=%s sibling=%s",
@@ -278,6 +612,211 @@ class DataladStudyRepo:
                 cfg.ria_name,
             )
             raise
+
+    def _get_dataset_content(self, dataset_path: Path, path: Optional[Path] = None) -> None:
+        cfg = self._cfg()
+        if cfg.mode not in {"shadow", "primary"} or not cfg.get_on_open:
+            return
+        if Dataset is None:
+            raise RuntimeError("DataLad is not installed")
+
+        dataset_path = Path(dataset_path).expanduser().resolve()
+        if not dataset_path.exists():
+            return
+
+        with dataset_lock(LockSpec(dataset_path=dataset_path)):
+            ds = Dataset(str(dataset_path))
+            if not ds.is_installed():
+                return
+
+            kwargs: Dict[str, Any] = {}
+            if path is not None:
+                kwargs["path"] = str(Path(path).expanduser().resolve())
+            else:
+                kwargs["path"] = str(dataset_path)
+                kwargs["recursive"] = True
+
+            logger.info("[DataladStudyRepo._get_dataset_content] datalad get dataset=%s path=%s", dataset_path, kwargs["path"])
+            results = ds.get(**kwargs)
+            if _result_has_error(results):
+                raise RuntimeError(f"DataLad get failed for {kwargs['path']}")
+
+    def get_study_content(self, study_id: int, study_name: str) -> None:
+        p = self.paths(study_id, study_name)
+        self._get_dataset_content(p.dataset_path)
+
+    def dataset_id(self, dataset_path: Path) -> Optional[str]:
+        dataset_path = Path(dataset_path).expanduser().resolve()
+        if Dataset is not None:
+            try:
+                ds = Dataset(str(dataset_path))
+                dataset_id = getattr(ds, "id", None)
+                if dataset_id:
+                    return str(dataset_id)
+            except Exception:
+                pass
+        try:
+            out = _run_git(dataset_path, ["config", "--get", "datalad.dataset.id"])
+        except Exception:
+            return None
+        return out.strip() or None
+
+    def clone_study_from_remote(
+        self,
+        study_id: int,
+        study_name: str,
+        dataset_id: str,
+        *,
+        source_dataset_path: Optional[Path] = None,
+    ) -> StudyPaths:
+        if Dataset is None:
+            raise RuntimeError("DataLad is not installed")
+
+        cfg = self._cfg()
+        p = self.paths(study_id, study_name)
+        if p.dataset_path.exists():
+            if self.dataset_id(p.dataset_path):
+                return p
+            backup_path = p.dataset_path.with_name(f"{p.dataset_path.name}.invalid-{int(time.time())}")
+            suffix = 1
+            while backup_path.exists():
+                backup_path = p.dataset_path.with_name(
+                    f"{p.dataset_path.name}.invalid-{int(time.time())}-{suffix}"
+                )
+                suffix += 1
+            logger.warning(
+                "[DataladStudyRepo.clone_study_from_remote] Local path exists but is not a DataLad dataset; moving aside path=%s backup=%s",
+                p.dataset_path,
+                backup_path,
+            )
+            shutil.move(str(p.dataset_path), str(backup_path))
+
+        remote_source_path = Path(source_dataset_path).expanduser().resolve() if source_dataset_path else p.dataset_path
+        clone_url = self._ssh_remote_url_for_dataset(remote_source_path)
+        if not clone_url:
+            if not cfg.ria_url:
+                raise RuntimeError("ECRF_DATALAD_RIA_URL is not configured; cannot clone study.")
+            clone_url = f"{cfg.ria_url}#{dataset_id}"
+
+        p.dataset_path.parent.mkdir(parents=True, exist_ok=True)
+        logger.info(
+            "[DataladStudyRepo.clone_study_from_remote] Cloning study_id=%s from=%s to=%s",
+            study_id,
+            clone_url,
+            p.dataset_path,
+        )
+        result = subprocess.run(
+            ["datalad", "clone", clone_url, str(p.dataset_path)],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            detail = (result.stderr or result.stdout or "").strip()
+            raise RuntimeError(
+                f"DataLad clone failed for study_id={study_id}: "
+                f"{detail or f'exit code {result.returncode}'}"
+            )
+
+        self._get_dataset_content(p.dataset_path)
+        return p
+
+    def _verify_push(self, ds: Any, to: str) -> None:
+        cfg = self._cfg()
+        if not cfg.verify_push:
+            return
+        logger.info("[DataladStudyRepo._verify_push] Verifying push dataset=%s to=%s", ds.path, to)
+        results = ds.push(to=to, data="nothing")
+        if _result_has_error(results):
+            raise RuntimeError(f"DataLad push verification failed for {ds.path} to={to}")
+
+    def _drop_annex_content_after_push(self, ds: Any, dataset_path: Path) -> None:
+        cfg = self._cfg()
+        if not cfg.drop_after_push:
+            return
+        logger.info("[DataladStudyRepo._drop_annex_content_after_push] Dropping annex content dataset=%s", dataset_path)
+        results = ds.drop(
+            path=str(dataset_path),
+            what="filecontent",
+            recursive=True,
+            reckless="availability",
+        )
+        if _result_has_error(results):
+            logger.warning(
+                "[DataladStudyRepo._drop_annex_content_after_push] DataLad drop reported non-fatal errors dataset=%s results=%s",
+                dataset_path,
+                results,
+            )
+
+    def _mirror_to_juseless_worktree(self, ds: Any, dataset_path: Path) -> None:
+        if os.getenv("ECRF_JUSELESS_MIRROR_AFTER_PUSH", "1") != "1":
+            return
+
+        cfg = self._cfg()
+        studies_dir = os.getenv("ECRF_JUSELESS_STUDIES_DIR", "/home/vshivashankar/casee-studies")
+        dataset_name = Path(dataset_path).expanduser().resolve().name
+        remote_dataset_path = f"{studies_dir.rstrip('/')}/{dataset_name}"
+
+        if cfg.ssh_remote_template:
+            remote_url = self._ssh_remote_url_for_dataset(dataset_path)
+            if not remote_url:
+                return
+            ssh_target, ssh_port, remote_repo_path = _parse_ssh_url(remote_url)
+            remote_repo_name = Path(remote_repo_path).name
+            if remote_repo_name != f"{dataset_name}.git":
+                raise RuntimeError(
+                    f"Refusing to mirror unexpected remote repo {remote_repo_path}; expected {dataset_name}.git"
+                )
+            remote_clone_url = remote_repo_path
+        elif cfg.ria_url:
+            dataset_id = getattr(ds, "id", None)
+            if not dataset_id:
+                dataset_id = _run_git(dataset_path, ["config", "--get", "datalad.dataset.id"])
+            if not dataset_id:
+                raise RuntimeError(f"Cannot mirror {dataset_path}; DataLad dataset id is missing.")
+
+            ssh_target, ssh_port, ria_store_path = _parse_ria_ssh_url(cfg.ria_url)
+            remote_clone_url = f"ria+file://{ria_store_path}#{dataset_id}"
+        else:
+            return
+
+        remote_cmd = " && ".join(
+            [
+                "set -e",
+                f"mkdir -p {shlex.quote(studies_dir)}",
+                (
+                    f"if [ -e {shlex.quote(remote_dataset_path)} ] "
+                    f"&& [ ! -d {shlex.quote(remote_dataset_path + '/.git')} ] "
+                    f"&& [ ! -d {shlex.quote(remote_dataset_path + '/.datalad')} ]; then "
+                    f"echo 'Refusing to overwrite non-repository mirror path: {shlex.quote(remote_dataset_path)}' >&2; "
+                    f"exit 2; fi"
+                ),
+                (
+                    f"if [ ! -d {shlex.quote(remote_dataset_path + '/.git')} ] "
+                    f"&& [ ! -d {shlex.quote(remote_dataset_path + '/.datalad')} ]; then "
+                    f"datalad clone {shlex.quote(remote_clone_url)} {shlex.quote(remote_dataset_path)}; "
+                    f"else cd {shlex.quote(remote_dataset_path)} && datalad update --merge; fi"
+                ),
+                f"cd {shlex.quote(remote_dataset_path)} && datalad get -r .",
+            ]
+        )
+
+        ssh_cmd = _ssh_command_prefix()
+        if ssh_port:
+            ssh_cmd.extend(["-p", str(ssh_port)])
+        ssh_cmd.extend([ssh_target, remote_cmd])
+
+        logger.info(
+            "[DataladStudyRepo._mirror_to_juseless_worktree] Updating Juseless worktree dataset=%s remote_path=%s",
+            dataset_path,
+            remote_dataset_path,
+        )
+        result = subprocess.run(ssh_cmd, capture_output=True, text=True)
+        if result.returncode != 0:
+            detail = (result.stderr or result.stdout or "").strip()
+            raise RuntimeError(
+                "Juseless worktree mirror failed "
+                f"for {remote_dataset_path}: {detail or f'exit code {result.returncode}'}"
+            )
 
     def _logical_path(self, dataset_path: Path, absolute_path: Path) -> str:
         return str(Path(absolute_path).resolve().relative_to(dataset_path.resolve()))
@@ -404,12 +943,6 @@ class DataladStudyRepo:
                     d,
                 )
 
-            self._ensure_ria_sibling_if_needed(p.dataset_path)
-            logger.info(
-                "[DataladStudyRepo.ensure_dataset] RIA sibling check complete dataset_path=%s",
-                p.dataset_path,
-            )
-
         logger.info(
             "[DataladStudyRepo.ensure_dataset] Completed study_id=%s dataset_path=%s",
             study_id,
@@ -490,32 +1023,86 @@ class DataladStudyRepo:
                 logger.exception("[DataladStudyRepo.save] ds.save failed ds_path=%s msg=%s", ds_path, message)
                 raise
 
-            if cfg.push_on_save and cfg.ria_name:
-                push_kwargs = {"to": cfg.ria_name}
+            if cfg.push_on_save and (cfg.ria_name or cfg.ssh_remote_template):
+                if not cfg.ria_url and not cfg.ssh_remote_template:
+                    raise RuntimeError(
+                        "ECRF_DATALAD_RIA_URL or ECRF_DATALAD_SSH_REMOTE_TEMPLATE is not configured; cannot push dataset."
+                    )
+                push_target = self._ensure_ria_sibling_if_needed(ds_path)
+                push_kwargs = {"to": push_target}
                 if cfg.push_data_mode != "nothing":
                     push_kwargs["data"] = cfg.push_data_mode
                 try:
                     logger.info(
                         "[DataladStudyRepo.save] Pushing dataset ds_path=%s to=%s data_mode=%s",
                         ds_path,
-                        cfg.ria_name,
+                        push_target,
                         cfg.push_data_mode,
                     )
                     ds.push(**push_kwargs)
                     logger.info(
                         "[DataladStudyRepo.save] Pushed dataset ds_path=%s to=%s data_mode=%s",
                         ds_path,
-                        cfg.ria_name,
+                        push_target,
                         cfg.push_data_mode,
                     )
+                    self._verify_push(ds, push_target)
+                    self._drop_annex_content_after_push(ds, ds_path)
+                    self._mirror_to_juseless_worktree(ds, ds_path)
                 except Exception:
                     logger.exception(
                         "[DataladStudyRepo.save] ds.push failed ds_path=%s to=%s data_mode=%s",
                         ds_path,
-                        cfg.ria_name,
+                        push_target,
                         cfg.push_data_mode,
                     )
                     raise
+
+    def sync_to_remote(self, ds_path: Path, message: str) -> Optional[str]:
+        if Dataset is None:
+            raise RuntimeError("DataLad is not installed")
+
+        cfg = self._cfg()
+        if not cfg.ria_name and not cfg.ssh_remote_template:
+            raise RuntimeError("ECRF_DATALAD_RIA_NAME or ECRF_DATALAD_SSH_REMOTE_TEMPLATE is not configured")
+        if not cfg.ria_url and not cfg.ssh_remote_template:
+            raise RuntimeError("ECRF_DATALAD_RIA_URL or ECRF_DATALAD_SSH_REMOTE_TEMPLATE is not configured; cannot sync dataset.")
+
+        ds_path = Path(ds_path).expanduser().resolve()
+        logger.info(
+            "[DataladStudyRepo.sync_to_remote] Start ds_path=%s message=%s remote=%s data_mode=%s",
+            ds_path,
+            message,
+            cfg.ria_name,
+            cfg.push_data_mode,
+        )
+
+        with dataset_lock(LockSpec(dataset_path=ds_path)):
+            ds = Dataset(str(ds_path))
+            if not ds.is_installed():
+                raise RuntimeError(f"Dataset not installed at {ds_path}")
+
+            self._set_repo_identity(ds)
+            push_target = self._ensure_ria_sibling_if_needed(ds_path)
+            ds.save(message=message)
+
+            push_kwargs = {"to": push_target}
+            if cfg.push_data_mode != "nothing":
+                push_kwargs["data"] = cfg.push_data_mode
+            results = ds.push(**push_kwargs)
+            if _result_has_error(results):
+                raise RuntimeError(f"DataLad push failed for {ds_path} to={push_target}")
+
+            self._verify_push(ds, push_target)
+            self._drop_annex_content_after_push(ds, ds_path)
+            dataset_id = getattr(ds, "id", None) or self.dataset_id(ds_path)
+            self._mirror_to_juseless_worktree(ds, ds_path)
+            logger.info(
+                "[DataladStudyRepo.sync_to_remote] Completed ds_path=%s remote=%s",
+                ds_path,
+                push_target,
+            )
+            return dataset_id
 
     def previous_study_content(self, ds_path: Path) -> Dict[str, Any]:
         return _git_show_json(ds_path, "HEAD~1", "canonical/study_content.json", default={}) or {}
@@ -966,6 +1553,7 @@ class DataladStudyRepo:
 
     def read_study(self, study_id: int, study_name: str) -> Dict[str, Any]:
         p = self.paths(study_id, study_name)
+        self._get_dataset_content(p.dataset_path)
         metadata = _json_load(p.metadata_json)
         content = _json_load(p.content_json)
         if not metadata or not content:
@@ -1059,6 +1647,11 @@ class DataladStudyRepo:
 
     def delete_study(self, study_id: int, study_name: str) -> None:
         ds = self.study_dataset_path(study_id, study_name)
+        self._delete_remote_bare_repo_if_configured(ds)
+        self.delete_local_study(study_id, study_name)
+
+    def delete_local_study(self, study_id: int, study_name: str) -> None:
+        ds = self.study_dataset_path(study_id, study_name)
         if ds.exists():
             shutil.rmtree(ds, ignore_errors=True)
 
@@ -1072,6 +1665,7 @@ class DataladStudyRepo:
 
         if not ds_path.exists() or not ds_path.is_dir():
             raise FileNotFoundError("Study dataset folder not found")
+        self._get_dataset_content(ds_path)
 
         safe_study_name = _slugify(study_name)
         zip_basename = f"study_{int(study_id)}_{safe_study_name}"
@@ -1184,9 +1778,14 @@ class DataladStudyRepo:
         audit_label: Optional[str] = None,
     ) -> Dict[str, Any]:
         p = self.ensure_dataset(study_id, study_name)
+        self._get_dataset_content(p.dataset_path)
 
         with dataset_lock(LockSpec(dataset_path=p.dataset_path)):
-            existing_rows = self.list_entries(study_id, study_name)
+            existing_rows = []
+            for f in sorted(p.entries_dir.rglob("entry_*.json")):
+                row = _json_load(f)
+                if row:
+                    existing_rows.append(row)
             next_entry_id = self._next_entry_id_from_rows(existing_rows)
             written_ids: List[int] = []
 
@@ -1281,6 +1880,11 @@ class DataladStudyRepo:
         skipped_required_flags: Any,
         actor: str,
         audit_label: Optional[str] = None,
+        progress_status: Optional[str] = None,
+        progress_percentage: Optional[int] = None,
+        progress_completed: Optional[int] = None,
+        progress_total: Optional[int] = None,
+        progress_skipped: Optional[int] = None,
         subject_raw: Optional[str] = None,
         visit_raw: Optional[str] = None,
         group_raw: Optional[str] = None,
@@ -1301,6 +1905,11 @@ class DataladStudyRepo:
                 "form_version": int(form_version),
                 "data": _deepcopy_json(data or {}),
                 "skipped_required_flags": _deepcopy_json(skipped_required_flags or []),
+                "progress_status": progress_status,
+                "progress_percentage": progress_percentage,
+                "progress_completed": progress_completed,
+                "progress_total": progress_total,
+                "progress_skipped": progress_skipped,
                 "created_at": local_now().isoformat(),
                 "updated_at": local_now().isoformat(),
             }
@@ -1378,6 +1987,11 @@ class DataladStudyRepo:
                 "group_index": int(payload["group_index"]),
                 "data": _deepcopy_json(payload.get("data") or {}),
                 "skipped_required_flags": _deepcopy_json(payload.get("skipped_required_flags") or []),
+                "progress_status": payload.get("progress_status"),
+                "progress_percentage": payload.get("progress_percentage"),
+                "progress_completed": payload.get("progress_completed"),
+                "progress_total": payload.get("progress_total"),
+                "progress_skipped": payload.get("progress_skipped"),
                 "updated_at": local_now().isoformat(),
             })
 
@@ -1436,6 +2050,7 @@ class DataladStudyRepo:
 
     def list_entries(self, study_id: int, study_name: str) -> List[Dict[str, Any]]:
         p = self.paths(study_id, study_name)
+        self._get_dataset_content(p.dataset_path)
         out = []
         for f in sorted(p.entries_dir.rglob("entry_*.json")):
             row = _json_load(f)
@@ -1831,6 +2446,7 @@ class DataladStudyRepo:
 
     def list_files(self, study_id: int, study_name: str) -> List[Dict[str, Any]]:
         p = self.paths(study_id, study_name)
+        self._get_dataset_content(p.dataset_path)
         out = []
         for f in sorted(p.files_dir.glob("file_*.json")):
             if re.match(r"file_\d+\.json$", f.name):
@@ -1847,6 +2463,7 @@ class DataladStudyRepo:
         file_id: int,
     ) -> Dict[str, Any]:
         p = self.paths(study_id, study_name)
+        self._get_dataset_content(p.dataset_path)
         rec_path = p.files_dir / f"file_{int(file_id):09d}.json"
         row = _json_load(rec_path)
 
@@ -1889,6 +2506,7 @@ class DataladStudyRepo:
             raise FileNotFoundError("Stored file path not found")
 
         abs_path = (p.dataset_path / rel_path).resolve()
+        self._get_dataset_content(p.dataset_path, abs_path)
 
         dataset_root = p.dataset_path.resolve()
         try:

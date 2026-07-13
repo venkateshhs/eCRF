@@ -5,11 +5,14 @@ import os
 import secrets
 import shutil
 import tempfile
+import time
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+import jwt
 from fastapi import APIRouter, HTTPException, Depends, Query, UploadFile, File, Form, Body, Request, status
+from fastapi import Header
 from fastapi.responses import FileResponse, RedirectResponse
 
 from sqlalchemy.orm import Session
@@ -18,11 +21,21 @@ from .database import get_db
 from . import schemas, models
 from .users import get_current_user
 from .datalad_repo import DataladStudyRepo, _deepcopy_json, local_now
+from .study_activity import (
+    cleanup_stale_shared_views,
+    expire_shared_view_for_token,
+    record_study_activity,
+    release_activity_by_session,
+)
+from .pending_remote_deletes import enqueue_pending_remote_delete
 from .versions import VersionManager
 from .settings import get_settings
+from .auth import SECRET_KEY, ALGORITHM
+from .logger import logger
 
 router = APIRouter(prefix="/forms", tags=["forms"])
 repo = DataladStudyRepo()
+MAINTENANCE_MESSAGE = "eCRF is under maintenance. Please try again later."
 
 settings = get_settings()
 TEMPLATE_DIR = (
@@ -77,6 +90,267 @@ def _actor_identifier(u) -> str:
         or _display_name(u)
         or f"User#{getattr(u, 'id', '')}"
     )
+
+
+ENTRY_PROGRESS_STATUSES = {"none", "partial", "complete", "skipped"}
+
+
+def _clamp_progress_int(value: Any, default: int = 0, max_value: Optional[int] = None) -> int:
+    try:
+        n = int(value)
+    except Exception:
+        n = default
+    n = max(0, n)
+    if max_value is not None:
+        n = min(max_value, n)
+    return n
+
+
+def _entry_progress_values(payload: Any) -> Dict[str, Any]:
+    total = _clamp_progress_int(getattr(payload, "progress_total", None))
+    completed = _clamp_progress_int(getattr(payload, "progress_completed", None))
+    skipped = _clamp_progress_int(getattr(payload, "progress_skipped", None))
+    percentage = _clamp_progress_int(getattr(payload, "progress_percentage", None), max_value=100)
+    status = str(getattr(payload, "progress_status", None) or "").strip().lower()
+
+    if status not in ENTRY_PROGRESS_STATUSES:
+        if total <= 0 or completed <= 0:
+            status = "none"
+        elif skipped > 0:
+            status = "skipped"
+        elif percentage >= 100:
+            status = "complete"
+        else:
+            status = "partial"
+
+    return {
+        "progress_status": status,
+        "progress_percentage": percentage,
+        "progress_completed": completed,
+        "progress_total": total,
+        "progress_skipped": skipped,
+    }
+
+
+def _session_jti_from_authorization(authorization: Optional[str]) -> Optional[str]:
+    try:
+        if not authorization or not authorization.startswith("Bearer "):
+            return None
+        token = authorization.split("Bearer ", 1)[1]
+        payload = jwt.decode(
+            token,
+            SECRET_KEY,
+            algorithms=[ALGORITHM],
+            options={"verify_exp": False},
+        )
+        return payload.get("jti")
+    except Exception:
+        return None
+
+
+def _latest_remote_reference(db: Session, study_id: int) -> tuple[Optional[str], Optional[Path]]:
+    rows = (
+        db.query(models.StudyActivity)
+        .filter(
+            models.StudyActivity.study_id == int(study_id),
+            models.StudyActivity.metadata_json.isnot(None),
+        )
+        .order_by(models.StudyActivity.last_sync_at.desc(), models.StudyActivity.id.desc())
+        .all()
+    )
+
+    for row in rows:
+        metadata = row.metadata_json or {}
+        if isinstance(metadata, dict) and metadata.get("dataset_id"):
+            source_path = None
+            if row.dataset_path:
+                source_path = Path(row.dataset_path).expanduser().resolve()
+            return str(metadata["dataset_id"]), source_path
+    return None, None
+
+
+def _latest_remote_dataset_id(db: Session, study_id: int) -> Optional[str]:
+    dataset_id, _source_path = _latest_remote_reference(db, study_id)
+    return dataset_id
+
+
+def _raise_storage_unavailable(exc: Exception, *, context: str) -> None:
+    logger.exception("%s failed because JTrack/Juseless storage is unavailable", context)
+    raise HTTPException(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        detail=MAINTENANCE_MESSAGE,
+    ) from exc
+
+
+def _local_study_dataset_is_usable(dataset_path: Path) -> bool:
+    if not dataset_path.exists():
+        return False
+    return bool(repo.dataset_id(dataset_path))
+
+
+def _move_invalid_local_study_dataset(dataset_path: Path, *, study_id: int) -> None:
+    if not dataset_path.exists():
+        return
+    if not dataset_path.is_dir():
+        raise RuntimeError(f"Study dataset path exists but is not a directory: {dataset_path}")
+
+    root = repo.root.expanduser().resolve()
+    resolved_path = dataset_path.expanduser().resolve()
+    try:
+        resolved_path.relative_to(root)
+    except ValueError as exc:
+        raise RuntimeError(f"Refusing to move dataset outside BIDS root: {resolved_path}") from exc
+
+    expected_prefix = f"study_{int(study_id)}_"
+    if not resolved_path.name.startswith(expected_prefix):
+        raise RuntimeError(
+            f"Refusing to move unexpected study folder '{resolved_path.name}' for study_id={study_id}"
+        )
+
+    backup_path = resolved_path.with_name(f"{resolved_path.name}.invalid-{int(time.time())}")
+    suffix = 1
+    while backup_path.exists():
+        backup_path = resolved_path.with_name(
+            f"{resolved_path.name}.invalid-{int(time.time())}-{suffix}"
+        )
+        suffix += 1
+    logger.warning(
+        "Local study dataset path exists but is not a DataLad dataset; moving aside path=%s backup=%s",
+        resolved_path,
+        backup_path,
+    )
+    shutil.move(str(resolved_path), str(backup_path))
+
+
+def _ensure_local_study_dataset(db: Session, meta: models.StudyMetadata) -> Path:
+    paths = repo.paths(meta.id, meta.study_name)
+    if paths.dataset_path.exists():
+        if _local_study_dataset_is_usable(paths.dataset_path):
+            return paths.dataset_path
+        _move_invalid_local_study_dataset(paths.dataset_path, study_id=meta.id)
+
+    dataset_id, source_dataset_path = _latest_remote_reference(db, meta.id)
+    if not dataset_id:
+        raise RuntimeError(
+            "Study dataset is not present on JTrack and no Juseless dataset id is available."
+        )
+    return repo.clone_study_from_remote(
+        meta.id,
+        meta.study_name,
+        dataset_id,
+        source_dataset_path=source_dataset_path,
+    ).dataset_path
+
+
+def _record_shared_activity(
+    db: Session,
+    *,
+    meta: models.StudyMetadata,
+    dataset_path: Path,
+    token: str,
+    session_jti: str,
+    purpose: str,
+) -> None:
+    metadata = {
+        "study_name": meta.study_name,
+        "shared_token": token,
+    }
+    dataset_id = repo.dataset_id(dataset_path)
+    if dataset_id:
+        metadata["dataset_id"] = dataset_id
+
+    record_study_activity(
+        db,
+        study_id=meta.id,
+        dataset_path=dataset_path,
+        user_id=None,
+        session_jti=session_jti,
+        purpose=purpose,
+        metadata=metadata,
+    )
+
+
+def _activity_metadata(meta: models.StudyMetadata, dataset_path: Path, extra: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    metadata: Dict[str, Any] = {"study_name": meta.study_name}
+    dataset_id = repo.dataset_id(dataset_path)
+    if dataset_id:
+        metadata["dataset_id"] = dataset_id
+    if extra:
+        metadata.update(extra)
+    return metadata
+
+
+def _record_authenticated_activity(
+    db: Session,
+    *,
+    meta: models.StudyMetadata,
+    dataset_path: Path,
+    user,
+    authorization: Optional[str],
+    purpose: str,
+    extra: Optional[Dict[str, Any]] = None,
+) -> None:
+    record_study_activity(
+        db,
+        study_id=meta.id,
+        dataset_path=dataset_path,
+        user_id=getattr(user, "id", None),
+        session_jti=_session_jti_from_authorization(authorization),
+        purpose=purpose,
+        metadata=_activity_metadata(meta, dataset_path, extra),
+    )
+
+
+def _ensure_local_study_dataset_for_write(
+    db: Session,
+    meta: models.StudyMetadata,
+    *,
+    allow_create_if_missing: bool = False,
+) -> Path:
+    paths = repo.paths(meta.id, meta.study_name)
+    if paths.dataset_path.exists():
+        if _local_study_dataset_is_usable(paths.dataset_path):
+            return paths.dataset_path
+        _move_invalid_local_study_dataset(paths.dataset_path, study_id=meta.id)
+
+    dataset_id, source_dataset_path = _latest_remote_reference(db, meta.id)
+    if dataset_id:
+        return repo.clone_study_from_remote(
+            meta.id,
+            meta.study_name,
+            dataset_id,
+            source_dataset_path=source_dataset_path,
+        ).dataset_path
+
+    if allow_create_if_missing:
+        return repo.ensure_dataset(meta.id, meta.study_name).dataset_path
+
+    raise RuntimeError(
+        "Study dataset is not present on JTrack and no Juseless dataset id is available."
+    )
+
+
+def _move_prepared_dataset_if_study_was_renamed(
+    *,
+    study_id: int,
+    old_study_name: str,
+    new_study_name: str,
+    prepared_path: Optional[Path],
+) -> Optional[Path]:
+    if not prepared_path:
+        return None
+
+    old_path = repo.paths(study_id, old_study_name).dataset_path
+    new_path = repo.paths(study_id, new_study_name).dataset_path
+    if old_path == new_path:
+        return prepared_path
+
+    if old_path.exists() and not new_path.exists():
+        new_path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(old_path), str(new_path))
+        return new_path
+
+    return new_path if new_path.exists() else prepared_path
 
 
 def _is_admin(user) -> bool:
@@ -363,6 +637,7 @@ def create_study(
     draft_of_study_id: Optional[int] = Query(None),
     last_completed_step: Optional[int] = Query(None),
     audit_label: Optional[str] = Query(None),
+    authorization: Optional[str] = Header(None),
     db: Session = Depends(get_db),
     user=Depends(get_current_user),
 ):
@@ -396,8 +671,9 @@ def create_study(
 
     tv = _ensure_initial_version_if_missing(db, meta.id, content_row.study_data or {})
 
+    datalad_refs = None
     if desired_status == "PUBLISHED":
-        _write_published_snapshot_to_datalad(
+        datalad_refs = _write_published_snapshot_to_datalad(
             meta=meta,
             study_data=content_row.study_data or {},
             template_version=tv.version,
@@ -407,6 +683,24 @@ def create_study(
             user_id=user.id,
             audit_label=audit_label,
         )
+        try:
+            dataset_path = Path(str(datalad_refs["dataset_path"]))
+            metadata = {"study_name": meta.study_name}
+            dataset_id = repo.dataset_id(dataset_path)
+            if dataset_id:
+                metadata["dataset_id"] = dataset_id
+            record_study_activity(
+                db,
+                study_id=meta.id,
+                dataset_path=dataset_path,
+                user_id=user.id,
+                session_jti=_session_jti_from_authorization(authorization),
+                purpose="create_study",
+                metadata=metadata,
+            )
+        except Exception:
+            db.rollback()
+            logger.exception("Failed to record study activity for study_id=%s", meta.id)
 
     meta_out = schemas.StudyMetadataOut.model_validate(meta).model_dump()
     meta_out["permissions"] = {"view": True, "add_data": True, "edit_study": True}
@@ -452,6 +746,7 @@ def list_studies(
 @router.get("/studies/{study_id}", response_model=schemas.StudyFull)
 def read_study(
     study_id: int,
+    authorization: Optional[str] = Header(None),
     db: Session = Depends(get_db),
     user=Depends(get_current_user),
 ):
@@ -460,6 +755,20 @@ def read_study(
         raise HTTPException(status_code=404, detail="Study not found")
 
     perms = _assert_has_study_permission(db, meta, user, required="view")
+    try:
+        dataset_path = _ensure_local_study_dataset(db, meta)
+        repo.get_study_content(study_id, meta.study_name)
+        _record_authenticated_activity(
+            db,
+            meta=meta,
+            dataset_path=dataset_path,
+            user=user,
+            authorization=authorization,
+            purpose="view_study",
+        )
+    except Exception as e:
+        _raise_storage_unavailable(e, context="read_study")
+
     content_row = _get_content_row_or_404(db, study_id)
 
     meta_out = schemas.StudyMetadataOut.model_validate(meta).model_dump()
@@ -601,6 +910,7 @@ def get_slot_data(
     visit_index: int = Query(...),
     group_index: int = Query(...),
     version: Optional[int] = Query(None),
+    authorization: Optional[str] = Header(None),
     db: Session = Depends(get_db),
     user=Depends(get_current_user),
 ):
@@ -612,6 +922,19 @@ def get_slot_data(
 
     if (meta.status or "PUBLISHED").upper().strip() != "PUBLISHED":
         raise HTTPException(status_code=400, detail="Data entry is only available for published studies")
+
+    try:
+        dataset_path = _ensure_local_study_dataset(db, meta)
+        _record_authenticated_activity(
+            db,
+            meta=meta,
+            dataset_path=dataset_path,
+            user=user,
+            authorization=authorization,
+            purpose="slot_data_view",
+        )
+    except Exception as e:
+        _raise_storage_unavailable(e, context="get_slot_data")
 
     if version is None:
         latest_tv = _latest_template_or_500(db, study_id)
@@ -651,6 +974,7 @@ def update_study(
     study_metadata: schemas.StudyMetadataUpdate = Body(..., embed=True),
     study_content: schemas.StudyContentUpdate = Body(..., embed=True),
     audit_label: Optional[str] = Query(None),
+    authorization: Optional[str] = Header(None),
     db: Session = Depends(get_db),
     user=Depends(get_current_user),
 ):
@@ -668,6 +992,19 @@ def update_study(
     new_sd = _deepcopy_json(study_content.study_data or {})
 
     incoming_status = _norm_status(getattr(study_metadata, "status", None)) or (meta.status or "PUBLISHED")
+    old_study_name = meta.study_name
+    old_status = (meta.status or "DRAFT").upper().strip()
+    prepared_dataset_path: Optional[Path] = None
+
+    if incoming_status == "PUBLISHED":
+        try:
+            prepared_dataset_path = _ensure_local_study_dataset_for_write(
+                db,
+                meta,
+                allow_create_if_missing=old_status != "PUBLISHED",
+            )
+        except Exception as e:
+            _raise_storage_unavailable(e, context="update_study")
 
     if getattr(study_metadata, "study_name", None) is not None:
         meta.study_name = study_metadata.study_name
@@ -695,7 +1032,13 @@ def update_study(
     latest_tv = _latest_template_or_500(db, study_id)
 
     if incoming_status == "PUBLISHED":
-        _write_published_snapshot_to_datalad(
+        prepared_dataset_path = _move_prepared_dataset_if_study_was_renamed(
+            study_id=study_id,
+            old_study_name=old_study_name,
+            new_study_name=meta.study_name,
+            prepared_path=prepared_dataset_path,
+        )
+        datalad_refs = _write_published_snapshot_to_datalad(
             meta=meta,
             study_data=content_row.study_data or {},
             template_version=latest_tv.version,
@@ -704,6 +1047,15 @@ def update_study(
             actor_name=_display_name(user),
             user_id=user.id,
             audit_label=audit_label,
+        )
+        dataset_path = Path(str(datalad_refs["dataset_path"]))
+        _record_authenticated_activity(
+            db,
+            meta=meta,
+            dataset_path=dataset_path,
+            user=user,
+            authorization=authorization,
+            purpose="update_study",
         )
 
     # Locking disabled for now.
@@ -730,6 +1082,7 @@ def update_study(
 def publish_study(
     study_id: int,
     audit_label: Optional[str] = Query(None),
+    authorization: Optional[str] = Header(None),
     db: Session = Depends(get_db),
     user=Depends(get_current_user),
 ):
@@ -744,12 +1097,22 @@ def publish_study(
 
     content_row = _get_content_row_or_404(db, study_id)
     latest_tv = _ensure_initial_version_if_missing(db, study_id, content_row.study_data or {})
+    old_status = (meta.status or "DRAFT").upper().strip()
+
+    try:
+        _ensure_local_study_dataset_for_write(
+            db,
+            meta,
+            allow_create_if_missing=old_status != "PUBLISHED",
+        )
+    except Exception as e:
+        _raise_storage_unavailable(e, context="publish_study")
 
     meta.status = "PUBLISHED"
     db.commit()
     db.refresh(meta)
 
-    _write_published_snapshot_to_datalad(
+    datalad_refs = _write_published_snapshot_to_datalad(
         meta=meta,
         study_data=content_row.study_data or {},
         template_version=latest_tv.version,
@@ -758,6 +1121,15 @@ def publish_study(
         actor_name=_display_name(user),
         user_id=user.id,
         audit_label=audit_label,
+    )
+    dataset_path = Path(str(datalad_refs["dataset_path"]))
+    _record_authenticated_activity(
+        db,
+        meta=meta,
+        dataset_path=dataset_path,
+        user=user,
+        authorization=authorization,
+        purpose="publish_study",
     )
 
     # Locking disabled for now.
@@ -782,6 +1154,7 @@ def publish_study(
 @router.get("/studies/{study_id}/files", response_model=List[schemas.FileOut])
 def read_files_for_study(
     study_id: int,
+    authorization: Optional[str] = Header(None),
     db: Session = Depends(get_db),
     user=Depends(get_current_user),
 ):
@@ -790,11 +1163,24 @@ def read_files_for_study(
         raise HTTPException(status_code=404, detail="Study not found")
 
     _assert_has_study_permission(db, meta, user, required="view")
+    try:
+        dataset_path = _ensure_local_study_dataset(db, meta)
+        _record_authenticated_activity(
+            db,
+            meta=meta,
+            dataset_path=dataset_path,
+            user=user,
+            authorization=authorization,
+            purpose="list_files",
+        )
+    except Exception as e:
+        _raise_storage_unavailable(e, context="read_files_for_study")
     return repo.list_files(study_id, meta.study_name)
 
 @router.get("/studies/{study_id}/download")
 def download_full_study(
     study_id: int,
+    authorization: Optional[str] = Header(None),
     db: Session = Depends(get_db),
     user=Depends(get_current_user),
 ):
@@ -805,6 +1191,15 @@ def download_full_study(
     _assert_owner_or_admin(meta, user)
 
     try:
+        dataset_path = _ensure_local_study_dataset(db, meta)
+        _record_authenticated_activity(
+            db,
+            meta=meta,
+            dataset_path=dataset_path,
+            user=user,
+            authorization=authorization,
+            purpose="download_study",
+        )
         zip_path, zip_name = repo.build_full_study_zip(
             study_id=study_id,
             study_name=meta.study_name,
@@ -830,6 +1225,7 @@ def upload_file(
     group_index: Optional[int] = Form(None),
     modalities_json: Optional[str] = Form("[]"),
     audit_label: Optional[str] = Form(None),
+    authorization: Optional[str] = Header(None),
     db: Session = Depends(get_db),
     user=Depends(get_current_user),
 ):
@@ -839,6 +1235,18 @@ def upload_file(
 
     _assert_has_study_permission(db, meta, user, required="add_data")
     _assert_not_locked_by_other(meta, user)
+    try:
+        dataset_path = _ensure_local_study_dataset(db, meta)
+        _record_authenticated_activity(
+            db,
+            meta=meta,
+            dataset_path=dataset_path,
+            user=user,
+            authorization=authorization,
+            purpose="upload_file",
+        )
+    except Exception as e:
+        _raise_storage_unavailable(e, context="upload_file_for_study")
 
     modalities = _parse_modalities_json(modalities_json)
     latest_tv = _latest_template_or_500(db, study_id)
@@ -888,6 +1296,7 @@ def create_url_file(
     group_index: Optional[int] = Form(None),
     modalities_json: Optional[str] = Form("[]"),
     audit_label: Optional[str] = Form(None),
+    authorization: Optional[str] = Header(None),
     db: Session = Depends(get_db),
     user=Depends(get_current_user),
 ):
@@ -897,6 +1306,18 @@ def create_url_file(
 
     _assert_has_study_permission(db, meta, user, required="add_data")
     _assert_not_locked_by_other(meta, user)
+    try:
+        dataset_path = _ensure_local_study_dataset(db, meta)
+        _record_authenticated_activity(
+            db,
+            meta=meta,
+            dataset_path=dataset_path,
+            user=user,
+            authorization=authorization,
+            purpose="create_url_file",
+        )
+    except Exception as e:
+        _raise_storage_unavailable(e, context="add_url_file_for_study")
 
     modalities = _parse_modalities_json(modalities_json)
     latest_tv = _latest_template_or_500(db, study_id)
@@ -948,6 +1369,23 @@ def shared_upload_file(
     if (meta.status or "PUBLISHED").upper().strip() != "PUBLISHED":
         raise HTTPException(status_code=400, detail="Shared file upload is only allowed for published studies")
 
+    cleanup_stale_shared_views(db)
+    try:
+        dataset_path = _ensure_local_study_dataset(db, meta)
+    except Exception as e:
+        _raise_storage_unavailable(e, context="shared_upload_file")
+
+    submit_jti = f"shared-submit:{token}:{secrets.token_urlsafe(12)}"
+    _record_shared_activity(
+        db,
+        meta=meta,
+        dataset_path=dataset_path,
+        token=token,
+        session_jti=submit_jti,
+        purpose="shared_link_file_upload",
+    )
+    expire_shared_view_for_token(db, token=token)
+
     modalities = _parse_modalities_json(modalities_json)
     latest_tv = _latest_template_or_500(db, access.study_id)
     form_version = int(latest_tv.version)
@@ -979,17 +1417,26 @@ def shared_upload_file(
             user_id=None,
             audit_label=audit_label,
         )
+    except Exception as e:
+        _raise_storage_unavailable(e, context="shared_upload_file")
     finally:
         try:
             if tmp_path and os.path.exists(tmp_path):
                 os.remove(tmp_path)
         except Exception:
             pass
+        release_activity_by_session(
+            db,
+            session_jti=submit_jti,
+            reason="shared_link_file_upload_complete",
+            sync_after_release=True,
+        )
 
 @router.get("/studies/{study_id}/files/{file_id}/download")
 def download_study_file(
     study_id: int,
     file_id: int,
+    authorization: Optional[str] = Header(None),
     db: Session = Depends(get_db),
     user=Depends(get_current_user),
 ):
@@ -1000,6 +1447,15 @@ def download_study_file(
     _assert_can_download_study_file(db, meta, user)
 
     try:
+        dataset_path = _ensure_local_study_dataset(db, meta)
+        _record_authenticated_activity(
+            db,
+            meta=meta,
+            dataset_path=dataset_path,
+            user=user,
+            authorization=authorization,
+            purpose="download_file",
+        )
         file_info = repo.get_file_for_download(
             study_id=study_id,
             study_name=meta.study_name,
@@ -1036,6 +1492,7 @@ def save_study_data(
     version: Optional[int] = Query(None),
     expected_revision_token: str = Query(...),
     audit_label: Optional[str] = Query(None),
+    authorization: Optional[str] = Header(None),
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
@@ -1045,6 +1502,18 @@ def save_study_data(
 
     _assert_has_study_permission(db, meta, current_user, required="add_data")
     _assert_not_locked_by_other(meta, current_user)
+    try:
+        dataset_path = _ensure_local_study_dataset(db, meta)
+        _record_authenticated_activity(
+            db,
+            meta=meta,
+            dataset_path=dataset_path,
+            user=current_user,
+            authorization=authorization,
+            purpose="add_data",
+        )
+    except Exception as e:
+        _raise_storage_unavailable(e, context="create_study_data_entry")
 
     if (meta.status or "PUBLISHED").upper().strip() != "PUBLISHED":
         raise HTTPException(status_code=400, detail="Data entry is only allowed for published studies")
@@ -1081,6 +1550,7 @@ def save_study_data(
 
     content_row = _get_content_row_or_404(db, study_id)
     selected_models = ((content_row.study_data or {}).get("selectedModels") or [])
+    progress_values = _entry_progress_values(payload)
 
     return repo.save_entry(
         study_id=study_id,
@@ -1095,6 +1565,7 @@ def save_study_data(
         actor_name=_display_name(current_user),
         user_id=current_user.id,
         audit_label=audit_label,
+        **progress_values,
     )
 
 
@@ -1105,6 +1576,7 @@ def update_study_data_entry(
     payload: schemas.StudyDataEntryCreate = Body(...),
     expected_revision_token: str = Query(...),
     audit_label: Optional[str] = Query(None),
+    authorization: Optional[str] = Header(None),
     db: Session = Depends(get_db),
     user=Depends(get_current_user),
 ):
@@ -1117,6 +1589,19 @@ def update_study_data_entry(
 
     if (meta.status or "PUBLISHED").upper().strip() != "PUBLISHED":
         raise HTTPException(status_code=400, detail="Data entry is only allowed for published studies")
+
+    try:
+        dataset_path = _ensure_local_study_dataset(db, meta)
+        _record_authenticated_activity(
+            db,
+            meta=meta,
+            dataset_path=dataset_path,
+            user=user,
+            authorization=authorization,
+            purpose="update_data_entry",
+        )
+    except Exception as e:
+        _raise_storage_unavailable(e, context="update_study_data_entry")
 
     target_entry = None
     for e in repo.list_entries(study_id, meta.study_name):
@@ -1162,6 +1647,7 @@ def update_study_data_entry(
 
     content_row = _get_content_row_or_404(db, study_id)
     selected_models = ((content_row.study_data or {}).get("selectedModels") or [])
+    progress_values = _entry_progress_values(payload)
 
     return repo.update_entry(
         study_id=study_id,
@@ -1173,12 +1659,99 @@ def update_study_data_entry(
             "group_index": payload.group_index,
             "data": payload.data,
             "skipped_required_flags": _flags_dict_to_list(payload.skipped_required_flags, selected_models),
+            **progress_values,
         },
         actor=_actor_identifier(user),
         actor_name=_display_name(user),
         user_id=user.id,
         audit_label=audit_label,
     )
+
+
+@router.get("/studies/{study_id}/data_entry_statuses", response_model=schemas.StudyDataEntryStatusListOut)
+def list_study_data_entry_statuses(
+    study_id: int,
+    subject_indexes: Optional[str] = Query(None),
+    visit_indexes: Optional[str] = Query(None),
+    version: Optional[int] = Query(None),
+    authorization: Optional[str] = Header(None),
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    meta = db.query(models.StudyMetadata).filter(models.StudyMetadata.id == study_id).first()
+    if not meta:
+        raise HTTPException(status_code=404, detail="Study not found")
+
+    _assert_has_study_permission(db, meta, user, required="view")
+    try:
+        dataset_path = _ensure_local_study_dataset(db, meta)
+        _record_authenticated_activity(
+            db,
+            meta=meta,
+            dataset_path=dataset_path,
+            user=user,
+            authorization=authorization,
+            purpose="list_data_entry_statuses",
+        )
+    except Exception as e:
+        _raise_storage_unavailable(e, context="list_study_data_entry_statuses")
+
+    entries = repo.list_entries(study_id, meta.study_name)
+    if version is not None:
+        target_version = int(version)
+        entries = [e for e in entries if int(e.get("form_version") or 0) <= target_version]
+
+    if subject_indexes:
+        subj_idx_list = [int(s) for s in subject_indexes.split(",") if s.strip().isdigit()]
+        if subj_idx_list:
+            entries = [e for e in entries if int(e.get("subject_index", -1)) in subj_idx_list]
+
+    if visit_indexes:
+        visit_idx_list = [int(s) for s in visit_indexes.split(",") if s.strip().isdigit()]
+        if visit_idx_list:
+            entries = [e for e in entries if int(e.get("visit_index", -1)) in visit_idx_list]
+
+    latest_by_slot: Dict[tuple, Dict[str, Any]] = {}
+    for entry in entries:
+        key = (
+            int(entry.get("subject_index") or 0),
+            int(entry.get("visit_index") or 0),
+            int(entry.get("group_index") or 0),
+        )
+        current = latest_by_slot.get(key)
+        if current is None:
+            latest_by_slot[key] = entry
+            continue
+        entry_rank = (int(entry.get("form_version") or 0), int(entry.get("id") or 0))
+        current_rank = (int(current.get("form_version") or 0), int(current.get("id") or 0))
+        if entry_rank > current_rank:
+            latest_by_slot[key] = entry
+
+    statuses = []
+    needs_backfill = False
+    for entry in latest_by_slot.values():
+        row_needs_backfill = entry.get("progress_status") is None or entry.get("progress_percentage") is None
+        needs_backfill = needs_backfill or row_needs_backfill
+        statuses.append({
+            "id": int(entry.get("id") or 0),
+            "study_id": int(entry.get("study_id") or study_id),
+            "form_version": int(entry.get("form_version") or 1),
+            "subject_index": int(entry.get("subject_index") or 0),
+            "visit_index": int(entry.get("visit_index") or 0),
+            "group_index": int(entry.get("group_index") or 0),
+            "progress_status": entry.get("progress_status"),
+            "progress_percentage": entry.get("progress_percentage"),
+            "progress_completed": entry.get("progress_completed"),
+            "progress_total": entry.get("progress_total"),
+            "progress_skipped": entry.get("progress_skipped"),
+            "needs_progress_backfill": row_needs_backfill,
+        })
+
+    return {
+        "total": len(statuses),
+        "statuses": statuses,
+        "needs_progress_backfill": needs_backfill,
+    }
 
 
 @router.get("/studies/{study_id}/data_entries", response_model=schemas.PaginatedStudyDataEntries)
@@ -1188,6 +1761,7 @@ def list_study_data_entries(
     visit_indexes: Optional[str] = Query(None),
     all: bool = Query(False),
     current_only: bool = Query(False),
+    authorization: Optional[str] = Header(None),
     db: Session = Depends(get_db),
     user=Depends(get_current_user),
 ):
@@ -1196,6 +1770,18 @@ def list_study_data_entries(
         raise HTTPException(status_code=404, detail="Study not found")
 
     _assert_has_study_permission(db, meta, user, required="view")
+    try:
+        dataset_path = _ensure_local_study_dataset(db, meta)
+        _record_authenticated_activity(
+            db,
+            meta=meta,
+            dataset_path=dataset_path,
+            user=user,
+            authorization=authorization,
+            purpose="list_data_entries",
+        )
+    except Exception as e:
+        _raise_storage_unavailable(e, context="list_study_data_entries")
 
     entries = repo.list_latest_entries_by_slot(study_id, meta.study_name) if current_only else repo.list_entries(study_id, meta.study_name)
 
@@ -1217,6 +1803,7 @@ def list_study_data_entries(
 def grant_study_access(
     study_id: int,
     payload: schemas.StudyAccessGrantCreate = Body(...),
+    authorization: Optional[str] = Header(None),
     db: Session = Depends(get_db),
     user=Depends(get_current_user),
 ):
@@ -1226,6 +1813,18 @@ def grant_study_access(
 
     _assert_owner_or_admin(meta, user)
     _assert_not_locked_by_other(meta, user)
+    try:
+        dataset_path = _ensure_local_study_dataset(db, meta)
+        _record_authenticated_activity(
+            db,
+            meta=meta,
+            dataset_path=dataset_path,
+            user=user,
+            authorization=authorization,
+            purpose="grant_study_access",
+        )
+    except Exception as e:
+        _raise_storage_unavailable(e, context="grant_study_access")
 
     if payload.user_id == meta.created_by:
         raise HTTPException(status_code=400, detail="Owner already has full access")
@@ -1310,6 +1909,7 @@ def list_study_access(
 def revoke_study_access(
     study_id: int,
     user_id: int,
+    authorization: Optional[str] = Header(None),
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
@@ -1319,6 +1919,18 @@ def revoke_study_access(
 
     _assert_owner_or_admin(meta, current_user)
     _assert_not_locked_by_other(meta, current_user)
+    try:
+        dataset_path = _ensure_local_study_dataset(db, meta)
+        _record_authenticated_activity(
+            db,
+            meta=meta,
+            dataset_path=dataset_path,
+            user=current_user,
+            authorization=authorization,
+            purpose="revoke_study_access",
+        )
+    except Exception as e:
+        _raise_storage_unavailable(e, context="revoke_study_access")
 
     if user_id == meta.created_by:
         raise HTTPException(status_code=400, detail="Cannot revoke owner access")
@@ -1443,6 +2055,7 @@ def list_share_links_for_study(
 def revoke_share_link(
     study_id: int,
     token: str,
+    authorization: Optional[str] = Header(None),
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
@@ -1452,6 +2065,18 @@ def revoke_share_link(
 
     _assert_owner_or_admin(meta, current_user)
     _assert_not_locked_by_other(meta, current_user)
+    try:
+        dataset_path = _ensure_local_study_dataset(db, meta)
+        _record_authenticated_activity(
+            db,
+            meta=meta,
+            dataset_path=dataset_path,
+            user=current_user,
+            authorization=authorization,
+            purpose="revoke_share_link",
+        )
+    except Exception as e:
+        _raise_storage_unavailable(e, context="list_share_links")
 
     access = (
         db.query(models.SharedFormAccess)
@@ -1465,11 +2090,9 @@ def revoke_share_link(
     if not access:
         raise HTTPException(status_code=404, detail="Shared link not found")
 
-    # No schema migration needed: invalidating by forcing usage limit reached.
-    access.max_uses = int(access.used_count or 0)
-    db.commit()
-
     try:
+        # No schema migration needed: invalidating by forcing usage limit reached.
+        access.max_uses = int(access.used_count or 0)
         repo.update_share_link(
             study_id=study_id,
             study_name=meta.study_name,
@@ -1492,7 +2115,10 @@ def revoke_share_link(
             },
         )
     except Exception:
-        pass
+        db.rollback()
+        raise HTTPException(status_code=500, detail="Failed to write revoked shared link to study dataset")
+
+    db.commit()
 
     return {"ok": True}
 
@@ -1500,6 +2126,7 @@ def revoke_share_link(
 def create_share_link(
     payload: schemas.ShareLinkCreate,
     request: Request,
+    authorization: Optional[str] = Header(None),
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
@@ -1509,6 +2136,10 @@ def create_share_link(
 
     _assert_has_study_permission(db, meta, current_user, required="add_data")
     _assert_not_locked_by_other(meta, current_user)
+    try:
+        dataset_path = _ensure_local_study_dataset(db, meta)
+    except Exception as e:
+        _raise_storage_unavailable(e, context="create_share_link")
 
     content_row = _get_content_row_or_404(db, payload.study_id)
     study_data = content_row.study_data or {}
@@ -1557,23 +2188,35 @@ def create_share_link(
         allowed_section_ids=allowed_section_ids,
     )
     db.add(access)
-    db.commit()
-    db.refresh(access)
-    repo.save_share_link(
-        study_id=payload.study_id,
-        study_name=meta.study_name,
-        token=token,
-        subject_index=payload.subject_index,
-        visit_index=payload.visit_index,
-        group_index=payload.group_index,
-        permission=payload.permission,
-        max_uses=payload.max_uses,
-        expires_at=expires_at.isoformat(),
-        allowed_section_ids=allowed_section_ids,
-        actor=_actor_identifier(current_user),
-        actor_name=_display_name(current_user),
-        user_id=current_user.id,
-    )
+    try:
+        repo.save_share_link(
+            study_id=payload.study_id,
+            study_name=meta.study_name,
+            token=token,
+            subject_index=payload.subject_index,
+            visit_index=payload.visit_index,
+            group_index=payload.group_index,
+            permission=payload.permission,
+            max_uses=payload.max_uses,
+            expires_at=expires_at.isoformat(),
+            allowed_section_ids=allowed_section_ids,
+            actor=_actor_identifier(current_user),
+            actor_name=_display_name(current_user),
+            user_id=current_user.id,
+        )
+        db.commit()
+        db.refresh(access)
+        _record_authenticated_activity(
+            db,
+            meta=meta,
+            dataset_path=dataset_path,
+            user=current_user,
+            authorization=authorization,
+            purpose="create_share_link",
+        )
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Failed to create shared link in study dataset: {str(e)}")
 
     frontend_base = os.getenv("FRONTEND_BASE_URL", "").rstrip("/")
     if not frontend_base:
@@ -1587,6 +2230,8 @@ def access_shared_form(
     token: str,
     db: Session = Depends(get_db),
 ):
+    cleanup_stale_shared_views(db)
+
     access = db.query(models.SharedFormAccess).filter_by(token=token).first()
     if not access:
         raise HTTPException(404, "Link not found")
@@ -1596,13 +2241,13 @@ def access_shared_form(
         raise HTTPException(403, "Link expired")
 
     access.used_count += 1
-    db.commit()
 
     meta = db.query(models.StudyMetadata).filter(models.StudyMetadata.id == access.study_id).first()
     if not meta:
         raise HTTPException(404, "Study not found")
 
     try:
+        dataset_path = _ensure_local_study_dataset(db, meta)
         repo.update_share_link(
             study_id=access.study_id,
             study_name=meta.study_name,
@@ -1621,8 +2266,18 @@ def access_shared_form(
                 "created_at": access.created_at.isoformat() if getattr(access, "created_at", None) else None,
             },
         )
-    except Exception:
-        pass
+        db.commit()
+        _record_shared_activity(
+            db,
+            meta=meta,
+            dataset_path=dataset_path,
+            token=token,
+            session_jti=f"shared-view:{token}",
+            purpose="shared_link_view",
+        )
+    except Exception as e:
+        db.rollback()
+        _raise_storage_unavailable(e, context="access_shared_form")
 
     content_row = _get_content_row_or_404(db, access.study_id)
     filtered_study_data = _filter_shared_study_data_by_sections(
@@ -1679,6 +2334,23 @@ def shared_upsert_data(
     if (meta.status or "PUBLISHED").upper().strip() != "PUBLISHED":
         raise HTTPException(status_code=400, detail="Shared data entry is only allowed for published studies")
 
+    cleanup_stale_shared_views(db)
+    try:
+        dataset_path = _ensure_local_study_dataset(db, meta)
+    except Exception as e:
+        _raise_storage_unavailable(e, context="shared_upsert_data")
+
+    submit_jti = f"shared-submit:{token}:{secrets.token_urlsafe(12)}"
+    _record_shared_activity(
+        db,
+        meta=meta,
+        dataset_path=dataset_path,
+        token=token,
+        session_jti=submit_jti,
+        purpose="shared_link_submit",
+    )
+    expire_shared_view_for_token(db, token=token)
+
     form_version = _resolve_form_version_or_400(db, access.study_id, version)
 
     content_row = _get_content_row_or_404(db, access.study_id)
@@ -1690,26 +2362,39 @@ def shared_upsert_data(
         study_data=study_data,
         allowed_section_ids=access.allowed_section_ids or [],
     )
+    progress_values = _entry_progress_values(payload)
 
-    return repo.save_entry(
-        study_id=meta.id,
-        study_name=meta.study_name,
-        subject_index=access.subject_index,
-        visit_index=access.visit_index,
-        group_index=access.group_index,
-        form_version=form_version,
-        data=payload.data,
-        skipped_required_flags=_flags_dict_to_list(payload.skipped_required_flags, selected_models),
-        actor="shared-link",
-        actor_name="Shared link submit",
-        user_id=None,
-        audit_label=audit_label,
-    )
+    try:
+        return repo.save_entry(
+            study_id=meta.id,
+            study_name=meta.study_name,
+            subject_index=access.subject_index,
+            visit_index=access.visit_index,
+            group_index=access.group_index,
+            form_version=form_version,
+            data=payload.data,
+            skipped_required_flags=_flags_dict_to_list(payload.skipped_required_flags, selected_models),
+            actor="shared-link",
+            actor_name="Shared link submit",
+            user_id=None,
+            audit_label=audit_label,
+            **progress_values,
+        )
+    except Exception as e:
+        _raise_storage_unavailable(e, context="shared_upsert_data")
+    finally:
+        release_activity_by_session(
+            db,
+            session_jti=submit_jti,
+            reason="shared_link_submit_complete",
+            sync_after_release=True,
+        )
 
 
 @router.delete("/studies/{study_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_study(
     study_id: int,
+    authorization: Optional[str] = Header(None),
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
@@ -1719,16 +2404,74 @@ def delete_study(
 
     _assert_owner_or_admin(meta, current_user)
 
-    try:
-        repo.delete_study(study_id, meta.study_name)
-    except Exception:
-        pass
+    active_activity_count = (
+        db.query(models.StudyActivity)
+        .filter(
+            models.StudyActivity.study_id == study_id,
+            models.StudyActivity.state.in_(("active", "syncing")),
+        )
+        .count()
+    )
+    if active_activity_count:
+        logger.info(
+            "Deleting study_id=%s while %s study activity row(s) are active; "
+            "owner/admin delete is authoritative.",
+            study_id,
+            active_activity_count,
+        )
 
-    db.query(models.SharedFormAccess).filter(models.SharedFormAccess.study_id == study_id).delete()
-    db.query(models.StudyAccessGrant).filter(models.StudyAccessGrant.study_id == study_id).delete()
-    db.query(models.StudyTemplateVersion).filter(models.StudyTemplateVersion.study_id == study_id).delete()
-    db.query(models.StudyContent).filter(models.StudyContent.study_id == study_id).delete()
-    db.query(models.StudyMetadata).filter(models.StudyMetadata.id == study_id).delete()
-    db.commit()
+    _dataset_id, source_dataset_path = _latest_remote_reference(db, study_id)
+    dataset_path = source_dataset_path or repo.study_dataset_path(study_id, meta.study_name)
+    remote_url = repo.remote_delete_url_for_dataset(dataset_path)
+    remote_delete_error = None
+
+    if remote_url:
+        try:
+            repo.delete_remote_bare_repo_url(
+                remote_url,
+                expected_dataset_name=dataset_path.name,
+            )
+            repo.delete_remote_worktree_for_dataset(dataset_path)
+        except Exception as e:
+            if "Refusing to delete" in str(e):
+                raise HTTPException(status_code=500, detail=f"Unsafe remote delete blocked: {str(e)}")
+            remote_delete_error = e
+            logger.warning(
+                "Juseless delete failed for study_id=%s remote=%s; queueing retry and continuing local delete: %s",
+                study_id,
+                remote_url,
+                e,
+            )
+
+    try:
+        repo.delete_local_study(study_id, meta.study_name)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to delete local study dataset: {str(e)}")
+
+    try:
+        if remote_delete_error is not None and remote_url:
+            enqueue_pending_remote_delete(
+                db,
+                study_id=study_id,
+                study_name=meta.study_name,
+                dataset_path=str(dataset_path),
+                remote_url=remote_url,
+                last_error=str(remote_delete_error),
+            )
+        db.query(models.StudyMetadata).filter(
+            models.StudyMetadata.draft_of_study_id == study_id
+        ).update({"draft_of_study_id": None}, synchronize_session=False)
+        db.query(models.StudyActivity).filter(models.StudyActivity.study_id == study_id).delete(synchronize_session=False)
+        db.query(models.SharedFormAccess).filter(models.SharedFormAccess.study_id == study_id).delete(synchronize_session=False)
+        db.query(models.StudyAccessGrant).filter(models.StudyAccessGrant.study_id == study_id).delete(synchronize_session=False)
+        db.query(models.StudyTemplateVersion).filter(models.StudyTemplateVersion.study_id == study_id).delete(synchronize_session=False)
+        db.query(models.StudyEntryData).filter(models.StudyEntryData.study_id == study_id).delete(synchronize_session=False)
+        db.query(models.File).filter(models.File.study_id == study_id).delete(synchronize_session=False)
+        db.query(models.StudyContent).filter(models.StudyContent.study_id == study_id).delete(synchronize_session=False)
+        db.query(models.StudyMetadata).filter(models.StudyMetadata.id == study_id).delete(synchronize_session=False)
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
 
     return

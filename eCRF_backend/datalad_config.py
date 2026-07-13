@@ -18,9 +18,13 @@ class DataladConfig:
 
     push_on_save: bool
     push_data_mode: str        # auto-if-wanted|all|nothing
+    verify_push: bool
+    drop_after_push: bool
+    get_on_open: bool
 
     ria_url: Optional[str]
     ria_name: str
+    ssh_remote_template: Optional[str]
 
     gpgsign: bool
     gpg_keyid: Optional[str]
@@ -40,6 +44,11 @@ def _parse_int_set(csv: str) -> Set[int]:
 def is_datalad_enabled(cfg: Optional[DataladConfig] = None) -> bool:
     cfg = cfg or get_datalad_config()
     return cfg.mode in {"shadow", "primary"}
+
+
+def is_study_primary(cfg: Optional[DataladConfig], study_id: int) -> bool:
+    cfg = cfg or get_datalad_config()
+    return cfg.mode == "primary" and int(study_id) in cfg.primary_study_ids
 
 
 def get_datalad_config() -> DataladConfig:
@@ -67,8 +76,12 @@ def get_datalad_config() -> DataladConfig:
         git_email=os.getenv("ECRF_DATALAD_GIT_EMAIL", "case-e@localhost"),
         push_on_save=(os.getenv("ECRF_DATALAD_PUSH_ON_SAVE", "0") == "1"),
         push_data_mode=push_data_mode,
+        verify_push=(os.getenv("ECRF_DATALAD_VERIFY_PUSH", "1") == "1"),
+        drop_after_push=(os.getenv("ECRF_DATALAD_DROP_AFTER_PUSH", "0") == "1"),
+        get_on_open=(os.getenv("ECRF_DATALAD_GET_ON_OPEN", "1") == "1"),
         ria_url=os.getenv("ECRF_DATALAD_RIA_URL") or None,
         ria_name=os.getenv("ECRF_DATALAD_RIA_NAME", "ria"),
+        ssh_remote_template=os.getenv("ECRF_DATALAD_SSH_REMOTE_TEMPLATE") or None,
         gpgsign=(os.getenv("ECRF_DATALAD_GPGSIGN", "0") == "1"),
         gpg_keyid=os.getenv("ECRF_DATALAD_GPG_KEYID") or None,
         require_ria_for_writes=(
@@ -76,9 +89,15 @@ def get_datalad_config() -> DataladConfig:
         ),
     )
 
-    if settings.is_production and cfg.require_ria_for_writes and not cfg.ria_url:
+    if (
+        settings.is_production
+        and cfg.require_ria_for_writes
+        and not cfg.ria_url
+        and not cfg.ssh_remote_template
+    ):
         raise RuntimeError(
-            "ECRF_DATALAD_REQUIRE_RIA_FOR_WRITES=1 but ECRF_DATALAD_RIA_URL is not configured."
+            "ECRF_DATALAD_REQUIRE_RIA_FOR_WRITES=1 but neither "
+            "ECRF_DATALAD_RIA_URL nor ECRF_DATALAD_SSH_REMOTE_TEMPLATE is configured."
         )
 
     return cfg

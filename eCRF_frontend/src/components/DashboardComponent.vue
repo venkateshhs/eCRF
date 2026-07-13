@@ -36,6 +36,7 @@
           type="button"
           @click="logout('Logged out.')"
           class="btn-minimal"
+          :disabled="logoutSyncing"
         >
           Logout
         </button>
@@ -50,6 +51,20 @@
         </button>
       </div>
     </header>
+
+    <div
+      v-if="logoutSyncing"
+      class="sync-logout-overlay"
+      role="status"
+      aria-live="polite"
+      aria-busy="true"
+    >
+      <div class="sync-logout-panel">
+        <div class="sync-logout-spinner" aria-hidden="true"></div>
+        <div class="sync-logout-title">Syncing study data</div>
+        <div class="sync-logout-text">{{ logoutSyncMessage }}</div>
+      </div>
+    </div>
 
     <!-- Sidebar (HIDDEN for View Study + Add Data + Scratch Form) -->
     <aside v-if="!hideSidebar" :class="['dashboard-sidebar', { collapsed: sidebarCollapsed }]">
@@ -458,6 +473,8 @@ export default {
 
       // auth restore guard
       authReady: false,
+      logoutSyncing: false,
+      logoutSyncMessage: "Please wait while the server finishes syncing and closing your session.",
 
       // Draft-blocker dialog state
       draftDialog: {
@@ -1080,6 +1097,9 @@ export default {
       if (message && typeof message !== "string") {
         message = "Logged out.";
       }
+      if (this.logoutSyncing) {
+        return;
+      }
 
       console.log("[Dashboard] logout()", message || "");
 
@@ -1087,6 +1107,10 @@ export default {
       activityTracker.stop();
 
       const token = this.$store.state.token || localStorage.getItem("access_token");
+      this.logoutSyncMessage = String(message || "").toLowerCase().includes("session")
+        ? "Your session is ending. Please wait while study data is synced safely."
+        : "Please wait while study data is synced safely before logout.";
+      this.logoutSyncing = true;
 
       // Best-effort server revoke (do NOT block logout if this fails)
       try {
@@ -1104,6 +1128,8 @@ export default {
           e?.response?.status,
           e?.message
         );
+      } finally {
+        this.logoutSyncing = false;
       }
 
       // clear local auth
@@ -1179,6 +1205,55 @@ export default {
   grid-template-columns: 220px 1fr;
   height: 100vh;
   transition: grid-template-columns 0.3s ease;
+}
+
+.sync-logout-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(17, 24, 39, 0.42);
+}
+
+.sync-logout-panel {
+  width: min(360px, 100%);
+  padding: 24px;
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 18px 48px rgba(15, 23, 42, 0.22);
+  text-align: center;
+}
+
+.sync-logout-spinner {
+  width: 38px;
+  height: 38px;
+  margin: 0 auto 14px;
+  border: 4px solid #dbeafe;
+  border-top-color: #2563eb;
+  border-radius: 50%;
+  animation: sync-logout-spin 0.85s linear infinite;
+}
+
+.sync-logout-title {
+  font-size: 17px;
+  font-weight: 700;
+  color: #111827;
+  margin-bottom: 6px;
+}
+
+.sync-logout-text {
+  font-size: 14px;
+  line-height: 1.45;
+  color: #4b5563;
+}
+
+@keyframes sync-logout-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 /* When sidebar should be hidden entirely (View Study / Add Data / Scratch Form) */
