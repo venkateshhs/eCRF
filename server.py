@@ -259,15 +259,15 @@ def _configure_local_environment() -> Path:
     )
     db_path = (data_dir / "ecrf.db").resolve()
 
-    # Local launcher defaults. Hosted/server deployments can override these in .env.
-    os.environ.setdefault("ECRF_DATA_DIR", str(data_dir))
-    os.environ.setdefault("BIDS_ROOT", str(bids_root))
+    # Force local launcher behavior when running python server.py / packaged app
+    os.environ["ECRF_DATA_DIR"] = str(data_dir)
+    os.environ["BIDS_ROOT"] = str(bids_root)
 
-    os.environ.setdefault("ECRF_ENV", "development")
-    os.environ.setdefault("ECRF_PROFILE", "local")
-    os.environ.setdefault("ECRF_DATABASE_URL", f"sqlite:///{db_path}")
-    os.environ.setdefault("ECRF_DB_AUTO_CREATE", "1")
-    os.environ.setdefault("ECRF_ALLOW_SQLITE_IN_PRODUCTION", "0")
+    os.environ["ECRF_ENV"] = "development"
+    os.environ["ECRF_PROFILE"] = "local"
+    os.environ["ECRF_DATABASE_URL"] = f"sqlite:///{db_path}"
+    os.environ["ECRF_DB_AUTO_CREATE"] = "1"
+    os.environ["ECRF_ALLOW_SQLITE_IN_PRODUCTION"] = "0"
 
     # Auth defaults for local mode
     os.environ.setdefault("ECRF_SECRET_KEY", "case-e-local-dev-secret")
@@ -284,23 +284,25 @@ def _configure_local_environment() -> Path:
     os.environ.setdefault("ECRF_ADMIN_ROLE", "Administrator")
 
     # Local network / browser
-    os.environ.setdefault("ECRF_BIND_HOST", "127.0.0.1")
-    os.environ.setdefault("ECRF_OPEN_BROWSER", "1")
-    os.environ.setdefault("ECRF_PORT", "8000")
+    os.environ["ECRF_BIND_HOST"] = "127.0.0.1"
+    os.environ["ECRF_OPEN_BROWSER"] = "1"
+    os.environ["ECRF_PORT"] = os.environ.get("ECRF_PORT", "8000")
 
-    # DataLad defaults. Keep ECRF_DATALAD_RIA_URL from .env when simulating hosted
-    # JTrack -> Juseless storage locally.
-    os.environ.setdefault("BIDS_DATALAD_ENABLED", "1")
-    os.environ.setdefault("ECRF_DATALAD_MODE", "shadow")
-    os.environ.setdefault("ECRF_DATALAD_SYNC_MODE", "sync")
-    os.environ.setdefault("ECRF_DATALAD_GIT_NAME", "case-e local")
-    os.environ.setdefault("ECRF_DATALAD_GIT_EMAIL", "case-e@localhost")
-    os.environ.setdefault("ECRF_DATALAD_PUSH_ON_SAVE", "0")
-    os.environ.setdefault("ECRF_DATALAD_PUSH_DATA_MODE", "auto-if-wanted")
-    os.environ.setdefault("ECRF_DATALAD_RIA_NAME", "ria")
-    os.environ.setdefault("ECRF_DATALAD_REQUIRE_RIA_FOR_WRITES", "0")
-    os.environ.setdefault("ECRF_DATALAD_GPGSIGN", "0")
-    os.environ.setdefault("ECRF_DATALAD_LOCK_TIMEOUT_SECONDS", "120")
+    # Force local DataLad mode
+    os.environ["BIDS_DATALAD_ENABLED"] = "1"
+    os.environ["ECRF_DATALAD_MODE"] = "shadow"
+    os.environ["ECRF_DATALAD_SYNC_MODE"] = "sync"
+    os.environ["ECRF_DATALAD_GIT_NAME"] = "case-e local"
+    os.environ["ECRF_DATALAD_GIT_EMAIL"] = "case-e@localhost"
+    os.environ["ECRF_DATALAD_PUSH_ON_SAVE"] = "0"
+    os.environ["ECRF_DATALAD_PUSH_DATA_MODE"] = "auto-if-wanted"
+    os.environ["ECRF_DATALAD_RIA_NAME"] = "ria"
+    os.environ["ECRF_DATALAD_REQUIRE_RIA_FOR_WRITES"] = "0"
+    os.environ["ECRF_DATALAD_GPGSIGN"] = "0"
+    os.environ["ECRF_DATALAD_LOCK_TIMEOUT_SECONDS"] = "120"
+
+    # Critical: local launcher must not inherit hosted SSH RIA config
+    os.environ.pop("ECRF_DATALAD_RIA_URL", None)
 
     # Templates
     tpl_dir = find_backend_templates()

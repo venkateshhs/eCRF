@@ -48,7 +48,7 @@ def ensure_auth_schema() -> None:
 
 
 def ensure_entry_progress_schema() -> None:
-    ensure_pending_remote_deletes_schema()
+
 
     inspector = inspect(engine)
     if "study_entry_data" not in inspector.get_table_names():
@@ -76,13 +76,7 @@ def ensure_entry_progress_schema() -> None:
     )
 
 
-def ensure_pending_remote_deletes_schema() -> None:
-    inspector = inspect(engine)
-    if "pending_remote_deletes" in inspector.get_table_names():
-        return
 
-    models.PendingRemoteDelete.__table__.create(bind=engine, checkfirst=True)
-    logger.info("Created pending_remote_deletes table.")
 
 
 def ensure_admin_user() -> None:
