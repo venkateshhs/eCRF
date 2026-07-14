@@ -119,7 +119,7 @@ export default {
     defaultValue: { type: String, default: undefined },
     hourCycle: { type: String, default: "24" }
   },
-  emits: ["update:modelValue"],
+  emits: ["update:modelValue", "change"],
   data() {
     return {
       menuOpen: false,
@@ -363,14 +363,18 @@ export default {
       if (this.isReadonly) return;
       let d = this.currentSelectionToDate();
       d = this.clampToBounds(d);
-      this.$emit("update:modelValue", this.to24(d));
+      const next = this.to24(d);
+      this.$emit("update:modelValue", next);
+      this.$emit("change", next);
       this.close();
     },
     setNow() {
       if (this.isReadonly) return;
       let d = new Date();
       d = this.clampToBounds(d);
-      this.$emit("update:modelValue", this.to24(d));
+      const next = this.to24(d);
+      this.$emit("update:modelValue", next);
+      this.$emit("change", next);
       this.syncPanelFromValue();
     },
 

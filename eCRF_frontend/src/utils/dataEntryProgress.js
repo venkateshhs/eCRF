@@ -282,40 +282,19 @@ export function calculateDataEntryProgress({
     (section.fields || []).forEach((field, fieldIndex) => {
       if (!isFieldVisible(sectionIndex, fieldIndex)) return;
 
-      const value = values?.[sectionIndex]?.[fieldIndex];
-      const isSkipped = !!skips?.[sectionIndex]?.[fieldIndex];
-      const fieldType = String(field?.type || "").toLowerCase();
-      const hasError = !!hasFieldError(sectionIndex, fieldIndex);
-      const isSystemManaged =
-        !!field?.constraints?.readonly ||
-        !!isCalculatedField(sectionIndex, fieldIndex);
+      const contribution = calculateDataEntryFieldProgress({
+        field,
+        value: values?.[sectionIndex]?.[fieldIndex],
+        skipped: !!skips?.[sectionIndex]?.[fieldIndex],
+        visible: true,
+        calculated: isCalculatedField(sectionIndex, fieldIndex),
+        hasError: hasFieldError(sectionIndex, fieldIndex),
+        tableCellErrors: getTableCellErrors(sectionIndex, fieldIndex),
+      });
 
-      if (isSkipped) skipped += 1;
-
-      if (fieldType === "table") {
-        if (isSystemManaged && !tableHasAnyEnteredValue(field, value)) return;
-
-        const progress = tableProgress(
-          field,
-          value,
-          isSkipped,
-          hasError,
-          getTableCellErrors(sectionIndex, fieldIndex),
-          isSystemManaged
-        );
-        total += progress.total;
-        completed += progress.completed;
-        return;
-      }
-
-      const hasValue = !isBlankValue(value, fieldType);
-
-      // Empty read-only/calculated fields are not actionable and do not
-      // reduce progress. Once populated, they count as completed data points.
-      if (isSystemManaged && !hasValue) return;
-
-      total += 1;
-      if (!isSkipped && hasValue && !hasError) completed += 1;
+      total += contribution.total;
+      completed += contribution.completed;
+      skipped += contribution.skipped;
     });
   });
 
@@ -329,5 +308,58 @@ export function calculateDataEntryProgress({
     incomplete: Math.max(0, total - completed),
     skipped,
     percentage,
+  };
+}
+
+export function calculateDataEntryFieldProgress({
+  field,
+  value,
+  skipped = false,
+  visible = true,
+  calculated = false,
+  hasError = false,
+  tableCellErrors = {},
+} = {}) {
+  if (!field || !visible) {
+    return { total: 0, completed: 0, skipped: 0 };
+  }
+
+  const fieldType = String(field?.type || "").toLowerCase();
+  const isSystemManaged = !!field?.constraints?.readonly || !!calculated;
+  const skippedCount = skipped ? 1 : 0;
+
+  if (fieldType === "table") {
+    if (isSystemManaged && !tableHasAnyEnteredValue(field, value)) {
+      return { total: 0, completed: 0, skipped: skippedCount };
+    }
+
+    const progress = tableProgress(
+      field,
+      value,
+      skipped,
+      !!hasError,
+      tableCellErrors || {},
+      isSystemManaged
+    );
+
+    return {
+      total: progress.total,
+      completed: progress.completed,
+      skipped: skippedCount,
+    };
+  }
+
+  const hasValue = !isBlankValue(value, fieldType);
+
+  // Preserve the full-calculation rule exactly: empty read-only/calculated
+  // fields do not reduce progress, while populated ones count as data points.
+  if (isSystemManaged && !hasValue) {
+    return { total: 0, completed: 0, skipped: skippedCount };
+  }
+
+  return {
+    total: 1,
+    completed: !skipped && hasValue && !hasError ? 1 : 0,
+    skipped: skippedCount,
   };
 }

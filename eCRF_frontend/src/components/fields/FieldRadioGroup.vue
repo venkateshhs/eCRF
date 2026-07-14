@@ -135,6 +135,22 @@ export default {
       const s = dv == null ? "" : String(dv);
       return opts.includes(s) ? [s] : [];
     },
+    selectionEqualsCurrent(next) {
+      if (this.allowMultiple) {
+        const current = this.proxyArray;
+        return (
+          Array.isArray(next) &&
+          current.length === next.length &&
+          current.every((value, index) => value === next[index])
+        );
+      }
+      return this.proxySingle === String(next ?? "");
+    },
+    emitInitializedSelection(next, force = false) {
+      if (!force && this.selectionEqualsCurrent(next)) return;
+      this.$emit("update:modelValue", next);
+      this.$emit("change", next);
+    },
     initFromDefaults(force = false) {
       const hasValue = (v) =>
         (Array.isArray(v) ? v.length > 0 : v !== null && String(v).trim() !== "");
@@ -143,15 +159,13 @@ export default {
         const cur = this.proxyArray;
         if (!hasValue(cur) || force) {
           const next = this.pickMultiDefault();
-          this.$emit("update:modelValue", next);
-          this.$emit("change", next);
+          this.emitInitializedSelection(next, force);
         }
       } else {
         const cur = this.proxySingle;
         if (!hasValue(cur) || force) {
           const next = this.pickSingleDefault();
-          this.$emit("update:modelValue", next);
-          this.$emit("change", next);
+          this.emitInitializedSelection(next, force);
         }
       }
     },

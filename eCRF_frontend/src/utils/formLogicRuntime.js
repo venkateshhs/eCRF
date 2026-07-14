@@ -223,19 +223,19 @@ function getFieldKeys(field) {
     .map(String);
 }
 
-function getMetaForFieldId(selectedModels, fieldId) {
-  const lookup = buildFieldLookup(selectedModels);
+function getMetaForFieldId(selectedModels, fieldId, fieldLookup = null) {
+  const lookup = fieldLookup || buildFieldLookup(selectedModels);
   return lookup.get(String(fieldId)) || null;
 }
 
-function getRawFieldValueById(selectedModels, currentCellData, fieldId) {
-  const meta = getMetaForFieldId(selectedModels, fieldId);
+function getRawFieldValueById(selectedModels, currentCellData, fieldId, fieldLookup = null) {
+  const meta = getMetaForFieldId(selectedModels, fieldId, fieldLookup);
   if (!meta) return null;
   return currentCellData?.[meta.mIdx]?.[meta.fIdx];
 }
 
-function getFieldLabelByIdInternal(selectedModels, fieldId) {
-  const lookup = buildFieldLookup(selectedModels);
+function getFieldLabelByIdInternal(selectedModels, fieldId, fieldLookup = null) {
+  const lookup = fieldLookup || buildFieldLookup(selectedModels);
   const meta = lookup.get(String(fieldId));
   if (!meta?.field) return "Field";
   return meta.field.label || meta.field.name || meta.field.title || "Field";
@@ -287,13 +287,18 @@ function resolveSymbolValue(symbolDef, rawValue, blankPolicy = "strict") {
   return fallback;
 }
 
-function buildScopeForExpressionRule(rule, selectedModels, currentCellData) {
+function buildScopeForExpressionRule(rule, selectedModels, currentCellData, fieldLookup = null) {
   const scope = {};
   const symbolMap = rule?.symbolMap || {};
   const blankPolicy = rule?.blankPolicy || "strict";
 
   for (const [symbol, def] of Object.entries(symbolMap)) {
-    const rawValue = getRawFieldValueById(selectedModels, currentCellData, def?.fieldId);
+    const rawValue = getRawFieldValueById(
+      selectedModels,
+      currentCellData,
+      def?.fieldId,
+      fieldLookup
+    );
     scope[symbol] = resolveSymbolValue(def, rawValue, blankPolicy);
   }
 
@@ -304,15 +309,34 @@ function hasStrictMissingValues(scope) {
   return Object.values(scope).some((v) => v === null || typeof v === "undefined" || Number.isNaN(v));
 }
 
+const compiledExpressionCache = new WeakMap();
+
 function compileRuleExpression(rule) {
   const expr = String(rule?.expression || "").trim();
   if (!expr) throw new Error("Expression is empty.");
+  if (rule && typeof rule === "object") {
+    const cached = compiledExpressionCache.get(rule);
+    if (cached?.expression === expr) return cached.compiled;
+    const compiled = math.compile(expr);
+    compiledExpressionCache.set(rule, { expression: expr, compiled });
+    return compiled;
+  }
   return math.compile(expr);
 }
 
-export function computeExpressionCalculation(rule, selectedModels, currentCellData) {
+export function computeExpressionCalculation(
+  rule,
+  selectedModels,
+  currentCellData,
+  fieldLookup = null
+) {
   try {
-    const scope = buildScopeForExpressionRule(rule, selectedModels, currentCellData);
+    const scope = buildScopeForExpressionRule(
+      rule,
+      selectedModels,
+      currentCellData,
+      fieldLookup
+    );
 
     if ((rule?.blankPolicy || "strict") === "strict" && hasStrictMissingValues(scope)) {
       return {
@@ -471,9 +495,20 @@ export function computeLegacyCalculation(rule, sourceValues) {
   }
 }
 
-export function computeCalculation(rule, selectedModels, currentCellData, sourceValues = null) {
+export function computeCalculation(
+  rule,
+  selectedModels,
+  currentCellData,
+  sourceValues = null,
+  fieldLookup = null
+) {
   if (String(rule?.kind || "") === "calc_expr") {
-    return computeExpressionCalculation(rule, selectedModels, currentCellData);
+    return computeExpressionCalculation(
+      rule,
+      selectedModels,
+      currentCellData,
+      fieldLookup
+    );
   }
 
   if (Array.isArray(sourceValues)) {
@@ -481,7 +516,7 @@ export function computeCalculation(rule, selectedModels, currentCellData, source
   }
 
   const values = (rule?.sources || []).map((srcId) =>
-    getRawFieldValueById(selectedModels, currentCellData, srcId)
+    getRawFieldValueById(selectedModels, currentCellData, srcId, fieldLookup)
   );
   return computeLegacyCalculation(rule, values);
 }
@@ -500,18 +535,18 @@ export function findCalculationRuleForField(study, field) {
   return rules.find((r) => keys.includes(String(r?.target || ""))) || null;
 }
 
-export function getFieldLabelById(selectedModels, fieldId) {
-  return getFieldLabelByIdInternal(selectedModels, fieldId);
+export function getFieldLabelById(selectedModels, fieldId, fieldLookup = null) {
+  return getFieldLabelByIdInternal(selectedModels, fieldId, fieldLookup);
 }
 
-function replaceSymbolsWithLabels(expression, rule, selectedModels) {
+function replaceSymbolsWithLabels(expression, rule, selectedModels, fieldLookup = null) {
   let out = String(expression || "");
   const entries = Object.entries(rule?.symbolMap || {}).sort((a, b) => b[0].length - a[0].length);
 
   entries.forEach(([symbol, def]) => {
     const label =
       def?.fieldLabel ||
-      getFieldLabelByIdInternal(selectedModels, def?.fieldId) ||
+      getFieldLabelByIdInternal(selectedModels, def?.fieldId, fieldLookup) ||
       symbol;
 
     const rx = new RegExp(`\\b${symbol.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "g");
@@ -521,22 +556,32 @@ function replaceSymbolsWithLabels(expression, rule, selectedModels) {
   return out;
 }
 
-export function buildCalculationFormula(rule, selectedModels, targetField = null) {
+export function buildCalculationFormula(
+  rule,
+  selectedModels,
+  targetField = null,
+  fieldLookup = null
+) {
   if (!rule) return "";
 
   const targetLabel =
     targetField?.label ||
     targetField?.name ||
     targetField?.title ||
-    getFieldLabelByIdInternal(selectedModels, rule.target) ||
+    getFieldLabelByIdInternal(selectedModels, rule.target, fieldLookup) ||
     "Result";
 
   if (rule.kind === "calc_expr") {
-    return `${targetLabel} = ${replaceSymbolsWithLabels(rule.expression, rule, selectedModels)}`;
+    return `${targetLabel} = ${replaceSymbolsWithLabels(
+      rule.expression,
+      rule,
+      selectedModels,
+      fieldLookup
+    )}`;
   }
 
   const sourceLabels = (rule.sources || []).map((srcId) =>
-    getFieldLabelByIdInternal(selectedModels, srcId)
+    getFieldLabelByIdInternal(selectedModels, srcId, fieldLookup)
   );
 
   const A = sourceLabels[0];
@@ -563,10 +608,15 @@ export function buildCalculationFormula(rule, selectedModels, targetField = null
   return `${targetLabel} = ${String(rule.op || "CALC").toUpperCase()}(${sourceLabels.join(", ")})`;
 }
 
-export function getCalculationFormulaForField(study, selectedModels, field) {
+export function getCalculationFormulaForField(
+  study,
+  selectedModels,
+  field,
+  fieldLookup = null
+) {
   const rule = findCalculationRuleForField(study, field);
   if (!rule) return "";
-  return buildCalculationFormula(rule, selectedModels, field);
+  return buildCalculationFormula(rule, selectedModels, field, fieldLookup);
 }
 
 /* ============================================================
@@ -781,7 +831,8 @@ export function evaluatePopupLogic(
   selectedModels,
   currentCellData,
   sourceMIdx,
-  sourceFIdx
+  sourceFIdx,
+  fieldLookup = null
 ) {
   const sourceField = selectedModels?.[sourceMIdx]?.fields?.[sourceFIdx];
   if (!sourceField) return false;
@@ -797,7 +848,9 @@ export function evaluatePopupLogic(
     selectedModels,
     currentCellData,
     sourceMIdx,
-    sourceFIdx
+    sourceFIdx,
+    new Set(),
+    fieldLookup
   );
 
   if (!sourceVisible) return false;
@@ -815,6 +868,40 @@ export function evaluatePopupLogic(
   );
 }
 
+export function buildPopupReminderIndex(selectedModels) {
+  const index = new Map();
+  const add = (displayMIdx, displayFIdx, sourceMIdx, sourceFIdx) => {
+    const key = `${displayMIdx}:${displayFIdx}`;
+    const sources = index.get(key) || [];
+    if (!sources.some((item) =>
+      item.sourceMIdx === sourceMIdx && item.sourceFIdx === sourceFIdx
+    )) {
+      sources.push({ sourceMIdx, sourceFIdx });
+    }
+    index.set(key, sources);
+  };
+
+  (selectedModels || []).forEach((section, sourceMIdx) => {
+    (section?.fields || []).forEach((sourceField, sourceFIdx) => {
+      const popupLogic = normalizePopupLogic(sourceField?.constraints?.popupLogic);
+      if (!popupLogic.enabled || !popupLogic.message) return;
+
+      add(sourceMIdx, sourceFIdx, sourceMIdx, sourceFIdx);
+      if (!popupLogic.targetFieldKey) return;
+
+      (selectedModels || []).forEach((displaySection, displayMIdx) => {
+        (displaySection?.fields || []).forEach((displayField, displayFIdx) => {
+          if (fieldHasKey(displayField, popupLogic.targetFieldKey)) {
+            add(displayMIdx, displayFIdx, sourceMIdx, sourceFIdx);
+          }
+        });
+      });
+    });
+  });
+
+  return index;
+}
+
 export function getPopupReminderMessage(selectedModels, sourceMIdx, sourceFIdx) {
   const sourceField = selectedModels?.[sourceMIdx]?.fields?.[sourceFIdx];
   const popupLogic = normalizePopupLogic(sourceField?.constraints?.popupLogic);
@@ -827,15 +914,30 @@ export function getPopupReminderMessagesForField(
   selectedModels,
   currentCellData,
   displayMIdx,
-  displayFIdx
+  displayFIdx,
+  fieldLookup = null,
+  reminderIndex = null
 ) {
   const displayField = selectedModels?.[displayMIdx]?.fields?.[displayFIdx];
   if (!displayField) return [];
 
   const messages = [];
 
-  (selectedModels || []).forEach((section, sourceMIdx) => {
-    (section?.fields || []).forEach((sourceField, sourceFIdx) => {
+  const indexedSources = reminderIndex?.get(`${displayMIdx}:${displayFIdx}`);
+  const sources = reminderIndex instanceof Map
+    ? indexedSources || []
+    : (selectedModels || []).flatMap((section, sourceMIdx) =>
+        (section?.fields || []).map((sourceField, sourceFIdx) => ({
+          sourceField,
+          sourceMIdx,
+          sourceFIdx,
+        }))
+      );
+
+  sources.forEach((source) => {
+      const sourceMIdx = source.sourceMIdx;
+      const sourceFIdx = source.sourceFIdx;
+      const sourceField = source.sourceField || selectedModels?.[sourceMIdx]?.fields?.[sourceFIdx];
       const popupLogic = normalizePopupLogic(sourceField?.constraints?.popupLogic);
 
       if (!popupLogic.enabled || !popupLogic.message) return;
@@ -854,7 +956,8 @@ export function getPopupReminderMessagesForField(
         selectedModels,
         currentCellData,
         sourceMIdx,
-        sourceFIdx
+        sourceFIdx,
+        fieldLookup
       );
 
       if (!matched) return;
@@ -862,7 +965,6 @@ export function getPopupReminderMessagesForField(
       if (!messages.includes(popupLogic.message)) {
         messages.push(popupLogic.message);
       }
-    });
   });
 
   return messages;
@@ -874,7 +976,8 @@ export function evaluateFieldVisibility(
   currentCellData,
   targetMIdx,
   targetFIdx,
-  visiting = new Set()
+  visiting = new Set(),
+  fieldLookup = null
 ) {
   const targetField = selectedModels?.[targetMIdx]?.fields?.[targetFIdx];
   if (!targetField) return true;
@@ -891,7 +994,7 @@ export function evaluateFieldVisibility(
   const nextVisiting = new Set(visiting);
   nextVisiting.add(targetKey);
 
-  const lookup = buildFieldLookup(selectedModels);
+  const lookup = fieldLookup || buildFieldLookup(selectedModels);
 
   const results = logic.rules.map((rule) => {
     const srcKey = String(rule?.sourceFieldKey || "");
@@ -909,7 +1012,8 @@ export function evaluateFieldVisibility(
       currentCellData,
       meta.mIdx,
       meta.fIdx,
-      nextVisiting
+      nextVisiting,
+      lookup
     );
 
     if (!sourceVisible) return false;
@@ -934,11 +1038,25 @@ export function evaluateFieldVisibility(
   return matched;
 }
 
-export function sectionHasVisibleFields(study, selectedModels, currentCellData, mIdx) {
+export function sectionHasVisibleFields(
+  study,
+  selectedModels,
+  currentCellData,
+  mIdx,
+  fieldLookup = null
+) {
   const fields = selectedModels?.[mIdx]?.fields || [];
   if (!fields.length) return false;
 
   return fields.some((_, fIdx) =>
-    evaluateFieldVisibility(study, selectedModels, currentCellData, mIdx, fIdx)
+    evaluateFieldVisibility(
+      study,
+      selectedModels,
+      currentCellData,
+      mIdx,
+      fIdx,
+      new Set(),
+      fieldLookup
+    )
   );
 }

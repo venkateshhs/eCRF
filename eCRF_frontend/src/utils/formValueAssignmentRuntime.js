@@ -25,7 +25,7 @@ function fieldKeys(field) {
     .map(String);
 }
 
-function buildFieldLookup(selectedModels) {
+export function buildValueAssignmentFieldLookup(selectedModels) {
   const lookup = new Map();
 
   (selectedModels || []).forEach((section, sectionIndex) => {
@@ -249,11 +249,16 @@ function valuesEqual(left, right) {
   return left === right;
 }
 
-export function evaluateValueAssignments(study, selectedModels, currentCellData) {
+export function evaluateValueAssignments(
+  study,
+  selectedModels,
+  currentCellData,
+  fieldLookup = null
+) {
   const rules = getValueAssignmentRulesFromStudy(study);
   if (!rules.length) return { updates: [], warnings: [] };
 
-  const lookup = buildFieldLookup(selectedModels);
+  const lookup = fieldLookup || buildValueAssignmentFieldLookup(selectedModels);
   const working = (currentCellData || []).map((section) =>
     Array.isArray(section) ? [...section] : []
   );

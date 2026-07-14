@@ -329,7 +329,11 @@
                   </div>
               </div>
 
-                <div v-show="!isSectionCollapsed(mIdx)" class="section-card-body">
+                <div
+                  v-if="validationMountAllSections || !isSectionCollapsed(mIdx)"
+                  v-show="!isSectionCollapsed(mIdx)"
+                  class="section-card-body"
+                >
                 <template
                   v-for="(field, fIdx) in selectedModels[mIdx].fields"
                   :key="'f-wrap-' + mIdx + '-' + fIdx"
@@ -405,7 +409,7 @@
                         :maxlength="field.constraints?.maxLength"
                         :pattern="field.constraints?.pattern"
                         @blur="onFieldBlur(mIdx, fIdx)"
-                        @input="() => { clearError(mIdx, fIdx); onRuntimeFieldChanged(mIdx, fIdx); }"
+                        @input="onLiveFieldInput(mIdx, fIdx)"
                       />
 
                       <!-- TEXTAREA -->
@@ -421,7 +425,7 @@
                         :pattern="field.constraints?.pattern"
                         rows="4"
                         @blur="onFieldBlur(mIdx, fIdx)"
-                        @input="() => { clearError(mIdx, fIdx); onRuntimeFieldChanged(mIdx, fIdx); }"
+                        @input="onLiveFieldInput(mIdx, fIdx)"
                       ></textarea>
 
                       <!-- NUMBER -->
@@ -436,12 +440,8 @@
                         :min="field.constraints?.min"
                         :max="field.constraints?.max"
                         :step="field.constraints?.step"
-                        @blur="() => {
-                        $nextTick(() => {
-                          validateField(mIdx, fIdx);
-                        });
-                      }"
-                        @input="() => { clearError(mIdx, fIdx); onRuntimeFieldChanged(mIdx, fIdx); }"
+                        @blur="onNumberFieldBlur(mIdx, fIdx)"
+                        @input="onLiveFieldInput(mIdx, fIdx)"
                        />
 
                       <!-- CHECKBOX -->
@@ -451,7 +451,7 @@
                         v-model="entryData[currentSubjectIndex][currentVisitIndex][currentGroupIndex][mIdx][fIdx]"
                         v-bind="selectedModels[mIdx].fields[fIdx].constraints"
                         :disabled="isReadonlyField(field, mIdx, fIdx)"
-                        @update:modelValue="() => { clearError(mIdx, fIdx); validateField(mIdx, fIdx); onRuntimeFieldChanged(mIdx, fIdx); }"
+                        @update:modelValue="onDiscreteFieldChanged(mIdx, fIdx)"
                       />
 
                       <!-- RADIO -->
@@ -464,8 +464,7 @@
                         :default-value="field.constraints?.defaultValue"
                         v-bind="selectedModels[mIdx].fields[fIdx].constraints"
                         :disabled="isReadonlyField(field, mIdx, fIdx)"
-                        @change="() => { validateField(mIdx, fIdx); onRuntimeFieldChanged(mIdx, fIdx); }"
-                        @update:modelValue="() => { clearError(mIdx, fIdx); validateField(mIdx, fIdx); onRuntimeFieldChanged(mIdx, fIdx); }"
+                        @update:modelValue="onDiscreteFieldChanged(mIdx, fIdx)"
                       />
 
                       <!-- DATE -->
@@ -480,8 +479,8 @@
                         :readonly="isReadonlyField(field, mIdx, fIdx)"
                         @update:model-value="() => clearDateManualInputError(mIdx, fIdx)"
                         @manual-input-state="(state) => onDateManualInputState(mIdx, fIdx, state)"
-                        @change="() => { validateField(mIdx, fIdx); onRuntimeFieldChanged(mIdx, fIdx); }"
-                        @blur="() => { validateField(mIdx, fIdx); onRuntimeFieldChanged(mIdx, fIdx); }"
+                        @change="onDiscreteFieldChanged(mIdx, fIdx)"
+                        @blur="onDiscreteFieldBlur(mIdx, fIdx)"
                       />
 
                       <!-- TIME -->
@@ -492,8 +491,8 @@
                         :placeholder="field.placeholder || (field.constraints?.timeFormat || 'HH:mm')"
                         v-bind="selectedModels[mIdx].fields[fIdx].constraints"
                         :readonly="isReadonlyField(field, mIdx, fIdx)"
-                        @change="() => { validateField(mIdx, fIdx); onRuntimeFieldChanged(mIdx, fIdx); }"
-                        @blur="() => { validateField(mIdx, fIdx); onRuntimeFieldChanged(mIdx, fIdx); }"
+                        @change="onDiscreteFieldChanged(mIdx, fIdx)"
+                        @blur="onDiscreteFieldBlur(mIdx, fIdx)"
                       />
 
                       <!-- SELECT -->
@@ -506,7 +505,7 @@
                         :readonly="isReadonlyField(field, mIdx, fIdx)"
                         :default-value="field.constraints?.defaultValue"
                         :placeholder="'Select…'"
-                        @update:modelValue="() => { validateField(mIdx, fIdx); onRuntimeFieldChanged(mIdx, fIdx); }"
+                        @update:modelValue="onDiscreteFieldChanged(mIdx, fIdx)"
                       />
 
                       <!-- SLIDER -->
@@ -516,8 +515,7 @@
                         v-model="entryData[currentSubjectIndex][currentVisitIndex][currentGroupIndex][mIdx][fIdx]"
                         v-bind="getSliderProps(field)"
                         :disabled="isReadonlyField(field, mIdx, fIdx)"
-                        @update:modelValue="() => { clearError(mIdx, fIdx); validateField(mIdx, fIdx); onRuntimeFieldChanged(mIdx, fIdx); }"
-                        @change="() => { validateField(mIdx, fIdx); onRuntimeFieldChanged(mIdx, fIdx); }"
+                        @update:modelValue="onDiscreteFieldChanged(mIdx, fIdx)"
                       />
 
                       <!-- LINEAR -->
@@ -527,8 +525,7 @@
                         v-model="entryData[currentSubjectIndex][currentVisitIndex][currentGroupIndex][mIdx][fIdx]"
                         v-bind="getLinearProps(field)"
                         :disabled="isReadonlyField(field, mIdx, fIdx)"
-                        @update:modelValue="() => { clearError(mIdx, fIdx); validateField(mIdx, fIdx); onRuntimeFieldChanged(mIdx, fIdx); }"
-                        @change="() => { validateField(mIdx, fIdx); onRuntimeFieldChanged(mIdx, fIdx); }"
+                        @update:modelValue="onDiscreteFieldChanged(mIdx, fIdx)"
                       />
 
                       <!-- TABLE -->
@@ -539,7 +536,7 @@
                         v-model="entryData[currentSubjectIndex][currentVisitIndex][currentGroupIndex][mIdx][fIdx]"
                         :field="field"
                         :readonly="isReadonlyField(field, mIdx, fIdx)"
-                        @update:modelValue="() => { clearError(mIdx, fIdx); validateField(mIdx, fIdx); onRuntimeFieldChanged(mIdx, fIdx); }"
+                        @update:modelValue="onDiscreteFieldChanged(mIdx, fIdx)"
                         @validation-state="(payload) => onTableValidationState(mIdx, fIdx, payload)"
                       />
 
@@ -567,7 +564,7 @@
                         :required="!!field.constraints?.required"
                         :readonly="isReadonlyField(field, mIdx, fIdx)"
                         @blur="onFieldBlur(mIdx, fIdx)"
-                        @input="() => { clearError(mIdx, fIdx); onRuntimeFieldChanged(mIdx, fIdx); }"
+                        @input="onLiveFieldInput(mIdx, fIdx)"
                       />
                     </div>
 
@@ -857,10 +854,11 @@ import {
   getCalculationRulesFromStudy,
   getCalculationFormulaForField,
   buildFieldLookup,
-  isCalculatedRuntimeField as isCalculatedRuntimeFieldUtil,
+  getCalculatedTargetIdSet,
   computeCalculation,
   sectionHasVisibleFields,
   evaluateFieldVisibility,
+  buildPopupReminderIndex,
   getPopupReminderMessagesForField,
 } from "@/utils/formLogicRuntime";
 import {
@@ -869,8 +867,14 @@ import {
   buildUniqueSubjectId,
   getNextSubjectSequenceNumber,
 } from "@/utils/subjectIdUtils";
-import { calculateDataEntryProgress } from "@/utils/dataEntryProgress";
-import { evaluateValueAssignments } from "@/utils/formValueAssignmentRuntime";
+import {
+  calculateDataEntryFieldProgress,
+  calculateDataEntryProgress,
+} from "@/utils/dataEntryProgress";
+import {
+  buildValueAssignmentFieldLookup,
+  evaluateValueAssignments,
+} from "@/utils/formValueAssignmentRuntime";
 import { parseDateByConfiguredFormat } from "@/utils/dateFormatParsing";
 import {
   inferUploadedFileFieldContext,
@@ -1033,6 +1037,9 @@ export default {
         percentage: 0,
       },
       entryProgressTimer: null,
+      entryProgressFieldCache: new Map(),
+      entryProgressCacheSlot: "",
+      progressVisibilityDependents: new Map(),
       scrollFloatingMode: "bottom",
       scrollListenerAttached: false,
       showPreviousVisitImportDialog: false,
@@ -1040,6 +1047,18 @@ export default {
       previousVisitImportContext: null,
       importedPreviousVisitLocks: {},
       entryBaselineSnapshot: "",
+      entryDirty: false,
+      validationMountAllSections: false,
+      runtimeFieldLookup: null,
+      runtimeFieldLookupModels: null,
+      runtimeValueAssignmentLookup: null,
+      runtimeValueAssignmentLookupModels: null,
+      runtimeCalculatedTargetIds: null,
+      runtimeCalculatedStudy: null,
+      runtimeCalculationFormulaCache: new Map(),
+      runtimePopupReminderIndex: null,
+      runtimePopupReminderIndexModels: null,
+      runtimeCommitHandles: new Map(),
       pendingNavigationAction: null,
       showUnsavedExitDialog: false,
       subjectIdConfigDraft: null,
@@ -1107,9 +1126,7 @@ export default {
     hasUnsavedEntryChanges() {
       if (this.showSelection) return false;
       if (!this.canEdit) return false;
-
-      const current = this.buildCurrentEntrySnapshot();
-      return current !== this.entryBaselineSnapshot;
+      return this.entryDirty;
     },
     importDialogSubjects() {
       const subjects = Array.isArray(this.sd?.subjects) ? this.sd.subjects : [];
@@ -1482,6 +1499,7 @@ export default {
         window.clearTimeout(this.entryProgressTimer);
         this.entryProgressTimer = null;
       }
+      this.cancelAllRuntimeFieldCommits();
       window.onbeforeunload = null;
     },
   watch: {
@@ -1515,6 +1533,15 @@ export default {
     },
     study: {
       handler() {
+        this.runtimeFieldLookupModels = null;
+        this.runtimeFieldLookup = null;
+        this.runtimeValueAssignmentLookupModels = null;
+        this.runtimeValueAssignmentLookup = null;
+        this.runtimeCalculatedStudy = null;
+        this.runtimeCalculatedTargetIds = null;
+        this.runtimeCalculationFormulaCache = new Map();
+        this.runtimePopupReminderIndexModels = null;
+        this.runtimePopupReminderIndex = null;
         this.prepareAssignmentsLookup();
         this.prepareSubjectGroupIndexMap();
         if (this.selectedVisitIndex === -999) return;
@@ -1611,7 +1638,145 @@ export default {
     },
 
     updateEntryProgress() {
-      this.entryProgress = this.calculateCurrentEntryProgress();
+      this.rebuildEntryProgressCache();
+    },
+
+    currentProgressSlotKey() {
+      return [
+        this.currentSubjectIndex,
+        this.currentVisitIndex,
+        this.currentGroupIndex,
+        this.selectedVersion,
+      ].join("|");
+    },
+
+    progressFieldKey(mIdx, fIdx) {
+      return `${mIdx}:${fIdx}`;
+    },
+
+    calculateProgressContribution(mIdx, fIdx) {
+      const s = this.currentSubjectIndex;
+      const v = this.currentVisitIndex;
+      const g = this.currentGroupIndex;
+      const field = this.selectedModels?.[mIdx]?.fields?.[fIdx];
+
+      return calculateDataEntryFieldProgress({
+        field,
+        value: this.entryData?.[s]?.[v]?.[g]?.[mIdx]?.[fIdx],
+        skipped: !!this.skipFlags?.[s]?.[v]?.[g]?.[mIdx]?.[fIdx],
+        visible: this.isFieldVisible(mIdx, fIdx),
+        calculated: this.isCalculatedRuntimeField(mIdx, fIdx),
+        hasError: !!this.fieldErrors(mIdx, fIdx),
+        tableCellErrors: this.getTableValidationState(mIdx, fIdx)?.cellErrors || {},
+      });
+    },
+
+    rebuildProgressVisibilityDependents() {
+      const dependents = new Map();
+      const lookup = this.getFieldLookup();
+
+      (this.selectedModels || []).forEach((section, mIdx) => {
+        (section?.fields || []).forEach((field, fIdx) => {
+          const rules = field?.constraints?.visibilityLogic?.rules || [];
+          rules.forEach((rule) => {
+            const source = lookup.get(String(rule?.sourceFieldKey || ""));
+            if (!source) return;
+            const sourceKey = this.progressFieldKey(source.mIdx, source.fIdx);
+            const targets = dependents.get(sourceKey) || new Set();
+            targets.add(this.progressFieldKey(mIdx, fIdx));
+            dependents.set(sourceKey, targets);
+          });
+        });
+      });
+
+      this.progressVisibilityDependents = dependents;
+    },
+
+    publishEntryProgressCache() {
+      let total = 0;
+      let completed = 0;
+      let skipped = 0;
+
+      this.entryProgressFieldCache.forEach((item) => {
+        total += item.total;
+        completed += item.completed;
+        skipped += item.skipped;
+      });
+
+      this.entryProgress = {
+        total,
+        completed,
+        incomplete: Math.max(0, total - completed),
+        skipped,
+        percentage: total > 0 ? Math.round((completed / total) * 100) : 0,
+      };
+    },
+
+    rebuildEntryProgressCache() {
+      if (
+        this.showSelection ||
+        this.currentSubjectIndex == null ||
+        this.currentVisitIndex == null ||
+        this.currentGroupIndex == null
+      ) {
+        this.entryProgressFieldCache = new Map();
+        this.entryProgressCacheSlot = "";
+        this.entryProgress = this.calculateCurrentEntryProgress();
+        return;
+      }
+
+      this.ensureSlot(
+        this.currentSubjectIndex,
+        this.currentVisitIndex,
+        this.currentGroupIndex
+      );
+      const cache = new Map();
+      this.assignedModelIndices.forEach((mIdx) => {
+        (this.selectedModels?.[mIdx]?.fields || []).forEach((_, fIdx) => {
+          cache.set(
+            this.progressFieldKey(mIdx, fIdx),
+            this.calculateProgressContribution(mIdx, fIdx)
+          );
+        });
+      });
+      this.entryProgressFieldCache = cache;
+      this.entryProgressCacheSlot = this.currentProgressSlotKey();
+      this.rebuildProgressVisibilityDependents();
+      this.publishEntryProgressCache();
+    },
+
+    refreshEntryProgressFields(fields = []) {
+      if (this.entryProgressCacheSlot !== this.currentProgressSlotKey()) {
+        this.rebuildEntryProgressCache();
+        return;
+      }
+
+      const pending = [...fields];
+      const affected = new Set();
+      while (pending.length) {
+        const item = pending.shift();
+        const key = typeof item === "string"
+          ? item
+          : this.progressFieldKey(item.mIdx, item.fIdx);
+        if (affected.has(key)) continue;
+        affected.add(key);
+        (this.progressVisibilityDependents.get(key) || []).forEach((dependent) => {
+          pending.push(dependent);
+        });
+      }
+
+      affected.forEach((key) => {
+        const [mIdx, fIdx] = key.split(":").map(Number);
+        if (!this.assignedModelIndices.includes(mIdx)) {
+          this.entryProgressFieldCache.delete(key);
+          return;
+        }
+        this.entryProgressFieldCache.set(
+          key,
+          this.calculateProgressContribution(mIdx, fIdx)
+        );
+      });
+      this.publishEntryProgressCache();
     },
 
     entryProgressStatus(progress) {
@@ -1712,7 +1877,15 @@ export default {
           values,
           skips,
           isFieldVisible: (mIdx, fIdx) =>
-            evaluateFieldVisibility(this.study, this.selectedModels, values, mIdx, fIdx),
+            evaluateFieldVisibility(
+              this.study,
+              this.selectedModels,
+              values,
+              mIdx,
+              fIdx,
+              new Set(),
+              this.getFieldLookup()
+            ),
           isCalculatedField: (mIdx, fIdx) =>
             this.isCalculatedRuntimeField(mIdx, fIdx),
           hasFieldError: () => false,
@@ -1990,6 +2163,11 @@ export default {
 
     captureEntryBaseline() {
       this.entryBaselineSnapshot = this.buildCurrentEntrySnapshot();
+      this.entryDirty = false;
+    },
+
+    markEntryDirty() {
+      if (!this.showSelection && this.canEdit) this.entryDirty = true;
     },
 
     requestBackToSelection() {
@@ -2027,6 +2205,7 @@ export default {
       this.showUnsavedExitDialog = false;
       this.pendingNavigationAction = null;
       this.entryBaselineSnapshot = this.buildCurrentEntrySnapshot();
+      this.entryDirty = false;
       window.onbeforeunload = null;
 
       if (typeof action === "function") {
@@ -2388,6 +2567,10 @@ export default {
           fIdx,
           payload?.message || "Table contains invalid cells."
         );
+      }
+
+      if (this.entryProgressCacheSlot === this.currentProgressSlotKey()) {
+        this.refreshEntryProgressFields([{ mIdx, fIdx }]);
       }
     },
 
@@ -2996,6 +3179,8 @@ applyImportedRowFromDialog(payload) {
     this.calcWarnings = {};
 
     this.runAllCalculationsForCurrentCell();
+    this.markEntryDirty();
+    this.rebuildEntryProgressCache();
 
     this.assignedModelIndices.forEach((mIdx) => {
       (this.selectedModels?.[mIdx]?.fields || []).forEach((field, fIdx) => {
@@ -3071,6 +3256,8 @@ applyImportedRowFromDialog(payload) {
         });
 
         this.runAllCalculationsForCurrentCell();
+        this.markEntryDirty();
+        this.rebuildEntryProgressCache();
 
         this.assignedModelIndices.forEach((mIdx) => {
           (this.selectedModels?.[mIdx]?.fields || []).forEach((field, fIdx) => {
@@ -3120,12 +3307,26 @@ applyImportedRowFromDialog(payload) {
 
     isFieldVisible(mIdx, fIdx) {
       const cellData = this.getCurrentCellData();
-      return evaluateFieldVisibility(this.study, this.selectedModels, cellData, mIdx, fIdx);
+      return evaluateFieldVisibility(
+        this.study,
+        this.selectedModels,
+        cellData,
+        mIdx,
+        fIdx,
+        new Set(),
+        this.getFieldLookup()
+      );
     },
 
     hasVisibleFieldsInSection(mIdx) {
       const cellData = this.getCurrentCellData();
-      return sectionHasVisibleFields(this.study, this.selectedModels, cellData, mIdx);
+      return sectionHasVisibleFields(
+        this.study,
+        this.selectedModels,
+        cellData,
+        mIdx,
+        this.getFieldLookup()
+      );
     },
     fieldCalcWarning(mIdx, fIdx) {
       const runtimeKey = this.currentCalcKey(mIdx, fIdx);
@@ -3135,17 +3336,36 @@ applyImportedRowFromDialog(payload) {
       const field = this.selectedModels?.[mIdx]?.fields?.[fIdx];
       if (!field) return "";
 
-      return getCalculationFormulaForField(this.study, this.selectedModels, field) || "";
+      const key = this.progressFieldKey(mIdx, fIdx);
+      if (!this.runtimeCalculationFormulaCache.has(key)) {
+        this.runtimeCalculationFormulaCache.set(
+          key,
+          getCalculationFormulaForField(
+            this.study,
+            this.selectedModels,
+            field,
+            this.getFieldLookup()
+          ) || ""
+        );
+      }
+      return this.runtimeCalculationFormulaCache.get(key);
     },
     popupReminderMessages(mIdx, fIdx) {
       const cellData = this.getCurrentCellData();
+
+      if (this.runtimePopupReminderIndexModels !== this.selectedModels) {
+        this.runtimePopupReminderIndexModels = this.selectedModels;
+        this.runtimePopupReminderIndex = buildPopupReminderIndex(this.selectedModels);
+      }
 
       return getPopupReminderMessagesForField(
         this.study,
         this.selectedModels,
         cellData,
         mIdx,
-        fIdx
+        fIdx,
+        this.getFieldLookup(),
+        this.runtimePopupReminderIndex
       );
     },
 
@@ -3180,7 +3400,22 @@ applyImportedRowFromDialog(payload) {
 
     isCalculatedRuntimeField(mIdx, fIdx) {
       const field = this.selectedModels?.[mIdx]?.fields?.[fIdx];
-      return isCalculatedRuntimeFieldUtil(this.study, field);
+      if (!field) return false;
+      if (field.computed || field.isCalculatedField) return true;
+
+      if (this.runtimeCalculatedStudy !== this.study) {
+        this.runtimeCalculatedStudy = this.study;
+        this.runtimeCalculatedTargetIds = getCalculatedTargetIdSet(this.study);
+      }
+      const keys = [
+        field?._id,
+        field?.id,
+        field?.field_id,
+        field?.uid,
+        field?.key,
+        field?.name,
+      ].filter(Boolean);
+      return keys.some((key) => this.runtimeCalculatedTargetIds.has(String(key)));
     },
 
     isReadonlyField(field, mIdx, fIdx) {
@@ -3238,6 +3473,7 @@ applyImportedRowFromDialog(payload) {
       const next = { ...(this.importedPreviousVisitLocks || {}) };
       delete next[key];
       this.importedPreviousVisitLocks = next;
+      this.markEntryDirty();
     },
 
     closePreviousVisitImportDialog() {
@@ -3374,13 +3610,28 @@ applyImportedRowFromDialog(payload) {
         },
       };
 
+      this.markEntryDirty();
       this.validateField(mIdx, fIdx);
       this.onRuntimeFieldChanged(mIdx, fIdx);
       this.closePreviousVisitImportDialog();
     },
 
     getFieldLookup() {
-      return buildFieldLookup(this.selectedModels);
+      if (this.runtimeFieldLookupModels !== this.selectedModels) {
+        this.runtimeFieldLookupModels = this.selectedModels;
+        this.runtimeFieldLookup = buildFieldLookup(this.selectedModels);
+      }
+      return this.runtimeFieldLookup;
+    },
+
+    getValueAssignmentFieldLookup() {
+      if (this.runtimeValueAssignmentLookupModels !== this.selectedModels) {
+        this.runtimeValueAssignmentLookupModels = this.selectedModels;
+        this.runtimeValueAssignmentLookup = buildValueAssignmentFieldLookup(
+          this.selectedModels
+        );
+      }
+      return this.runtimeValueAssignmentLookup;
     },
 
     getFieldMetaByRuleFieldId(ruleFieldId) {
@@ -3427,8 +3678,15 @@ applyImportedRowFromDialog(payload) {
 
     runCalculationsForCell(s, v, g, changedMIdx = null, changedFIdx = null) {
       const initialAssignmentResult = this.runValueAssignmentsForCell(s, v, g);
+      const changedFields = new Set(
+        (initialAssignmentResult.updates || []).map((update) =>
+          this.progressFieldKey(update.sectionIndex, update.fieldIndex)
+        )
+      );
       const rules = this.calculationRules || [];
-      if (!rules.length) return initialAssignmentResult;
+      if (!rules.length) {
+        return { ...initialAssignmentResult, changedFields: [...changedFields] };
+      }
 
       const changedField =
         changedMIdx != null && changedFIdx != null
@@ -3495,13 +3753,16 @@ applyImportedRowFromDialog(payload) {
           const result = computeCalculation(
             rule,
             this.selectedModels,
-            currentCellData
+            currentCellData,
+            null,
+            this.getFieldLookup()
           );
 
           if (!result.ok) {
             if (!sameValue(previousValue, null)) {
               this.setDeepValue(s, v, g, mIdx, fIdx, null);
               calculationsChanged = true;
+              changedFields.add(this.progressFieldKey(mIdx, fIdx));
             }
             this.setCalcWarningByRuleTarget(
               s,
@@ -3516,6 +3777,7 @@ applyImportedRowFromDialog(payload) {
           if (!sameValue(previousValue, result.value)) {
             this.setDeepValue(s, v, g, mIdx, fIdx, result.value);
             calculationsChanged = true;
+            changedFields.add(this.progressFieldKey(mIdx, fIdx));
             this.clearError(mIdx, fIdx);
 
             const fieldDef = this.selectedModels?.[mIdx]?.fields?.[fIdx];
@@ -3525,6 +3787,11 @@ applyImportedRowFromDialog(payload) {
         });
 
         latestAssignmentResult = this.runValueAssignmentsForCell(s, v, g);
+        (latestAssignmentResult.updates || []).forEach((update) => {
+          changedFields.add(
+            this.progressFieldKey(update.sectionIndex, update.fieldIndex)
+          );
+        });
         anyChanged =
           anyChanged ||
           calculationsChanged ||
@@ -3549,6 +3816,7 @@ applyImportedRowFromDialog(payload) {
         changed: anyChanged,
         updates: latestAssignmentResult.updates || [],
         warnings: latestAssignmentResult.warnings || [],
+        changedFields: [...changedFields],
       };
     },
 
@@ -3561,7 +3829,8 @@ applyImportedRowFromDialog(payload) {
       const result = evaluateValueAssignments(
         this.study,
         this.selectedModels,
-        this.entryData?.[s]?.[v]?.[g] || []
+        this.entryData?.[s]?.[v]?.[g] || [],
+        this.getValueAssignmentFieldLookup()
       );
 
       (result.updates || []).forEach((update) => {
@@ -3608,19 +3877,109 @@ applyImportedRowFromDialog(payload) {
       this.runCalculationsForCell(s, v, g, null, null);
     },
 
-    onRuntimeFieldChanged(mIdx, fIdx) {
+    cancelRuntimeFieldCommit(key) {
+      const handle = this.runtimeCommitHandles.get(key);
+      if (!handle) return;
+      if (handle.frameId != null) window.cancelAnimationFrame(handle.frameId);
+      if (handle.timerId != null) window.clearTimeout(handle.timerId);
+      this.runtimeCommitHandles.delete(key);
+    },
+
+    cancelAllRuntimeFieldCommits() {
+      [...this.runtimeCommitHandles.keys()].forEach((key) => {
+        this.cancelRuntimeFieldCommit(key);
+      });
+    },
+
+    queueRuntimeFieldCommit(
+      mIdx,
+      fIdx,
+      { afterPaint = false, updateProgress = true } = {}
+    ) {
       const s = this.currentSubjectIndex;
       const v = this.currentVisitIndex;
       const g = this.currentGroupIndex;
       if (s == null || v == null || g == null) return;
       this.ensureSlot(s, v, g);
 
+      const key = `${s}|${v}|${g}|${mIdx}|${fIdx}`;
+      this.cancelRuntimeFieldCommit(key);
+      const handle = { frameId: null, timerId: null };
+      this.runtimeCommitHandles.set(key, handle);
+
+      const execute = () => {
+        if (this.runtimeCommitHandles.get(key) !== handle) return;
+        this.runtimeCommitHandles.delete(key);
+        if (
+          s !== this.currentSubjectIndex ||
+          v !== this.currentVisitIndex ||
+          g !== this.currentGroupIndex
+        ) return;
+
+        const result = this.runCalculationsForCell(s, v, g, mIdx, fIdx);
+        this.hydrateCache.delete(`${s}|${v}|${g}|${this.selectedVersion}`);
+        if (updateProgress) {
+          this.refreshEntryProgressFields([
+            { mIdx, fIdx },
+            ...(result?.changedFields || []),
+          ]);
+        }
+      };
+
+      const scheduleTimer = () => {
+        handle.frameId = null;
+        handle.timerId = window.setTimeout(execute, afterPaint ? 120 : 0);
+      };
+
+      if (afterPaint) {
+        handle.frameId = window.requestAnimationFrame(scheduleTimer);
+      } else {
+        scheduleTimer();
+      }
+    },
+
+    onLiveFieldInput(mIdx, fIdx) {
+      this.markEntryDirty();
+      this.clearError(mIdx, fIdx);
+      this.queueRuntimeFieldCommit(mIdx, fIdx, {
+        afterPaint: true,
+        updateProgress: false,
+      });
+    },
+
+    onNumberFieldBlur(mIdx, fIdx) {
+      this.validateField(mIdx, fIdx);
+      this.queueRuntimeFieldCommit(mIdx, fIdx, {
+        afterPaint: false,
+        updateProgress: true,
+      });
+    },
+
+    onDiscreteFieldChanged(mIdx, fIdx) {
+      this.markEntryDirty();
+      this.validateField(mIdx, fIdx);
+      this.clearError(mIdx, fIdx);
+      this.queueRuntimeFieldCommit(mIdx, fIdx, {
+        afterPaint: false,
+        updateProgress: true,
+      });
+    },
+
+    onDiscreteFieldBlur(mIdx, fIdx) {
+      this.validateField(mIdx, fIdx);
+      this.clearError(mIdx, fIdx);
+      this.queueRuntimeFieldCommit(mIdx, fIdx, {
+        afterPaint: false,
+        updateProgress: true,
+      });
+    },
+
+    onRuntimeFieldChanged(mIdx, fIdx) {
       // user changed something manually -> source errors may go away
       this.clearError(mIdx, fIdx);
-
-      this.$nextTick(() => {
-        this.runCalculationsForCell(s, v, g, mIdx, fIdx);
-        this.scheduleEntryProgressUpdate();
+      this.queueRuntimeFieldCommit(mIdx, fIdx, {
+        afterPaint: false,
+        updateProgress: true,
       });
     },
 
@@ -4268,14 +4627,6 @@ applyImportedRowFromDialog(payload) {
         );
       }
       this.entryData[s][v][g][m][f] = val;
-
-      if (
-        s === this.currentSubjectIndex &&
-        v === this.currentVisitIndex &&
-        g === this.currentGroupIndex
-      ) {
-        this.scheduleEntryProgressUpdate();
-      }
     },
     setDeepSkip(s, v, g, m, f, on) {
       this.ensureSlot(s, v, g);
@@ -4284,14 +4635,6 @@ applyImportedRowFromDialog(payload) {
         this.skipFlags[s][v][g][m] = fields.map(() => false);
       }
       this.skipFlags[s][v][g][m][f] = !!on;
-
-      if (
-        s === this.currentSubjectIndex &&
-        v === this.currentVisitIndex &&
-        g === this.currentGroupIndex
-      ) {
-        this.scheduleEntryProgressUpdate();
-      }
     },
 
     setEntryValue(mIdx, fIdx, val) {
@@ -4299,6 +4642,7 @@ applyImportedRowFromDialog(payload) {
         v = this.currentVisitIndex,
         g = this.currentGroupIndex;
       this.setDeepValue(s, v, g, mIdx, fIdx, val);
+      this.markEntryDirty();
       this.clearError(mIdx, fIdx);
       this.validateField(mIdx, fIdx);
       this.onRuntimeFieldChanged(mIdx, fIdx);
@@ -4570,7 +4914,6 @@ applyImportedRowFromDialog(payload) {
         ...this.validationErrors,
         [k]: msg,
       };
-      this.scheduleEntryProgressUpdate();
     },
     clearError(mIdx, fIdx) {
       const k = this.errorKey(mIdx, fIdx);
@@ -4584,8 +4927,6 @@ applyImportedRowFromDialog(payload) {
       if (this.highlightedErrorKey === k) {
         this.highlightedErrorKey = "";
       }
-
-      this.scheduleEntryProgressUpdate();
     },
     fieldErrors(mIdx, fIdx) {
       return this.validationErrors[this.errorKey(mIdx, fIdx)] || "";
@@ -4875,6 +5216,8 @@ applyImportedRowFromDialog(payload) {
         });
       });
       this.runAllCalculationsForCurrentCell();
+      this.markEntryDirty();
+      this.rebuildEntryProgressCache();
       this.hydrateCache.delete(`${s}|${v}|${g}|${this.selectedVersion}`);
     },
 
@@ -4904,6 +5247,9 @@ applyImportedRowFromDialog(payload) {
       this.validationErrors = {};
       this.manualDateInputErrors = {};
       this.calcWarnings = {};
+      this.entryDirty = false;
+      this.entryProgressFieldCache = new Map();
+      this.entryProgressCacheSlot = "";
     },
 
     prepareAssignmentsLookup() {
@@ -5305,6 +5651,8 @@ applyImportedRowFromDialog(payload) {
       )
         return;
       this.setDeepSkip(s, v, g, mIdx, fIdx, on);
+      this.markEntryDirty();
+      this.refreshEntryProgressFields([{ mIdx, fIdx }]);
     },
 
     validateField(mIdx, fIdx) {
@@ -5791,18 +6139,24 @@ applyImportedRowFromDialog(payload) {
         return;
       }
 
+      this.cancelAllRuntimeFieldCommits();
       this.applyTransformsForSection();
+      this.cancelAllRuntimeFieldCommits();
       this.runAllCalculationsForCurrentCell();
 
+      this.validationMountAllSections = true;
+      await this.$nextTick();
       const ok = this.validateCurrentSection();
       const tableFieldsInvalid = this.assignedModelIndices.some((mIdx) => {
-      const fields = this.selectedModels?.[mIdx]?.fields || [];
-      return fields.some((field, fIdx) => {
-        if (field?.type !== "table") return false;
-        if (!this.isFieldVisible(mIdx, fIdx)) return false;
-        return !this.validateField(mIdx, fIdx);
-            });
+        const fields = this.selectedModels?.[mIdx]?.fields || [];
+        return fields.some((field, fIdx) => {
+          if (field?.type !== "table") return false;
+          if (!this.isFieldVisible(mIdx, fIdx)) return false;
+          return !this.validateField(mIdx, fIdx);
         });
+      });
+      this.validationMountAllSections = false;
+      this.rebuildEntryProgressCache();
       const blocking = Object.entries(this.validationErrors).filter(([k, msg]) => {
         if (!msg) return false;
         const idx = this.parseKey(k);

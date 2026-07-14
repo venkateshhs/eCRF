@@ -54,7 +54,7 @@ export default {
     mobileBreakpoint: { type: Number, default: 0 },
   },
 
-  emits: ["update:modelValue", "manual-input-state"],
+  emits: ["update:modelValue", "change", "manual-input-state"],
 
   computed: {
     pickerConfig() {
@@ -116,7 +116,9 @@ export default {
       },
       set(v) {
         if (this.isReadonly) return;
-        this.$emit("update:modelValue", this.normalizeOutputValue(v));
+        const normalized = this.normalizeOutputValue(v);
+        this.$emit("update:modelValue", normalized);
+        this.$emit("change", normalized);
       },
     },
 
