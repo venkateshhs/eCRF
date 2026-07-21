@@ -5512,6 +5512,21 @@ applyImportedRowFromDialog(payload) {
       });
 
       this.runCalculationsForCell(s, v, g, null, null);
+
+      // The entry screen can build its progress cache while this asynchronous
+      // slot request is still loading, which leaves a valid cache containing
+      // only the empty field skeleton. Rebuild after the saved values and skip
+      // flags are applied so the initial bar matches the matrix calculation.
+      if (
+        !this.showSelection &&
+        s === this.currentSubjectIndex &&
+        v === this.currentVisitIndex &&
+        g === this.currentGroupIndex
+      ) {
+        this.entryProgressFieldCache = new Map();
+        this.entryProgressCacheSlot = "";
+        this.scheduleEntryProgressUpdate({ immediate: true });
+      }
     },
 
     async reloadLatestAfterConflict(latest) {
