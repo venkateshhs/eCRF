@@ -894,6 +894,12 @@ import {
   mergeDataEntryFields,
 } from "@/utils/dataEntryConflict";
 import { mergeTableFieldConflict } from "@/utils/tableConflict";
+import {
+  buildPreviousVisitTableColumns,
+  buildPreviousVisitTableRows,
+  hasPreviousVisitTableData,
+  selectPreviousVisitTableRows,
+} from "@/utils/previousVisitTableImport";
 
 export default {
   name: "StudyDataEntryComponent",
@@ -3459,7 +3465,7 @@ applyImportedRowFromDialog(payload) {
 
     isImportSupportedField(field) {
       const type = String(field?.type || "").toLowerCase();
-      return !["file", "table", "button"].includes(type);
+      return !["file", "button"].includes(type);
     },
 
     canShowPreviousVisitImport(field, mIdx, fIdx) {
@@ -3525,6 +3531,9 @@ applyImportedRowFromDialog(payload) {
 
       if (!this.isImportSupportedField(field)) return false;
 
+      if (type === "table") {
+        return hasPreviousVisitTableData(field, value);
+      }
       if (type === "checkbox") return typeof value === "boolean";
       if (Array.isArray(value)) return value.length > 0;
       if (typeof value === "number") return Number.isFinite(value);
@@ -3578,7 +3587,20 @@ applyImportedRowFromDialog(payload) {
           entryId: entry?.id || null,
           createdAtLabel,
           versionLabel: entry?.form_version ? `Version ${entry.form_version}` : "",
+          isTable: String(field?.type || "").toLowerCase() === "table",
+          tableColumns:
+            String(field?.type || "").toLowerCase() === "table"
+              ? buildPreviousVisitTableColumns(field, rawValue)
+              : [],
         });
+
+        const added = out[out.length - 1];
+        if (added.isTable) {
+          added.tableRows = buildPreviousVisitTableRows(
+            rawValue,
+            added.tableColumns
+          );
+        }
       }
 
       return out;
@@ -3612,7 +3634,13 @@ applyImportedRowFromDialog(payload) {
 
       this.ensureSlot(s, v, g);
 
-      this.setDeepValue(s, v, g, mIdx, fIdx, option.rawValue);
+      const importedValue = option.isTable
+        ? selectPreviousVisitTableRows(
+            option.rawValue,
+            option.selectedRowIndexes
+          )
+        : option.rawValue;
+      this.setDeepValue(s, v, g, mIdx, fIdx, importedValue);
       this.setDeepSkip(s, v, g, mIdx, fIdx, false);
       this.clearError(mIdx, fIdx);
       this.clearCalcWarningFor(mIdx, fIdx);
