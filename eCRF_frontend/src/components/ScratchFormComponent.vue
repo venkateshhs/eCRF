@@ -478,8 +478,8 @@
 
                           <button
                             class="icon-button"
-                            title="Copy field (basic settings only)"
-                            @click.stop.prevent="setActiveSection(si); addSimilarField(si, fi)"
+                            :title="field.type === 'table' ? 'Copy table' : 'Copy field (basic settings only)'"
+                            @click.stop.prevent="setActiveSection(si); field.type === 'table' ? openTableCopyDialog(si, fi) : addSimilarField(si, fi)"
                           ><i :class="icons.add"></i></button>
 
                           <button
@@ -919,6 +919,34 @@
       </div>
     </div>
 
+    <!-- Table Copy Dialog -->
+    <div v-if="showTableCopyDialog" class="modal-overlay" @click.self="closeTableCopyDialog">
+      <div class="modal table-copy-modal" role="dialog" aria-modal="true" aria-labelledby="table-copy-title">
+        <h3 id="table-copy-title">Copy table</h3>
+        <p class="table-copy-intro">Choose how much of this table should be copied.</p>
+
+        <div class="table-copy-choices">
+          <button type="button" class="table-copy-choice recommended" @click="confirmCompleteTableCopy">
+            <strong>Copy complete table structure</strong>
+            <span>
+              Copies all columns, field types, options, and advanced settings—including show/hide logic.
+              Entered data is not copied.
+            </span>
+            <span class="table-copy-recommended">Recommended</span>
+          </button>
+
+          <button type="button" class="table-copy-choice" @click="confirmBasicTableCopy">
+            <strong>Copy basic table only</strong>
+            <span>Copies only the basic field settings. Columns and advanced settings are not copied.</span>
+          </button>
+        </div>
+
+        <div class="modal-actions">
+          <button type="button" class="btn-option" @click="closeTableCopyDialog">Cancel</button>
+        </div>
+      </div>
+    </div>
+
     <!-- UNSAVED CHANGES DIALOG -->
     <div v-if="showUnsavedDialog" class="modal-overlay" @click.self="unsavedBusy ? null : onUnsavedKeepEditing()">
       <div class="modal">
@@ -968,6 +996,7 @@ import RearrangeStructureDialog from "@/components/RearrangeStructureDialog.vue"
 import FieldTable from "@/components/FieldTable.vue";
 import FieldOptionRemapDialog from "@/components/FieldOptionRemapDialog.vue";
 import SaveTemplateFormDialog from "@/components/SaveTemplateFormDialog.vue";
+import { copyCompleteTableStructure } from "@/utils/tableFieldCopy";
 export default {
   name: "ScratchFormComponent",
   components: {
@@ -1081,6 +1110,8 @@ export default {
       inputDialogCallback: null,
       showTableConfigurator: false,
       pendingTableField: null,
+      showTableCopyDialog: false,
+      pendingTableCopyIndices: null,
 
       // Template search
       searchQuery: "",
@@ -3938,6 +3969,74 @@ export default {
       this.openGenericDialog("Basic settings are copied. Advanced settings are not copied.");
     },
 
+    openTableCopyDialog(si, fi) {
+      this.ensureCurrentFormExists();
+
+      const field = this.currentForm.sections?.[si]?.fields?.[fi];
+      if (!field || field.type !== "table") return;
+
+      this.pendingTableCopyIndices = { sectionIndex: si, fieldIndex: fi };
+      this.showTableCopyDialog = true;
+    },
+
+    closeTableCopyDialog() {
+      this.showTableCopyDialog = false;
+      this.pendingTableCopyIndices = null;
+    },
+
+    confirmBasicTableCopy() {
+      const indices = this.pendingTableCopyIndices;
+      this.closeTableCopyDialog();
+      if (!indices) return;
+      this.addSimilarField(indices.sectionIndex, indices.fieldIndex);
+    },
+
+    confirmCompleteTableCopy() {
+      const indices = this.pendingTableCopyIndices;
+      this.closeTableCopyDialog();
+      if (!indices) return;
+
+      const { sectionIndex: si, fieldIndex: fi } = indices;
+      const source = this.currentForm.sections?.[si]?.fields?.[fi];
+      if (!source || source.type !== "table") return;
+
+      const baseName = String(source.name || "table").replace(/_\d+$/, "");
+      const nameSeed = `${baseName}_${Date.now()}`;
+      const existingNames = new Set(
+        (this.currentForm.sections[si]?.fields || []).map((field) => String(field?.name || ""))
+      );
+      let uniqueName = nameSeed;
+      let nameCounter = 2;
+      while (existingNames.has(uniqueName)) {
+        uniqueName = `${nameSeed}_${nameCounter}`;
+        nameCounter += 1;
+      }
+
+      const sourceLabel = String(source.label || "Table").trim() || "Table";
+      const labelSeed = `${sourceLabel}_copy`;
+      const existingLabels = new Set(
+        (this.currentForm.sections[si]?.fields || []).map((field) => String(field?.label || "").trim())
+      );
+      let uniqueLabel = labelSeed;
+      let labelCounter = 2;
+      while (existingLabels.has(uniqueLabel)) {
+        uniqueLabel = `${labelSeed}_${labelCounter}`;
+        labelCounter += 1;
+      }
+
+      const clone = copyCompleteTableStructure(source, {
+        fieldId: this.uuidForLogic(),
+        name: uniqueName,
+        label: uniqueLabel,
+        createColumnId: (_, index) => `table_col_${this.uuidForLogic()}_${index + 1}`,
+      });
+
+      this.currentForm.sections[si].fields.splice(fi + 1, 0, clone);
+      this.openGenericDialog(
+        "The complete table structure was copied, including advanced settings and show/hide logic. Entered data was not copied."
+      );
+    },
+
     removeField(si, fi) {
       this.ensureCurrentFormExists();
       const field = this.currentForm.sections?.[si]?.fields?.[fi];
@@ -5410,6 +5509,83 @@ select:focus {
   justify-content: flex-end;
   gap: 10px;
   margin-top: 14px;
+}
+
+.table-copy-modal {
+  width: min(92vw, 620px);
+}
+
+.table-copy-modal h3 {
+  margin: 0 0 6px;
+  color: #111827;
+}
+
+.table-copy-intro {
+  margin-bottom: 16px !important;
+}
+
+.table-copy-choices {
+  display: grid;
+  gap: 12px;
+}
+
+.table-copy-choice {
+  position: relative;
+  display: grid;
+  gap: 6px;
+  width: 100%;
+  padding: 16px;
+  text-align: left;
+  color: #1f2937;
+  background: #ffffff;
+  border: 1px solid #d1d5db;
+  border-radius: 10px;
+  cursor: pointer;
+}
+
+.table-copy-choice:hover,
+.table-copy-choice:focus-visible {
+  border-color: #2563eb;
+  background: #f8faff;
+  outline: none;
+}
+
+.table-copy-choice.recommended {
+  border-color: #93c5fd;
+  padding-right: 112px;
+}
+
+.table-copy-choice strong {
+  color: #111827;
+  font-size: 15px;
+}
+
+.table-copy-choice span:not(.table-copy-recommended) {
+  color: #4b5563;
+  line-height: 1.45;
+}
+
+.table-copy-recommended {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  padding: 3px 8px;
+  color: #1d4ed8;
+  background: #dbeafe;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+@media (max-width: 520px) {
+  .table-copy-choice.recommended {
+    padding-right: 16px;
+  }
+
+  .table-copy-recommended {
+    position: static;
+    justify-self: start;
+  }
 }
 
 .input-dialog-field {
