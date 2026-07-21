@@ -752,6 +752,13 @@
       @select="applyPreviousVisitImport"
     />
 
+    <DataEntryConflictDialog
+      :visible="showEntryConflictDialog"
+      :conflicts="entryConflicts"
+      @confirm="confirmEntryConflictResolution"
+      @cancel="cancelEntryConflictResolution"
+    />
+
     <div
       v-if="showUnsavedExitDialog"
       class="unsaved-exit-backdrop"
@@ -849,6 +856,7 @@ import GroupAssignDialog from "@/components/dataentry/GroupAssignDialog.vue";
 import SkipRequiredDialog from "@/components/dataentry/SkipRequiredDialog.vue";
 import StudyDataImportDialog from "@/components/dataentry/StudyDataImportDialog.vue";
 import PreviousVisitImportDialog from "@/components/dataentry/PreviousVisitImportDialog.vue";
+import DataEntryConflictDialog from "@/components/dataentry/DataEntryConflictDialog.vue";
 import FieldTable from "@/components/FieldTable.vue";
 import {
   getCalculationRulesFromStudy,
@@ -881,6 +889,11 @@ import {
   uploadedFileId,
   uploadedFileName,
 } from "@/utils/uploadedFiles";
+import {
+  applyConflictDecisions,
+  mergeDataEntryFields,
+} from "@/utils/dataEntryConflict";
+import { mergeTableFieldConflict } from "@/utils/tableConflict";
 
 export default {
   name: "StudyDataEntryComponent",
@@ -906,6 +919,7 @@ export default {
     SkipRequiredDialog,
     StudyDataImportDialog,
     PreviousVisitImportDialog,
+    DataEntryConflictDialog,
   },
   data() {
     return {
@@ -960,6 +974,9 @@ export default {
       showSkipDialog: false,
       skipCandidates: [],
       skipSelections: {},
+      showEntryConflictDialog: false,
+      entryConflicts: [],
+      pendingEntryConflict: null,
 
       existingEntries: [],
       entryIds: [],
@@ -5011,6 +5028,16 @@ applyImportedRowFromDialog(payload) {
         this.currentVisitIndex = payload.visit_index ?? 0;
         this.currentGroupIndex = payload.group_index ?? 0;
         this.ensureSlot(this.currentSubjectIndex, this.currentVisitIndex, this.currentGroupIndex);
+        this.entryData[this.currentSubjectIndex][this.currentVisitIndex][this.currentGroupIndex] =
+          this.dictToArray(payload.entry_data || {});
+        this.skipFlags[this.currentSubjectIndex][this.currentVisitIndex][this.currentGroupIndex] =
+          this.flagsDictToArray(payload.skipped_required_flags || {});
+        this.entryIds[this.currentSubjectIndex][this.currentVisitIndex][this.currentGroupIndex] =
+          payload.entry_id || null;
+        this.currentRevisionToken = String(payload.revision_token || "");
+        if (payload.form_version != null) {
+          this.selectedVersion = Number(payload.form_version);
+        }
         this.runAllCalculationsForCurrentCell();
         this.showSelection = false;
         this.validationErrors = {};
@@ -5466,6 +5493,211 @@ applyImportedRowFromDialog(payload) {
       this.validationErrors = {};
       this.manualDateInputErrors = {};
       this.calcWarnings = {};
+    },
+
+    parseEntryBaseline() {
+      try {
+        const parsed = JSON.parse(this.entryBaselineSnapshot || "{}");
+        return {
+          data: Array.isArray(parsed?.data) ? parsed.data : this.makeSectionFieldSkeleton(),
+          skips: Array.isArray(parsed?.skips) ? parsed.skips : this.makeSkipSkeleton(),
+        };
+      } catch (error) {
+        console.warn("Unable to parse the data-entry baseline", error);
+        return {
+          data: this.makeSectionFieldSkeleton(),
+          skips: this.makeSkipSkeleton(),
+        };
+      }
+    },
+
+    flagsDictToArray(flagsDict) {
+      return (this.selectedModels || []).map((section) => {
+        const sectionKey = this.sectionDictKey(section);
+        const sectionFlags =
+          flagsDict && typeof flagsDict === "object" ? flagsDict[sectionKey] : null;
+        return (section?.fields || []).map((field, fieldIndex) =>
+          !!this.getValueFromSectionDict(sectionFlags, field, fieldIndex)
+        );
+      });
+    },
+
+    entryConflictLabels(conflict) {
+      const sectionIndex = (this.selectedModels || []).findIndex(
+        (section) => this.sectionDictKey(section) === conflict.sectionKey
+      );
+      const section = this.selectedModels?.[sectionIndex] || null;
+      const fieldIndex = (section?.fields || []).findIndex(
+        (field, index) => this.fieldDictKey(field, index) === conflict.fieldKey
+      );
+      const field = section?.fields?.[fieldIndex] || null;
+
+      return {
+        ...conflict,
+        field: field || {},
+        fieldType: String(field?.type || "text").toLowerCase(),
+        sectionLabel: section?.title || conflict.sectionKey || "Other",
+        fieldLabel:
+          field?.label ||
+          field?.title ||
+          field?.name ||
+          conflict.fieldKey ||
+          "Field",
+      };
+    },
+
+    expandTableEntryConflicts(dataMerge) {
+      const expanded = [];
+
+      (dataMerge?.conflicts || []).forEach((conflict) => {
+        const labeled = this.entryConflictLabels(conflict);
+        if (labeled.fieldType !== "table") {
+          expanded.push(labeled);
+          return;
+        }
+
+        const tableMerge = mergeTableFieldConflict({
+          parentKey: conflict.key,
+          sectionKey: conflict.sectionKey,
+          fieldKey: conflict.fieldKey,
+          field: labeled.field,
+          baseValue: conflict.originalValue,
+          localValue: conflict.localValue,
+          latestValue: conflict.latestValue,
+        });
+
+        if (!dataMerge.merged[conflict.sectionKey]) {
+          dataMerge.merged[conflict.sectionKey] = {};
+        }
+        dataMerge.merged[conflict.sectionKey][conflict.fieldKey] =
+          tableMerge.mergedValue;
+
+        tableMerge.conflicts.forEach((cellConflict) => {
+          if (cellConflict.conflictKind === "concurrent-table-row-addition") {
+            expanded.push({
+              ...cellConflict,
+              sectionLabel: labeled.sectionLabel,
+              fieldLabel: `${labeled.fieldLabel} · Row ${cellConflict.tableRowIndex + 1} · New row`,
+              field: {
+                ...labeled.field,
+                type: "table-row",
+                conflictColumns: cellConflict.tableColumns,
+              },
+              fieldType: "table-row",
+            });
+            return;
+          }
+
+          const columnField = {
+            ...(cellConflict.tableColumn || {}),
+            type: cellConflict.tableColumnType || "text",
+          };
+          expanded.push({
+            ...cellConflict,
+            sectionLabel: labeled.sectionLabel,
+            fieldLabel: `${labeled.fieldLabel} · Row ${cellConflict.tableRowIndex + 1} · ${cellConflict.tableColumnLabel}`,
+            field: columnField,
+            fieldType: String(columnField.type || "text").toLowerCase(),
+          });
+        });
+      });
+
+      return expanded;
+    },
+
+    setConflictRetryState(dataDict, skipFlags, latest) {
+      const s = this.currentSubjectIndex;
+      const v = this.currentVisitIndex;
+      const g = this.currentGroupIndex;
+      this.ensureSlot(s, v, g);
+
+      this.entryData[s][v][g] = this.dictToArray(dataDict || {});
+      this.skipFlags[s][v][g] = this.normalizeSkipFlagsShape(skipFlags);
+      this.entryIds[s][v][g] = latest?.entry_id || null;
+      this.currentRevisionToken = String(latest?.revision_token || "");
+
+      const latestDataArray = this.dictToArray(latest?.data || {});
+      const latestSkipFlags = this.normalizeSkipFlagsShape(
+        latest?.skipped_required_flags || []
+      );
+      this.entryBaselineSnapshot = JSON.stringify({
+        data: latestDataArray,
+        skips: latestSkipFlags,
+        locks: this.importedPreviousVisitLocks || {},
+      });
+      this.entryDirty = true;
+    },
+
+    async handleEntrySaveConflict(latest, localData, localSkipFlags) {
+      if (!latest) {
+        this.showDialogMessage(
+          "Another person changed this entry. Your values are still here; please try saving again."
+        );
+        return;
+      }
+
+      const baseline = this.parseEntryBaseline();
+      const dataMerge = mergeDataEntryFields(
+        this.arrayToDict(baseline.data),
+        localData || {},
+        latest.data || {}
+      );
+
+      const latestSkipArray = this.normalizeSkipFlagsShape(
+        latest.skipped_required_flags || []
+      );
+      const skipMerge = mergeDataEntryFields(
+        this.flagsArrayToDict(baseline.skips),
+        this.flagsArrayToDict(localSkipFlags),
+        this.flagsArrayToDict(latestSkipArray)
+      );
+      const mergedSkipArray = this.flagsDictToArray(skipMerge.merged);
+      const displayConflicts = this.expandTableEntryConflicts(dataMerge);
+
+      if (!displayConflicts.length) {
+        this.setConflictRetryState(dataMerge.merged, mergedSkipArray, latest);
+        await this.$nextTick();
+        await this.submitData();
+        return;
+      }
+
+      this.pendingEntryConflict = {
+        latest,
+        mergedData: dataMerge.merged,
+        mergedSkipFlags: mergedSkipArray,
+        conflicts: displayConflicts,
+      };
+      this.entryConflicts = displayConflicts;
+      this.showEntryConflictDialog = true;
+    },
+
+    cancelEntryConflictResolution() {
+      this.showEntryConflictDialog = false;
+      this.entryConflicts = [];
+      this.pendingEntryConflict = null;
+      this.entryDirty = true;
+    },
+
+    async confirmEntryConflictResolution(decisions) {
+      const pending = this.pendingEntryConflict;
+      if (!pending) return;
+
+      const resolvedData = applyConflictDecisions(
+        pending.mergedData,
+        pending.conflicts,
+        decisions
+      );
+
+      this.showEntryConflictDialog = false;
+      this.entryConflicts = [];
+      this.pendingEntryConflict = null;
+      this.setConflictRetryState(
+        resolvedData,
+        pending.mergedSkipFlags,
+        pending.latest
+      );
+      await this.$nextTick();
+      await this.submitData();
     },
 
     async fetchRevisionTokenForSlot(s, v, g, versionOverride = null) {
@@ -6231,7 +6463,10 @@ applyImportedRowFromDialog(payload) {
         if (this.isShared) {
           const auditLabel = hasAnySkip ? "Shared link data Entry (Skipped Required)" : "Shared link data Entry";
           const resp = await axios.post(`/forms/shared/${this.shareToken}/data`, payload, {
-            params: { audit_label: auditLabel },
+            params: {
+              audit_label: auditLabel,
+              expected_revision_token: this.currentRevisionToken,
+            },
           });
 
           const saved = {
@@ -6251,6 +6486,8 @@ applyImportedRowFromDialog(payload) {
             created_at: resp?.data?.created_at ?? new Date().toISOString(),
           };
           (this.existingEntries = this.existingEntries || []).push(saved);
+          this.currentRevisionToken = String(resp?.data?.revision_token || "");
+          this.entryIds[s][v][g] = resp?.data?.id || null;
 
           this.showDialogMessage(this.buildSaveSuccessMessage("saved"));
           this.captureEntryBaseline();
@@ -6345,12 +6582,7 @@ applyImportedRowFromDialog(payload) {
 
         if (err?.response?.status === 409) {
           const latest = err?.response?.data?.detail?.latest || null;
-          if (latest) {
-            await this.reloadLatestAfterConflict(latest);
-          }
-          this.showDialogMessage(
-            "This entry was changed in the backend after you opened it. Latest values were reloaded. Please review your values and save again."
-          );
+          await this.handleEntrySaveConflict(latest, dictData, rawSkipFlags);
           return;
         }
 

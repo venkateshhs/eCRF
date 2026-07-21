@@ -1291,10 +1291,23 @@ class DataladStudyRepo:
         group_raw: Optional[str] = None,
         user_id: Optional[int] = None,
         actor_name: Optional[str] = None,
+        expected_revision_token: Optional[str] = None,
     ) -> Dict[str, Any]:
         p = self.ensure_dataset(study_id, study_name)
 
         with dataset_lock(LockSpec(dataset_path=p.dataset_path)):
+            if expected_revision_token is not None:
+                latest = self.get_latest_entry_for_slot(
+                    study_id=study_id,
+                    study_name=study_name,
+                    subject_index=subject_index,
+                    visit_index=visit_index,
+                    group_index=group_index,
+                    form_version=form_version,
+                )
+                if self.compute_entry_revision_token(latest) != str(expected_revision_token):
+                    raise ValueError("Slot state changed")
+
             entry_id = self._next_entry_id(p)
 
             entry = {
@@ -1370,6 +1383,7 @@ class DataladStudyRepo:
         group_raw: Optional[str] = None,
         user_id: Optional[int] = None,
         actor_name: Optional[str] = None,
+        expected_revision_token: Optional[str] = None,
     ) -> Dict[str, Any]:
         p = self.paths(study_id, study_name)
         target = None
@@ -1381,6 +1395,18 @@ class DataladStudyRepo:
 
         with dataset_lock(LockSpec(dataset_path=p.dataset_path)):
             old_entry = _json_load(target, {})
+            if expected_revision_token is not None:
+                latest = self.get_latest_entry_for_slot(
+                    study_id=study_id,
+                    study_name=study_name,
+                    subject_index=int(payload["subject_index"]),
+                    visit_index=int(payload["visit_index"]),
+                    group_index=int(payload["group_index"]),
+                    form_version=int(old_entry.get("form_version") or 1),
+                )
+                if self.compute_entry_revision_token(latest) != str(expected_revision_token):
+                    raise ValueError("Slot state changed")
+
             new_entry = _deepcopy_json(old_entry)
             new_entry.update({
                 "subject_index": int(payload["subject_index"]),

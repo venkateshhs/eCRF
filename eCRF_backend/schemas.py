@@ -193,6 +193,11 @@ class SharedFormAccessOut(BaseModel):
     group_index: int
     permission: str
     allowed_section_ids: Optional[List[str]] = []
+    entry_id: Optional[int] = None
+    form_version: Optional[int] = None
+    entry_data: Dict[str, Any] = Field(default_factory=dict)
+    skipped_required_flags: Optional[Dict[str, Any]] = None
+    revision_token: str = ""
     study: Any
 
     class Config:
@@ -257,6 +262,7 @@ class StudyDataEntryOut(BaseModel):
     progress_completed: Optional[int] = None
     progress_total: Optional[int] = None
     progress_skipped: Optional[int] = None
+    revision_token: Optional[str] = None
     created_at: datetime
 
     class Config:

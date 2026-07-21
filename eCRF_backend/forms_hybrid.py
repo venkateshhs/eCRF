@@ -20,6 +20,7 @@ from .users import get_current_user
 from .datalad_repo import DataladStudyRepo, _deepcopy_json, local_now
 from .versions import VersionManager
 from .settings import get_settings
+from .entry_progress import calculate_overall_entry_progress
 
 router = APIRouter(prefix="/forms", tags=["forms"])
 repo = DataladStudyRepo()
@@ -326,10 +327,71 @@ def _flags_dict_to_list(flags, selected_models):
         fields = sec.get("fields") or []
         inner = flags.get(title, {}) if isinstance(flags.get(title), dict) else {}
         for idx, f in enumerate(fields):
-            key = f.get("name") or f.get("label") or f.get("key") or f.get("title") or f"f{idx}"
+            key = (
+                f.get("id")
+                or f.get("_id")
+                or f.get("name")
+                or f.get("field_id")
+                or f.get("uid")
+                or f.get("key")
+                or f.get("label")
+                or f.get("title")
+                or f"f{idx}"
+            )
             row.append(bool(inner.get(key, False)))
         out.append(row)
     return out
+
+
+def _flags_list_to_dict(flags, selected_models):
+    rows = flags if isinstance(flags, list) else []
+    out: Dict[str, Dict[str, bool]] = {}
+    for sec_idx, sec in enumerate(selected_models or []):
+        title = str(sec.get("title") or "").strip()
+        if not title:
+            continue
+        row = rows[sec_idx] if sec_idx < len(rows) and isinstance(rows[sec_idx], list) else []
+        inner: Dict[str, bool] = {}
+        for field_idx, field in enumerate(sec.get("fields") or []):
+            key = (
+                field.get("id")
+                or field.get("_id")
+                or field.get("name")
+                or field.get("field_id")
+                or field.get("uid")
+                or field.get("key")
+                or field.get("label")
+                or field.get("title")
+                or f"f{field_idx}"
+            )
+            inner[str(key)] = bool(row[field_idx]) if field_idx < len(row) else False
+        out[title] = inner
+    return out
+
+
+def _filter_entry_dict_to_allowed_sections(data, study_data, allowed_section_ids):
+    allowed_titles = set(
+        _allowed_shared_section_title_map(study_data or {}, allowed_section_ids).keys()
+    )
+    return {
+        str(section): _deepcopy_json(values)
+        for section, values in (data or {}).items()
+        if str(section) in allowed_titles
+    }
+
+
+def _merge_submitted_entry_sections(latest_data, submitted_data):
+    """Overlay submitted fields while preserving every unsubmitted section/field."""
+    merged = _deepcopy_json(latest_data or {})
+    for section_title, section_values in (submitted_data or {}).items():
+        existing_section = merged.get(section_title)
+        if not isinstance(existing_section, dict):
+            existing_section = {}
+        merged[section_title] = {
+            **existing_section,
+            **_deepcopy_json(section_values or {}),
+        }
+    return merged
 
 
 @router.get("/available-fields")
@@ -1082,20 +1144,39 @@ def save_study_data(
     content_row = _get_content_row_or_404(db, study_id)
     selected_models = ((content_row.study_data or {}).get("selectedModels") or [])
 
-    return repo.save_entry(
-        study_id=study_id,
-        study_name=meta.study_name,
-        subject_index=payload.subject_index,
-        visit_index=payload.visit_index,
-        group_index=payload.group_index,
-        form_version=form_version,
-        data=payload.data,
-        skipped_required_flags=_flags_dict_to_list(payload.skipped_required_flags, selected_models),
-        actor=_actor_identifier(current_user),
-        actor_name=_display_name(current_user),
-        user_id=current_user.id,
-        audit_label=audit_label,
-    )
+    try:
+        return repo.save_entry(
+            study_id=study_id,
+            study_name=meta.study_name,
+            subject_index=payload.subject_index,
+            visit_index=payload.visit_index,
+            group_index=payload.group_index,
+            form_version=form_version,
+            data=payload.data,
+            skipped_required_flags=_flags_dict_to_list(payload.skipped_required_flags, selected_models),
+            actor=_actor_identifier(current_user),
+            actor_name=_display_name(current_user),
+            user_id=current_user.id,
+            audit_label=audit_label,
+            expected_revision_token=expected_revision_token,
+        )
+    except ValueError:
+        latest_slot_state = repo.get_current_slot_state(
+            study_id=study_id,
+            study_name=meta.study_name,
+            subject_index=payload.subject_index,
+            visit_index=payload.visit_index,
+            group_index=payload.group_index,
+            form_version=form_version,
+        )
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": "This data changed while it was being saved.",
+                "conflict": True,
+                "latest": latest_slot_state,
+            },
+        )
 
 
 @router.put("/studies/{study_id}/data_entries/{entry_id}", response_model=schemas.StudyDataEntryOut)
@@ -1163,22 +1244,41 @@ def update_study_data_entry(
     content_row = _get_content_row_or_404(db, study_id)
     selected_models = ((content_row.study_data or {}).get("selectedModels") or [])
 
-    return repo.update_entry(
-        study_id=study_id,
-        study_name=meta.study_name,
-        entry_id=entry_id,
-        payload={
-            "subject_index": payload.subject_index,
-            "visit_index": payload.visit_index,
-            "group_index": payload.group_index,
-            "data": payload.data,
-            "skipped_required_flags": _flags_dict_to_list(payload.skipped_required_flags, selected_models),
-        },
-        actor=_actor_identifier(user),
-        actor_name=_display_name(user),
-        user_id=user.id,
-        audit_label=audit_label,
-    )
+    try:
+        return repo.update_entry(
+            study_id=study_id,
+            study_name=meta.study_name,
+            entry_id=entry_id,
+            payload={
+                "subject_index": payload.subject_index,
+                "visit_index": payload.visit_index,
+                "group_index": payload.group_index,
+                "data": payload.data,
+                "skipped_required_flags": _flags_dict_to_list(payload.skipped_required_flags, selected_models),
+            },
+            actor=_actor_identifier(user),
+            actor_name=_display_name(user),
+            user_id=user.id,
+            audit_label=audit_label,
+            expected_revision_token=expected_revision_token,
+        )
+    except ValueError:
+        latest_slot_state = repo.get_current_slot_state(
+            study_id=study_id,
+            study_name=meta.study_name,
+            subject_index=payload.subject_index,
+            visit_index=payload.visit_index,
+            group_index=payload.group_index,
+            form_version=form_version,
+        )
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": "This data changed while it was being saved.",
+                "conflict": True,
+                "latest": latest_slot_state,
+            },
+        )
 
 
 @router.get("/studies/{study_id}/data_entries", response_model=schemas.PaginatedStudyDataEntries)
@@ -1629,6 +1729,31 @@ def access_shared_form(
         content_row.study_data or {},
         access.allowed_section_ids,
     )
+    latest_template = _latest_template_or_500(db, access.study_id)
+    form_version = int(latest_template.version)
+    slot_state = repo.get_current_slot_state(
+        study_id=access.study_id,
+        study_name=meta.study_name,
+        subject_index=access.subject_index,
+        visit_index=access.visit_index,
+        group_index=access.group_index,
+        form_version=form_version,
+    )
+    selected_models = (content_row.study_data or {}).get("selectedModels") or []
+    filtered_entry_data = _filter_entry_dict_to_allowed_sections(
+        slot_state.get("data") or {},
+        content_row.study_data or {},
+        access.allowed_section_ids,
+    )
+    all_flags_dict = _flags_list_to_dict(
+        slot_state.get("skipped_required_flags") or [],
+        selected_models,
+    )
+    filtered_flags = _filter_entry_dict_to_allowed_sections(
+        all_flags_dict,
+        content_row.study_data or {},
+        access.allowed_section_ids,
+    )
 
     return {
         "study_id": access.study_id,
@@ -1637,6 +1762,11 @@ def access_shared_form(
         "group_index": access.group_index,
         "permission": access.permission,
         "allowed_section_ids": access.allowed_section_ids or [],
+        "entry_id": slot_state.get("entry_id"),
+        "form_version": form_version,
+        "entry_data": filtered_entry_data,
+        "skipped_required_flags": filtered_flags,
+        "revision_token": slot_state.get("revision_token") or "",
         "study": {
             "metadata": {
                 "id": meta.id,
@@ -1658,6 +1788,7 @@ def shared_upsert_data(
     token: str,
     payload: schemas.SharedStudyDataEntryCreate,
     version: Optional[int] = Query(None),
+    expected_revision_token: str = Query(...),
     audit_label: Optional[str] = Query(None),
     db: Session = Depends(get_db),
 ):
@@ -1691,20 +1822,124 @@ def shared_upsert_data(
         allowed_section_ids=access.allowed_section_ids or [],
     )
 
-    return repo.save_entry(
+    latest = repo.get_current_slot_state(
         study_id=meta.id,
         study_name=meta.study_name,
         subject_index=access.subject_index,
         visit_index=access.visit_index,
         group_index=access.group_index,
         form_version=form_version,
-        data=payload.data,
-        skipped_required_flags=_flags_dict_to_list(payload.skipped_required_flags, selected_models),
-        actor="shared-link",
-        actor_name="Shared link submit",
-        user_id=None,
-        audit_label=audit_label,
     )
+
+    def filtered_slot_state(slot_state):
+        filtered_study_data = _filter_shared_study_data_by_sections(
+            study_data,
+            access.allowed_section_ids,
+        )
+        filtered_models = filtered_study_data.get("selectedModels") or []
+        filtered_data = _filter_entry_dict_to_allowed_sections(
+            slot_state.get("data") or {},
+            study_data,
+            access.allowed_section_ids,
+        )
+        all_flags = _flags_list_to_dict(
+            slot_state.get("skipped_required_flags") or [],
+            selected_models,
+        )
+        filtered_flags = _filter_entry_dict_to_allowed_sections(
+            all_flags,
+            study_data,
+            access.allowed_section_ids,
+        )
+        return {
+            **slot_state,
+            "data": filtered_data,
+            "skipped_required_flags": _flags_dict_to_list(
+                filtered_flags,
+                filtered_models,
+            ),
+        }
+
+    if str(latest.get("revision_token") or "") != str(expected_revision_token or ""):
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": "This data was changed after the shared form was opened.",
+                "conflict": True,
+                "latest": filtered_slot_state(latest),
+            },
+        )
+
+    merged_data = _merge_submitted_entry_sections(
+        latest.get("data") or {},
+        payload.data or {},
+    )
+
+    merged_flags = _merge_submitted_entry_sections(
+        _flags_list_to_dict(
+            latest.get("skipped_required_flags") or [],
+            selected_models,
+        ),
+        payload.skipped_required_flags or {},
+    )
+    merged_flags_list = _flags_dict_to_list(merged_flags, selected_models)
+    overall_progress = calculate_overall_entry_progress(
+        study_data=study_data,
+        data=merged_data,
+        skipped_required_flags=merged_flags_list,
+        visit_index=access.visit_index,
+        group_index=access.group_index,
+    )
+
+    try:
+        saved = repo.save_entry(
+            study_id=meta.id,
+            study_name=meta.study_name,
+            subject_index=access.subject_index,
+            visit_index=access.visit_index,
+            group_index=access.group_index,
+            form_version=form_version,
+            data=merged_data,
+            skipped_required_flags=merged_flags_list,
+            actor="shared-link",
+            actor_name="Shared link submit",
+            user_id=None,
+            audit_label=audit_label,
+            progress_status=overall_progress["progress_status"],
+            progress_percentage=overall_progress["progress_percentage"],
+            progress_completed=overall_progress["progress_completed"],
+            progress_total=overall_progress["progress_total"],
+            progress_skipped=overall_progress["progress_skipped"],
+            expected_revision_token=expected_revision_token,
+        )
+    except ValueError:
+        latest = repo.get_current_slot_state(
+            study_id=meta.id,
+            study_name=meta.study_name,
+            subject_index=access.subject_index,
+            visit_index=access.visit_index,
+            group_index=access.group_index,
+            form_version=form_version,
+        )
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": "This data changed while it was being saved.",
+                "conflict": True,
+                "latest": filtered_slot_state(latest),
+            },
+        )
+
+    filtered_saved = filtered_slot_state(
+        {
+            **saved,
+            "exists": True,
+            "entry_id": saved.get("id"),
+            "revision_token": repo.compute_entry_revision_token(saved),
+        }
+    )
+    filtered_saved["revision_token"] = repo.compute_entry_revision_token(saved)
+    return filtered_saved
 
 
 @router.delete("/studies/{study_id}", status_code=status.HTTP_204_NO_CONTENT)
