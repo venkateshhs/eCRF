@@ -278,7 +278,11 @@ def _configure_local_environment() -> Path:
     # Local bootstrap admin
     os.environ.setdefault("ECRF_BOOTSTRAP_ADMIN", "1")
     os.environ.setdefault("ECRF_ADMIN_USERNAME", "admin")
-    os.environ.setdefault("ECRF_ADMIN_EMAIL", "admin@case-e.local")
+    if (os.environ.get("ECRF_ADMIN_EMAIL") or "").strip().lower() in {
+        "",
+        "admin@case-e.local",
+    }:
+        os.environ["ECRF_ADMIN_EMAIL"] = "admin@case-e.org"
     os.environ.setdefault("ECRF_ADMIN_PASSWORD", "Admin123!")
     os.environ.setdefault("ECRF_ADMIN_FIRST_NAME", "Admin")
     os.environ.setdefault("ECRF_ADMIN_LAST_NAME", "User")

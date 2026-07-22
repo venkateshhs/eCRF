@@ -59,6 +59,14 @@ except Exception as e:
     print(f"!! could not collect sqlalchemy submodules ({e})")
     sa_submods = []
 
+try:
+    charset_submods = collect_submodules("charset_normalizer")
+    if charset_submods:
+        print(f"++ collected charset_normalizer submodules: {len(charset_submods)}")
+except Exception as e:
+    print(f"!! could not collect charset_normalizer submodules ({e})")
+    charset_submods = []
+
 hiddenimports = [
     "eCRF_backend",
     "eCRF_backend.main",
@@ -96,7 +104,8 @@ hiddenimports = [
     # force-include PyJWT
     "jwt",
     "sqlalchemy",
-] + jwt_submods
+    "charset_normalizer",
+] + jwt_submods + charset_submods
 
 # 2) Directory trees for COLLECT
 extra_trees = []

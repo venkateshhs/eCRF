@@ -11,6 +11,16 @@ from .settings import get_settings
 
 settings = get_settings()
 
+LEGACY_INVALID_ADMIN_EMAILS = {"admin@case-e.local"}
+DEFAULT_LOCAL_ADMIN_EMAIL = "admin@case-e.org"
+
+
+def normalize_bootstrap_admin_email(email: str | None) -> str:
+    candidate = (email or "").strip()
+    if not candidate or candidate.lower() in LEGACY_INVALID_ADMIN_EMAILS:
+        return DEFAULT_LOCAL_ADMIN_EMAIL
+    return candidate
+
 
 def ensure_tables() -> None:
     if not settings.db_auto_create:
@@ -90,7 +100,7 @@ def ensure_admin_user() -> None:
         )
 
     username = settings.admin_username
-    email = settings.admin_email
+    email = normalize_bootstrap_admin_email(settings.admin_email)
     password = settings.admin_password or "Admin123!"
     first_name = settings.admin_first_name
     last_name = settings.admin_last_name
@@ -111,6 +121,11 @@ def ensure_admin_user() -> None:
                 .first()
             )
             changed = False
+
+            if (existing.email or "").strip().lower() in LEGACY_INVALID_ADMIN_EMAILS:
+                existing.email = email
+                changed = True
+                logger.info("Repaired legacy bootstrap admin email for: %s", username)
 
             if profile is None:
                 profile = models.UserProfile(
