@@ -270,6 +270,9 @@
         class="form-area"
         :class="{ 'form-area-full': showMatrix || showLogic || showValueAssignments }"
         @scroll.passive="onScratchScroll"
+        @pointerenter="onBuilderPointerMove"
+        @pointermove.passive="onBuilderPointerMove"
+        @pointerleave="onBuilderPointerLeave"
       >
         <div class="sections-container" :class="{ 'value-assignments-sections-container': showValueAssignments }">
           <!-- Sections View -->
@@ -390,9 +393,13 @@
                 v-for="(section, si) in currentForm.sections"
                 :key="getSectionUid(section)"
                 class="form-section"
-                :class="{ active: activeSection === si }"
+                :class="{
+                  active: activeSection === si,
+                  'recently-added-section': recentlyAddedSectionUid === getSectionUid(section)
+                }"
                 @click="onSectionClick(si)"
                 :ref="'section-' + si"
+                :data-builder-section-index="si"
               >
                 <div class="section-header">
                   <h3>{{ section.title }}</h3>
@@ -440,7 +447,11 @@
                       v-for="(field, fi) in section.fields"
                       :key="getFieldUid(field)"
                       class="form-group"
-                      :class="getFieldDropClass(si, fi)"
+                      :class="[
+                        getFieldDropClass(si, fi),
+                        { 'recently-added-field': recentlyAddedFieldId === String(field._id || '') }
+                      ]"
+                      :data-builder-field-id="field._id || null"
                       @dragover.stop.prevent="onFieldDragOver(si, fi, $event)"
                       @drop.stop.prevent="onFieldDrop(si, fi)"
                     >
@@ -997,6 +1008,7 @@ import FieldTable from "@/components/FieldTable.vue";
 import FieldOptionRemapDialog from "@/components/FieldOptionRemapDialog.vue";
 import SaveTemplateFormDialog from "@/components/SaveTemplateFormDialog.vue";
 import { copyCompleteTableStructure } from "@/utils/tableFieldCopy";
+import { calculateContainedRevealScrollTop } from "@/utils/builderScrollFocus";
 export default {
   name: "ScratchFormComponent",
   components: {
@@ -1174,6 +1186,13 @@ export default {
       scratchScrollDirection: "down",
       hasScratchScrollableContent: false,
       builderStickyResizeObserver: null,
+      builderPointerPosition: null,
+      activeSectionScrollFrame: null,
+      addedFieldRevealFrame: null,
+      suppressScrollActiveUntil: 0,
+      recentlyAddedSectionUid: "",
+      recentlyAddedFieldId: "",
+      recentlyAddedHighlightTimer: null,
 
       showSaveTemplateFormDialog: false,
       saveTemplateBusy: false,
@@ -1436,6 +1455,18 @@ export default {
     if (this.builderStickyResizeObserver) {
       this.builderStickyResizeObserver.disconnect();
       this.builderStickyResizeObserver = null;
+    }
+    if (this.activeSectionScrollFrame !== null) {
+      window.cancelAnimationFrame(this.activeSectionScrollFrame);
+      this.activeSectionScrollFrame = null;
+    }
+    if (this.addedFieldRevealFrame !== null) {
+      window.cancelAnimationFrame(this.addedFieldRevealFrame);
+      this.addedFieldRevealFrame = null;
+    }
+    if (this.recentlyAddedHighlightTimer) {
+      window.clearTimeout(this.recentlyAddedHighlightTimer);
+      this.recentlyAddedHighlightTimer = null;
     }
   },
 
@@ -1794,6 +1825,134 @@ export default {
 
       const nearBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 24;
       this.scratchScrollDirection = nearBottom ? "up" : "down";
+      this.scheduleActiveSectionFromPointer();
+    },
+
+    onBuilderPointerMove(event) {
+      const pointerType = String(event?.pointerType || "mouse").toLowerCase();
+      if (pointerType !== "mouse" && pointerType !== "pen") return;
+
+      this.builderPointerPosition = {
+        x: Number(event.clientX),
+        y: Number(event.clientY),
+      };
+    },
+
+    onBuilderPointerLeave() {
+      this.builderPointerPosition = null;
+    },
+
+    scheduleActiveSectionFromPointer() {
+      if (
+        !this.builderPointerPosition ||
+        Date.now() < this.suppressScrollActiveUntil ||
+        this.activeSectionScrollFrame !== null
+      ) {
+        return;
+      }
+
+      this.activeSectionScrollFrame = window.requestAnimationFrame(() => {
+        this.activeSectionScrollFrame = null;
+        if (
+          !this.builderPointerPosition ||
+          Date.now() < this.suppressScrollActiveUntil
+        ) {
+          return;
+        }
+
+        const scrollEl = this.getScratchScrollEl();
+        if (!scrollEl) return;
+
+        const { x, y } = this.builderPointerPosition;
+        const scrollRect = scrollEl.getBoundingClientRect();
+        if (
+          !Number.isFinite(x) ||
+          !Number.isFinite(y) ||
+          x < scrollRect.left ||
+          x > scrollRect.right ||
+          y < scrollRect.top ||
+          y > scrollRect.bottom
+        ) {
+          return;
+        }
+
+        const pointedElement = document.elementFromPoint(x, y);
+        const sectionElement = pointedElement?.closest?.(".form-section");
+        if (!sectionElement || !scrollEl.contains(sectionElement)) return;
+
+        const sectionIndex = Number(sectionElement.dataset.builderSectionIndex);
+        if (
+          Number.isInteger(sectionIndex) &&
+          sectionIndex >= 0 &&
+          sectionIndex < this.currentForm.sections.length &&
+          sectionIndex !== this.activeSection
+        ) {
+          this.activeSection = sectionIndex;
+        }
+      });
+    },
+
+    revealAddedField(sectionIndex, field) {
+      const fieldId = String(field?._id || "");
+      const section = this.currentForm.sections?.[sectionIndex];
+      if (!fieldId || !section) return;
+
+      this.activeSection = sectionIndex;
+      this.recentlyAddedSectionUid = this.getSectionUid(section);
+      this.recentlyAddedFieldId = fieldId;
+
+      if (this.recentlyAddedHighlightTimer) {
+        window.clearTimeout(this.recentlyAddedHighlightTimer);
+      }
+      this.recentlyAddedHighlightTimer = window.setTimeout(() => {
+        this.recentlyAddedSectionUid = "";
+        this.recentlyAddedFieldId = "";
+        this.recentlyAddedHighlightTimer = null;
+      }, 2200);
+
+      this.$nextTick(() => {
+        if (this.addedFieldRevealFrame !== null) {
+          window.cancelAnimationFrame(this.addedFieldRevealFrame);
+        }
+
+        this.addedFieldRevealFrame = window.requestAnimationFrame(() => {
+          this.addedFieldRevealFrame = null;
+          const scrollEl = this.getScratchScrollEl();
+          if (!scrollEl) return;
+
+          const fieldElement = Array.from(
+            scrollEl.querySelectorAll("[data-builder-field-id]")
+          ).find((element) => element.dataset.builderFieldId === fieldId);
+          if (!fieldElement) return;
+
+          const containerRect = scrollEl.getBoundingClientRect();
+          const fieldRect = fieldElement.getBoundingClientRect();
+          const stickyHeight = Math.ceil(
+            this.getBuilderStickyBar()?.getBoundingClientRect().height || 0
+          );
+          const sectionHeader = fieldElement
+            .closest(".form-section")
+            ?.querySelector(".section-header");
+          const sectionHeaderHeight = Math.ceil(
+            sectionHeader?.getBoundingClientRect().height || 0
+          );
+          const targetScrollTop = calculateContainedRevealScrollTop({
+            scrollTop: scrollEl.scrollTop,
+            scrollHeight: scrollEl.scrollHeight,
+            clientHeight: scrollEl.clientHeight,
+            containerTop: containerRect.top,
+            targetTop: fieldRect.top,
+            targetHeight: fieldRect.height,
+            topClearance: stickyHeight + sectionHeaderHeight + 16,
+          });
+
+          // Keep pointer-based tracking from selecting a section underneath a
+          // closing dialog while this intentional inner-container scroll runs.
+          this.suppressScrollActiveUntil = Date.now() + 1200;
+          scrollEl.scrollTo({ top: targetScrollTop, behavior: "smooth" });
+          this.updateScratchScrollState();
+        });
+      });
     },
 
     toggleScratchScroll() {
@@ -2410,6 +2569,10 @@ export default {
         builtField._id = builtField._id || this.uuidForLogic();
 
         sec.fields.push(builtField);
+        this.revealAddedField(
+          this.activeSection,
+          sec.fields[sec.fields.length - 1]
+        );
       }
 
       this.showTableConfigurator = false;
@@ -3853,6 +4016,10 @@ export default {
       }
 
       sec.fields.push(base);
+      this.revealAddedField(
+        this.activeSection,
+        sec.fields[sec.fields.length - 1]
+      );
     },
 
     editSection(i, v) {
@@ -5024,6 +5191,10 @@ export default {
   border-left: 3px solid #374151;
 }
 
+.form-section.recently-added-section {
+  animation: recently-added-section-glow 2.2s ease-out;
+}
+
 .section-header {
   position: sticky;
   top: calc(var(--builder-sticky-height));
@@ -5098,6 +5269,50 @@ export default {
 
 .form-group:hover {
   border-color: #d1d5db;
+}
+
+.form-group.recently-added-field {
+  animation: recently-added-field-glow 2.2s ease-out;
+}
+
+@keyframes recently-added-section-glow {
+  0%, 35% {
+    border-color: #60a5fa;
+    background: #eff6ff;
+    box-shadow: 0 0 0 4px rgba(96, 165, 250, 0.2), 0 10px 28px rgba(37, 99, 235, 0.14);
+  }
+  100% {
+    border-color: #dbe4ee;
+    background: #f8fafc;
+    box-shadow: 0 2px 8px rgba(15, 23, 42, 0.04);
+  }
+}
+
+@keyframes recently-added-field-glow {
+  0%, 35% {
+    border-color: #3b82f6;
+    background: #f8fbff;
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.18);
+  }
+  100% {
+    border-color: #e5e7eb;
+    background: #ffffff;
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .form-section.recently-added-section {
+    animation: none;
+    border-color: #60a5fa;
+    background: #eff6ff;
+  }
+
+  .form-group.recently-added-field {
+    animation: none;
+    border-color: #3b82f6;
+    background: #f8fbff;
+  }
 }
 
 .field-header {
