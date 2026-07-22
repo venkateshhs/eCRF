@@ -32,6 +32,28 @@ def _runtime_data_dir_fallback() -> Path:
     return Path(__file__).resolve().parent / "data"
 
 
+def _detect_profile(env: str) -> str:
+    """Select local versus hosted behavior without requiring a manual switch."""
+    explicit = (os.getenv("ECRF_PROFILE") or "").strip().lower()
+    if explicit:
+        if explicit in {"hosted", "production"}:
+            return "server"
+        return explicit
+
+    if getattr(sys, "frozen", False):
+        return "local"
+
+    database_url = (os.getenv("ECRF_DATABASE_URL") or os.getenv("DATABASE_URL") or "").lower()
+    if (
+        env == "production"
+        or os.getenv("ECRF_DATALAD_RIA_URL")
+        or database_url.startswith(("postgresql:", "postgres:"))
+    ):
+        return "server"
+
+    return "local"
+
+
 @dataclass(frozen=True)
 class AppSettings:
     env: str
@@ -110,7 +132,7 @@ class AppSettings:
 @lru_cache(maxsize=1)
 def get_settings() -> AppSettings:
     env = (os.getenv("ECRF_ENV", "development") or "development").strip().lower()
-    profile = (os.getenv("ECRF_PROFILE", "local" if env != "production" else "server") or "server").strip().lower()
+    profile = _detect_profile(env)
 
     data_dir = _runtime_data_dir_fallback()
     bids_root = Path(os.getenv("BIDS_ROOT", str(data_dir / "bids_datasets"))).expanduser().resolve()

@@ -42,10 +42,15 @@ def is_datalad_enabled(cfg: Optional[DataladConfig] = None) -> bool:
     return cfg.mode in {"shadow", "primary"}
 
 
+def is_study_primary(cfg: DataladConfig, study_id: int) -> bool:
+    return cfg.mode == "primary" and int(study_id) in cfg.primary_study_ids
+
+
 def get_datalad_config() -> DataladConfig:
     settings = get_settings()
 
-    mode = (os.getenv("ECRF_DATALAD_MODE", "off") or "off").strip().lower()
+    default_mode = "off" if settings.is_local_profile else "primary"
+    mode = (os.getenv("ECRF_DATALAD_MODE", default_mode) or default_mode).strip().lower()
     if mode not in ("off", "shadow", "primary"):
         mode = "off"
 

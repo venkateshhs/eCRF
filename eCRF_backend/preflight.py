@@ -10,7 +10,7 @@ from typing import List, Tuple
 from urllib.parse import urlparse
 
 from .settings import get_settings
-from .datalad_config import get_datalad_config
+from .datalad_config import get_datalad_config, is_datalad_enabled
 
 
 def _ok(msg: str) -> None:
@@ -175,27 +175,30 @@ def main() -> int:
     print(f"[case-e] datalad_ria_url={cfg.ria_url}")
     print(f"[case-e] datalad_push_on_save={cfg.push_on_save}")
 
-    for cmd in ["git", "git-annex"]:
-        ok = _check_command(cmd) and ok
-
-    ok = _check_datalad_import() and ok
     ok = _check_db_url(settings.database_url) and ok
     ok = _check_dir_writable(settings.data_dir, "ECRF_DATA_DIR") and ok
     ok = _check_dir_writable(settings.bids_root, "BIDS_ROOT") and ok
-    ok = _check_git_identity() and ok
+
+    if is_datalad_enabled(cfg):
+        for cmd in ["git", "git-annex"]:
+            ok = _check_command(cmd) and ok
+        ok = _check_datalad_import() and ok
+        ok = _check_git_identity() and ok
+    else:
+        _ok("DataLad disabled; external DataLad/git-annex checks skipped")
 
     if settings.templates_dir is not None:
         ok = _check_file_exists(settings.templates_dir, "ECRF_TEMPLATES_DIR") and ok
     else:
         _warn("ECRF_TEMPLATES_DIR not set; backend must resolve templates another way")
 
-    if cfg.require_ria_for_writes:
+    if is_datalad_enabled(cfg) and cfg.require_ria_for_writes:
         if not cfg.ria_url:
             _fail("RIA is required for writes but ECRF_DATALAD_RIA_URL is not set")
             ok = False
         else:
             ok = _check_ssh_quick(cfg.ria_url) and ok
-    else:
+    elif is_datalad_enabled(cfg):
         if cfg.ria_url:
             _check_ssh_quick(cfg.ria_url)
         else:

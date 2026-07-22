@@ -252,9 +252,10 @@ def _configure_local_environment() -> Path:
     _load_dotenv_if_present()
 
     data_dir = _load_or_init_data_dir()
+    local_study_root = (os.environ.get("ECRF_LOCAL_STUDY_ROOT") or "").strip()
     bids_root = (
-        Path(os.environ.get("BIDS_ROOT", "")).expanduser().resolve()
-        if os.environ.get("BIDS_ROOT")
+        Path(local_study_root).expanduser().resolve()
+        if local_study_root
         else (data_dir / "bids_datasets").resolve()
     )
     db_path = (data_dir / "ecrf.db").resolve()
@@ -285,15 +286,15 @@ def _configure_local_environment() -> Path:
 
     # Local network / browser
     os.environ["ECRF_BIND_HOST"] = "127.0.0.1"
-    os.environ["ECRF_OPEN_BROWSER"] = "1"
+    os.environ.setdefault("ECRF_OPEN_BROWSER", "1")
     os.environ["ECRF_PORT"] = os.environ.get("ECRF_PORT", "8000")
 
-    # Force local DataLad mode
-    os.environ["BIDS_DATALAD_ENABLED"] = "1"
-    os.environ["ECRF_DATALAD_MODE"] = "shadow"
+    # The packaged/development launcher is always filesystem-only. Hosted
+    # deployments run the backend entrypoint directly and are auto-detected
+    # from their production/server profile.
+    os.environ["BIDS_DATALAD_ENABLED"] = "0"
+    os.environ["ECRF_DATALAD_MODE"] = "off"
     os.environ["ECRF_DATALAD_SYNC_MODE"] = "sync"
-    os.environ["ECRF_DATALAD_GIT_NAME"] = "case-e local"
-    os.environ["ECRF_DATALAD_GIT_EMAIL"] = "case-e@localhost"
     os.environ["ECRF_DATALAD_PUSH_ON_SAVE"] = "0"
     os.environ["ECRF_DATALAD_PUSH_DATA_MODE"] = "auto-if-wanted"
     os.environ["ECRF_DATALAD_RIA_NAME"] = "ria"
@@ -339,7 +340,7 @@ def import_backend_app() -> FastAPI:
     except Exception:
         print("Failed to import backend app from", BACKEND_IMPORT, file=sys.stderr)
         traceback.print_exc()
-        return FastAPI(title="eCRF (SPA-only fallback)")
+        raise
 
 
 def make_root_app() -> FastAPI:

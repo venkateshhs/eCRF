@@ -1,6 +1,10 @@
 # macOS + IDE
 .DS_Store
 .idea/
+.env
+.env.*
+!.env.example
+!deploy/docker/.env.example
 
 # Python
 __pycache__/
@@ -35,4 +39,3 @@ eCRF_frontend/.DS_Store
 eCRF_frontend/public/favicon.ico
 /hosted/bin/*
 /hosted/lib/*
-

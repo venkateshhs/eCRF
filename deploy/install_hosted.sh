@@ -28,7 +28,7 @@ if [ ! -d "${APP_ROOT}/.venv" ]; then
 fi
 
 sudo -u "$RUN_USER" "${APP_ROOT}/.venv/bin/pip" install --upgrade pip wheel setuptools
-sudo -u "$RUN_USER" "${APP_ROOT}/.venv/bin/pip" install -r "${APP_ROOT}/requirements.txt"
+sudo -u "$RUN_USER" "${APP_ROOT}/.venv/bin/pip" install -r "${APP_ROOT}/requirements-hosted.txt"
 
 sudo install -m 0644 "${APP_ROOT}/deploy/systemd/casee.service" /etc/systemd/system/casee.service
 

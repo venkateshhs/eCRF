@@ -72,6 +72,22 @@ hiddenimports = [
     "eCRF_backend.crud",
     "eCRF_backend.auth",
     "eCRF_backend.bids_exporter",
+    "eCRF_backend.datalad_main",
+    "eCRF_backend.forms_hybrid",
+    "eCRF_backend.audit_datalad",
+    "eCRF_backend.datalad_api_routes",
+    "eCRF_backend.datalad_config",
+    "eCRF_backend.datalad_hooks",
+    "eCRF_backend.datalad_lock",
+    "eCRF_backend.datalad_repo",
+    "eCRF_backend.datalad_runtime",
+    "eCRF_backend.datalad_store",
+    "eCRF_backend.datalad_worker",
+    "eCRF_backend.db_bootstrap",
+    "eCRF_backend.entry_progress",
+    "eCRF_backend.hybrid_study_store",
+    "eCRF_backend.saved_form_templates",
+    "eCRF_backend.settings",
 
     # libs commonly used by FastAPI stacks (harmless if unused)
     "yaml",
@@ -110,7 +126,9 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=[],
+    # The executable is the local SQLite/filesystem distribution. Hosted
+    # deployments install DataLad and PostgreSQL support separately.
+    excludes=["datalad", "datalad_next", "psycopg", "psycopg2"],
     win_no_prefer_redirects=False,
     win_private_assemblies=False,
     noarchive=False,

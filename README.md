@@ -17,6 +17,44 @@ Case-e is a web-based **Electronic Case Report Form** system designed to capture
 ### Installation and Setup (Source Version)  
 The standalone, exxecutable eCRF application can be obtained from the source repository (https://github.com/venkateshhs/case-e). 
 
+### Automatic local and hosted storage
+
+Case-e uses the hybrid API and canonical study layout in every deployment. The
+storage capability is selected automatically:
+
+- The standalone executable and normal development runs use local SQLite and
+  filesystem storage. DataLad and git-annex are not required.
+- Production/server runs use DataLad-backed storage. A PostgreSQL database or
+  RIA configuration also causes the server profile to be selected when
+  `ECRF_PROFILE` is not set.
+
+Environment variables remain available as deployment overrides. Copy
+`.env.example` to `.env` for a hosted installation. Docker deployments should
+copy `deploy/docker/.env.example` to `deploy/docker/.env`.
+
+Install dependencies for the intended target:
+
+```bash
+# Local source run
+pip install -r requirements.txt
+
+# Local executable build
+pip install -r requirements-build.txt
+
+# Hosted server
+pip install -r requirements-hosted.txt
+```
+
+Build the local executable after building the frontend:
+
+```bash
+cd eCRF_frontend
+npm ci
+npm run build
+cd ..
+pyinstaller -y ecrf.spec
+```
+
 ### Usage  
 Once the eCRF application is running, you can access its user interface through a web browser or the provided application window:
 
