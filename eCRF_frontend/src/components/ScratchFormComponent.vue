@@ -3287,17 +3287,17 @@ export default {
       if (this.dragState.kind !== "field") return;
       this.ensureCurrentFormExists();
 
-      const fromS = this.dragState.fromSection;
+      const sourceSectionIndex = this.dragState.fromSection;
       const fromF = this.dragState.fromField;
       const toS = si;
 
-      if (fromS !== toS) {
+      if (sourceSectionIndex !== toS) {
         this.onDragEnd();
         return;
       }
 
       const sections = this.forms[this.currentFormIndex].sections || [];
-      const sec = sections[fromS];
+      const sec = sections[sourceSectionIndex];
       if (!sec) return this.onDragEnd();
 
       const fields = sec.fields || [];
@@ -3331,16 +3331,16 @@ export default {
       if (this.dragState.kind !== "field") return;
       this.ensureCurrentFormExists();
 
-      const fromS = this.dragState.fromSection;
+      const sourceSectionIndex = this.dragState.fromSection;
       const fromF = this.dragState.fromField;
 
-      if (fromS !== si) {
+      if (sourceSectionIndex !== si) {
         this.onDragEnd();
         return;
       }
 
       const sections = this.forms[this.currentFormIndex].sections || [];
-      const sec = sections[fromS];
+      const sec = sections[sourceSectionIndex];
       if (!sec) return this.onDragEnd();
 
       const fields = sec.fields || [];
