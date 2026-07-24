@@ -552,7 +552,32 @@
               />
               Dominant
             </label>
-            <button class="icon-btn" title="Delete" @click.prevent="deleteOption(idx)" :disabled="localOptions.length <= 1">✕</button>
+            <div class="option-actions">
+              <button
+                type="button"
+                class="icon-btn"
+                title="Move up"
+                :aria-label="`Move option ${idx + 1} up`"
+                :disabled="idx === 0"
+                @click.prevent="moveOption(idx, -1)"
+              >↑</button>
+              <button
+                type="button"
+                class="icon-btn"
+                title="Move down"
+                :aria-label="`Move option ${idx + 1} down`"
+                :disabled="idx === localOptions.length - 1"
+                @click.prevent="moveOption(idx, 1)"
+              >↓</button>
+              <button
+                type="button"
+                class="icon-btn"
+                title="Delete"
+                :aria-label="`Delete option ${idx + 1}`"
+                :disabled="localOptions.length <= 1"
+                @click.prevent="deleteOption(idx)"
+              >✕</button>
+            </div>
           </div>
         </div>
         <div class="row note" v-if="isRadio && local.allowMultiple">
@@ -1106,9 +1131,14 @@
 /* eslint-disable */
 import { normalizeConstraints, coerceDefaultForType } from "@/utils/constraints";
 import {
+  haveSameChoiceOptions,
   normalizeDominantOptions,
   normalizeMultiChoiceValue,
 } from "@/utils/dominantChoice";
+import {
+  constraintEditSnapshot,
+  constraintsForSave,
+} from "@/utils/constraintEditState";
 import {
   FIELD_TYPE_OPTIONS,
   getFieldTypeConversionReport,
@@ -1337,6 +1367,10 @@ export default {
       local,
       localOptions: initialOptions.length ? initialOptions : ["Option 1"],
       optionsCount: Math.max(1, initialOptions.length || 1),
+      initialConstraintEditSnapshot: "",
+      initialConstraintOptions: initialOptions.length
+        ? [...initialOptions]
+        : ["Option 1"],
 
       chipInput: "",
       markEditValue: null,
@@ -1345,7 +1379,8 @@ export default {
   },
   mounted() {
     this.syncRuleSectionKeys();
-    },
+    this.$nextTick(() => this.captureInitialConstraintState());
+  },
 
   computed: {
     currentEditingFieldTitle() {
@@ -1596,8 +1631,9 @@ export default {
         }
 
         this.$nextTick(() => {
-            this.syncRuleSectionKeys();
-          });
+          this.syncRuleSectionKeys();
+          this.captureInitialConstraintState();
+        });
       },
     },
 
@@ -1694,6 +1730,38 @@ export default {
   },
 
   methods: {
+    captureInitialConstraintState() {
+      this.initialConstraintEditSnapshot = constraintEditSnapshot(
+        this.local,
+        this.allowedFormatsText
+      );
+      this.initialConstraintOptions = Array.isArray(this.localOptions)
+        ? [...this.localOptions]
+        : [];
+    },
+    constraintsForCurrentSave(generated, finalOptions = null) {
+      const originalType = String(this.currentFieldType || "text").toLowerCase();
+      const nextType = String(this.localType || originalType).toLowerCase();
+      const choiceMembershipUnchanged = this.isChoice
+        ? haveSameChoiceOptions(
+            this.initialConstraintOptions,
+            this.localOptions
+          )
+        : true;
+
+      return constraintsForSave({
+        generated,
+        original: this.fieldDefinition?.constraints || {},
+        initialSnapshot: this.initialConstraintEditSnapshot,
+        currentSnapshot: constraintEditSnapshot(
+          this.local,
+          this.allowedFormatsText
+        ),
+        sameType: nextType === originalType,
+        choiceMembershipUnchanged,
+        finalOptions,
+      });
+    },
     operatorsForType(type) {
       const t = String(type || "text").toLowerCase();
 
@@ -2520,6 +2588,20 @@ export default {
       this.localOptions.push(`Option ${this.localOptions.length + 1}`);
       this.optionsCount = this.localOptions.length;
     },
+    moveOption(idx, direction) {
+      const target = idx + direction;
+      if (
+        !Number.isInteger(idx) ||
+        !Number.isInteger(direction) ||
+        target < 0 ||
+        target >= this.localOptions.length
+      ) {
+        return;
+      }
+
+      const option = this.localOptions.splice(idx, 1)[0];
+      this.localOptions.splice(target, 0, option);
+    },
     renameOption(idx, nextValue) {
       const previousValue = this.localOptions[idx];
       this.localOptions[idx] = nextValue;
@@ -2698,13 +2780,14 @@ export default {
         visibilityLogic,
         popupLogic,
       };
+      const savedConstraints = this.constraintsForCurrentSave(cleaned);
 
       this.$emit("updateConstraints", {
         type: nextType,
         field: {
           ...this.fieldDefinition,
           type: nextType,
-          constraints: cleaned,
+          constraints: savedConstraints,
         },
         changedType: false,
         conversionWarnings: [],
@@ -2735,13 +2818,14 @@ export default {
           visibilityLogic,
           popupLogic,
         };
+        const savedConstraints = this.constraintsForCurrentSave(cleaned);
 
         this.$emit("updateConstraints", {
           type: nextType,
           field: {
             ...this.fieldDefinition,
             type: nextType,
-            constraints: cleaned,
+            constraints: savedConstraints,
           },
           changedType: false,
           conversionWarnings: [],
@@ -2800,14 +2884,18 @@ export default {
         cleaned.hourCycle = this.local.hourCycle || "24";
         cleaned.visibilityLogic = visibilityLogic;
         cleaned.popupLogic = popupLogic;
+        const savedConstraints = this.constraintsForCurrentSave(
+          cleaned,
+          this.isChoice ? finalOptions : null
+        );
 
         const updatedField = {
           ...this.fieldDefinition,
           type: nextType,
-          constraints: cleaned,
+          constraints: savedConstraints,
           placeholder:
-            Object.prototype.hasOwnProperty.call(cleaned, "placeholder")
-              ? cleaned.placeholder || ""
+            Object.prototype.hasOwnProperty.call(savedConstraints, "placeholder")
+              ? savedConstraints.placeholder || ""
               : this.fieldDefinition?.placeholder || "",
           options: this.isChoice ? finalOptions : [],
         };
@@ -2851,13 +2939,14 @@ export default {
           visibilityLogic,
           popupLogic,
         };
+        const savedConstraints = this.constraintsForCurrentSave(cleaned);
 
         this.$emit("updateConstraints", {
           type: nextType,
           field: {
             ...this.fieldDefinition,
             type: nextType,
-            constraints: cleaned,
+            constraints: savedConstraints,
           },
           changedType: false,
           conversionWarnings: [],
@@ -2883,13 +2972,14 @@ export default {
         visibilityLogic,
         popupLogic,
       };
+      const savedConstraints = this.constraintsForCurrentSave(cleaned);
 
       this.$emit("updateConstraints", {
         type: nextType,
         field: {
           ...this.fieldDefinition,
           type: nextType,
-          constraints: cleaned,
+          constraints: savedConstraints,
         },
         changedType: false,
         conversionWarnings: [],
@@ -3111,16 +3201,20 @@ select {
 }
 .opt-row {
   display: grid;
-  grid-template-columns: 24px 1fr 32px;
+  grid-template-columns: 24px minmax(140px, 1fr) auto;
   gap: 8px;
   align-items: center;
   margin-bottom: 8px;
 }
 .opt-row.has-exclusive-control {
-  grid-template-columns: 24px minmax(140px, 1fr) auto 32px;
+  grid-template-columns: 24px minmax(140px, 1fr) auto auto;
 }
 .dominant-option {
   white-space: nowrap;
+}
+.option-actions {
+  display: inline-flex;
+  gap: 4px;
 }
 .opt-index {
   text-align: right;
@@ -3133,6 +3227,10 @@ select {
   background: #f9fafb;
   cursor: pointer;
   padding: 4px 8px;
+}
+.icon-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
 }
 .quick {
   display: flex;

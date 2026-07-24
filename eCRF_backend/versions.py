@@ -11,7 +11,7 @@
 # Structural changes:
 #   - Add/remove/rename groups or visits (by name)
 #   - Add/remove/reorder models or fields; field name/type change
-#   - Options change for select/radio
+#   - Option membership changes for select/radio (display-only reordering is ignored)
 #   - Validation-affecting constraint changes (required, pattern, min/max…)
 #   - Assignments matrix changes (shape or values)
 #   - SUBJECTS: removing subjects or changing their group assignment
@@ -225,7 +225,7 @@ def _field_signature(f: Dict[str, Any]) -> Dict[str, Any]:
                     norm_opts.append(_norm_str(val))
                 else:
                     norm_opts.append(_norm_str(o))
-            sig["options"] = norm_opts
+            sig["options"] = sorted(norm_opts)
     if ftype == "table":
         sig["table"] = _table_signature(f)
 
@@ -275,7 +275,7 @@ def _table_column_signature(col: Dict[str, Any]) -> Dict[str, Any]:
                     norm_opts.append(_norm_str(val))
                 else:
                     norm_opts.append(_norm_str(o))
-            sig["options"] = norm_opts
+            sig["options"] = sorted(norm_opts)
 
     return sig
 
@@ -457,7 +457,7 @@ def _choice_options(field_or_col: Dict[str, Any]) -> List[str]:
 
 
 def _choice_options_changed(old_obj: Dict[str, Any], new_obj: Dict[str, Any]) -> bool:
-    return _choice_options(old_obj) != _choice_options(new_obj)
+    return sorted(_choice_options(old_obj)) != sorted(_choice_options(new_obj))
 
 
 def _dominant_options(field_or_col: Dict[str, Any]) -> List[str]:

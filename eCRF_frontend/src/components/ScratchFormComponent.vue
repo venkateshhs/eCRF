@@ -997,6 +997,7 @@ import FormPreview from "./FormPreview.vue";
 import DateFormatPicker from "./DateFormatPicker.vue";
 import FieldCheckbox from "@/components/fields/FieldCheckbox.vue";
 import FieldRadioGroup from "@/components/fields/FieldRadioGroup.vue";
+import { haveSameChoiceOptions } from "@/utils/dominantChoice";
 import FieldTime from "@/components/fields/FieldTime.vue";
 import FieldSlider from "@/components/fields/FieldSlider.vue";
 import FieldLinearScale from "@/components/fields/FieldLinearScale.vue";
@@ -2057,21 +2058,7 @@ export default {
         return false;
       }
 
-      const prev = (Array.isArray(previousField?.options) ? previousField.options : [])
-        .map(v => String(v || "").trim())
-        .filter(Boolean);
-
-      const next = (Array.isArray(nextField?.options) ? nextField.options : [])
-        .map(v => String(v || "").trim())
-        .filter(Boolean);
-
-      if (prev.length !== next.length) return true;
-
-      for (let i = 0; i < prev.length; i++) {
-        if (prev[i] !== next[i]) return true;
-      }
-
-      return false;
+      return !haveSameChoiceOptions(previousField?.options, nextField?.options);
     },
 
     buildBuilderFieldLookup() {

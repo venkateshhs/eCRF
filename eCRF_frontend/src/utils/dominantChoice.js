@@ -4,6 +4,22 @@ function asStrings(values) {
     .filter(Boolean);
 }
 
+export function haveSameChoiceOptions(left, right) {
+  const normalizedLeft = asStrings(left)
+    .map((value) => value.trim())
+    .filter(Boolean)
+    .sort();
+  const normalizedRight = asStrings(right)
+    .map((value) => value.trim())
+    .filter(Boolean)
+    .sort();
+
+  return (
+    normalizedLeft.length === normalizedRight.length &&
+    normalizedLeft.every((value, index) => value === normalizedRight[index])
+  );
+}
+
 export function normalizeDominantOptions(dominantOptions, options = []) {
   const valid = new Set(asStrings(options));
   return Array.from(

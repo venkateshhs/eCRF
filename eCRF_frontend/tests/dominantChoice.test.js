@@ -16,6 +16,7 @@ const loaded = { exports: {} };
 new Function("module", "exports", transformed)(loaded, loaded.exports);
 
 const {
+  haveSameChoiceOptions,
   normalizeDominantOptions,
   normalizeMultiChoiceValue,
   toggleMultiChoiceValue,
@@ -23,6 +24,9 @@ const {
 
 const options = ["Scar", "Burn", "Amputation", "No injuries"];
 const dominantOptions = ["No injuries"];
+
+assert.equal(haveSameChoiceOptions(["A", "B", "C"], ["C", "B", "A"]), true);
+assert.equal(haveSameChoiceOptions(["A", "B"], ["A", "C"]), false);
 
 assert.deepEqual(
   normalizeDominantOptions(["No injuries", "Missing"], options),
