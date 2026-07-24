@@ -167,6 +167,56 @@ class VersionChoiceSanitizeTests(unittest.TestCase):
         self.assertEqual(changed_count, 0)
         self.assertEqual(sanitized, data)
 
+    def test_sanitize_new_dominant_option_in_cloned_entry_data(self):
+        old_schema = {
+            "selectedModels": [
+                {
+                    "title": "Post-operative injuries",
+                    "fields": [
+                        {
+                            "_id": "injuries",
+                            "type": "radio",
+                            "options": ["Scar", "Burn", "Amputation", "No injuries"],
+                            "constraints": {"allowMultiple": True},
+                        }
+                    ],
+                }
+            ]
+        }
+        new_schema = {
+            "selectedModels": [
+                {
+                    "title": "Post-operative injuries",
+                    "fields": [
+                        {
+                            "_id": "injuries",
+                            "type": "radio",
+                            "options": ["Scar", "Burn", "Amputation", "No injuries"],
+                            "constraints": {
+                                "allowMultiple": True,
+                                "dominantOptions": ["No injuries"],
+                            },
+                        }
+                    ],
+                }
+            ]
+        }
+        data = {
+            "Post-operative injuries": {
+                "injuries": ["Scar", "No injuries", "Burn"]
+            }
+        }
+
+        sanitized, changed_count = _sanitize_entry_data_for_new_options(
+            data, old_schema, new_schema
+        )
+
+        self.assertEqual(changed_count, 1)
+        self.assertEqual(
+            sanitized["Post-operative injuries"]["injuries"],
+            ["No injuries"],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

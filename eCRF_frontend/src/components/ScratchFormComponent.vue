@@ -589,6 +589,7 @@
                           :name="field.name"
                           :options="field.options"
                           v-model="field.value"
+                          v-bind="field.constraints || {}"
                         />
 
                         <!-- SLIDER / LINEAR -->

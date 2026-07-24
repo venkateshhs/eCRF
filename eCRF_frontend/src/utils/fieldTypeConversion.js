@@ -121,6 +121,7 @@ function defaultConstraintsForType(type) {
     return {
       ...base,
       allowMultiple: false,
+      dominantOptions: [],
       defaultValue: "",
     };
   }
@@ -415,6 +416,7 @@ function buildConvertedConstraints({
   if (to === "select") {
     next.placeholder = sourceConstraints.placeholder || "";
     delete next.allowMultiple;
+    delete next.dominantOptions;
 
     if (CHOICE.has(from)) {
       return next;
@@ -431,6 +433,9 @@ function buildConvertedConstraints({
 
   if (to === "radio") {
     next.allowMultiple = !!sourceConstraints.allowMultiple;
+    next.dominantOptions = next.allowMultiple
+      ? normalizeOptions(sourceConstraints.dominantOptions)
+      : [];
 
     if (CHOICE.has(from)) {
       return next;

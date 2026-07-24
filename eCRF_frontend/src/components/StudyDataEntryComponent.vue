@@ -4847,8 +4847,16 @@ applyImportedRowFromDialog(payload) {
         if (typeof c.step === "number")
           parts.push(`Step (sec): ${c.step}`);
       }
-      if (field.type === "select" && c.allowMultiple)
+      if (field.type === "radio" && c.allowMultiple)
         parts.push("Multiple selection: allowed");
+      if (
+        field.type === "radio" &&
+        c.allowMultiple &&
+        Array.isArray(c.dominantOptions) &&
+        c.dominantOptions.length
+      ) {
+        parts.push(`Dominant options: ${c.dominantOptions.join(", ")}`);
+      }
       if (field.type === "file") {
         const storage =
           c.storagePreference === "url"

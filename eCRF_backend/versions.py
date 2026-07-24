@@ -185,6 +185,7 @@ _STRUCTURAL_CONSTRAINT_KEYS = {
     "maxLength",
     "step",
     "allowMultiple",
+    "dominantOptions",
     "integerOnly",
     "dateFormat",
     "minDate",
@@ -459,6 +460,21 @@ def _choice_options_changed(old_obj: Dict[str, Any], new_obj: Dict[str, Any]) ->
     return _choice_options(old_obj) != _choice_options(new_obj)
 
 
+def _dominant_options(field_or_col: Dict[str, Any]) -> List[str]:
+    cons = field_or_col.get("constraints") or {}
+    raw = cons.get("dominantOptions") or []
+    if not isinstance(raw, list):
+        return []
+    return [_norm_str(value) for value in raw if _norm_str(value)]
+
+
+def _choice_definition_changed(old_obj: Dict[str, Any], new_obj: Dict[str, Any]) -> bool:
+    return (
+        _choice_options_changed(old_obj, new_obj)
+        or _dominant_options(old_obj) != _dominant_options(new_obj)
+    )
+
+
 def _is_multi_choice(field_or_col: Dict[str, Any], value: Any) -> bool:
     cons = field_or_col.get("constraints") or {}
     return bool(cons.get("allowMultiple")) or isinstance(value, list)
@@ -481,7 +497,14 @@ def _sanitize_choice_value_for_new_options(
 
     if isinstance(value, list):
         kept = [v for v in value if _norm_str(v) in valid]
-        changed = len(kept) != len(value)
+        dominant = set(_dominant_options(new_field_or_col))
+        selected_dominant = next(
+            (v for v in kept if _norm_str(v) in dominant),
+            None,
+        )
+        if selected_dominant is not None:
+            kept = [selected_dominant]
+        changed = kept != value
         return kept, changed
 
     if _norm_str(value) in valid:
@@ -619,7 +642,7 @@ def _sanitize_table_choice_values(
         old_type = _norm_str(old_col.get("type")).lower()
         if old_type not in ("select", "radio"):
             continue
-        if not _choice_options_changed(old_col, new_col):
+        if not _choice_definition_changed(old_col, new_col):
             continue
 
         old_data_key = _column_data_key(old_col, int(match["index"]))
@@ -693,7 +716,7 @@ def _sanitize_entry_data_for_new_options(
 
             if new_type not in ("select", "radio") or old_type not in ("select", "radio"):
                 continue
-            if not _choice_options_changed(old_field, new_field):
+            if not _choice_definition_changed(old_field, new_field):
                 continue
 
             changed_count += _sanitize_regular_choice_field_in_entry_data(

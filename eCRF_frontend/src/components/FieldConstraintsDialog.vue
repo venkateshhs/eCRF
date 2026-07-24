@@ -527,11 +527,36 @@
         </div>
 
         <div class="options-scroll">
-          <div class="opt-row" v-for="(opt, idx) in localOptions" :key="idx">
+          <div
+            class="opt-row"
+            :class="{ 'has-exclusive-control': isRadio && local.allowMultiple }"
+            v-for="(opt, idx) in localOptions"
+            :key="idx"
+          >
             <span class="opt-index">{{ idx + 1 }}.</span>
-            <input type="text" v-model="localOptions[idx]" placeholder="Option label" />
+            <input
+              type="text"
+              :value="localOptions[idx]"
+              placeholder="Option label"
+              @input="renameOption(idx, $event.target.value)"
+            />
+            <label
+              v-if="isRadio && local.allowMultiple"
+              class="chk dominant-option"
+              title="Selecting this option clears every other selection"
+            >
+              <input
+                type="checkbox"
+                :checked="isDominantOption(opt)"
+                @change="setDominantOption(opt, $event.target.checked)"
+              />
+              Dominant
+            </label>
             <button class="icon-btn" title="Delete" @click.prevent="deleteOption(idx)" :disabled="localOptions.length <= 1">✕</button>
           </div>
+        </div>
+        <div class="row note" v-if="isRadio && local.allowMultiple">
+          <span>Dominant options cannot be combined with any other selection.</span>
         </div>
         <div class="row note" v-if="isSelect">
           <span>Dropdowns are single-select in this builder.</span>
@@ -1081,6 +1106,10 @@
 /* eslint-disable */
 import { normalizeConstraints, coerceDefaultForType } from "@/utils/constraints";
 import {
+  normalizeDominantOptions,
+  normalizeMultiChoiceValue,
+} from "@/utils/dominantChoice";
+import {
   FIELD_TYPE_OPTIONS,
   getFieldTypeConversionReport,
   buildConvertedField,
@@ -1225,6 +1254,9 @@ function buildInitialLocal(vm, constraintsForm, currentFieldType) {
     dateFormat: base.dateFormat || "dd.MM.yyyy",
 
     allowMultiple: !!base.allowMultiple,
+    dominantOptions: Array.isArray(base.dominantOptions)
+      ? base.dominantOptions.map(String)
+      : [],
 
     mode: base.mode === "linear" ? "linear" : "slider",
     percent: !!base.percent,
@@ -1616,6 +1648,10 @@ export default {
       deep: true,
       handler() {
         if (!this.isChoice) return;
+        this.local.dominantOptions = normalizeDominantOptions(
+          this.local.dominantOptions,
+          this.localOptions
+        );
 
         if (this.isRadio && this.local.allowMultiple) {
           if (!Array.isArray(this.local.defaultValue)) {
@@ -2484,6 +2520,39 @@ export default {
       this.localOptions.push(`Option ${this.localOptions.length + 1}`);
       this.optionsCount = this.localOptions.length;
     },
+    renameOption(idx, nextValue) {
+      const previousValue = this.localOptions[idx];
+      this.localOptions[idx] = nextValue;
+
+      if (
+        Array.isArray(this.local.dominantOptions) &&
+        this.local.dominantOptions.includes(previousValue)
+      ) {
+        this.local.dominantOptions = this.local.dominantOptions.map((value) =>
+          value === previousValue ? nextValue : value
+        );
+      }
+    },
+    isDominantOption(option) {
+      return (
+        Array.isArray(this.local.dominantOptions) &&
+        this.local.dominantOptions.includes(option)
+      );
+    },
+    setDominantOption(option, enabled) {
+      const selected = new Set(this.local.dominantOptions || []);
+      if (enabled) selected.add(option);
+      else selected.delete(option);
+      this.local.dominantOptions = Array.from(selected);
+
+      if (enabled && Array.isArray(this.local.defaultValue)) {
+        this.local.defaultValue = this.local.defaultValue.includes(option)
+          ? [option]
+          : this.local.defaultValue.filter(
+              (value) => !this.local.dominantOptions.includes(value)
+            );
+      }
+    },
     compareOptionLabels(a, b) {
       return String(a ?? "").trim().localeCompare(
         String(b ?? "").trim(),
@@ -2599,10 +2668,18 @@ export default {
         if (this.isChoice) {
           const opts = this.localOptions.map((o) => String(o || "").trim()).filter(Boolean);
           fieldPayload.options = opts.length ? Array.from(new Set(opts)) : ["Option 1"];
+          fieldPayload.constraints.dominantOptions =
+            nextType === "radio" && fieldPayload.constraints.allowMultiple
+              ? normalizeDominantOptions(
+                  this.local.dominantOptions,
+                  fieldPayload.options
+                )
+              : [];
         }
 
         if (nextType === "select") {
           delete fieldPayload.constraints.allowMultiple;
+          delete fieldPayload.constraints.dominantOptions;
         }
 
         this.$emit("updateConstraints", {
@@ -2684,21 +2761,36 @@ export default {
           finalOptions = opts.length ? Array.from(new Set(opts)) : ["Option 1"];
 
           if (this.isRadio && this.local.allowMultiple) {
+            cleaned.dominantOptions = normalizeDominantOptions(
+              this.local.dominantOptions,
+              finalOptions
+            );
             const arr = Array.isArray(cleaned.defaultValue) ? cleaned.defaultValue : [];
-            cleaned.defaultValue = arr.filter((v) => finalOptions.includes(v));
+            cleaned.defaultValue = normalizeMultiChoiceValue(
+              arr,
+              finalOptions,
+              cleaned.dominantOptions
+            );
           } else {
             if (!finalOptions.includes(cleaned.defaultValue)) cleaned.defaultValue = "";
           }
 
           cleaned.options = finalOptions;
-          if (this.isSelect) delete cleaned.allowMultiple;
+          if (this.isSelect) {
+            delete cleaned.allowMultiple;
+            delete cleaned.dominantOptions;
+          }
         }
 
         if (this.isRadio && this.local.allowMultiple) {
           cleaned.defaultValue = Array.isArray(cleaned.defaultValue)
-            ? cleaned.defaultValue
-                .map((v) => String(v ?? "").trim())
-                .filter((v) => v && finalOptions.includes(v))
+            ? normalizeMultiChoiceValue(
+                cleaned.defaultValue
+                  .map((v) => String(v ?? "").trim())
+                  .filter(Boolean),
+                finalOptions,
+                cleaned.dominantOptions
+              )
             : cleaned.defaultValue
             ? [String(cleaned.defaultValue).trim()].filter((v) => v && finalOptions.includes(v))
             : [];
@@ -3023,6 +3115,12 @@ select {
   gap: 8px;
   align-items: center;
   margin-bottom: 8px;
+}
+.opt-row.has-exclusive-control {
+  grid-template-columns: 24px minmax(140px, 1fr) auto 32px;
+}
+.dominant-option {
+  white-space: nowrap;
 }
 .opt-index {
   text-align: right;

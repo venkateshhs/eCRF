@@ -65,6 +65,16 @@ export function normalizeConstraints(fieldType = "text", raw = {}) {
     if (k in c) c[k] = !!c[k];
   });
 
+  if ("dominantOptions" in c) {
+    c.dominantOptions = Array.from(
+      new Set(
+        (Array.isArray(c.dominantOptions) ? c.dominantOptions : [])
+          .map((value) => String(value ?? "").trim())
+          .filter(Boolean)
+      )
+    );
+  }
+
   [
     "min", "max", "step",
     "maxLength", "minLength",
@@ -265,9 +275,11 @@ export function normalizeConstraints(fieldType = "text", raw = {}) {
     case "select":
       allowed = [...COMMON];
       delete c.allowMultiple;
+      delete c.dominantOptions;
       break;
     case "radio":
-      allowed = [...COMMON, "allowMultiple"];
+      allowed = [...COMMON, "allowMultiple", "dominantOptions"];
+      if (!c.allowMultiple) delete c.dominantOptions;
       break;
     case "checkbox":
       allowed = ["required", "readonly", "helpText", "defaultValue"];
