@@ -27,12 +27,16 @@
       </p>
       <p v-if="error" class="error">{{ error }}</p>
     </div>
+    <BuildInfoFooter class="login-build-footer" />
   </div>
 </template>
 
 <script>
+import BuildInfoFooter from "@/components/BuildInfoFooter.vue";
+
 export default {
   name: "LoginComponent",
+  components: { BuildInfoFooter },
   data() {
     return {
       username: "",
@@ -93,11 +97,21 @@ export default {
 <style scoped>
 /* General Styling */
 .login-page {
+  position: relative;
   display: flex;
   justify-content: center;
   align-items: center;
   height: 100vh;
+  padding-bottom: 48px;
+  box-sizing: border-box;
   background-color: #f4f4f9;
+}
+
+.login-build-footer {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
 }
 
 .login-container {

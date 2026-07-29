@@ -11,7 +11,7 @@
 # Structural changes:
 #   - Add/remove/rename groups or visits (by name)
 #   - Add/remove/reorder models or fields; field name/type change
-#   - Options change for select/radio
+#   - Option membership changes for select/radio (display-only reordering is ignored)
 #   - Validation-affecting constraint changes (required, pattern, min/max…)
 #   - Assignments matrix changes (shape or values)
 #   - SUBJECTS: removing subjects or changing their group assignment
@@ -185,6 +185,7 @@ _STRUCTURAL_CONSTRAINT_KEYS = {
     "maxLength",
     "step",
     "allowMultiple",
+    "dominantOptions",
     "integerOnly",
     "dateFormat",
     "minDate",
@@ -224,7 +225,7 @@ def _field_signature(f: Dict[str, Any]) -> Dict[str, Any]:
                     norm_opts.append(_norm_str(val))
                 else:
                     norm_opts.append(_norm_str(o))
-            sig["options"] = norm_opts
+            sig["options"] = sorted(norm_opts)
     if ftype == "table":
         sig["table"] = _table_signature(f)
 
@@ -274,7 +275,7 @@ def _table_column_signature(col: Dict[str, Any]) -> Dict[str, Any]:
                     norm_opts.append(_norm_str(val))
                 else:
                     norm_opts.append(_norm_str(o))
-            sig["options"] = norm_opts
+            sig["options"] = sorted(norm_opts)
 
     return sig
 
@@ -456,7 +457,22 @@ def _choice_options(field_or_col: Dict[str, Any]) -> List[str]:
 
 
 def _choice_options_changed(old_obj: Dict[str, Any], new_obj: Dict[str, Any]) -> bool:
-    return _choice_options(old_obj) != _choice_options(new_obj)
+    return sorted(_choice_options(old_obj)) != sorted(_choice_options(new_obj))
+
+
+def _dominant_options(field_or_col: Dict[str, Any]) -> List[str]:
+    cons = field_or_col.get("constraints") or {}
+    raw = cons.get("dominantOptions") or []
+    if not isinstance(raw, list):
+        return []
+    return [_norm_str(value) for value in raw if _norm_str(value)]
+
+
+def _choice_definition_changed(old_obj: Dict[str, Any], new_obj: Dict[str, Any]) -> bool:
+    return (
+        _choice_options_changed(old_obj, new_obj)
+        or _dominant_options(old_obj) != _dominant_options(new_obj)
+    )
 
 
 def _is_multi_choice(field_or_col: Dict[str, Any], value: Any) -> bool:
@@ -481,7 +497,14 @@ def _sanitize_choice_value_for_new_options(
 
     if isinstance(value, list):
         kept = [v for v in value if _norm_str(v) in valid]
-        changed = len(kept) != len(value)
+        dominant = set(_dominant_options(new_field_or_col))
+        selected_dominant = next(
+            (v for v in kept if _norm_str(v) in dominant),
+            None,
+        )
+        if selected_dominant is not None:
+            kept = [selected_dominant]
+        changed = kept != value
         return kept, changed
 
     if _norm_str(value) in valid:
@@ -619,7 +642,7 @@ def _sanitize_table_choice_values(
         old_type = _norm_str(old_col.get("type")).lower()
         if old_type not in ("select", "radio"):
             continue
-        if not _choice_options_changed(old_col, new_col):
+        if not _choice_definition_changed(old_col, new_col):
             continue
 
         old_data_key = _column_data_key(old_col, int(match["index"]))
@@ -693,7 +716,7 @@ def _sanitize_entry_data_for_new_options(
 
             if new_type not in ("select", "radio") or old_type not in ("select", "radio"):
                 continue
-            if not _choice_options_changed(old_field, new_field):
+            if not _choice_definition_changed(old_field, new_field):
                 continue
 
             changed_count += _sanitize_regular_choice_field_in_entry_data(

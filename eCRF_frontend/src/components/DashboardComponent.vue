@@ -89,7 +89,15 @@
     </aside>
 
     <!-- Main Content -->
-    <main :class="['dashboard-main', { expanded: sidebarCollapsed && !hideSidebar }]">
+    <main
+      :class="[
+        'dashboard-main',
+        {
+          expanded: sidebarCollapsed && !hideSidebar,
+          'dashboard-index': $route.name === 'Dashboard'
+        }
+      ]"
+    >
       <!-- Only show Dashboard home content when you're actually ON Dashboard route -->
       <template v-if="$route.name === 'Dashboard'">
         <div class="dashboard-home">
@@ -308,6 +316,10 @@
           </div>
         </div>
        </div>
+       <BuildInfoFooter
+         v-if="!showStudyOptions && !showImportData"
+         class="dashboard-build-footer"
+       />
       </template>
 
       <router-view v-else />
@@ -438,11 +450,12 @@
 import axios from "axios";
 import icons from "@/assets/styles/icons";
 import ImportStudy from "@/components/ImportStudy.vue";
+import BuildInfoFooter from "@/components/BuildInfoFooter.vue";
 import activityTracker from "@/utils/activityTracker";
 
 export default {
   name: "DashboardComponent",
-  components: { ImportStudy },
+  components: { ImportStudy, BuildInfoFooter },
   data() {
     return {
       sidebarCollapsed: false,
@@ -1301,6 +1314,15 @@ export default {
   box-sizing: border-box;
   margin: 0;
   overflow-x: hidden;
+}
+
+.dashboard-main.dashboard-index {
+  display: flex;
+  flex-direction: column;
+}
+
+.dashboard-build-footer {
+  margin-top: auto;
 }
 
 .dashboard-main.expanded {

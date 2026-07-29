@@ -45,6 +45,11 @@
 </template>
 
 <script>
+import {
+  normalizeMultiChoiceValue,
+  toggleMultiChoiceValue,
+} from "@/utils/dominantChoice";
+
 export default {
   name: "FieldRadioGroup",
   inheritAttrs: false,
@@ -58,6 +63,7 @@ export default {
     disabled: { type: Boolean, default: false },
     defaultValue: { type: [String, Number, Array], default: "" },
     allowMultiple: { type: Boolean, default: false },
+    dominantOptions: { type: Array, default: () => [] },
   },
   emits: ["update:modelValue", "change"],
   computed: {
@@ -92,9 +98,7 @@ export default {
       const opts = this.stringOptions;
 
       if (this.allowMultiple) {
-        const cur = this.proxyArray.filter((v) => opts.includes(v));
-        this.$emit("update:modelValue", cur);
-        this.$emit("change", cur);
+        this.emitInitializedSelection(this.normalizeMulti(this.proxyArray));
       } else {
         const cur = this.proxySingle;
         if (!opts.includes(cur)) {
@@ -108,6 +112,17 @@ export default {
     allowMultiple() {
       // when the mode flips, coerce the model shape and apply defaults if needed
       this.initFromDefaults(true);
+    },
+    dominantOptions() {
+      if (!this.allowMultiple) return;
+      this.emitInitializedSelection(this.normalizeMulti(this.proxyArray));
+    },
+    modelValue: {
+      deep: true,
+      handler() {
+        if (!this.allowMultiple) return;
+        this.emitInitializedSelection(this.normalizeMulti(this.proxyArray));
+      },
     },
   },
   methods: {
@@ -130,10 +145,19 @@ export default {
       const dv = this.defaultValue;
 
       if (Array.isArray(dv)) {
-        return dv.map((x) => String(x)).filter((x) => opts.includes(x));
+        return this.normalizeMulti(
+          dv.map((x) => String(x)).filter((x) => opts.includes(x))
+        );
       }
       const s = dv == null ? "" : String(dv);
-      return opts.includes(s) ? [s] : [];
+      return this.normalizeMulti(opts.includes(s) ? [s] : []);
+    },
+    normalizeMulti(value) {
+      return normalizeMultiChoiceValue(
+        value,
+        this.stringOptions,
+        this.dominantOptions
+      );
     },
     selectionEqualsCurrent(next) {
       if (this.allowMultiple) {
@@ -156,7 +180,11 @@ export default {
         (Array.isArray(v) ? v.length > 0 : v !== null && String(v).trim() !== "");
 
       if (this.allowMultiple) {
-        const cur = this.proxyArray;
+        const cur = this.normalizeMulti(this.proxyArray);
+        if (!this.selectionEqualsCurrent(cur)) {
+          this.emitInitializedSelection(cur);
+          return;
+        }
         if (!hasValue(cur) || force) {
           const next = this.pickMultiDefault();
           this.emitInitializedSelection(next, force);
@@ -178,10 +206,13 @@ export default {
     },
     onToggleMulti(opt, checked) {
       if (this.isReadonly) return;
-      const set = new Set(this.proxyArray);
-      if (checked) set.add(opt);
-      else set.delete(opt);
-      const next = Array.from(set);
+      const next = toggleMultiChoiceValue({
+        value: this.proxyArray,
+        option: opt,
+        checked,
+        options: this.stringOptions,
+        dominantOptions: this.dominantOptions,
+      });
       this.$emit("update:modelValue", next);
       this.$emit("change", next); //
     },
