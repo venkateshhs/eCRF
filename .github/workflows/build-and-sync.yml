@@ -16,8 +16,60 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  version:
+    name: Determine release version
+    runs-on: ubuntu-latest
+    outputs:
+      release_version: ${{ steps.version.outputs.release_version }}
+
+    steps:
+      - name: Checkout eCRF tags
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          path: ecrf
+
+      - name: Checkout release repository tags
+        uses: actions/checkout@v4
+        with:
+          repository: venkateshhs/case-e
+          fetch-depth: 0
+          token: ${{ secrets.CASEE_PUSH_TOKEN }}
+          path: case-e
+
+      - name: Select or increment version
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            VERSION="${GITHUB_REF_NAME}"
+          else
+            EXISTING_TAG="$(
+              git -C ecrf tag --points-at "${GITHUB_SHA}" \
+                --list 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | sed -n '1p'
+            )"
+
+            if [[ -n "${EXISTING_TAG}" ]]; then
+              VERSION="${EXISTING_TAG}"
+            else
+              LATEST_TAG="$(git -C case-e tag --list 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | sed -n '1p')"
+
+              if [[ "${LATEST_TAG}" =~ ^v([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+                VERSION="v${BASH_REMATCH[1]}.${BASH_REMATCH[2]}.$((BASH_REMATCH[3] + 1))"
+              else
+                VERSION="v0.0.1"
+              fi
+            fi
+          fi
+
+          echo "release_version=${VERSION}" >> "${GITHUB_OUTPUT}"
+          echo "Release version: ${VERSION}"
+
   build:
     name: Build binaries
+    needs: [ version ]
     strategy:
       fail-fast: false
       matrix:
@@ -38,6 +90,8 @@ jobs:
 
       - name: Build frontend
         working-directory: eCRF_frontend
+        env:
+          CASEE_VERSION: ${{ needs.version.outputs.release_version }}
         run: |
           npm ci
           npm run build
@@ -93,7 +147,7 @@ jobs:
 
   sync:
     name: Sync to both case-e repos
-    needs: [ build ]
+    needs: [ version, build ]
     runs-on: ubuntu-latest
 
     strategy:
@@ -136,6 +190,7 @@ jobs:
           SHORT_SHA: ${{ github.sha }}
           REF_TYPE: ${{ github.ref_type }}
           REF_NAME: ${{ github.ref_name }}
+          RELEASE_VERSION: ${{ needs.version.outputs.release_version }}
         run: |
           set -euo pipefail
           mkdir -p builds/latest/{macos,windows}
@@ -147,6 +202,7 @@ jobs:
           cat > builds/latest/manifest.json <<EOF
           {
             "created_at": "${NOW}",
+            "version": "${RELEASE_VERSION}",
             "commit": "${SHORT_SHA}",
             "ref_type": "${REF_TYPE}",
             "ref_name": "${REF_NAME}",
@@ -161,14 +217,10 @@ jobs:
           }
           EOF
 
-          # If this is a tag, also create versioned folders and copy everything
-          if [[ "${REF_TYPE}" == "tag" ]]; then
-            TAG="${REF_NAME}"
-            mkdir -p "builds/${TAG}/macos" "builds/${TAG}/windows"
-            cp -f builds/latest/macos/case-e-macOS.tar.gz "builds/${TAG}/macos/"
-            cp -f builds/latest/windows/case-e-Windows.zip "builds/${TAG}/windows/"
-            cp -f builds/latest/manifest.json "builds/${TAG}/"
-          fi
+          mkdir -p "builds/${RELEASE_VERSION}/macos" "builds/${RELEASE_VERSION}/windows"
+          cp -f builds/latest/macos/case-e-macOS.tar.gz "builds/${RELEASE_VERSION}/macos/"
+          cp -f builds/latest/windows/case-e-Windows.zip "builds/${RELEASE_VERSION}/windows/"
+          cp -f builds/latest/manifest.json "builds/${RELEASE_VERSION}/"
 
       - name: Commit & push to case-e
         working-directory: case-e
@@ -190,15 +242,39 @@ jobs:
 
       # --- Releases in each case-e repo ---
 
-      - name: Publish tagged GitHub Release on case-e
-        if: startsWith(github.ref, 'refs/tags/')
+      - name: Tag successful main build in eCRF
+        if: matrix.owner == 'venkateshhs' && github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ needs.version.outputs.release_version }}
+        run: |
+          set -euo pipefail
+
+          EXISTING_SHA="$(
+            gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${RELEASE_VERSION}" \
+              --jq '.object.sha' 2>/dev/null || true
+          )"
+
+          if [[ -n "${EXISTING_SHA}" && "${EXISTING_SHA}" != "${GITHUB_SHA}" ]]; then
+            echo "Tag ${RELEASE_VERSION} already points to ${EXISTING_SHA}, not ${GITHUB_SHA}."
+            exit 1
+          fi
+
+          if [[ -z "${EXISTING_SHA}" ]]; then
+            gh api --method POST "repos/${GITHUB_REPOSITORY}/git/refs" \
+              -f ref="refs/tags/${RELEASE_VERSION}" \
+              -f sha="${GITHUB_SHA}"
+          fi
+
+      - name: Publish versioned GitHub Release on case-e
+        if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')
         uses: ncipollo/release-action@v1
         with:
           token: ${{ secrets[matrix.token_secret] }}
           owner: ${{ matrix.owner }}
           repo: case-e
-          tag: ${{ github.ref_name }}             # e.g. v1.2.3 or release-xyz
-          name: ${{ github.ref_name }}
+          tag: ${{ needs.version.outputs.release_version }}
+          name: ${{ needs.version.outputs.release_version }}
           commit: main                            # branch in case-e
           makeLatest: true
           allowUpdates: true
@@ -207,30 +283,7 @@ jobs:
           draft: false
           prerelease: false
           body: |
-            Automated sync from eCRF @ ${{ github.sha }}
-          artifacts: |
-            case-e/builds/latest/macos/case-e-macOS.tar.gz
-            case-e/builds/latest/windows/case-e-Windows.zip
-          artifactErrorsFailBuild: true
-
-      - name: Publish main branch build GitHub Release on case-e
-        if: github.ref == 'refs/heads/main'
-        uses: ncipollo/release-action@v1
-        with:
-          token: ${{ secrets[matrix.token_secret] }}
-          owner: ${{ matrix.owner }}
-          repo: case-e
-          tag: main-${{ github.run_number }}-${{ github.sha }}
-          name: main-${{ github.run_number }}-${{ github.sha }}
-          commit: main                            # branch in case-e
-          makeLatest: true
-          allowUpdates: false
-          replacesArtifacts: true
-          removeArtifacts: true
-          draft: false
-          prerelease: false
-          body: |
-            Automated sync from eCRF @ ${{ github.sha }} (main branch build)
+            Automated release ${{ needs.version.outputs.release_version }} from eCRF @ ${{ github.sha }}
           artifacts: |
             case-e/builds/latest/macos/case-e-macOS.tar.gz
             case-e/builds/latest/windows/case-e-Windows.zip
@@ -260,24 +313,24 @@ jobs:
 
             _This release is a pointer only. Binaries are published in the case-e repo._
 
-      - name: Mirror tagged release in eCRF (links to same tag in case-e)
-        if: matrix.owner == 'venkateshhs' && startsWith(github.ref, 'refs/tags/')
+      - name: Mirror versioned release in eCRF (links to same tag in case-e)
+        if: matrix.owner == 'venkateshhs' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/'))
         uses: ncipollo/release-action@v1
         with:
           token: ${{ github.token }}
-          tag: ${{ github.ref_name }}
+          tag: ${{ needs.version.outputs.release_version }}
           commit: main
-          name: ${{ github.ref_name }} (downloads hosted in case-e)
+          name: ${{ needs.version.outputs.release_version }} (downloads hosted in case-e)
           makeLatest: false
           allowUpdates: true
           draft: false
           prerelease: false
           body: |
-            ## Where are the downloads for ${{ github.ref_name }}?
-            Assets are hosted in **[venkateshhs/case-e -> Releases -> ${{ github.ref_name }}](https://github.com/venkateshhs/case-e/releases/tag/${{ github.ref_name }})**.
+            ## Where are the downloads for ${{ needs.version.outputs.release_version }}?
+            Assets are hosted in **[venkateshhs/case-e -> Releases -> ${{ needs.version.outputs.release_version }}](https://github.com/venkateshhs/case-e/releases/tag/${{ needs.version.outputs.release_version }})**.
 
             **Direct download links:**
-            - **macOS:** https://github.com/venkateshhs/case-e/releases/download/${{ github.ref_name }}/case-e-macOS.tar.gz
-            - **Windows:** https://github.com/venkateshhs/case-e/releases/download/${{ github.ref_name }}/case-e-Windows.zip
+            - **macOS:** https://github.com/venkateshhs/case-e/releases/download/${{ needs.version.outputs.release_version }}/case-e-macOS.tar.gz
+            - **Windows:** https://github.com/venkateshhs/case-e/releases/download/${{ needs.version.outputs.release_version }}/case-e-Windows.zip
 
             _This release is a pointer only. Binaries are published in the case-e repo._
