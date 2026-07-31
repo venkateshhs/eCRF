@@ -171,6 +171,7 @@ def _human_action(action: str) -> str:
         "entry_upserted": "Data entry saved",
         "entry_cloned_forward": "Data cloned forward",
         "file_added": "File added",
+        "file_deleted": "File deleted",
         "share_link_created": "Share link created",
         "access_changed": "Access changed",
         "access_revoked": "Access revoked",

@@ -551,6 +551,7 @@
                         stage="runtime"
                         @input="(meta) => setEntryValue(mIdx, fIdx, meta)"
                         @file-selected="(file) => onRawFileSelected(mIdx, fIdx, file)"
+                        @file-removed="(file) => onFileRemoved(mIdx, fIdx, file)"
                         @download-file="downloadUploadedFile"
                       />
 
@@ -995,6 +996,7 @@ export default {
       showLegendDialog: false,
 
       pendingFiles: {},
+      pendingFileDeletions: {},
       showStatusLegend: false,
 
       // shared link
@@ -4539,6 +4541,7 @@ applyImportedRowFromDialog(payload) {
 
         const fileId = String(file.id || file.dbId || file.file_id || "");
         if (!fileId) return;
+        if (this.isFileQueuedForDeletion(fileId)) return;
 
         if (!Array.isArray(slotData[mIdx])) {
           slotData[mIdx] = (this.selectedModels[mIdx]?.fields || []).map((f) =>
@@ -4726,6 +4729,128 @@ applyImportedRowFromDialog(payload) {
         ? [this.pendingFiles[key]]
         : [];
       this.pendingFiles = { ...this.pendingFiles, [key]: [...cur, ...arr] };
+    },
+
+    onFileRemoved(mIdx, fIdx, file) {
+      if (!file) return;
+
+      const key = this.errorKey(mIdx, fIdx);
+      const fileId = uploadedFileId(file);
+      if (fileId) {
+        const currentIds = Array.isArray(this.pendingFileDeletions[key])
+          ? this.pendingFileDeletions[key]
+          : [];
+        const normalizedId = String(fileId);
+        if (!currentIds.some((id) => String(id) === normalizedId)) {
+          this.pendingFileDeletions = {
+            ...this.pendingFileDeletions,
+            [key]: [...currentIds, fileId],
+          };
+        }
+      }
+
+      const pending = Array.isArray(this.pendingFiles[key])
+        ? this.pendingFiles[key]
+        : this.pendingFiles[key]
+        ? [this.pendingFiles[key]]
+        : [];
+      const remaining = pending.filter(
+        (candidate) =>
+          !(
+            candidate &&
+            candidate.name === file.name &&
+            Number(candidate.size) === Number(file.size) &&
+            (file.lastModified
+              ? candidate.lastModified === file.lastModified
+              : true)
+          )
+      );
+      this.pendingFiles = { ...this.pendingFiles, [key]: remaining };
+    },
+
+    isFileQueuedForDeletion(fileId) {
+      if (!fileId) return false;
+      const normalizedId = String(fileId);
+      return Object.values(this.pendingFileDeletions || {}).some(
+        (ids) =>
+          Array.isArray(ids) &&
+          ids.some((queuedId) => String(queuedId) === normalizedId)
+      );
+    },
+
+    queuedFileDeletionIdsForCurrentCell() {
+      const prefix = [
+        this.currentSubjectIndex,
+        this.currentVisitIndex,
+        this.currentGroupIndex,
+      ].join("-") + "-";
+      const ids = [];
+
+      Object.entries(this.pendingFileDeletions || {}).forEach(([key, values]) => {
+        if (!key.startsWith(prefix) || !Array.isArray(values)) return;
+        values.forEach((id) => {
+          if (
+            id &&
+            !ids.some((existingId) => String(existingId) === String(id))
+          ) {
+            ids.push(id);
+          }
+        });
+      });
+      return ids;
+    },
+
+    removeCompletedFileDeletions(completedIds) {
+      const completed = new Set((completedIds || []).map((id) => String(id)));
+      const next = {};
+      Object.entries(this.pendingFileDeletions || {}).forEach(([key, values]) => {
+        const remaining = (Array.isArray(values) ? values : []).filter(
+          (id) => !completed.has(String(id))
+        );
+        if (remaining.length) next[key] = remaining;
+      });
+      this.pendingFileDeletions = next;
+      this.studyFiles = (this.studyFiles || []).filter(
+        (file) => !completed.has(String(uploadedFileId(file) || ""))
+      );
+      this.hydrateCache.clear();
+    },
+
+    async deleteQueuedFilesForCurrentCell() {
+      const ids = this.queuedFileDeletionIdsForCurrentCell();
+      if (!ids.length) return;
+
+      const completed = [];
+      try {
+        for (const fileId of ids) {
+          const url = this.isShared
+            ? `/forms/shared/${this.shareToken}/files/${fileId}`
+            : `/forms/studies/${this.study.metadata.id}/files/${fileId}`;
+          const config = this.isShared
+            ? { params: { audit_label: "Delete File" } }
+            : {
+                headers: { Authorization: `Bearer ${this.token}` },
+                params: { audit_label: "Delete File" },
+              };
+          await axios.delete(url, config);
+          completed.push(fileId);
+        }
+      } catch (error) {
+        this.removeCompletedFileDeletions(completed);
+        throw error;
+      }
+      this.removeCompletedFileDeletions(completed);
+    },
+
+    fileDeletionFailureMessage(error) {
+      const detail =
+        error?.response?.data?.detail ||
+        error?.response?.data?.message ||
+        error?.message ||
+        "Unknown deletion error";
+      const text =
+        typeof detail === "string" ? detail : JSON.stringify(detail);
+      return `The data was saved, but one or more files could not be deleted: ${text}. Please save again to retry the file deletion.`;
     },
 
     getSliderProps(field) {
@@ -6335,6 +6460,11 @@ applyImportedRowFromDialog(payload) {
                 fd.append("url", it.url);
                 fd.append("description", def.label || def.name || "");
                 fd.append("modalities_json", modalitiesJson);
+                if (!this.isShared) {
+                  fd.append("subject_index", String(s));
+                  fd.append("visit_index", String(v));
+                  fd.append("group_index", String(g));
+                }
                 const headers = this.isShared ? {} : { Authorization: `Bearer ${this.token}` };
                 const resp = await axios.post(`${base}/files/url`, fd, {
                   headers,
@@ -6393,6 +6523,11 @@ applyImportedRowFromDialog(payload) {
               fd.append("url", val.url);
               fd.append("description", def.label || def.name || "");
               fd.append("modalities_json", modalitiesJson);
+              if (!this.isShared) {
+                fd.append("subject_index", String(s));
+                fd.append("visit_index", String(v));
+                fd.append("group_index", String(g));
+              }
               const headers = this.isShared ? {} : { Authorization: `Bearer ${this.token}` };
               const resp = await axios.post(`${base}/files/url`, fd, {
                 headers,
@@ -6540,12 +6675,22 @@ applyImportedRowFromDialog(payload) {
           this.currentRevisionToken = String(resp?.data?.revision_token || "");
           this.entryIds[s][v][g] = resp?.data?.id || null;
 
-          this.showDialogMessage(this.buildSaveSuccessMessage("saved"));
+          let fileDeletionError = null;
+          try {
+            await this.deleteQueuedFilesForCurrentCell();
+          } catch (error) {
+            fileDeletionError = error;
+          }
           this.captureEntryBaseline();
           this.rebuildEntriesIndex();
           this.hydrateCache.delete(`${s}|${v}|${g}|${this.selectedVersion}`);
           this.applyVersionView();
           this.updateStatusCacheFor(s, v, g);
+          this.showDialogMessage(
+            fileDeletionError
+              ? this.fileDeletionFailureMessage(fileDeletionError)
+              : this.buildSaveSuccessMessage("saved")
+          );
           return;
         }
 
@@ -6553,6 +6698,7 @@ applyImportedRowFromDialog(payload) {
           headers: { Authorization: `Bearer ${this.token}` },
         };
         const existingId = this.entryIds[s][v][g];
+        const saveResultLabel = existingId ? "updated" : "saved";
 
         if (!this.currentRevisionToken) {
           const slot = await this.fetchRevisionTokenForSlot(s, v, g, this.selectedVersion);
@@ -6573,9 +6719,6 @@ applyImportedRowFromDialog(payload) {
             }
           );
 
-          this.showDialogMessage(
-              this.buildSaveSuccessMessage("updated")
-            );
           const idx = this.existingEntries.findIndex((x) => x.id === existingId);
           if (idx >= 0) this.existingEntries.splice(idx, 1, resp.data);
           else this.existingEntries.push(resp.data);
@@ -6614,11 +6757,14 @@ applyImportedRowFromDialog(payload) {
             created_at: resp?.data?.created_at ?? new Date().toISOString(),
           };
           (this.existingEntries = this.existingEntries || []).push(saved);
-          this.showDialogMessage(
-          this.buildSaveSuccessMessage("saved")
-        );
         }
 
+        let fileDeletionError = null;
+        try {
+          await this.deleteQueuedFilesForCurrentCell();
+        } catch (error) {
+          fileDeletionError = error;
+        }
         const latestSlot = await this.fetchRevisionTokenForSlot(s, v, g, this.selectedVersion);
         if (latestSlot) {
           this.applyLoadedSlotState(latestSlot);
@@ -6628,6 +6774,11 @@ applyImportedRowFromDialog(payload) {
         this.hydrateCache.delete(`${s}|${v}|${g}|${this.selectedVersion}`);
         this.applyVersionView();
         this.updateStatusCacheFor(s, v, g);
+        this.showDialogMessage(
+          fileDeletionError
+            ? this.fileDeletionFailureMessage(fileDeletionError)
+            : this.buildSaveSuccessMessage(saveResultLabel)
+        );
       } catch (err) {
         console.error(err);
 

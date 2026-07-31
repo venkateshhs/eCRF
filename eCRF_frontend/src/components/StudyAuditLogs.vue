@@ -396,6 +396,7 @@ export default {
         study_snapshot_written: "Published snapshot written",
         entry_upserted: "Data saved/edited",
         file_added: "File added",
+        file_deleted: "File deleted",
         share_link_created: "Share link created",
         access_changed: "Access changed",
         access_revoked: "Access revoked",
@@ -418,6 +419,9 @@ export default {
       if (a === "file_added") {
         const fileName = d.file_name || d.url || "file";
         return `File added: ${fileName}`;
+      }
+      if (a === "file_deleted") {
+        return `File deleted: ${d.file_name || "file"}`;
       }
       if (a === "share_link_created") {
         return `Share link created (permission ${d.permission || "—"})`;

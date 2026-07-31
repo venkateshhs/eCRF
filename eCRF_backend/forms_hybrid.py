@@ -980,6 +980,40 @@ def create_url_file(
         audit_label=audit_label,
     )
 
+
+@router.delete("/studies/{study_id}/files/{file_id}")
+def delete_study_file(
+    study_id: int,
+    file_id: int,
+    audit_label: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    meta = db.query(models.StudyMetadata).filter(models.StudyMetadata.id == study_id).first()
+    if not meta:
+        raise HTTPException(status_code=404, detail="Study not found")
+
+    _assert_has_study_permission(db, meta, user, required="add_data")
+    _assert_not_locked_by_other(meta, user)
+
+    try:
+        deleted = repo.delete_file(
+            study_id=study_id,
+            study_name=meta.study_name,
+            file_id=file_id,
+            actor=_actor_identifier(user),
+            actor_name=_display_name(user),
+            user_id=user.id,
+            audit_label=audit_label,
+        )
+    except FileNotFoundError:
+        return {"deleted": True, "file_id": file_id, "already_missing": True}
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    return {"deleted": True, "file_id": file_id, "file_name": deleted.get("file_name")}
+
+
 @router.post("/shared/{token}/files", response_model=schemas.FileOut)
 def shared_upload_file(
     token: str,
@@ -1047,6 +1081,66 @@ def shared_upload_file(
                 os.remove(tmp_path)
         except Exception:
             pass
+
+
+@router.delete("/shared/{token}/files/{file_id}")
+def shared_delete_file(
+    token: str,
+    file_id: int,
+    audit_label: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+):
+    access = db.query(models.SharedFormAccess).filter_by(token=token).first()
+    if not access:
+        raise HTTPException(status_code=404, detail="Link not found")
+    if access.expires_at < datetime.utcnow():
+        raise HTTPException(status_code=403, detail="Link expired")
+    if access.permission != "add":
+        raise HTTPException(status_code=403, detail="Not allowed")
+
+    meta = db.query(models.StudyMetadata).filter(models.StudyMetadata.id == access.study_id).first()
+    if not meta:
+        raise HTTPException(status_code=404, detail="Study not found")
+
+    try:
+        record = repo.get_file_record(
+            study_id=access.study_id,
+            study_name=meta.study_name,
+            file_id=file_id,
+        )
+    except FileNotFoundError:
+        return {"deleted": True, "file_id": file_id, "already_missing": True}
+
+    record_slot = (
+        record.get("subject_index"),
+        record.get("visit_index"),
+        record.get("group_index"),
+    )
+    access_slot = (
+        access.subject_index,
+        access.visit_index,
+        access.group_index,
+    )
+    if record_slot != access_slot:
+        raise HTTPException(status_code=403, detail="File does not belong to this shared data slot")
+
+    try:
+        deleted = repo.delete_file(
+            study_id=access.study_id,
+            study_name=meta.study_name,
+            file_id=file_id,
+            actor="shared-link",
+            actor_name="Shared link file deletion",
+            user_id=None,
+            audit_label=audit_label,
+        )
+    except FileNotFoundError:
+        return {"deleted": True, "file_id": file_id, "already_missing": True}
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    return {"deleted": True, "file_id": file_id, "file_name": deleted.get("file_name")}
+
 
 @router.get("/studies/{study_id}/files/{file_id}/download")
 def download_study_file(
