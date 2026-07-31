@@ -39,7 +39,13 @@
           >
             <i class="fas fa-download" />
           </button>
-          <button class="icon-inline danger" type="button" @click="clearValue" title="Remove">
+          <button
+            class="icon-inline danger"
+            type="button"
+            :disabled="readonly"
+            @click="clearValue"
+            title="Remove"
+          >
             <i :class="icons.trash" />
           </button>
         </div>
@@ -69,7 +75,13 @@
           >
             <i class="fas fa-download" />
           </button>
-          <button class="icon-inline danger" type="button" @click="removeLocalAt(i)" title="Remove">
+          <button
+            class="icon-inline danger"
+            type="button"
+            :disabled="readonly"
+            @click="removeLocalAt(i)"
+            title="Remove"
+          >
             <i :class="icons.trash" />
           </button>
         </div>
@@ -107,7 +119,13 @@
             >
               <i class="fas fa-download" />
             </button>
-            <button class="icon-inline danger" type="button" @click="removeUrlAt(i)" title="Remove">
+            <button
+              class="icon-inline danger"
+              type="button"
+              :disabled="readonly"
+              @click="removeUrlAt(i)"
+              title="Remove"
+            >
               <i :class="icons.trash" />
             </button>
           </div>
@@ -119,14 +137,26 @@
 
       <!-- SINGLE URL -->
       <div v-else class="url-row">
-        <input
-          type="url"
-          :placeholder="urlPlaceholder"
-          :value="displayedUrl"
-          @input="onUrlInput"
-          @blur="onUrlBlur"
-          :readonly="readonly"
-        />
+        <div class="single-url-input">
+          <input
+            type="url"
+            :placeholder="urlPlaceholder"
+            :value="displayedUrl"
+            @input="onUrlInput"
+            @blur="onUrlBlur"
+            :readonly="readonly"
+          />
+          <button
+            v-if="value"
+            class="icon-inline danger"
+            type="button"
+            :disabled="readonly"
+            @click="clearValue"
+            title="Remove"
+          >
+            <i :class="icons.trash" />
+          </button>
+        </div>
         <small class="note">
           Use a stable, accessible URL (institutional storage, or DOI).
         </small>
@@ -140,12 +170,24 @@
 
     <!-- Error -->
     <div v-if="error" class="error">{{ error }}</div>
+
+    <CustomDialog
+      :message="deleteConfirmationMessage"
+      :isVisible="deleteConfirmationVisible"
+      :showCancel="true"
+      confirmLabel="OK"
+      cancelLabel="Cancel"
+      @confirm="confirmPendingRemoval"
+      @cancel="cancelPendingRemoval"
+      @close="deleteConfirmationVisible = false"
+    />
   </div>
 </template>
 
 <script>
 /* eslint-disable */
 import icons from "@/assets/styles/icons";
+import CustomDialog from "@/components/CustomDialog.vue";
 
 const KB = 1024;
 const MB = 1024 * KB;
@@ -154,6 +196,9 @@ const DEFAULT_MAX_MB = null;      // ← no default size limit
 
 export default {
   name: "FieldFileUpload",
+  components: {
+    CustomDialog,
+  },
   props: {
     // value can be: null | metaObject | metaObject[]   (when allowMultipleFiles)
     value: { type: [Object, Array, null], default: null },
@@ -166,7 +211,9 @@ export default {
     return {
       icons,
       localUrl: "",
-      error: ""
+      error: "",
+      deleteConfirmationVisible: false,
+      pendingRemoval: null,
     };
   },
   computed: {
@@ -237,6 +284,9 @@ export default {
     displayedUrl() {
       if (this.value && !Array.isArray(this.value) && this.value.source === "url") return this.value.url || "";
       return this.localUrl;
+    },
+    deleteConfirmationMessage() {
+      return "This action will permanently delete the file when you save. Do you want to continue?";
     }
   },
   mounted() {
@@ -319,7 +369,14 @@ export default {
     onUrlBlur() {
       if (this.isMultiple) return; // handled by addUrl()
       const url = String(this.localUrl || "").trim();
-      if (!url) { this.$emit("input", null); return; }
+      if (!url) {
+        if (this.value) {
+          this.requestRemoval({ value: this.value });
+        } else {
+          this.$emit("input", null);
+        }
+        return;
+      }
       let parsed;
       try { parsed = new URL(url); } catch { this.error = "Invalid URL."; return; }
       if (!/^https?:$/.test(parsed.protocol)) { this.error = "Only http(s) URLs are supported."; return; }
@@ -345,7 +402,7 @@ export default {
     },
 
     removeLocalAt(idx) {
-      if (!this.isMultiple) return;
+      if (this.readonly || !this.isMultiple) return;
       const current = Array.isArray(this.value) ? this.value.slice() : [];
       const localIdxs = current
         .map((it, i) => ({ it, i }))
@@ -353,13 +410,15 @@ export default {
         .map(x => x.i);
       const toRemove = localIdxs[idx];
       if (toRemove !== undefined) {
-        current.splice(toRemove, 1);
-        this.$emit("input", current);
+        this.requestRemoval({
+          value: current[toRemove],
+          nextValue: current.filter((_, index) => index !== toRemove),
+        });
       }
     },
 
     removeUrlAt(idx) {
-      if (!this.isMultiple) return;
+      if (this.readonly || !this.isMultiple) return;
       const current = Array.isArray(this.value) ? this.value.slice() : [];
       const urlIdxs = current
         .map((it, i) => ({ it, i }))
@@ -367,15 +426,57 @@ export default {
         .map(x => x.i);
       const toRemove = urlIdxs[idx];
       if (toRemove !== undefined) {
-        current.splice(toRemove, 1);
-        this.$emit("input", current);
+        this.requestRemoval({
+          value: current[toRemove],
+          nextValue: current.filter((_, index) => index !== toRemove),
+        });
       }
     },
 
     clearValue() {
+      if (this.readonly || !this.value) return;
+      this.requestRemoval({
+        value: this.value,
+        nextValue: this.isMultiple ? [] : null,
+      });
+    },
+
+    requestRemoval(removal) {
+      if (this.readonly || !removal?.value) return;
+      this.pendingRemoval = {
+        value: removal.value,
+        nextValue:
+          Object.prototype.hasOwnProperty.call(removal, "nextValue")
+            ? removal.nextValue
+            : this.isMultiple
+            ? []
+            : null,
+      };
+      this.deleteConfirmationVisible = true;
+    },
+
+    confirmPendingRemoval() {
+      const removal = this.pendingRemoval;
+      if (!removal) return;
       this.error = "";
       this.localUrl = "";
-      this.$emit("input", this.isMultiple ? [] : null);
+      this.pendingRemoval = null;
+      this.deleteConfirmationVisible = false;
+      this.$emit("file-removed", removal.value);
+      this.$emit("input", removal.nextValue);
+    },
+
+    cancelPendingRemoval() {
+      const currentValue = this.value;
+      this.pendingRemoval = null;
+      this.deleteConfirmationVisible = false;
+      if (
+        !this.isMultiple &&
+        currentValue &&
+        currentValue.source === "url"
+      ) {
+        this.localUrl = currentValue.url || "";
+      }
     },
 
     canDownload(file) {
@@ -442,6 +543,7 @@ export default {
 .attach-btn { display:inline-flex; align-items:center; gap:8px; border:1px solid #d1d5db; background:white; padding:10px 14px; border-radius:8px; cursor:pointer; }
 .url-box { display:flex; flex-direction:column; gap:6px }
 .url-row { width:100%; }
+.single-url-input { display:grid; grid-template-columns:1fr auto; gap:8px; align-items:center; }
 .url-add-row { display:grid; grid-template-columns:1fr auto; gap:8px; align-items:center; }
 .add-url-btn { padding:10px 14px; border-radius:8px; border:1px solid #d1d5db; background:#f9fafb; cursor:pointer; }
 .icon-inline { border:none; background:transparent; padding:6px; border-radius:8px; cursor:pointer; }

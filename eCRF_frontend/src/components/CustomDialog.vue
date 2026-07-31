@@ -1,14 +1,26 @@
 <template>
-  <div v-if="isVisible" class="dialog-overlay">
-    <div class="dialog">
-      <div class="dialog-content">
-        <p class="dialog-message">{{ message }}</p>
-      </div>
-      <div class="dialog-actions">
-        <button @click="closeDialog" class="btn-primary">OK</button>
+  <Teleport to="body">
+    <div v-if="isVisible" class="dialog-overlay">
+      <div class="dialog" role="dialog" aria-modal="true">
+        <div class="dialog-content">
+          <p class="dialog-message">{{ message }}</p>
+        </div>
+        <div class="dialog-actions">
+          <button
+            v-if="showCancel"
+            @click="cancelDialog"
+            class="btn-secondary"
+            type="button"
+          >
+            {{ cancelLabel }}
+          </button>
+          <button @click="confirmDialog" class="btn-primary" type="button">
+            {{ confirmLabel }}
+          </button>
+        </div>
       </div>
     </div>
-  </div>
+  </Teleport>
 </template>
 
 <script>
@@ -25,15 +37,34 @@ export default {
       type: Boolean,
       default: false,
     },
+    showCancel: {
+      type: Boolean,
+      default: false,
+    },
+    confirmLabel: {
+      type: String,
+      default: "OK",
+    },
+    cancelLabel: {
+      type: String,
+      default: "Cancel",
+    },
   },
-  emits: ["close"],
+  emits: ["close", "confirm", "cancel"],
   setup(props, { emit }) {
-    function closeDialog() {
+    function confirmDialog() {
+      emit("confirm");
+      emit("close");
+    }
+
+    function cancelDialog() {
+      emit("cancel");
       emit("close");
     }
 
     return {
-      closeDialog,
+      confirmDialog,
+      cancelDialog,
     };
   },
 };
@@ -69,6 +100,7 @@ export default {
 .dialog-actions {
   display: flex;
   justify-content: center;
+  gap: 10px;
 }
 
 .btn-primary {
@@ -83,6 +115,18 @@ export default {
 
 .btn-primary:hover {
   background: #0056b3;
+}
+.btn-secondary {
+  background: #e5e7eb;
+  color: #111827;
+  padding: 8px 16px;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+}
+.btn-secondary:hover {
+  background: #d1d5db;
 }
 .dialog-message {
   white-space: pre-line;

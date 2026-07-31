@@ -1880,6 +1880,94 @@ class DataladStudyRepo:
                     out.append(row)
         return out
 
+    def delete_file(
+        self,
+        *,
+        study_id: int,
+        study_name: str,
+        file_id: int,
+        actor: str,
+        audit_label: Optional[str] = None,
+        user_id: Optional[int] = None,
+        actor_name: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        p = self.paths(study_id, study_name)
+        record_path = p.files_dir / f"file_{int(file_id):09d}.json"
+
+        with dataset_lock(LockSpec(dataset_path=p.dataset_path)):
+            record = _json_load(record_path)
+            if not record or int(record.get("study_id") or 0) != int(study_id):
+                raise FileNotFoundError("File record not found")
+
+            storage_option = str(record.get("storage_option") or "").strip().lower()
+            stored_path = record.get("file_path")
+            if storage_option != "url" and stored_path:
+                dataset_root = Path(os.path.abspath(p.dataset_path))
+                files_root = Path(os.path.abspath(p.files_dir))
+                # Validate the path lexically. DataLad/git-annex payloads are
+                # symlinks into .git/annex/objects, so Path.resolve() would
+                # follow a valid stored file outside canonical/files.
+                absolute_path = Path(
+                    os.path.abspath(p.dataset_path / str(stored_path))
+                )
+                try:
+                    absolute_path.relative_to(files_root)
+                    absolute_path.parent.resolve().relative_to(
+                        p.files_dir.resolve()
+                    )
+                except Exception as exc:
+                    raise ValueError("Invalid file path outside study file storage") from exc
+
+                if absolute_path.exists() or absolute_path.is_symlink():
+                    if not absolute_path.is_file() and not absolute_path.is_symlink():
+                        raise ValueError("Stored file path is not a file")
+                    absolute_path.unlink()
+
+                parent = absolute_path.parent
+                while parent != files_root and parent != dataset_root:
+                    try:
+                        parent.rmdir()
+                    except OSError:
+                        break
+                    parent = parent.parent
+
+            record_path.unlink()
+
+            labels = self._resolve_subject_visit_group_labels(
+                p,
+                subject_index=record.get("subject_index"),
+                visit_index=record.get("visit_index"),
+                group_index=record.get("group_index"),
+            )
+            actor_payload = self._build_actor_payload(
+                actor=actor,
+                actor_name=actor_name,
+                user_id=user_id,
+            )
+            self._append_audit(
+                p,
+                action="file_deleted",
+                study_id=study_id,
+                payload={
+                    "file_id": int(file_id),
+                    "file_name": record.get("file_name"),
+                    "stored_path": stored_path,
+                    "storage_option": storage_option,
+                    "modalities": record.get("modalities") or [],
+                    "form_version": record.get("form_version"),
+                    "subject_index": record.get("subject_index"),
+                    "visit_index": record.get("visit_index"),
+                    "group_index": record.get("group_index"),
+                    "ui_label": audit_label,
+                    **labels,
+                    **actor_payload,
+                },
+                subject_index=record.get("subject_index"),
+            )
+
+        self.save(p.dataset_path, f"case-e: delete_file study={study_id} file={int(file_id)}")
+        return record
+
     def get_file_record(
         self,
         *,
