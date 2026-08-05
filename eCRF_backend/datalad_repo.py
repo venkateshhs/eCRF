@@ -1369,6 +1369,139 @@ class DataladStudyRepo:
         self.save(p.dataset_path, f"case-e: upsert_entry study={study_id} entry={entry_id}")
         return entry
 
+    def save_entries_bulk(
+        self,
+        *,
+        study_id: int,
+        study_name: str,
+        form_version: int,
+        entries: List[Dict[str, Any]],
+        actor: str,
+        audit_label: Optional[str] = None,
+        user_id: Optional[int] = None,
+        actor_name: Optional[str] = None,
+        require_empty_slots: bool = True,
+    ) -> List[Dict[str, Any]]:
+        """Write a batch of entries under one dataset lock and one DataLad save."""
+        if not entries:
+            return []
+
+        p = self.ensure_dataset(study_id, study_name)
+
+        with dataset_lock(LockSpec(dataset_path=p.dataset_path)):
+            existing_rows = self.list_entries(study_id, study_name)
+            occupied_slots = set()
+            for row in existing_rows:
+                try:
+                    slot = (
+                        int(row.get("subject_index")),
+                        int(row.get("visit_index")),
+                        int(row.get("group_index")),
+                        int(row.get("form_version")),
+                    )
+                except (TypeError, ValueError):
+                    continue
+                occupied_slots.add(slot)
+
+            requested_slots = set()
+            normalized_entries = []
+            for item in entries:
+                normalized = {
+                    **item,
+                    "subject_index": int(item["subject_index"]),
+                    "visit_index": int(item["visit_index"]),
+                    "group_index": int(item["group_index"]),
+                }
+                slot = (
+                    normalized["subject_index"],
+                    normalized["visit_index"],
+                    normalized["group_index"],
+                    int(form_version),
+                )
+                if slot in requested_slots:
+                    raise ValueError(
+                        "Bulk import contains more than one row for the same subject, visit, group, and version"
+                    )
+                if require_empty_slots and slot in occupied_slots:
+                    raise ValueError(
+                        "Bulk import cannot overwrite a slot that already contains data"
+                    )
+                requested_slots.add(slot)
+                normalized_entries.append(normalized)
+
+            next_entry_id = self._next_entry_id_from_rows(existing_rows)
+            actor_payload = self._build_actor_payload(
+                actor=actor,
+                actor_name=actor_name,
+                user_id=user_id,
+            )
+            written = []
+
+            for item in normalized_entries:
+                entry_id = next_entry_id
+                next_entry_id += 1
+                now = local_now().isoformat()
+                entry = {
+                    "id": entry_id,
+                    "study_id": int(study_id),
+                    "subject_index": item["subject_index"],
+                    "visit_index": item["visit_index"],
+                    "group_index": item["group_index"],
+                    "form_version": int(form_version),
+                    "data": _deepcopy_json(item.get("data") or {}),
+                    "skipped_required_flags": _deepcopy_json(item.get("skipped_required_flags") or []),
+                    "progress_status": item.get("progress_status"),
+                    "progress_percentage": item.get("progress_percentage"),
+                    "progress_completed": item.get("progress_completed"),
+                    "progress_total": item.get("progress_total"),
+                    "progress_skipped": item.get("progress_skipped"),
+                    "created_at": now,
+                    "updated_at": now,
+                }
+
+                path = self._entry_path(
+                    p,
+                    form_version=form_version,
+                    subject_index=entry["subject_index"],
+                    visit_index=entry["visit_index"],
+                    group_index=entry["group_index"],
+                    entry_id=entry_id,
+                )
+                _json_dump(path, entry)
+
+                labels = self._resolve_subject_visit_group_labels(
+                    p,
+                    subject_index=entry["subject_index"],
+                    visit_index=entry["visit_index"],
+                    group_index=entry["group_index"],
+                    subject_raw=item.get("subject_raw"),
+                    visit_raw=item.get("visit_raw"),
+                    group_raw=item.get("group_raw"),
+                )
+                self._append_audit(
+                    p,
+                    action="entry_upserted",
+                    study_id=study_id,
+                    payload={
+                        "entry_id": entry_id,
+                        "subject_index": entry["subject_index"],
+                        "visit_index": entry["visit_index"],
+                        "group_index": entry["group_index"],
+                        "form_version": int(form_version),
+                        "ui_label": audit_label,
+                        **labels,
+                        **actor_payload,
+                    },
+                    subject_index=entry["subject_index"],
+                )
+                written.append(entry)
+
+        self.save(
+            p.dataset_path,
+            f"case-e: bulk_upsert_entries study={study_id} version={form_version} count={len(written)}",
+        )
+        return written
+
     def update_entry(
         self,
         *,

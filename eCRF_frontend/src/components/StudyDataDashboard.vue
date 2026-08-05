@@ -78,7 +78,19 @@
     </div>
 
     <div class="table-wrapper">
-      <div class="loading" v-if="isLoadingEntries">Building dashboard…</div>
+      <div
+        v-if="isBootstrapping || isLoadingEntries"
+        class="dashboard-loading-state"
+        role="status"
+        aria-live="polite"
+        aria-busy="true"
+      >
+        <div class="dashboard-loading-card">
+          <div class="dashboard-loading-spinner" aria-hidden="true"></div>
+          <div class="dashboard-loading-title">Please wait</div>
+          <div class="dashboard-loading-message">Study data is being loaded.</div>
+        </div>
+      </div>
 
       <table class="dashboard-table" v-else>
         <thead>
@@ -253,7 +265,7 @@
       </div>
     </div>
 
-    <div v-if="!filteredData.length && !isLoadingEntries" class="no-data">
+    <div v-if="!filteredData.length && !isBootstrapping && !isLoadingEntries" class="no-data">
       No data entries found. Please enter data for the assigned sections using the data entry form.
     </div>
 
@@ -267,8 +279,12 @@
     />
   </div>
 
-  <div v-else class="loading">
-    Loading study data…
+  <div v-else class="dashboard-loading-state dashboard-loading-standalone" role="status" aria-live="polite" aria-busy="true">
+    <div class="dashboard-loading-card">
+      <div class="dashboard-loading-spinner" aria-hidden="true"></div>
+      <div class="dashboard-loading-title">Please wait</div>
+      <div class="dashboard-loading-message">Study data is being loaded.</div>
+    </div>
   </div>
 </template>
 
@@ -290,7 +306,11 @@ export default {
   props: {
     studyId: { type: [String, Number], default: null },
     embedded: { type: Boolean, default: false },
+    active: { type: Boolean, default: true },
     fullscreen: { type: Boolean, default: false },
+    initialStudy: { type: Object, default: null },
+    initialVersions: { type: Array, default: null },
+    initialStudyFiles: { type: Array, default: null },
   },
   data() {
     return {
@@ -307,6 +327,7 @@ export default {
       filters: { subjectId: "", group: "", visit: "" },
       filterDrafts: {},
       filterDebounceTimers: {},
+      entryIndexCache: new WeakMap(),
 
       currentPage: 1,
       pageSize: 50,
@@ -315,6 +336,7 @@ export default {
       isLoadingEntries: false,
       isLoadingMore: false,
       loadingMode: null,
+      isBootstrapping: true,
 
       studyVersions: [],
       selectedVersion: null,
@@ -421,6 +443,21 @@ export default {
       return this.uniqueDashboardValues("visit");
     },
 
+    currentEntrySlotIndex() {
+      return this.buildEntrySlotIndex(this.entries);
+    },
+
+    studyFileSlotIndex() {
+      const index = new Map();
+      (this.studyFiles || []).forEach((file) => {
+        const key = this.studyFileSlotKey(file?.subject_index, file?.visit_index);
+        const files = index.get(key);
+        if (files) files.push(file);
+        else index.set(key, [file]);
+      });
+      return index;
+    },
+
     filteredData() {
       const filtered = this.applyDashboardFilters(this.dashboardData, this.dashboardColumns);
       return this.applyDashboardSort(filtered);
@@ -442,6 +479,14 @@ export default {
   },
 
   watch: {
+    initialStudyFiles(nextFiles) {
+      if (Array.isArray(nextFiles)) this.studyFiles = nextFiles;
+    },
+    initialVersions(nextVersions) {
+      if (Array.isArray(nextVersions)) {
+        this.studyVersions = [...nextVersions].sort((a, b) => a.version - b.version);
+      }
+    },
     pageSize() {
       if (this.viewAll) return;
       this.currentPage = 1;
@@ -456,9 +501,15 @@ export default {
         this.updateStickyColumnOffsets?.();
       });
     },
+    active(isActive) {
+      if (!isActive) return;
+      this.$nextTick(() => {
+        this.updateStickyColumnOffsets?.();
+      });
+    },
     selectedVersion: {
       async handler() {
-        if (!this.study) return;
+        if (!this.study || this.isBootstrapping) return;
         await this.loadTemplateForSelectedVersion();
         this.initDynamicFilters();
         this.currentPage = 1;
@@ -601,17 +652,29 @@ export default {
     async bootstrap() {
       const studyId = this.getStudyId();
       try {
-        const studyResp = await axios.get(`/forms/studies/${studyId}`, {
-          headers: { Authorization: `Bearer ${this.token}` },
-        });
-        this.study = studyResp.data;
+        if (this.initialStudy) {
+          this.study = this.cloneStudyPayload(this.initialStudy);
+        } else {
+          const studyResp = await axios.get(`/forms/studies/${studyId}`, {
+            headers: { Authorization: `Bearer ${this.token}` },
+          });
+          this.study = studyResp.data;
+        }
 
-        await this.loadVersions(studyId);
+        if (Array.isArray(this.initialVersions)) {
+          this.studyVersions = [...this.initialVersions].sort((a, b) => a.version - b.version);
+        } else {
+          await this.loadVersions(studyId);
+        }
         if (!this.selectedVersion && this.studyVersions.length) {
           this.selectedVersion = this.studyVersions[this.studyVersions.length - 1].version;
         }
         await this.loadTemplateForSelectedVersion();
-        await this.loadStudyFiles(studyId);
+        if (Array.isArray(this.initialStudyFiles)) {
+          this.studyFiles = this.initialStudyFiles;
+        } else {
+          await this.loadStudyFiles(studyId);
+        }
 
         this.initDynamicFilters();
 
@@ -624,7 +687,20 @@ export default {
         } else {
           alert("Could not load study data");
         }
+      } finally {
+        this.isBootstrapping = false;
       }
+    },
+
+    cloneStudyPayload(payload) {
+      if (typeof structuredClone === "function") {
+        try {
+          return structuredClone(payload);
+        } catch {
+          // Vue props may be reactive proxies, which structuredClone cannot clone.
+        }
+      }
+      return JSON.parse(JSON.stringify(payload));
     },
 
     async loadStudyFiles(studyId) {
@@ -910,24 +986,66 @@ export default {
     },
 
     findBestEntryFromEntries(entries, subjIdx, visitIdx, groupIdx) {
-      const all = (entries || []).filter(
-        (e) =>
-          e.subject_index === subjIdx &&
-          e.visit_index === visitIdx &&
-          e.group_index === groupIdx
-      );
+      const index = this.entrySlotIndexFor(entries);
+      const all = index.get(this.entrySlotKey(subjIdx, visitIdx, groupIdx)) || [];
       if (!all.length) return null;
 
       const target = Number(this.selectedVersion);
       const exact = all.find((e) => Number(e.form_version) === target);
       if (exact) return exact;
 
-      const le = all
-        .filter((e) => Number(e.form_version) <= target)
-        .sort((a, b) => Number(b.form_version) - Number(a.form_version))[0];
-      if (le) return le;
+      let bestAtOrBefore = null;
+      let bestAtOrBeforeVersion = -Infinity;
+      let latest = all[0];
+      let latestVersion = Number(latest?.form_version);
 
-      return all.sort((a, b) => Number(b.form_version) - Number(a.form_version))[0];
+      all.forEach((entry) => {
+        const version = Number(entry?.form_version);
+        if (version <= target && version > bestAtOrBeforeVersion) {
+          bestAtOrBefore = entry;
+          bestAtOrBeforeVersion = version;
+        }
+        if (version > latestVersion) {
+          latest = entry;
+          latestVersion = version;
+        }
+      });
+
+      if (bestAtOrBefore) return bestAtOrBefore;
+
+      return latest;
+    },
+
+    entrySlotKey(subjIdx, visitIdx, groupIdx) {
+      const typed = (value) => `${typeof value}:${String(value)}`;
+      return `${typed(subjIdx)}|${typed(visitIdx)}|${typed(groupIdx)}`;
+    },
+
+    buildEntrySlotIndex(entries) {
+      const index = new Map();
+      (entries || []).forEach((entry) => {
+        const key = this.entrySlotKey(
+          entry?.subject_index,
+          entry?.visit_index,
+          entry?.group_index
+        );
+        const slotEntries = index.get(key);
+        if (slotEntries) slotEntries.push(entry);
+        else index.set(key, [entry]);
+      });
+      return index;
+    },
+
+    entrySlotIndexFor(entries) {
+      if (entries === this.entries) return this.currentEntrySlotIndex;
+      if (!entries || typeof entries !== "object") return new Map();
+
+      const cached = this.entryIndexCache.get(entries);
+      if (cached) return cached;
+
+      const index = this.buildEntrySlotIndex(entries);
+      this.entryIndexCache.set(entries, index);
+      return index;
     },
 
     getValue(subjIdx, visitIdx, sectionIdx, fieldIdx) {
@@ -937,6 +1055,10 @@ export default {
     getValueFromEntries(entries, subjIdx, visitIdx, sectionIdx, fieldIdx) {
       const groupIdx = this.resolveGroup(subjIdx);
       const entry = this.findBestEntryFromEntries(entries, subjIdx, visitIdx, groupIdx);
+      return this.getValueFromEntry(entry, sectionIdx, fieldIdx);
+    },
+
+    getValueFromEntry(entry, sectionIdx, fieldIdx) {
       if (!entry || !entry.data) return "";
 
       const d = entry.data;
@@ -954,7 +1076,13 @@ export default {
     },
 
     getTableRowsFromEntries(entries, subjIdx, visitIdx, sectionIdx, fieldIdx) {
-      const raw = this.getValueFromEntries(entries, subjIdx, visitIdx, sectionIdx, fieldIdx);
+      const groupIdx = this.resolveGroup(subjIdx);
+      const entry = this.findBestEntryFromEntries(entries, subjIdx, visitIdx, groupIdx);
+      return this.getTableRowsFromEntry(entry, sectionIdx, fieldIdx);
+    },
+
+    getTableRowsFromEntry(entry, sectionIdx, fieldIdx) {
+      const raw = this.getValueFromEntry(entry, sectionIdx, fieldIdx);
       if (!raw || typeof raw !== "object") return [];
       if (!Array.isArray(raw.rows)) return [];
       return raw.rows;
@@ -1131,6 +1259,7 @@ export default {
           };
 
           const entry = this.findBestEntryFromEntries(entries, subjIdx, vIdx, groupIdx);
+          row.__skippedRequiredFlags = entry?.skipped_required_flags || null;
           row.__uploadedFiles = this.uploadedFilesForRow(subjIdx, vIdx, entry?.data || []);
 
           columns.forEach((col) => {
@@ -1143,7 +1272,7 @@ export default {
 
             if (col.kind === "normal") {
               const field = this.sections?.[col.sIdx]?.fields?.[col.fIdx];
-              const raw = this.getValueFromEntries(entries, subjIdx, vIdx, col.sIdx, col.fIdx);
+              const raw = this.getValueFromEntry(entry, col.sIdx, col.fIdx);
               const type = String(field?.type || "").toLowerCase();
 
               if (type === "checkbox") {
@@ -1167,12 +1296,12 @@ export default {
             }
 
             if (col.kind === "tableCell") {
-                const field = this.sections?.[col.sIdx]?.fields?.[col.fIdx];
-                const tableRows = this.getTableRowsFromEntries(entries, subjIdx, vIdx, col.sIdx, col.fIdx);
-                const tableRow = tableRows[col.tableRowIdx] || null;
-                const tableColDef = field?.tableConfig?.columns?.[col.tIdx] || {};
-                const raw = this.readTableCellValue(tableRow, tableColDef, col.tIdx);
-                const tableColType = String(tableColDef?.type || "").toLowerCase();
+              const field = this.sections?.[col.sIdx]?.fields?.[col.fIdx];
+              const tableRows = this.getTableRowsFromEntry(entry, col.sIdx, col.fIdx);
+              const tableRow = tableRows[col.tableRowIdx] || null;
+              const tableColDef = field?.tableConfig?.columns?.[col.tIdx] || {};
+              const raw = this.readTableCellValue(tableRow, tableColDef, col.tIdx);
+              const tableColType = String(tableColDef?.type || "").toLowerCase();
 
               if (tableColType === "checkbox") {
                 row[col.key] = raw === true ? "Yes" : raw === false ? "No" : "";
@@ -1260,24 +1389,18 @@ export default {
       });
     },
 
-    isCellSkipped(subjIdx, visitIdx, sectionIdx, fieldIdx) {
-      const groupIdx = this.resolveGroup(subjIdx);
-      const entry = this.findBestEntry(subjIdx, visitIdx, groupIdx);
-      if (!entry) return false;
-      const flags = entry.skipped_required_flags;
-      return !!(
-        Array.isArray(flags) &&
-        Array.isArray(flags[sectionIdx]) &&
-        flags[sectionIdx][fieldIdx] === true
-      );
-    },
-
     dashboardCellClass(row, col) {
       if (col.kind === "normal") {
         const assigned = this.isAssigned(col.sIdx, row.__vIdx, row.__gIdx);
+        const skippedFlags = row.__skippedRequiredFlags;
+        const skipped = !!(
+          Array.isArray(skippedFlags) &&
+          Array.isArray(skippedFlags[col.sIdx]) &&
+          skippedFlags[col.sIdx][col.fIdx] === true
+        );
         return {
           "cell-unassigned": !assigned,
-          "cell-skipped": assigned && this.isCellSkipped(row.__sIdx, row.__vIdx, col.sIdx, col.fIdx),
+          "cell-skipped": assigned && skipped,
         };
       }
 
@@ -1333,11 +1456,11 @@ export default {
     },
 
     studyFileRecordsForCell(sIdx, vIdx) {
-      return (this.studyFiles || []).filter(
-        (file) =>
-          Number(file?.subject_index) === Number(sIdx) &&
-          Number(file?.visit_index) === Number(vIdx)
-      );
+      return this.studyFileSlotIndex.get(this.studyFileSlotKey(sIdx, vIdx)) || [];
+    },
+
+    studyFileSlotKey(sIdx, vIdx) {
+      return `${Number(sIdx)}:${Number(vIdx)}`;
     },
 
     uploadedFilesForRow(sIdx, vIdx, data) {
@@ -2038,6 +2161,58 @@ export default {
   text-align: center;
   padding: 24px;
   color: #6b7280;
+}
+
+.dashboard-loading-state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-height: 240px;
+  padding: 24px;
+  box-sizing: border-box;
+}
+
+.dashboard-loading-standalone {
+  min-height: 100vh;
+}
+
+.dashboard-loading-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  min-width: 260px;
+  padding: 24px 28px;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: 0 18px 45px rgba(15, 23, 42, 0.14);
+  color: #111827;
+  text-align: center;
+}
+
+.dashboard-loading-spinner {
+  width: 34px;
+  height: 34px;
+  border: 4px solid #e5e7eb;
+  border-top-color: #2563eb;
+  border-radius: 50%;
+  animation: dashboard-loading-spin 0.8s linear infinite;
+}
+
+.dashboard-loading-title {
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.dashboard-loading-message {
+  font-size: 14px;
+  color: #4b5563;
+}
+
+@keyframes dashboard-loading-spin {
+  to { transform: rotate(360deg); }
 }
 
 .no-data {

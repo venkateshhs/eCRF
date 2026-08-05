@@ -1273,6 +1273,69 @@ def save_study_data(
         )
 
 
+@router.post("/studies/{study_id}/data/bulk")
+def bulk_insert_data(
+    study_id: int,
+    payload: schemas.BulkPayload = Body(...),
+    version: Optional[int] = Query(None),
+    create_bids: bool = Query(True),
+    audit_label: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    meta = db.query(models.StudyMetadata).filter(models.StudyMetadata.id == study_id).first()
+    if not meta:
+        raise HTTPException(status_code=404, detail="Study not found")
+
+    _assert_has_study_permission(db, meta, current_user, required="add_data")
+    _assert_not_locked_by_other(meta, current_user)
+
+    if (meta.status or "PUBLISHED").upper().strip() != "PUBLISHED":
+        raise HTTPException(status_code=400, detail="Data entry is only allowed for published studies")
+
+    form_version = _resolve_form_version_or_400(db, study_id, version)
+    if not payload.entries:
+        return {"inserted": 0, "failed": 0, "errors": []}
+
+    content_row = _get_content_row_or_404(db, study_id)
+    selected_models = ((content_row.study_data or {}).get("selectedModels") or [])
+    entries = []
+    for payload_entry in payload.entries:
+        item = payload_entry.model_dump()
+        item["skipped_required_flags"] = _flags_dict_to_list(
+            item.get("skipped_required_flags"),
+            selected_models,
+        )
+        entries.append(item)
+
+    # create_bids is accepted for compatibility with the database-backed API.
+    # Hybrid mode always persists canonical entry data in the DataLad dataset.
+    _ = create_bids
+
+    try:
+        written = repo.save_entries_bulk(
+            study_id=study_id,
+            study_name=meta.study_name,
+            form_version=form_version,
+            entries=entries,
+            actor=_actor_identifier(current_user),
+            actor_name=_display_name(current_user),
+            user_id=current_user.id,
+            audit_label=audit_label or "Study Data Import",
+            require_empty_slots=True,
+        )
+    except ValueError as error:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": str(error),
+                "conflict": True,
+            },
+        )
+
+    return {"inserted": len(written), "failed": 0, "errors": []}
+
+
 @router.put("/studies/{study_id}/data_entries/{entry_id}", response_model=schemas.StudyDataEntryOut)
 def update_study_data_entry(
     study_id: int,
