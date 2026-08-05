@@ -137,22 +137,40 @@
 
           <tr class="filter-row">
               <th class="sticky-col sticky-subject">
-                <input v-model="filters.subjectId" placeholder="Filter Subject ID">
+                <select v-model="filters.subjectId" aria-label="Filter by subject">
+                  <option value="">All Subjects</option>
+                  <option v-for="subjectId in subjectFilterOptions" :key="`subject-${subjectId}`" :value="subjectId">
+                    {{ subjectId }}
+                  </option>
+                </select>
               </th>
 
               <th v-if="canViewGroupColumn" class="sticky-col sticky-group">
-                <input v-model="filters.group" placeholder="Filter Group">
+                <select v-model="filters.group" aria-label="Filter by group">
+                  <option value="">All Groups</option>
+                  <option v-for="group in groupFilterOptions" :key="`group-${group}`" :value="group">
+                    {{ group }}
+                  </option>
+                </select>
               </th>
 
               <th class="sticky-col sticky-visit">
-                <input v-model="filters.visit" placeholder="Filter Visit">
+                <select v-model="filters.visit" aria-label="Filter by visit">
+                  <option value="">All Visits</option>
+                  <option v-for="visit in visitFilterOptions" :key="`visit-${visit}`" :value="visit">
+                    {{ visit }}
+                  </option>
+                </select>
               </th>
 
             <template v-for="col in dashboardColumns" :key="'filter-'+col.key">
               <th>
                 <input
-                  v-model="filters[col.key]"
+                  :value="filterDrafts[col.key] || ''"
                   :placeholder="`Filter ${col.label}`"
+                  @input="onFieldFilterInput(col.key, $event.target.value)"
+                  @blur="applyFieldFilter(col.key)"
+                  @keydown.enter="applyFieldFilter(col.key)"
                 />
               </th>
             </template>
@@ -212,11 +230,26 @@
       </table>
 
       <div class="pagination-controls" v-if="!viewAll && !isLoadingEntries">
-        <button :disabled="currentPage === 1" @click="goFirst">First</button>
-        <button :disabled="currentPage === 1" @click="goPrev">Previous</button>
-        <span>Page {{ currentPage }} of {{ totalPages }}</span>
-        <button :disabled="currentPage === totalPages" @click="goNext">Next</button>
-        <button :disabled="currentPage === totalPages" @click="goLast">Last</button>
+        <span>Loaded first {{ loadedGridRows }} of {{ totalGridRows }} rows</span>
+        <button :disabled="currentPage === totalPages || isLoadingMore" @click="goNext">
+          {{ loadingMode === "next" ? "Loading…" : "Next" }}
+        </button>
+        <button
+          class="load-everything-button"
+          :disabled="currentPage === totalPages || isLoadingMore"
+          @click="loadEverything"
+        >
+          Load Everything
+        </button>
+        <span
+          v-if="loadingMode === 'all'"
+          class="load-everything-status"
+          role="status"
+          aria-live="polite"
+        >
+          <span class="pagination-spinner" aria-hidden="true"></span>
+          Loading all rows… This may take a while.
+        </span>
       </div>
     </div>
 
@@ -272,12 +305,16 @@ export default {
 
       sortConfig: { key: "subjectId", direction: "asc" },
       filters: { subjectId: "", group: "", visit: "" },
+      filterDrafts: {},
+      filterDebounceTimers: {},
 
       currentPage: 1,
       pageSize: 50,
       VIEW_ALL_MAX_ROWS: 1000,
       viewAll: false,
       isLoadingEntries: false,
+      isLoadingMore: false,
+      loadingMode: null,
 
       studyVersions: [],
       selectedVersion: null,
@@ -362,20 +399,41 @@ export default {
       return this.buildHeaderGroupsForColumns(this.dashboardColumns);
     },
 
-    filteredData() {
+    dashboardData() {
       return this.buildDashboardRows({
         entries: this.entries,
         columns: this.dashboardColumns,
         forceAllPairs: this.viewAll,
-        applyFilters: true,
-        applySort: true,
+        applyFilters: false,
+        applySort: false,
       });
+    },
+
+    subjectFilterOptions() {
+      return this.uniqueDashboardValues("subjectId");
+    },
+
+    groupFilterOptions() {
+      return this.uniqueDashboardValues("group");
+    },
+
+    visitFilterOptions() {
+      return this.uniqueDashboardValues("visit");
+    },
+
+    filteredData() {
+      const filtered = this.applyDashboardFilters(this.dashboardData, this.dashboardColumns);
+      return this.applyDashboardSort(filtered);
     },
 
     totalPages() {
       if (this.viewAll) return 1;
       const wholeGridPages = Math.ceil(Math.max(1, this.totalGridRows) / this.pageSize);
       return Math.max(1, wholeGridPages);
+    },
+
+    loadedGridRows() {
+      return Math.min(this.currentPage * this.pageSize, this.totalGridRows);
     },
 
     paginatedData() {
@@ -389,10 +447,6 @@ export default {
       this.currentPage = 1;
       this.fetchPageEntries();
     },
-    currentPage() {
-      if (this.viewAll) return;
-      this.fetchPageEntries();
-    },
     viewAll() {
       this.currentPage = 1;
       this.fetchPageEntries();
@@ -401,12 +455,6 @@ export default {
       this.$nextTick(() => {
         this.updateStickyColumnOffsets?.();
       });
-    },
-    filters: {
-      handler() {
-        if (!this.viewAll) this.fetchPageEntries();
-      },
-      deep: true,
     },
     selectedVersion: {
       async handler() {
@@ -436,6 +484,7 @@ export default {
 
   beforeUnmount() {
       window.removeEventListener("resize", this.updateStickyColumnOffsets);
+      Object.values(this.filterDebounceTimers).forEach((timer) => clearTimeout(timer));
     },
 
   methods: {
@@ -608,6 +657,11 @@ export default {
         next[col.key] = this.filters[col.key] || "";
       });
 
+      this.filterDrafts = this.dashboardColumns.reduce((drafts, col) => {
+        drafts[col.key] = this.filterDrafts[col.key] ?? next[col.key] ?? "";
+        return drafts;
+      }, {});
+
       if (!this.canViewGroupColumn) next.group = "";
 
       const currentKeys = Object.keys(this.filters).sort();
@@ -624,6 +678,31 @@ export default {
       if (sameValues) return;
 
       this.filters = next;
+    },
+
+    uniqueDashboardValues(key) {
+      return Array.from(
+        new Set(
+          this.dashboardData
+            .map((row) => String(row?.[key] ?? "").trim())
+            .filter(Boolean)
+        )
+      );
+    },
+
+    onFieldFilterInput(key, value) {
+      this.filterDrafts[key] = value;
+      clearTimeout(this.filterDebounceTimers[key]);
+      this.filterDebounceTimers[key] = setTimeout(() => {
+        this.filters[key] = value;
+        delete this.filterDebounceTimers[key];
+      }, 300);
+    },
+
+    applyFieldFilter(key) {
+      clearTimeout(this.filterDebounceTimers[key]);
+      delete this.filterDebounceTimers[key];
+      this.filters[key] = this.filterDrafts[key] || "";
     },
 
     async loadVersions(studyId) {
@@ -697,8 +776,9 @@ export default {
         };
       }
 
-      const pageStart = (this.currentPage - 1) * this.pageSize;
-      const pageEndExcl = Math.min(pageStart + this.pageSize, S * V);
+      const page = Number.isInteger(options.page) ? options.page : this.currentPage;
+      const pageStart = options.pageOnly === true ? (page - 1) * this.pageSize : 0;
+      const pageEndExcl = Math.min(page * this.pageSize, S * V);
 
       const subjSet = new Set();
       const visitSet = new Set();
@@ -725,22 +805,27 @@ export default {
       return windowInfo.pairKeySet.has(`${subjIdx}:${visitIdx}`);
     },
 
-    async fetchPageEntries() {
+    async fetchPageEntries(options = {}) {
       if (!this.study) return;
       const studyId = this.getStudyId();
+      const append = options.append === true;
+      const loadAll = options.loadAll === true;
 
-      const { subjectIdxPageSet, visitIdxPageSet } = this.currentWindowIndexSets();
+      const { subjectIdxPageSet, visitIdxPageSet } = this.currentWindowIndexSets({
+        ...options,
+        forceAll: loadAll,
+      });
 
-      const subject_indexes = this.viewAll
+      const subject_indexes = this.viewAll || loadAll
         ? null
         : Array.from(subjectIdxPageSet).sort((a, b) => a - b).join(",");
 
-      const visit_indexes = this.viewAll
+      const visit_indexes = this.viewAll || loadAll
         ? null
         : Array.from(visitIdxPageSet).sort((a, b) => a - b).join(",");
 
       const params = new URLSearchParams();
-      if (this.viewAll) params.append("all", "true");
+      if (this.viewAll || loadAll) params.append("all", "true");
       if (subject_indexes) params.append("subject_indexes", subject_indexes);
       if (visit_indexes) params.append("visit_indexes", visit_indexes);
       if (Number.isFinite(this.selectedVersion)) params.append("version", String(this.selectedVersion));
@@ -748,21 +833,53 @@ export default {
       const url = `/forms/studies/${studyId}/data_entries` + (params.toString() ? `?${params.toString()}` : "");
 
       try {
-        this.isLoadingEntries = true;
+        if (append) {
+          this.isLoadingMore = true;
+          this.loadingMode = loadAll ? "all" : "next";
+        }
+        else this.isLoadingEntries = true;
         const resp = await axios.get(url, {
           headers: { Authorization: `Bearer ${this.token}` },
         });
         const payload = Array.isArray(resp.data)
           ? { entries: resp.data, total: resp.data.length }
           : resp.data || {};
-        this.entries = payload.entries || [];
+        const incomingEntries = payload.entries || [];
+        this.entries = append
+          ? this.mergeDashboardEntries(this.entries, incomingEntries)
+          : incomingEntries;
         this.totalEntries = payload.total ?? this.entries.length;
+        return true;
       } catch (err) {
         console.error("Failed to load entries:", err);
-        this.entries = [];
+        if (!append) this.entries = [];
+        return false;
       } finally {
-        this.isLoadingEntries = false;
+        if (append) {
+          this.isLoadingMore = false;
+          this.loadingMode = null;
+        }
+        else this.isLoadingEntries = false;
       }
+    },
+
+    mergeDashboardEntries(existingEntries, incomingEntries) {
+      const merged = new Map();
+      const entryKey = (entry) => {
+        if (entry?.id != null) return `id:${entry.id}`;
+        return [
+          entry?.subject_index,
+          entry?.visit_index,
+          entry?.group_index,
+          entry?.form_version,
+        ].join(":");
+      };
+
+      [...(existingEntries || []), ...(incomingEntries || [])].forEach((entry) => {
+        merged.set(entryKey(entry), entry);
+      });
+
+      return Array.from(merged.values());
     },
 
     toggleExportMenu() {
@@ -1093,14 +1210,14 @@ export default {
 
     applyDashboardFilters(data, columns) {
       return data.filter((row) => {
-        if (this.filters.subjectId && !String(row.subjectId).toLowerCase().includes(this.filters.subjectId.toLowerCase())) return false;
-        if (this.canViewGroupColumn && this.filters.group && !String(row.group).toLowerCase().includes(this.filters.group.toLowerCase())) return false;
-        if (this.filters.visit && !String(row.visit).toLowerCase().includes(this.filters.visit.toLowerCase())) return false;
+        if (this.filters.subjectId && String(row.subjectId) !== String(this.filters.subjectId)) return false;
+        if (this.canViewGroupColumn && this.filters.group && String(row.group) !== String(this.filters.group)) return false;
+        if (this.filters.visit && String(row.visit) !== String(this.filters.visit)) return false;
 
         for (const col of columns) {
-          const filterVal = this.filters[col.key];
+          const filterVal = String(this.filters[col.key] ?? "").trim().toLowerCase();
           if (!filterVal) continue;
-          if (!String(row[col.key] ?? "").toLowerCase().includes(String(filterVal).toLowerCase())) {
+          if (!String(row[col.key] ?? "").toLowerCase().includes(filterVal)) {
             return false;
           }
         }
@@ -1321,17 +1438,24 @@ export default {
       }
     },
 
-    goFirst() {
-      this.currentPage = 1;
+    async goNext() {
+      if (this.currentPage >= this.totalPages || this.isLoadingMore) return;
+      const nextPage = this.currentPage + 1;
+      const loaded = await this.fetchPageEntries({
+        append: true,
+        page: nextPage,
+        pageOnly: true,
+      });
+      if (loaded) this.currentPage = nextPage;
     },
-    goPrev() {
-      if (this.currentPage > 1) this.currentPage--;
-    },
-    goNext() {
-      if (this.currentPage < this.totalPages) this.currentPage++;
-    },
-    goLast() {
-      this.currentPage = this.totalPages;
+    async loadEverything() {
+      if (this.currentPage >= this.totalPages || this.isLoadingMore) return;
+      const lastPage = this.totalPages;
+      const loaded = await this.fetchPageEntries({
+        append: true,
+        loadAll: true,
+      });
+      if (loaded) this.currentPage = lastPage;
     },
 
     async exportCSV() {
@@ -1895,7 +2019,8 @@ export default {
    FILTER ROW
    ============================================================ */
 
-.filter-row input {
+.filter-row input,
+.filter-row select {
   width: 100%;
   min-width: 120px;
   padding: 4px;
@@ -1964,6 +2089,35 @@ export default {
 .pagination-controls button:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+.pagination-controls .load-everything-button {
+  color: #1d4ed8;
+  background: #eff6ff;
+  border-color: #93c5fd;
+}
+
+.load-everything-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: #4b5563;
+}
+
+.pagination-spinner {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 16px;
+  border: 2px solid #bfdbfe;
+  border-top-color: #2563eb;
+  border-radius: 50%;
+  animation: pagination-spin 0.8s linear infinite;
+}
+
+@keyframes pagination-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .pagination-controls span {
