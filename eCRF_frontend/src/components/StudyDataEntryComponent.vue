@@ -107,8 +107,12 @@
           :selectedVersion="selectedVersion"
           :infoIcon="icons.info"
           :showGroupColumn="canSeeGroupColumn"
+          :canManageSubjectDropout="canManageSubjectDropout"
+          :isAdmin="isAdminUser"
           @update:selectedVisitIndex="selectedVisitIndex = $event"
           @add-subjects="openSubjectDialog"
+          @dropout-subject="openSubjectDropoutDialog"
+          @reactivate-subject="reactivateSubject"
           @select-cell="selectCell"
           @open-status-legend="openStatusLegend"
         />
@@ -699,6 +703,17 @@
       @save="saveNewSubjects"
     />
 
+    <SubjectDropoutDialog
+      v-if="showSubjectDropoutDialog"
+      :subjects="sd.subjects"
+      :entries="existingEntries"
+      :files="studyFiles"
+      :saving="savingSubjectDropout"
+      :error="subjectDropoutError"
+      @close="closeSubjectDropoutDialog"
+      @submit="submitSubjectDropout"
+    />
+
     <GroupAssignDialog
       :visible="showGroupAssignDialog"
       :groupAssignScope="groupAssignScope"
@@ -846,6 +861,7 @@ import FieldLinearScale from "@/components/fields/FieldLinearScale.vue";
 import FieldFileUpload from "@/components/fields/FieldFileUpload.vue";
 import SelectionMatrixView from "@/components/SelectionMatrixView.vue";
 import AddSubjectsDialog from "@/components/AddSubjectsDialog.vue";
+import SubjectDropoutDialog from "@/components/SubjectDropoutDialog.vue";
 import { createAjv, validateFieldValue } from "@/utils/jsonschemaValidation";
 
 import MergeStudy from "@/components/MergeStudy.vue";
@@ -917,6 +933,7 @@ export default {
     FieldFileUpload,
     SelectionMatrixView,
     AddSubjectsDialog,
+    SubjectDropoutDialog,
     MergeStudy,
     StudyShareDialog,
     PermissionDeniedDialog,
@@ -1018,6 +1035,9 @@ export default {
       subjectDrafts: [],
       subjectDialogError: "",
       savingSubjects: false,
+      showSubjectDropoutDialog: false,
+      savingSubjectDropout: false,
+      subjectDropoutError: "",
 
       // Merge mode (selection panel toggles to merge UI in same container)
       isMergeMode: false,
@@ -1107,8 +1127,9 @@ export default {
           index,
           id: String(subject?.id || subject?.subject_id || `Subject ${index + 1}`).trim(),
           group: String(subject?.group || "").trim() || "Unassigned",
+          status: String(subject?.status || "ACTIVE").toUpperCase(),
         }))
-        .filter((subject) => subject.group === currentGroup);
+        .filter((subject) => subject.group === currentGroup && subject.status === "ACTIVE");
     },
 
     shareDialogSectionAvailabilityByVisit() {
@@ -1164,8 +1185,9 @@ export default {
           index: idx,
           label: subjectLabel,
           groupLabel: groupName || "Unassigned",
+          status: String(s?.status || "ACTIVE").toUpperCase(),
         };
-      });
+      }).filter((subject) => subject.status === "ACTIVE");
     },
     importableFields() {
       const models = Array.isArray(this.selectedModels) ? this.selectedModels : [];
@@ -1249,6 +1271,7 @@ export default {
       const subjects = this.sd.subjects || [];
       const out = [];
       for (let i = 0; i < subjects.length; i++) {
+        if (String(subjects[i]?.status || "ACTIVE").toUpperCase() !== "ACTIVE") continue;
         const g = String(subjects[i]?.group || "").trim();
         if (!g) out.push(i);
       }
@@ -1259,9 +1282,17 @@ export default {
 
       const isCreator = this.study.metadata.created_by === this.$store.state.user?.id;
       const hasAddPermission = this.isShared && this.sharedPermission === "add";
-      const isAdmin = this.$store.state.user?.role === "Administrator";
+      const isAdmin = this.isAdminUser;
 
       return isCreator || hasAddPermission || isAdmin;
+    },
+    isAdminUser() {
+      const user = this.$store.getters.getUser || this.$store.state.user || {};
+      return (user.profile?.role || user.role || "") === "Administrator";
+    },
+    canManageSubjectDropout() {
+      if (this.isShared || !this.study?.metadata) return false;
+      return this.isAdminUser || Number(this.study.metadata.created_by) === Number(this.$store.state.user?.id);
     },
     studyId() {
       const id = Number(this.$route.params.id);
@@ -5976,6 +6007,13 @@ applyImportedRowFromDialog(payload) {
       }
     },
     async selectCell(sIdx, vIdx) {
+      const selectedSubject = this.sd.subjects?.[sIdx];
+      if (String(selectedSubject?.status || "ACTIVE").toUpperCase() !== "ACTIVE") {
+        this.showDialogMessage(
+          `Subject ${selectedSubject?.id || sIdx + 1} has been dropped out. Data entry is disabled.`
+        );
+        return;
+      }
       const nS = this.numberOfSubjects;
       const nV = this.visitList.length;
 
@@ -7201,6 +7239,70 @@ applyImportedRowFromDialog(payload) {
 
       this.generateSubjectDrafts();
       this.showSubjectDialog = true;
+    },
+
+    openSubjectDropoutDialog() {
+      if (!this.canManageSubjectDropout) {
+        this.showDialogMessage("Only an administrator or the study author can drop out a subject.");
+        return;
+      }
+      this.subjectDropoutError = "";
+      this.showSubjectDropoutDialog = true;
+    },
+
+    closeSubjectDropoutDialog() {
+      if (this.savingSubjectDropout) return;
+      this.showSubjectDropoutDialog = false;
+      this.subjectDropoutError = "";
+    },
+
+    async submitSubjectDropout(request) {
+      if (!this.canManageSubjectDropout || this.savingSubjectDropout) return;
+      this.savingSubjectDropout = true;
+      this.subjectDropoutError = "";
+      try {
+        const { subjectIndex, ...payload } = request;
+        const response = await axios.post(
+          `/forms/studies/${this.study.metadata.id}/subjects/${subjectIndex}/dropout`,
+          payload,
+          { headers: { Authorization: `Bearer ${this.token}` } }
+        );
+        this.showSubjectDropoutDialog = false;
+        await this.loadStudy(this.study.metadata.id);
+        await this.loadExistingEntries(this.study.metadata.id);
+        await this.loadStudyFiles(this.study.metadata.id);
+        this.buildStatusCache();
+        this.showDialogMessage(
+          response.data?.status === "DROPPED_DATA_DELETED"
+            ? `Subject ${response.data.subject_id} was dropped out and active application data was deleted.`
+            : `Subject ${response.data.subject_id} was dropped out. Existing data is now read-only.`
+        );
+      } catch (error) {
+        this.subjectDropoutError = this.getApiErrorDetail(error) || "Failed to drop out subject.";
+      } finally {
+        this.savingSubjectDropout = false;
+      }
+    },
+
+    async reactivateSubject(subjectIndex) {
+      if (!this.isAdminUser) return;
+      const subject = this.sd.subjects?.[subjectIndex];
+      if (!subject) return;
+      const reason = window.prompt(`Reason for reactivating subject ${subject.id}:`);
+      if (!reason || !reason.trim()) return;
+      try {
+        await axios.post(
+          `/forms/studies/${this.study.metadata.id}/subjects/${subjectIndex}/reactivate`,
+          { reason: reason.trim() },
+          { headers: { Authorization: `Bearer ${this.token}` } }
+        );
+        await this.loadStudy(this.study.metadata.id);
+        await this.loadExistingEntries(this.study.metadata.id);
+        this.buildStatusCache();
+        this.showDialogMessage(`Subject ${subject.id} was reactivated.`);
+      } catch (error) {
+        this.showDialogMessage(this.getApiErrorDetail(error) || "Failed to reactivate subject.");
+      }
     },
 
     closeSubjectDialog() {

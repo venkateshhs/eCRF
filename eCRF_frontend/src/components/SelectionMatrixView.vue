@@ -76,6 +76,30 @@
           >
             + Add subjects
           </button>
+
+          <button
+            v-if="canManageSubjectDropout"
+            type="button"
+            class="btn-dropout-subject"
+            @click="$emit('dropout-subject')"
+          >
+            <i class="fas fa-user-slash"></i> Drop out subject
+          </button>
+
+          <label class="subject-status-filter">
+            Subject status
+            <select v-model="subjectStatusFilter">
+              <option value="active_and_retained">Active + retained dropouts</option>
+              <option value="active">Active subjects</option>
+              <option value="retained">Dropped — data retained</option>
+              <option value="deleted">Dropped — data deleted</option>
+              <option value="all">All subjects</option>
+            </select>
+          </label>
+
+          <span class="dropout-summary" title="Subjects ever enrolled / active / dropped out">
+            Enrolled {{ subjectCounts.total }} · Active {{ subjectCounts.active }} · Dropped {{ subjectCounts.dropped }}
+          </span>
         </div>
 
         <!-- Info icon MUST be extreme right -->
@@ -118,18 +142,30 @@
           </thead>
           <tbody>
             <tr
-              v-for="(subject, sIdx) in subjects"
-              :key="'sv-row-'+sIdx"
-              :ref="el => setSubjectRowRef(el, sIdx)"
+              v-for="item in displayedSubjects"
+              :key="'sv-row-'+item.sIdx"
+              :ref="el => setSubjectRowRef(el, item.sIdx)"
               class="subject-row"
               :class="{
-                'subject-row-search-match': isSearchMatchedSubject(sIdx),
-                'subject-row-search-active': activeMatchedSubjectIndex === sIdx
+                'subject-row-search-match': isSearchMatchedSubject(item.sIdx),
+                'subject-row-search-active': activeMatchedSubjectIndex === item.sIdx,
+                'subject-row-dropped': isDropped(item.subject),
+                'subject-row-deleted': subjectStatus(item.subject) === 'DROPPED_DATA_DELETED'
               }"
             >
 
               <td class="subject-cell" :style="subjectColStyle">
-                {{ subject.id }}
+                {{ item.subject.id }}
+                <span v-if="isDropped(item.subject)" class="dropout-badge" :title="dropoutTitle(item.subject)">
+                  <i class="fas fa-user-slash"></i>
+                  {{ subjectStatus(item.subject) === 'DROPPED_DATA_DELETED' ? 'Data deleted' : 'Dropped out' }}
+                </span>
+                <button
+                  v-if="isAdmin && subjectStatus(item.subject) === 'DROPPED_DATA_RETAINED'"
+                  type="button"
+                  class="reactivate-btn"
+                  @click="$emit('reactivate-subject', item.sIdx)"
+                >Reactivate</button>
               </td>
 
 
@@ -137,24 +173,26 @@
                 v-if="showGroupColumn"
                 class="group-cell"
               >
-                {{ subject.group || "—" }}
+                {{ item.subject.group || "—" }}
               </td>
 
               <td
                 v-for="vIdx in displayedVisitIndices"
-                :key="'visit-td-' + sIdx + '-' + vIdx"
+                :key="'visit-td-' + item.sIdx + '-' + vIdx"
                 class="visit-cell"
                 :style="visitColStyle"
               >
                 <button
                   class="select-btn"
-                  :class="statusClass(sIdx, vIdx)"
-                  :style="progressStyle(sIdx, vIdx)"
-                  @click="$emit('select-cell', sIdx, vIdx)"
+                  :class="statusClass(item.sIdx, vIdx)"
+                  :style="progressStyle(item.sIdx, vIdx)"
+                  :disabled="isDropped(item.subject)"
+                  :title="isDropped(item.subject) ? dropoutTitle(item.subject) : ''"
+                  @click="$emit('select-cell', item.sIdx, vIdx)"
                 >
                   <span class="select-btn-fill"></span>
                   <span class="select-btn-label">
-                    {{ progressLabel(sIdx, vIdx) || "Select" }}
+                    {{ isDropped(item.subject) ? 'Dropped out' : (progressLabel(item.sIdx, vIdx) || "Select") }}
                   </span>
                 </button>
               </td>
@@ -204,10 +242,14 @@ export default {
     infoIcon: { type: String, default: "fas fa-info-circle" },
 
     showGroupColumn: { type: Boolean, default: false },
+    canManageSubjectDropout: { type: Boolean, default: false },
+    isAdmin: { type: Boolean, default: false },
   },
   emits: [
     "update:selectedVisitIndex",
     "add-subjects",
+    "dropout-subject",
+    "reactivate-subject",
     "select-cell",
     "open-status-legend",
   ],
@@ -218,6 +260,7 @@ export default {
       matchedSubjectIndices: [],
       activeMatchPosition: 0,
       subjectRowRefs: {},
+      subjectStatusFilter: "active_and_retained",
     };
   },
 
@@ -226,9 +269,38 @@ export default {
       if (!this.matchedSubjectIndices.length) return null;
       return this.matchedSubjectIndices[this.activeMatchPosition] ?? null;
     },
+    displayedSubjects() {
+      return (this.subjects || []).map((subject, sIdx) => ({ subject, sIdx })).filter(({ subject }) => {
+        const status = this.subjectStatus(subject);
+        if (this.subjectStatusFilter === "all") return true;
+        if (this.subjectStatusFilter === "active") return status === "ACTIVE";
+        if (this.subjectStatusFilter === "retained") return status === "DROPPED_DATA_RETAINED";
+        if (this.subjectStatusFilter === "deleted") return status === "DROPPED_DATA_DELETED";
+        return status !== "DROPPED_DATA_DELETED";
+      });
+    },
+    subjectCounts() {
+      const counts = { total: (this.subjects || []).length, active: 0, dropped: 0 };
+      (this.subjects || []).forEach((subject) => {
+        if (this.subjectStatus(subject) === "ACTIVE") counts.active += 1;
+        else if (this.subjectStatus(subject).startsWith("DROPPED_")) counts.dropped += 1;
+      });
+      return counts;
+    },
   },
 
   methods: {
+    subjectStatus(subject) {
+      return String(subject?.status || "ACTIVE").toUpperCase();
+    },
+    isDropped(subject) {
+      return this.subjectStatus(subject) !== "ACTIVE";
+    },
+    dropoutTitle(subject) {
+      const reason = subject?.dropout_reason || "Reason not available";
+      const date = subject?.dropout_date || "date not available";
+      return `Subject dropped out on ${date}: ${reason}. Data entry is disabled.`;
+    },
     onVisitChange(event) {
       const val = parseInt(event.target.value, 10);
       this.$emit("update:selectedVisitIndex", Number.isNaN(val) ? -1 : val);
@@ -286,15 +358,15 @@ export default {
         return;
       }
 
-      const subjects = Array.isArray(this.subjects) ? this.subjects : [];
+      const subjects = this.displayedSubjects;
 
       this.matchedSubjectIndices = subjects
-        .map((subject, index) => {
+        .map((item) => {
           const label = this.normalizeSearchText(
-            this.getSubjectSearchLabel(subject, index)
+            this.getSubjectSearchLabel(item.subject, item.sIdx)
           );
 
-          return label.includes(query) ? index : null;
+          return label.includes(query) ? item.sIdx : null;
         })
         .filter((index) => index !== null);
 
@@ -1053,6 +1125,31 @@ export default {
   transform: translateY(0);
 }
 
+.btn-dropout-subject {
+  border: 1px solid #be123c;
+  background: #fff1f2;
+  color: #9f1239;
+  border-radius: 7px;
+  padding: 9px 12px;
+  font-weight: 700;
+}
+
+.subject-status-filter {
+  display: grid;
+  gap: 3px;
+  color: #475569;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.subject-status-filter select { padding: 6px 8px; border: 1px solid #cbd5e1; border-radius: 6px; }
+.dropout-summary { padding: 7px 9px; border-radius: 999px; background: #f1f5f9; color: #334155; font-size: 12px; font-weight: 700; white-space: nowrap; }
+.subject-row-dropped { background: #fff1f2; color: #881337; }
+.subject-row-deleted { background: #f1f5f9; color: #64748b; }
+.subject-row-dropped .select-btn { cursor: not-allowed; filter: grayscale(.65); opacity: .6; }
+.dropout-badge { display: block; margin-top: 5px; color: #be123c; font-size: 12px; font-weight: 700; }
+.reactivate-btn { margin-top: 7px; padding: 4px 7px; border: 1px solid #047857; border-radius: 5px; color: #047857; background: #ecfdf5; font-size: 12px; }
+
 /* ========= Responsive ========= */
 @media (max-width: 900px) {
   .matrix-toolbar {
@@ -1092,6 +1189,7 @@ export default {
 
   .visit-select,
   .btn-add-subject,
+  .btn-dropout-subject,
   .version-helper {
     width: 100%;
   }

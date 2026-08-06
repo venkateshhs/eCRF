@@ -37,6 +37,12 @@ TEMPLATE_DIR = (
 )
 
 ALLOWED_STUDY_STATUS = {"DRAFT", "PUBLISHED", "ARCHIVED"}
+ACTIVE_SUBJECT_STATUS = "ACTIVE"
+SUBJECT_STATUS_FIELDS = {
+    "status", "dropout_date", "dropout_reason", "dropout_other_reason",
+    "dropped_at", "dropped_by", "dropped_by_name", "deletion_status",
+    "reactivated_at", "reactivated_by", "reactivation_reason",
+}
 
 
 def _normalize_allowed_section_ids(section_ids: Optional[List[Any]]) -> List[str]:
@@ -88,6 +94,57 @@ def _is_admin(user) -> bool:
 def _assert_owner_or_admin(meta: models.StudyMetadata, user) -> None:
     if meta.created_by != user.id and not _is_admin(user):
         raise HTTPException(status_code=403, detail="Not authorized")
+
+
+def _subject_status(subject: Dict[str, Any]) -> str:
+    return str((subject or {}).get("status") or ACTIVE_SUBJECT_STATUS).strip().upper()
+
+
+def _subject_from_study_data(study_data: Dict[str, Any], subject_index: int) -> Dict[str, Any]:
+    subjects = (study_data or {}).get("subjects") or []
+    if not isinstance(subject_index, int) or subject_index < 0 or subject_index >= len(subjects):
+        raise HTTPException(status_code=404, detail="Subject not found")
+    subject = subjects[subject_index]
+    if not isinstance(subject, dict):
+        raise HTTPException(status_code=400, detail="Invalid subject record")
+    return subject
+
+
+def _assert_subject_active(study_data: Dict[str, Any], subject_index: int) -> Dict[str, Any]:
+    subject = _subject_from_study_data(study_data, int(subject_index))
+    if _subject_status(subject) != ACTIVE_SUBJECT_STATUS:
+        subject_id = subject.get("id") or subject.get("subject_id") or f"Subject {int(subject_index) + 1}"
+        date = subject.get("dropout_date") or "an earlier date"
+        raise HTTPException(
+            status_code=409,
+            detail=f'Subject "{subject_id}" was dropped out on {date}. Data entry is no longer permitted.',
+        )
+    return subject
+
+
+def _assert_subject_active_for_study(db: Session, study_id: int, subject_index: Optional[int]) -> None:
+    if subject_index is None:
+        return
+    content = _get_content_row_or_404(db, study_id)
+    _assert_subject_active(content.study_data or {}, int(subject_index))
+
+
+def _validate_subject_identity_and_status_update(old_sd: Dict[str, Any], new_sd: Dict[str, Any]) -> None:
+    old_subjects = (old_sd or {}).get("subjects") or []
+    new_subjects = (new_sd or {}).get("subjects") or []
+    if len(new_subjects) < len(old_subjects):
+        raise HTTPException(status_code=400, detail="Existing subjects cannot be removed")
+    for index, old_subject in enumerate(old_subjects):
+        new_subject = new_subjects[index] if index < len(new_subjects) else {}
+        old_id = str((old_subject or {}).get("id") or (old_subject or {}).get("subject_id") or "").strip()
+        new_id = str((new_subject or {}).get("id") or (new_subject or {}).get("subject_id") or "").strip()
+        if old_id != new_id:
+            raise HTTPException(status_code=400, detail="Existing subject IDs and positions cannot be changed")
+        if _subject_status(old_subject or {}) != ACTIVE_SUBJECT_STATUS and old_subject != new_subject:
+            raise HTTPException(status_code=409, detail="Dropped subjects cannot be modified")
+        for field in SUBJECT_STATUS_FIELDS:
+            if (old_subject or {}).get(field) != (new_subject or {}).get(field):
+                raise HTTPException(status_code=400, detail="Subject dropout status can only be changed with the dropout workflow")
 
 
 def _effective_study_permissions(db: Session, meta: models.StudyMetadata, user) -> Dict[str, bool]:
@@ -728,6 +785,7 @@ def update_study(
     content_row = _get_content_row_or_404(db, study_id)
     old_sd = _deepcopy_json(content_row.study_data or {})
     new_sd = _deepcopy_json(study_content.study_data or {})
+    _validate_subject_identity_and_status_update(old_sd, new_sd)
 
     incoming_status = _norm_status(getattr(study_metadata, "status", None)) or (meta.status or "PUBLISHED")
 
@@ -841,6 +899,233 @@ def publish_study(
         },
     }
 
+
+@router.get("/studies/{study_id}/subjects/dropout-summary")
+def subject_dropout_summary(
+    study_id: int,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    meta = db.query(models.StudyMetadata).filter(models.StudyMetadata.id == study_id).first()
+    if not meta:
+        raise HTTPException(status_code=404, detail="Study not found")
+    _assert_has_study_permission(db, meta, current_user, required="view")
+    subjects = (_get_content_row_or_404(db, study_id).study_data or {}).get("subjects") or []
+    counts = {
+        "total_ever_enrolled": len(subjects),
+        "active": 0,
+        "dropped_data_retained": 0,
+        "dropped_data_deleted": 0,
+        "dropout_total": 0,
+        "by_reason": {},
+    }
+    for subject in subjects:
+        status_value = _subject_status(subject)
+        if status_value == ACTIVE_SUBJECT_STATUS:
+            counts["active"] += 1
+            continue
+        if status_value == "DROPPED_DATA_RETAINED":
+            counts["dropped_data_retained"] += 1
+        elif status_value == "DROPPED_DATA_DELETED":
+            counts["dropped_data_deleted"] += 1
+        if status_value.startswith("DROPPED_"):
+            counts["dropout_total"] += 1
+            reason = str((subject or {}).get("dropout_reason") or "Unspecified")
+            counts["by_reason"][reason] = int(counts["by_reason"].get(reason, 0)) + 1
+    total = counts["total_ever_enrolled"]
+    counts["dropout_percentage"] = round((counts["dropout_total"] / total) * 100, 2) if total else 0.0
+    return counts
+
+
+@router.post("/studies/{study_id}/subjects/{subject_index}/dropout")
+def drop_out_subject(
+    study_id: int,
+    subject_index: int,
+    payload: schemas.SubjectDropoutRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    meta = db.query(models.StudyMetadata).filter(models.StudyMetadata.id == study_id).first()
+    if not meta:
+        raise HTTPException(status_code=404, detail="Study not found")
+    _assert_owner_or_admin(meta, current_user)
+    try:
+        datetime.strptime(payload.dropout_date, "%Y-%m-%d")
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Dropout date must use YYYY-MM-DD")
+    other_reason = str(payload.other_reason or "").strip()
+    if payload.reason == "Other" and not other_reason:
+        raise HTTPException(status_code=400, detail="Other dropout reason is required")
+
+    content_row = _get_content_row_or_404(db, study_id)
+    study_data = _deepcopy_json(content_row.study_data or {})
+    subject = _assert_subject_active(study_data, subject_index)
+    subject_id = str(subject.get("id") or subject.get("subject_id") or f"Subject {subject_index + 1}").strip()
+    if payload.mode == "delete_data" and str(payload.confirmation_subject_id or "").strip() != subject_id:
+        raise HTTPException(status_code=400, detail="Enter the exact subject ID to confirm deletion")
+
+    now_iso = local_now().isoformat()
+    common = {
+        "dropout_date": payload.dropout_date,
+        "dropout_reason": payload.reason,
+        "dropout_other_reason": other_reason if payload.reason == "Other" else None,
+        "dropped_at": now_iso,
+        "dropped_by": current_user.id,
+        "dropped_by_name": _display_name(current_user),
+        "reactivated_at": None,
+        "reactivated_by": None,
+        "reactivation_reason": None,
+    }
+    audit_payload = {
+        "subject_index": subject_index,
+        "subject_raw": subject_id,
+        "previous_status": ACTIVE_SUBJECT_STATUS,
+        "dropout_date": payload.dropout_date,
+        "dropout_reason": payload.reason,
+        "dropout_other_reason": common["dropout_other_reason"],
+        "actor_role": "Administrator" if _is_admin(current_user) else "Study author",
+        **repo._build_actor_payload(
+            actor=_actor_identifier(current_user),
+            actor_name=_display_name(current_user),
+            user_id=current_user.id,
+        ),
+    }
+
+    if payload.mode == "keep_data":
+        subject.update({**common, "status": "DROPPED_DATA_RETAINED", "deletion_status": None})
+        content_row.study_data = study_data
+        db.commit()
+        latest_tv = _latest_template_or_500(db, study_id)
+        _write_published_snapshot_to_datalad(
+            meta=meta,
+            study_data=study_data,
+            template_version=latest_tv.version,
+            template_schema=latest_tv.schema or {},
+            actor=_actor_identifier(current_user),
+            actor_name=_display_name(current_user),
+            user_id=current_user.id,
+            audit_label="Subject dropped out — data retained",
+        )
+        repo.record_subject_status_event(
+            study_id=study_id,
+            study_name=meta.study_name,
+            subject_index=subject_index,
+            action="subject_dropped_keep_data",
+            payload={**audit_payload, "new_status": "DROPPED_DATA_RETAINED"},
+        )
+        return {"ok": True, "subject_index": subject_index, "subject_id": subject_id, "status": subject["status"]}
+
+    subject.update({**common, "status": "DROPOUT_DELETION_IN_PROGRESS", "deletion_status": "IN_PROGRESS"})
+    content_row.study_data = study_data
+    db.commit()
+    try:
+        counts = repo.delete_subject_active_data(
+            study_id=study_id,
+            study_name=meta.study_name,
+            subject_index=subject_index,
+            audit_payload={**audit_payload, "new_status": "DROPPED_DATA_DELETED"},
+        )
+        db.query(models.StudyEntryData).filter(
+            models.StudyEntryData.study_id == study_id,
+            models.StudyEntryData.subject_index == subject_index,
+        ).delete(synchronize_session=False)
+        db.query(models.File).filter(
+            models.File.study_id == study_id,
+            models.File.subject_index == subject_index,
+        ).delete(synchronize_session=False)
+        links = db.query(models.SharedFormAccess).filter(
+            models.SharedFormAccess.study_id == study_id,
+            models.SharedFormAccess.subject_index == subject_index,
+        ).all()
+        for link in links:
+            link.max_uses = int(link.used_count or 0)
+        subject.update({"status": "DROPPED_DATA_DELETED", "deletion_status": "COMPLETED"})
+        content_row.study_data = study_data
+        db.commit()
+        latest_tv = _latest_template_or_500(db, study_id)
+        _write_published_snapshot_to_datalad(
+            meta=meta,
+            study_data=study_data,
+            template_version=latest_tv.version,
+            template_schema=latest_tv.schema or {},
+            actor=_actor_identifier(current_user),
+            actor_name=_display_name(current_user),
+            user_id=current_user.id,
+            audit_label="Subject dropped out — active data deleted",
+        )
+        return {"ok": True, "subject_index": subject_index, "subject_id": subject_id, "status": subject["status"], **counts}
+    except Exception as exc:
+        subject.update({"status": "DROPOUT_DELETION_FAILED", "deletion_status": "FAILED"})
+        content_row.study_data = study_data
+        db.commit()
+        try:
+            repo.record_subject_status_event(
+                study_id=study_id,
+                study_name=meta.study_name,
+                subject_index=subject_index,
+                action="subject_data_deletion_failed",
+                payload={**audit_payload, "new_status": "DROPOUT_DELETION_FAILED", "error_type": type(exc).__name__},
+            )
+        except Exception:
+            pass
+        raise HTTPException(status_code=500, detail="Subject data deletion did not complete. The subject remains blocked; contact an administrator.")
+
+
+@router.post("/studies/{study_id}/subjects/{subject_index}/reactivate")
+def reactivate_subject(
+    study_id: int,
+    subject_index: int,
+    payload: schemas.SubjectReactivateRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    meta = db.query(models.StudyMetadata).filter(models.StudyMetadata.id == study_id).first()
+    if not meta:
+        raise HTTPException(status_code=404, detail="Study not found")
+    if not _is_admin(current_user):
+        raise HTTPException(status_code=403, detail="Only administrators can reactivate subjects")
+    content_row = _get_content_row_or_404(db, study_id)
+    study_data = _deepcopy_json(content_row.study_data or {})
+    subject = _subject_from_study_data(study_data, subject_index)
+    if _subject_status(subject) != "DROPPED_DATA_RETAINED":
+        raise HTTPException(status_code=409, detail="Only data-retained dropout subjects can be reactivated")
+    subject_id = str(subject.get("id") or subject.get("subject_id") or f"Subject {subject_index + 1}").strip()
+    previous_status = _subject_status(subject)
+    subject.update({
+        "status": ACTIVE_SUBJECT_STATUS,
+        "reactivated_at": local_now().isoformat(),
+        "reactivated_by": current_user.id,
+        "reactivation_reason": str(payload.reason).strip(),
+    })
+    content_row.study_data = study_data
+    db.commit()
+    latest_tv = _latest_template_or_500(db, study_id)
+    _write_published_snapshot_to_datalad(
+        meta=meta,
+        study_data=study_data,
+        template_version=latest_tv.version,
+        template_schema=latest_tv.schema or {},
+        actor=_actor_identifier(current_user),
+        actor_name=_display_name(current_user),
+        user_id=current_user.id,
+        audit_label="Subject reactivated",
+    )
+    repo.record_subject_status_event(
+        study_id=study_id,
+        study_name=meta.study_name,
+        subject_index=subject_index,
+        action="subject_reactivated",
+        payload={
+            "subject_index": subject_index,
+            "subject_raw": subject_id,
+            "previous_status": previous_status,
+            "new_status": ACTIVE_SUBJECT_STATUS,
+            "reactivation_reason": str(payload.reason).strip(),
+            **repo._build_actor_payload(actor=_actor_identifier(current_user), actor_name=_display_name(current_user), user_id=current_user.id),
+        },
+    )
+    return {"ok": True, "subject_index": subject_index, "subject_id": subject_id, "status": ACTIVE_SUBJECT_STATUS}
+
 @router.get("/studies/{study_id}/files", response_model=List[schemas.FileOut])
 def read_files_for_study(
     study_id: int,
@@ -901,6 +1186,7 @@ def upload_file(
 
     _assert_has_study_permission(db, meta, user, required="add_data")
     _assert_not_locked_by_other(meta, user)
+    _assert_subject_active_for_study(db, study_id, subject_index)
 
     modalities = _parse_modalities_json(modalities_json)
     latest_tv = _latest_template_or_500(db, study_id)
@@ -959,6 +1245,7 @@ def create_url_file(
 
     _assert_has_study_permission(db, meta, user, required="add_data")
     _assert_not_locked_by_other(meta, user)
+    _assert_subject_active_for_study(db, study_id, subject_index)
 
     modalities = _parse_modalities_json(modalities_json)
     latest_tv = _latest_template_or_500(db, study_id)
@@ -995,6 +1282,12 @@ def delete_study_file(
 
     _assert_has_study_permission(db, meta, user, required="add_data")
     _assert_not_locked_by_other(meta, user)
+
+    try:
+        existing_file = repo.get_file_record(study_id=study_id, study_name=meta.study_name, file_id=file_id)
+        _assert_subject_active_for_study(db, study_id, existing_file.get("subject_index"))
+    except FileNotFoundError:
+        return {"deleted": True, "file_id": file_id, "already_missing": True}
 
     try:
         deleted = repo.delete_file(
@@ -1036,6 +1329,7 @@ def shared_upload_file(
     meta = db.query(models.StudyMetadata).filter(models.StudyMetadata.id == access.study_id).first()
     if not meta:
         raise HTTPException(status_code=404, detail="Study not found")
+    _assert_subject_active_for_study(db, access.study_id, access.subject_index)
 
     # Locking disabled for now.
     # if bool(meta.is_locked):
@@ -1101,6 +1395,7 @@ def shared_delete_file(
     meta = db.query(models.StudyMetadata).filter(models.StudyMetadata.id == access.study_id).first()
     if not meta:
         raise HTTPException(status_code=404, detail="Study not found")
+    _assert_subject_active_for_study(db, access.study_id, access.subject_index)
 
     try:
         record = repo.get_file_record(
@@ -1201,6 +1496,7 @@ def save_study_data(
 
     _assert_has_study_permission(db, meta, current_user, required="add_data")
     _assert_not_locked_by_other(meta, current_user)
+    _assert_subject_active_for_study(db, study_id, payload.subject_index)
 
     if (meta.status or "PUBLISHED").upper().strip() != "PUBLISHED":
         raise HTTPException(status_code=400, detail="Data entry is only allowed for published studies")
@@ -1273,6 +1569,70 @@ def save_study_data(
         )
 
 
+@router.post("/studies/{study_id}/data/bulk")
+def bulk_insert_data(
+    study_id: int,
+    payload: schemas.BulkPayload = Body(...),
+    version: Optional[int] = Query(None),
+    create_bids: bool = Query(True),
+    audit_label: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    meta = db.query(models.StudyMetadata).filter(models.StudyMetadata.id == study_id).first()
+    if not meta:
+        raise HTTPException(status_code=404, detail="Study not found")
+
+    _assert_has_study_permission(db, meta, current_user, required="add_data")
+    _assert_not_locked_by_other(meta, current_user)
+
+    if (meta.status or "PUBLISHED").upper().strip() != "PUBLISHED":
+        raise HTTPException(status_code=400, detail="Data entry is only allowed for published studies")
+
+    form_version = _resolve_form_version_or_400(db, study_id, version)
+    if not payload.entries:
+        return {"inserted": 0, "failed": 0, "errors": []}
+
+    content_row = _get_content_row_or_404(db, study_id)
+    selected_models = ((content_row.study_data or {}).get("selectedModels") or [])
+    entries = []
+    for payload_entry in payload.entries:
+        item = payload_entry.model_dump()
+        _assert_subject_active(content_row.study_data or {}, int(item["subject_index"]))
+        item["skipped_required_flags"] = _flags_dict_to_list(
+            item.get("skipped_required_flags"),
+            selected_models,
+        )
+        entries.append(item)
+
+    # create_bids is accepted for compatibility with the database-backed API.
+    # Hybrid mode always persists canonical entry data in the DataLad dataset.
+    _ = create_bids
+
+    try:
+        written = repo.save_entries_bulk(
+            study_id=study_id,
+            study_name=meta.study_name,
+            form_version=form_version,
+            entries=entries,
+            actor=_actor_identifier(current_user),
+            actor_name=_display_name(current_user),
+            user_id=current_user.id,
+            audit_label=audit_label or "Study Data Import",
+            require_empty_slots=True,
+        )
+    except ValueError as error:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": str(error),
+                "conflict": True,
+            },
+        )
+
+    return {"inserted": len(written), "failed": 0, "errors": []}
+
+
 @router.put("/studies/{study_id}/data_entries/{entry_id}", response_model=schemas.StudyDataEntryOut)
 def update_study_data_entry(
     study_id: int,
@@ -1289,6 +1649,7 @@ def update_study_data_entry(
 
     _assert_has_study_permission(db, meta, user, required="add_data")
     _assert_not_locked_by_other(meta, user)
+    _assert_subject_active_for_study(db, study_id, payload.subject_index)
 
     if (meta.status or "PUBLISHED").upper().strip() != "PUBLISHED":
         raise HTTPException(status_code=400, detail="Data entry is only allowed for published studies")
@@ -1706,6 +2067,7 @@ def create_share_link(
 
     content_row = _get_content_row_or_404(db, payload.study_id)
     study_data = content_row.study_data or {}
+    _assert_subject_active(study_data, payload.subject_index)
 
     selected_models = study_data.get("selectedModels") or []
     assignments = study_data.get("assignments") or []
@@ -1789,6 +2151,8 @@ def access_shared_form(
     if access.expires_at < datetime.utcnow():
         raise HTTPException(403, "Link expired")
 
+    _assert_subject_active_for_study(db, access.study_id, access.subject_index)
+
     access.used_count += 1
     db.commit()
 
@@ -1819,6 +2183,7 @@ def access_shared_form(
         pass
 
     content_row = _get_content_row_or_404(db, access.study_id)
+    _assert_subject_active(content_row.study_data or {}, access.subject_index)
     filtered_study_data = _filter_shared_study_data_by_sections(
         content_row.study_data or {},
         access.allowed_section_ids,
@@ -1908,6 +2273,7 @@ def shared_upsert_data(
 
     content_row = _get_content_row_or_404(db, access.study_id)
     study_data = content_row.study_data or {}
+    _assert_subject_active(study_data, access.subject_index)
     selected_models = study_data.get("selectedModels") or []
 
     _validate_shared_payload_sections(
