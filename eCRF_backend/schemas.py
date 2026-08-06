@@ -318,6 +318,29 @@ class StudyDataConflictDetail(BaseModel):
     class Config:
         from_attributes = True
 
+
+class SubjectDropoutRequest(BaseModel):
+    mode: Literal["keep_data", "delete_data"]
+    dropout_date: str
+    reason: Literal[
+        "Withdrawal of consent",
+        "Lost to follow-up",
+        "Adverse event",
+        "Investigator decision",
+        "Protocol deviation",
+        "Non-compliance",
+        "Disease progression",
+        "Death",
+        "Administrative reason",
+        "Other",
+    ]
+    other_reason: Optional[str] = None
+    confirmation_subject_id: Optional[str] = None
+
+
+class SubjectReactivateRequest(BaseModel):
+    reason: constr(min_length=1, max_length=1000)
+
 class StudyDataEntryUpdate(BaseModel):
     data: Optional[Dict[str, Any]] = None
     skipped_required_flags: Optional[List[List[bool]]] = None

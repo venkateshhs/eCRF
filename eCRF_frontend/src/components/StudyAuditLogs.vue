@@ -400,6 +400,10 @@ export default {
         share_link_created: "Share link created",
         access_changed: "Access changed",
         access_revoked: "Access revoked",
+        subject_dropped_keep_data: "Subject dropped out — data retained",
+        subject_dropped_delete_data: "Subject dropped out — data deleted",
+        subject_data_deletion_failed: "Subject data deletion failed",
+        subject_reactivated: "Subject reactivated",
       };
       return map[a] || row.action || "—";
     },
@@ -432,6 +436,14 @@ export default {
       if (a === "access_revoked") {
         return `Access revoked for ${d.target_user_display || d.target_user_email || `User#${d.target_user_id}`}`;
       }
+      if (a === "subject_dropped_keep_data") {
+        return `Subject dropped out; data retained (${d.dropout_reason || "reason unavailable"})`;
+      }
+      if (a === "subject_dropped_delete_data") {
+        return `Subject dropped out; ${d.entries_deleted || 0} record(s), ${d.files_deleted || 0} file(s) deleted`;
+      }
+      if (a === "subject_data_deletion_failed") return "Subject data deletion did not complete";
+      if (a === "subject_reactivated") return `Subject reactivated (${d.reactivation_reason || "reason unavailable"})`;
       return row.raw?.summary || "—";
     },
 

@@ -2380,6 +2380,116 @@ class DataladStudyRepo:
             access_dir=canonical_dir / "access",
         )
 
+    def record_subject_status_event(
+        self,
+        *,
+        study_id: int,
+        study_name: str,
+        subject_index: int,
+        action: str,
+        payload: Dict[str, Any],
+    ) -> None:
+        p = self.ensure_dataset(study_id, study_name)
+        with dataset_lock(LockSpec(dataset_path=p.dataset_path)):
+            self._append_audit(
+                p,
+                action=action,
+                study_id=study_id,
+                payload=_deepcopy_json(payload or {}),
+                subject_index=subject_index,
+            )
+        self.save(p.dataset_path, f"case-e: {action} study={study_id} subject={subject_index}")
+
+    def delete_subject_active_data(
+        self,
+        *,
+        study_id: int,
+        study_name: str,
+        subject_index: int,
+        audit_payload: Dict[str, Any],
+    ) -> Dict[str, int]:
+        """Remove current subject data while retaining subject identity and audit history."""
+        p = self.ensure_dataset(study_id, study_name)
+        entry_paths: List[Path] = []
+        file_records: List[tuple[Path, Dict[str, Any]]] = []
+        share_records: List[tuple[Path, Dict[str, Any]]] = []
+
+        with dataset_lock(LockSpec(dataset_path=p.dataset_path)):
+            for path in p.entries_dir.rglob("entry_*.json"):
+                row = _json_load(path)
+                try:
+                    if row and int(row.get("subject_index")) == int(subject_index):
+                        entry_paths.append(path)
+                except (TypeError, ValueError):
+                    continue
+
+            for path in p.files_dir.rglob("file_*.json"):
+                row = _json_load(path)
+                try:
+                    if row and int(row.get("subject_index")) == int(subject_index):
+                        file_records.append((path, row))
+                except (TypeError, ValueError):
+                    continue
+
+            for path in p.shares_dir.glob("*.json"):
+                row = _json_load(path)
+                try:
+                    if row and int(row.get("subject_index")) == int(subject_index):
+                        share_records.append((path, row))
+                except (TypeError, ValueError):
+                    continue
+
+            files_root = Path(os.path.abspath(p.files_dir))
+            validated_payloads: List[Path] = []
+            for record_path, record in file_records:
+                storage_option = str(record.get("storage_option") or "").strip().lower()
+                stored_path = record.get("file_path")
+                if storage_option != "url" and stored_path:
+                    absolute_path = Path(os.path.abspath(p.dataset_path / str(stored_path)))
+                    try:
+                        absolute_path.relative_to(files_root)
+                        absolute_path.parent.resolve().relative_to(p.files_dir.resolve())
+                    except (ValueError, OSError) as exc:
+                        raise ValueError("Invalid file path outside study file storage") from exc
+                    if (absolute_path.exists() or absolute_path.is_symlink()) and not absolute_path.is_file() and not absolute_path.is_symlink():
+                        raise ValueError("Stored file path is not a file")
+                    validated_payloads.append(absolute_path)
+
+            for path in entry_paths:
+                path.unlink(missing_ok=True)
+
+            for absolute_path in validated_payloads:
+                if absolute_path.exists() or absolute_path.is_symlink():
+                    absolute_path.unlink()
+
+            for record_path, _record in file_records:
+                record_path.unlink(missing_ok=True)
+
+            for share_path, row in share_records:
+                row["max_uses"] = int(row.get("used_count") or 0)
+                row["status"] = "Invalidated by subject dropout"
+                row["revoked_at"] = local_now().isoformat()
+                _json_dump(share_path, row)
+
+            counts = {
+                "entries_deleted": len(entry_paths),
+                "files_deleted": len(file_records),
+                "shared_links_revoked": len(share_records),
+            }
+            self._append_audit(
+                p,
+                action="subject_dropped_delete_data",
+                study_id=study_id,
+                payload={**_deepcopy_json(audit_payload or {}), **counts},
+                subject_index=subject_index,
+            )
+
+        self.save(
+            p.dataset_path,
+            f"case-e: subject_dropped_delete_data study={study_id} subject={subject_index}",
+        )
+        return counts
+
     def _append_audit(
         self,
         p: StudyPaths,
