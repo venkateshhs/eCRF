@@ -25,6 +25,8 @@
           <li><span class="legend-swatch swatch-partial"></span> Partial — some fields filled.</li>
           <li><span class="legend-swatch swatch-complete"></span> Complete — all assigned fields filled.</li>
           <li><span class="legend-swatch swatch-skipped"></span> Skipped — one or more required fields were skipped.</li>
+          <li><span class="legend-swatch swatch-dropped-retained"></span> Dropped out — existing data retained as read-only.</li>
+          <li><span class="legend-swatch swatch-dropped-deleted"></span> Dropped out — active application data deleted.</li>
         </ul>
       </div>
     </div>
@@ -111,6 +113,12 @@ export default {
 }
 .swatch-skipped {
   background: #ef4444;
+}
+.swatch-dropped-retained {
+  background: #818cf8;
+}
+.swatch-dropped-deleted {
+  background: #64748b;
 }
 .legend-explain li {
   display: flex;

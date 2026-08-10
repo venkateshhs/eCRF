@@ -571,16 +571,6 @@
           </div>
         </div>
 
-        <!-- VIEW DATA: embedded (NO routing) -->
-        <div v-else-if="activeTab === 'viewdata'" class="viewdata-host">
-          <StudyDataDashboard
-            :study-id="studyId"
-            :embedded="true"
-            :fullscreen="dashboardFullscreen"
-            @toggle-fullscreen="toggleDashboardFullscreen"
-          />
-        </div>
-
         <!-- AUDIT LOGS -->
         <div v-else-if="activeTab === 'audit'">
           <StudyAuditLogs :study-id="studyId" />
@@ -669,6 +659,22 @@
             </p>
           </template>
         </div>
+
+        <!-- Keep View Data mounted after its first visit so switching tabs does not rebuild it. -->
+        <div v-show="activeTab === 'viewdata'" class="viewdata-host">
+          <StudyDataDashboard
+            v-if="viewDataInitialized && sharedStudyDataReady"
+            :key="`viewdata-${studyId}`"
+            :study-id="studyId"
+            :embedded="true"
+            :active="activeTab === 'viewdata'"
+            :fullscreen="dashboardFullscreen"
+            :initial-study="studyRecord"
+            :initial-versions="versions"
+            :initial-study-files="allFiles"
+            @toggle-fullscreen="toggleDashboardFullscreen"
+          />
+        </div>
       </section>
     </div>
     <!-- Delete study confirm dialog -->
@@ -724,6 +730,8 @@ export default {
       studyLoading: true,
       maintenanceMessage: "",
       studyId: this.$route.params.id,
+      studyRecord: null,
+      sharedStudyDataReady: false,
 
       // meta/content
       studyMeta: {
@@ -755,6 +763,7 @@ export default {
       // View Data embedding state
       dataSidebarCollapsed: false,
       dashboardFullscreen: false,
+      viewDataInitialized: false,
 
       // tabs
       activeTab: "meta",
@@ -804,6 +813,7 @@ export default {
       versionSchemas: {},
       versionDiffs: {},
       canShowVersionDetails: true,
+      versionDetailsLoaded: false,
 
       bidsDatasetPath: "",
       bidsPathExists: false,
@@ -909,6 +919,7 @@ export default {
 
       if (val === "viewdata") {
         this.dataSidebarCollapsed = true;
+        this.viewDataInitialized = true;
       } else {
         this.dataSidebarCollapsed = false;
         this.dashboardFullscreen = false;
@@ -974,7 +985,11 @@ export default {
 
     toggleMetaSection(key) {
       if (!key || !Object.prototype.hasOwnProperty.call(this.metaCollapsed, key)) return;
+      const isOpening = this.metaCollapsed[key] === true;
       this.metaCollapsed[key] = !this.metaCollapsed[key];
+      if (key === "versions" && isOpening && !this.versionDetailsLoaded) {
+        this.fetchVersionDiffDetails();
+      }
     },
 
     // ExportStudy shown in SAME container; no back button + no extra header
@@ -1219,6 +1234,7 @@ export default {
       try {
         this.maintenanceMessage = "";
         const resp = await axios.get(`/forms/studies/${this.studyId}`, { headers: { Authorization: `Bearer ${token}` } });
+        this.studyRecord = resp.data || null;
         const sd = resp.data?.content?.study_data || {};
         const meta = resp.data?.metadata || {};
 
@@ -1290,15 +1306,36 @@ export default {
     async fetchVersionsAndDiffs() {
       const token = this.token;
       if (!token) return;
+      let shouldLoadVisibleDetails = false;
       this.versionsLoading = true;
       this.canShowVersionDetails = true;
       try {
         const { data } = await axios.get(`/forms/studies/${this.studyId}/versions`, { headers: { Authorization: `Bearer ${token}` } });
         const list = Array.isArray(data) ? data : [];
         this.versions = [...list].sort((a, b) => Number(a.version) - Number(b.version));
+        this.versionSchemas = {};
+        this.versionDiffs = {};
+        this.versionDetailsLoaded = this.versions.length === 0;
+        shouldLoadVisibleDetails = !this.metaCollapsed.versions && this.versions.length > 0;
+      } catch (e) {
+        console.error("fetchVersionsAndDiffs failed:", e?.response?.data || e.message);
+        this.versions = [];
+        this.versionSchemas = {};
+        this.versionDiffs = {};
+        this.versionDetailsLoaded = false;
+      } finally {
+        this.versionsLoading = false;
+      }
+      if (shouldLoadVisibleDetails) await this.fetchVersionDiffDetails();
+    },
 
-        if (!this.versions.length) { this.versionSchemas = {}; this.versionDiffs = {}; return; }
+    async fetchVersionDiffDetails() {
+      const token = this.token;
+      if (!token || this.versionDetailsLoaded || this.versionsLoading || !this.versions.length) return;
 
+      this.versionsLoading = true;
+      this.canShowVersionDetails = true;
+      try {
         const schemas = {};
         for (const v of this.versions) {
           try {
@@ -1308,29 +1345,33 @@ export default {
             schemas[v.version] = resp.data?.schema || {};
           } catch (e) {
             if (e?.response?.status === 403) { this.canShowVersionDetails = false; break; }
-            console.warn(`Failed to fetch schema for v${v.version}:`, e?.response?.data || e.message);
+            throw e;
           }
         }
         this.versionSchemas = schemas;
 
-        if (!this.canShowVersionDetails) { this.versionDiffs = {}; return; }
+        if (!this.canShowVersionDetails) {
+          this.versionDiffs = {};
+          this.versionDetailsLoaded = true;
+          return;
+        }
 
         const diffs = {};
         for (const v of this.versions) {
           const ver = Number(v.version);
           if (ver <= 1) continue;
-          const prev = this.versionSchemas[ver - 1];
-          const next = this.versionSchemas[ver];
-          if (prev && next) {
-            const d = computeTemplateDiff(prev, next);
-            d.summary = buildVersionSummary(d);
-            diffs[ver] = d;
+          const previousSchema = schemas[ver - 1];
+          const nextSchema = schemas[ver];
+          if (previousSchema && nextSchema) {
+            const diff = computeTemplateDiff(previousSchema, nextSchema);
+            diff.summary = buildVersionSummary(diff);
+            diffs[ver] = diff;
           }
         }
         this.versionDiffs = diffs;
+        this.versionDetailsLoaded = true;
       } catch (e) {
-        console.error("fetchVersionsAndDiffs failed:", e?.response?.data || e.message);
-        this.versions = [];
+        console.error("fetchVersionDiffDetails failed:", e?.response?.data || e.message);
         this.versionSchemas = {};
         this.versionDiffs = {};
       } finally {
@@ -1660,6 +1701,7 @@ export default {
   },
   async mounted() {
     this.studyLoading = true;
+    this.sharedStudyDataReady = false;
     try {
       this.scrollToTop?.();
 
@@ -1675,18 +1717,30 @@ export default {
 
       if (this.canSeeBidsButton) await this.fetchBidsPath();
       await Promise.all([this.fetchStudyFiles(), this.fetchVersionsAndDiffs()]);
+      this.sharedStudyDataReady = true;
     } finally {
       this.studyLoading = false;
     }
   },
   beforeRouteEnter(to, from, next) { next((vm) => vm.scrollToTop?.()); },
   beforeRouteUpdate(to, from, next) {
+    if (String(to.params.id) === String(from.params.id)) {
+      const qTab = to.query?.tab;
+      if (qTab && this.tabs.some(t => t.key === qTab) && qTab !== this.activeTab) {
+        this.activeTab = qTab;
+      }
+      next();
+      return;
+    }
+
     this.studyLoading = true;
+    this.sharedStudyDataReady = false;
     this.maintenanceMessage = "";
     this.studyId = to.params.id;
 
     const qTab = to.query?.tab;
     if (qTab && this.tabs.some(t => t.key === qTab)) this.activeTab = qTab;
+    this.viewDataInitialized = this.activeTab === "viewdata";
 
     this.scrollToTop?.();
     Promise.resolve()
@@ -1705,6 +1759,7 @@ export default {
         return Promise.all([this.fetchStudyFiles(), this.fetchVersionsAndDiffs()]);
       })
       .finally(() => {
+        this.sharedStudyDataReady = !this.maintenanceMessage;
         this.studyLoading = false;
         next();
       });

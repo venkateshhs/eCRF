@@ -378,6 +378,10 @@ export default {
           ? sd.subjects.map((x) => ({
               id: String(x.id || x.subjectId || x.label || "").trim(),
               group: String(x.group || "").trim(),
+              status: String(x.status || "ACTIVE").toUpperCase(),
+              dropout_date: x.dropout_date || null,
+              dropout_reason: x.dropout_reason || null,
+              dropout_other_reason: x.dropout_other_reason || null,
             }))
           : [];
         this.visits = Array.isArray(sd.visits) ? sd.visits : [];

@@ -3,8 +3,40 @@
     <!-- STEP 1: Upload -->
     <section class="card">
       <h2>1) Upload file</h2>
-      <input type="file" accept=".csv,.tsv,.xlsx,.xls" @change="onFile" />
-      <div v-if="fileName" class="hint">Loaded: {{ fileName }} ({{ rowCount }} rows)</div>
+      <div class="upload-inputs">
+        <div class="upload-input-group">
+          <label class="upload-label">Study data</label>
+          <input type="file" accept=".csv,.tsv,.xlsx,.xls" @change="onFile" />
+          <div v-if="fileName" class="hint">Loaded: {{ fileName }} ({{ rowCount }} rows)</div>
+        </div>
+
+        <div class="upload-input-group">
+          <div class="schema-upload-heading">
+            <label class="upload-label">Field schema JSON <span class="muted">(optional)</span></label>
+            <button
+              type="button"
+              class="schema-info-button"
+              title="Field schema JSON example"
+              aria-label="Show field schema JSON example"
+              @click="showFieldSchemaInfo = true"
+            >
+              <i :class="icons.info"></i>
+            </button>
+          </div>
+          <input type="file" accept=".json,application/json" @change="onFieldSchemaFile" />
+          <div v-if="fieldSchemaFileName" class="schema-file-status">
+            <span>Loaded: {{ fieldSchemaFileName }}</span>
+            <button type="button" class="link schema-clear-button" @click="clearFieldSchema">Remove</button>
+          </div>
+          <div v-if="fieldSchemaAppliedCount" class="hint">
+            Schema matched {{ fieldSchemaAppliedCount }} column(s). Unlisted fields will be inferred.
+          </div>
+          <div v-if="fieldSchemaError" class="schema-error-row error">
+            <span>{{ fieldSchemaError }}</span>
+            <button type="button" class="link schema-clear-button" @click="clearFieldSchema">Ignore JSON</button>
+          </div>
+        </div>
+      </div>
 
       <div v-if="previewRows.length" class="table-scroll">
         <table class="preview">
@@ -375,6 +407,35 @@
         </button>
       </div>
     </section>
+
+    <div v-if="showFieldSchemaInfo" class="schema-modal-overlay" @click.self="showFieldSchemaInfo = false">
+      <div class="schema-modal" role="dialog" aria-modal="true" aria-labelledby="field-schema-title">
+        <div class="schema-modal-header">
+          <div>
+            <h3 id="field-schema-title">Field schema JSON example</h3>
+            <p class="muted">
+              Column names must exactly match the uploaded data headers. Fields omitted from this file use automatic inference.
+            </p>
+          </div>
+          <button type="button" class="schema-modal-close" aria-label="Close" @click="showFieldSchemaInfo = false">×</button>
+        </div>
+
+        <pre class="schema-example"><code>{{ fieldSchemaExampleText }}</code></pre>
+
+        <div class="schema-example-notes muted">
+          Supported types: text, textarea, number, checkbox, radio, date, time, select, and slider.
+          Use constraints for required fields, numeric ranges, steps, defaults, and date formats.
+        </div>
+
+        <div class="schema-modal-actions">
+          <button type="button" class="btn" @click="copyFieldSchemaExample">
+            {{ schemaCopyStatus || 'Copy JSON' }}
+          </button>
+          <button type="button" class="btn" @click="downloadFieldSchemaExample">Download example JSON</button>
+          <button type="button" class="btn primary" @click="showFieldSchemaInfo = false">Close</button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -402,6 +463,12 @@ export default {
 
       // file/preview
       fileName: "",
+      fieldSchemaFileName: "",
+      fieldSchema: null,
+      fieldSchemaError: "",
+      fieldSchemaAppliedCount: 0,
+      showFieldSchemaInfo: false,
+      schemaCopyStatus: "",
       headers: [],
       rows: [],
       previewRows: [],
@@ -410,6 +477,7 @@ export default {
       // columns meta
       columns: [],
       columnMeta: new Map(),     // Map<label, {section, field, name}]
+      resolvedImportFields: new Map(),
 
       // mapping (metadata + subject + eCRF)
       mapping: {
@@ -457,15 +525,23 @@ export default {
       return this.store.state.user?.id || null;
     },
     otherFieldCandidates() {
+      const explicitFieldColumns = new Set(
+        (this.fieldSchema?.fields || []).map(field => field.column)
+      );
       const exclude = new Set(
         [
           this.mapping.subject.idCol,
           this.mapping.group.nameCol,
           this.mapping.visit.nameCol,
-          this.mapping.subject.dateCol,
+          explicitFieldColumns.has(this.mapping.subject.dateCol)
+            ? ""
+            : this.mapping.subject.dateCol,
         ].filter(Boolean)
       );
       return this.headers.filter(h => !exclude.has(h));
+    },
+    fieldSchemaExampleText() {
+      return JSON.stringify(this.fieldSchemaExampleObject(), null, 2);
     },
   },
   watch: {
@@ -556,6 +632,392 @@ export default {
       }
     },
 
+    onFieldSchemaFile(e) {
+      const file = e.target.files?.[0];
+      if (!file) return;
+
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        try {
+          const parsed = JSON.parse(String(event.target?.result || ""));
+          this.fieldSchema = this.normalizeFieldSchemaDocument(parsed);
+          this.fieldSchemaFileName = file.name;
+          this.fieldSchemaError = "";
+          this.structureReady = false;
+          this.applyFieldSchemaToCurrentHeaders();
+        } catch (error) {
+          this.fieldSchema = null;
+          this.fieldSchemaFileName = "";
+          this.fieldSchemaAppliedCount = 0;
+          this.fieldSchemaError = error?.message || "Could not parse field schema JSON.";
+        } finally {
+          e.target.value = "";
+        }
+      };
+      reader.onerror = () => {
+        this.fieldSchemaError = "Could not read field schema JSON.";
+        e.target.value = "";
+      };
+      reader.readAsText(file);
+    },
+
+    normalizeFieldSchemaDocument(document) {
+      if (!document || typeof document !== "object" || Array.isArray(document)) {
+        throw new Error("Field schema JSON must contain an object.");
+      }
+      if (!Array.isArray(document.fields) || !document.fields.length) {
+        throw new Error('Field schema JSON must contain a non-empty "fields" array.');
+      }
+
+      const typeAliases = {
+        string: "text",
+        integer: "number",
+        decimal: "number",
+        boolean: "checkbox",
+        dropdown: "select",
+      };
+      const supportedTypes = new Set([
+        "text", "textarea", "number", "checkbox", "radio",
+        "date", "time", "select", "slider",
+      ]);
+      const seenColumns = new Set();
+      const shorthandConstraints = [
+        "required", "readonly", "min", "max", "step", "minLength", "maxLength",
+        "dateFormat", "minDate", "maxDate", "defaultValue", "allowMultiple",
+      ];
+
+      const fields = document.fields.map((rawField, index) => {
+        if (!rawField || typeof rawField !== "object" || Array.isArray(rawField)) {
+          throw new Error(`Field schema item ${index + 1} must be an object.`);
+        }
+
+        const column = String(rawField.column || "").trim();
+        if (!column) throw new Error(`Field schema item ${index + 1} is missing "column".`);
+        if (seenColumns.has(column)) throw new Error(`Field schema contains duplicate column "${column}".`);
+        seenColumns.add(column);
+
+        const requestedType = String(rawField.type || "").trim().toLowerCase();
+        const type = typeAliases[requestedType] || requestedType;
+        if (!supportedTypes.has(type)) {
+          throw new Error(`Unsupported type "${rawField.type || ""}" for column "${column}".`);
+        }
+
+        if (rawField.options != null && !Array.isArray(rawField.options)) {
+          throw new Error(`Options for column "${column}" must be an array.`);
+        }
+        if (
+          rawField.constraints != null &&
+          (typeof rawField.constraints !== "object" || Array.isArray(rawField.constraints))
+        ) {
+          throw new Error(`Constraints for column "${column}" must be an object.`);
+        }
+
+        const constraints = { ...(rawField.constraints || {}) };
+        shorthandConstraints.forEach((key) => {
+          if (rawField[key] !== undefined && constraints[key] === undefined) {
+            constraints[key] = rawField[key];
+          }
+        });
+
+        return {
+          column,
+          type,
+          section: String(rawField.section || "").trim(),
+          name: String(rawField.name || "").trim(),
+          label: String(rawField.label || "").trim(),
+          description: String(rawField.description || ""),
+          placeholder: String(rawField.placeholder || ""),
+          options: Array.isArray(rawField.options) ? rawField.options : [],
+          constraints,
+        };
+      });
+
+      return { version: document.version || 1, fields };
+    },
+
+    applyFieldSchemaToCurrentHeaders() {
+      this.fieldSchemaAppliedCount = 0;
+      if (!this.fieldSchema) {
+        this.fieldSchemaError = "";
+        return;
+      }
+      if (!this.headers.length) return;
+
+      const headerSet = new Set(this.headers);
+      const unknownColumns = this.fieldSchema.fields
+        .map(field => field.column)
+        .filter(column => !headerSet.has(column));
+      if (unknownColumns.length) {
+        this.fieldSchemaError = `Schema column(s) not found in the data file: ${unknownColumns.join(", ")}`;
+        return;
+      }
+
+      this.fieldSchemaError = "";
+      const structuralColumns = new Set([
+        this.mapping.subject.idCol,
+        this.mapping.group.nameCol,
+        this.mapping.visit.nameCol,
+      ].filter(Boolean));
+      const explicitColumns = this.fieldSchema.fields
+        .map(field => field.column)
+        .filter(column => !structuralColumns.has(column));
+      this.mapping.otherCols = Array.from(new Set([
+        ...this.mapping.otherCols,
+        ...explicitColumns,
+      ]));
+      this.fieldSchemaAppliedCount = this.fieldSchema.fields.length;
+      this.otherAllSelected = this.otherFieldCandidates.length > 0 &&
+        this.otherFieldCandidates.every(column => this.mapping.otherCols.includes(column));
+    },
+
+    clearFieldSchema() {
+      const mappedDateColumn = this.mapping.subject.dateCol;
+      this.fieldSchema = null;
+      this.fieldSchemaFileName = "";
+      this.fieldSchemaError = "";
+      this.fieldSchemaAppliedCount = 0;
+      this.schemaCopyStatus = "";
+      if (mappedDateColumn) {
+        this.mapping.otherCols = this.mapping.otherCols.filter(column => column !== mappedDateColumn);
+      }
+      this.otherAllSelected = false;
+      this.structureReady = false;
+    },
+
+    fieldSchemaExampleObject() {
+      return {
+        version: 1,
+        fields: [
+          {
+            column: "Site Code",
+            name: "site_code",
+            label: "Site Code",
+            section: "Visit Information",
+            description: "Identifier of the study site.",
+            placeholder: "SITE-01",
+            type: "text",
+            constraints: {
+              required: true,
+              readonly: false,
+              helpText: "Use the assigned site code.",
+              placeholder: "SITE-01",
+              defaultValue: "",
+              minLength: 7,
+              maxLength: 12,
+              pattern: "^SITE-[0-9]+$",
+              transform: "uppercase",
+            },
+          },
+          {
+            column: "Clinical Notes",
+            name: "clinical_notes",
+            label: "Clinical Notes",
+            section: "Visit Information",
+            description: "Free-text clinical observations.",
+            placeholder: "Enter relevant observations",
+            type: "textarea",
+            constraints: {
+              required: false,
+              readonly: false,
+              helpText: "Do not enter directly identifying information.",
+              placeholder: "Enter relevant observations",
+              defaultValue: "",
+              minLength: 0,
+              maxLength: 2000,
+              pattern: ".*",
+              transform: "none",
+            },
+          },
+          {
+            column: "Age (years)",
+            name: "age_years",
+            label: "Age (years)",
+            section: "Demographics",
+            description: "Age at assessment in completed years.",
+            placeholder: "18",
+            type: "number",
+            constraints: {
+              required: true,
+              readonly: false,
+              helpText: "Enter whole years.",
+              placeholder: "18",
+              defaultValue: "",
+              min: 0,
+              max: 120,
+              step: 1,
+              integerOnly: true,
+              minDigits: 1,
+              maxDigits: 3,
+            },
+          },
+          {
+            column: "Informed Consent",
+            name: "informed_consent",
+            label: "Informed Consent",
+            section: "Eligibility",
+            description: "Whether informed consent was obtained.",
+            type: "checkbox",
+            constraints: {
+              required: true,
+              readonly: false,
+              helpText: "Checked means consent was obtained.",
+              defaultValue: false,
+            },
+          },
+          {
+            column: "Symptoms",
+            name: "symptoms",
+            label: "Symptoms",
+            section: "Assessment",
+            description: "Select all symptoms reported by the subject.",
+            placeholder: "Select one or more symptoms",
+            type: "radio",
+            options: ["None", "Mild", "Moderate", "Severe"],
+            constraints: {
+              required: false,
+              readonly: false,
+              helpText: "The dominant option None clears other selections.",
+              placeholder: "Select one or more symptoms",
+              defaultValue: ["None"],
+              allowMultiple: true,
+              dominantOptions: ["None"],
+            },
+          },
+          {
+            column: "Assessment Date",
+            name: "assessment_date",
+            label: "Assessment Date",
+            section: "Visit Information",
+            description: "Date on which the assessment occurred.",
+            placeholder: "yyyy-MM-dd",
+            type: "date",
+            constraints: {
+              required: true,
+              readonly: false,
+              helpText: "Use ISO date format.",
+              placeholder: "yyyy-MM-dd",
+              defaultValue: "2025-01-01",
+              dateFormat: "yyyy-MM-dd",
+              minDate: "2020-01-01",
+              maxDate: "2030-12-31",
+            },
+          },
+          {
+            column: "Assessment Time",
+            name: "assessment_time",
+            label: "Assessment Time",
+            section: "Visit Information",
+            description: "Time at which the assessment occurred.",
+            placeholder: "HH:mm",
+            type: "time",
+            constraints: {
+              required: false,
+              readonly: false,
+              helpText: "Use 24-hour time.",
+              placeholder: "HH:mm",
+              defaultValue: "09:00",
+              hourCycle: "24",
+              minTime: "00:00",
+              maxTime: "23:59",
+              step: 60,
+            },
+          },
+          {
+            column: "Sex",
+            name: "sex",
+            label: "Sex",
+            section: "Demographics",
+            description: "Recorded sex category.",
+            placeholder: "Select a value",
+            type: "select",
+            options: ["Female", "Male", "Other"],
+            constraints: {
+              required: true,
+              readonly: false,
+              helpText: "Choose one option.",
+              placeholder: "Select a value",
+              defaultValue: "Other",
+            },
+          },
+          {
+            column: "Pain Score",
+            name: "pain_score",
+            label: "Pain Score",
+            section: "Assessment",
+            description: "Pain intensity from 0 to 10.",
+            type: "slider",
+            constraints: {
+              required: false,
+              readonly: false,
+              helpText: "0 means no pain and 10 means worst pain.",
+              mode: "slider",
+              percent: false,
+              min: 0,
+              max: 10,
+              step: 1,
+              showTicks: true,
+              marks: [
+                { value: 0, label: "No pain" },
+                { value: 5, label: "Moderate" },
+                { value: 10, label: "Worst pain" },
+              ],
+            },
+          },
+          {
+            column: "Quality Rating",
+            name: "quality_rating",
+            label: "Quality Rating",
+            section: "Assessment",
+            description: "Example of the Likert variant of a slider field.",
+            type: "slider",
+            constraints: {
+              required: false,
+              readonly: false,
+              helpText: "Choose one point on the scale.",
+              mode: "linear",
+              min: 1,
+              max: 5,
+              leftLabel: "Very poor",
+              rightLabel: "Excellent",
+            },
+          },
+        ],
+      };
+    },
+
+    async copyFieldSchemaExample() {
+      try {
+        if (navigator.clipboard && window.isSecureContext) {
+          await navigator.clipboard.writeText(this.fieldSchemaExampleText);
+        } else {
+          const textarea = document.createElement("textarea");
+          textarea.value = this.fieldSchemaExampleText;
+          textarea.style.position = "fixed";
+          textarea.style.opacity = "0";
+          document.body.appendChild(textarea);
+          textarea.select();
+          document.execCommand("copy");
+          textarea.remove();
+        }
+        this.schemaCopyStatus = "Copied";
+      } catch {
+        this.schemaCopyStatus = "Copy failed";
+      }
+      window.setTimeout(() => { this.schemaCopyStatus = ""; }, 1600);
+    },
+
+    downloadFieldSchemaExample() {
+      const blob = new Blob([`${this.fieldSchemaExampleText}\n`], { type: "application/json;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = "field-schema.example.json";
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    },
+
     ingestFromMatrix(matrix) {
       if (!Array.isArray(matrix) || !matrix.length) {
         this.saveError = "No rows found.";
@@ -626,6 +1088,8 @@ export default {
       if (!this.studyMeta.name) {
         this.studyMeta.name = (this.fileName || "Imported Study").replace(/\.(csv|tsv|xlsx|xls)$/i, "");
       }
+
+      this.applyFieldSchemaToCurrentHeaders();
     },
 
     buildRowObjects(dataRows, cols) {
@@ -662,6 +1126,43 @@ export default {
         .toLowerCase();
     },
     safeStr(v) { return v == null ? "" : String(v).trim(); },
+
+    async postImportedEntry(studyId, item) {
+      const headers = { Authorization: `Bearer ${this.token}` };
+      let expectedRevisionToken = null;
+
+      try {
+        const { data: slot } = await axios.get(
+          `/forms/studies/${studyId}/slot-data`,
+          {
+            headers,
+            params: {
+              subject_index: item.subject_index,
+              visit_index: item.visit_index,
+              group_index: item.group_index,
+            },
+          }
+        );
+        expectedRevisionToken = String(slot?.revision_token ?? "");
+      } catch (error) {
+        // The legacy database backend has no slot-data endpoint and does not
+        // require revision tokens. Preserve compatibility with that backend.
+        if (error?.response?.status !== 404 && error?.response?.status !== 405) {
+          throw error;
+        }
+      }
+
+      const params = { audit_label: "Study Data Import" };
+      if (expectedRevisionToken !== null) {
+        params.expected_revision_token = expectedRevisionToken;
+      }
+
+      await axios.post(
+        `/forms/studies/${studyId}/data`,
+        item,
+        { headers, params }
+      );
+    },
 
     firstNonEmptyFromColumn(col) {
       if (!col) return "";
@@ -733,22 +1234,49 @@ export default {
     },
 
     // ---------- eCRF model building ----------
+    isStrictDateValue(value) {
+      const text = String(value ?? "").trim();
+      let match = text.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+      let year, month, day;
+      if (match) {
+        year = Number(match[1]);
+        month = Number(match[2]);
+        day = Number(match[3]);
+      } else {
+        match = text.match(/^(\d{2})[.-](\d{2})[.-](\d{4})$/);
+        if (!match) return false;
+        day = Number(match[1]);
+        month = Number(match[2]);
+        year = Number(match[3]);
+      }
+
+      const date = new Date(Date.UTC(year, month - 1, day));
+      return date.getUTCFullYear() === year &&
+        date.getUTCMonth() === month - 1 &&
+        date.getUTCDate() === day;
+    },
+
     inferFieldType(samples) {
       let nums = 0, dates = 0, bools = 0, total = 0;
       for (const v of samples) {
         if (v == null || v === "") continue;
         total++;
         if (!isNaN(Number(v))) { nums++; continue; }
-        const d = new Date(v); if (!isNaN(d.getTime())) { dates++; continue; }
         if (["true","false","yes","no","y","n","0","1"].includes(String(v).toLowerCase())) { bools++; continue; }
+        if (this.isStrictDateValue(v)) { dates++; continue; }
       }
       if (total && nums === total) return "number";
       if (total && dates === total) return "date";
-      if (total && bools === total) return "boolean";
+      if (total && bools === total) return "checkbox";
       return "text";
     },
 
+    fieldSchemaDefinitionForColumn(column) {
+      return (this.fieldSchema?.fields || []).find(field => field.column === column) || null;
+    },
+
     buildSelectedModels() {
+      this.resolvedImportFields = new Map();
       const samplesByLabel = {};
       for (const k of this.mapping.otherCols) samplesByLabel[k] = [];
       for (const r of this.rows.slice(0, 200)) {
@@ -759,17 +1287,22 @@ export default {
       for (const label of this.mapping.otherCols) {
         const meta = this.columnMeta.get(label);
         if (!meta) continue;
-        const type = this.inferFieldType(samplesByLabel[label] || []);
-        const arr = bySection.get(meta.section) || [];
-        arr.push({
-          name: meta.name,
-          label: meta.field,
-          description: "",
-          type, options: [],
-          constraints: { required: false },
-          placeholder: ""
-        });
-        bySection.set(meta.section, arr);
+        const definition = this.fieldSchemaDefinitionForColumn(label);
+        const section = definition?.section || meta.section;
+        const type = definition?.type || this.inferFieldType(samplesByLabel[label] || []);
+        const arr = bySection.get(section) || [];
+        const field = {
+          name: definition?.name || meta.name,
+          label: definition?.label || meta.field,
+          description: definition?.description || "",
+          type,
+          options: definition?.options || [],
+          constraints: { required: false, ...(definition?.constraints || {}) },
+          placeholder: definition?.placeholder || ""
+        };
+        arr.push(field);
+        this.resolvedImportFields.set(label, { section, field });
+        bySection.set(section, arr);
       }
 
       const models = [];
@@ -813,10 +1346,41 @@ export default {
       for (const [label, val] of Object.entries(flatData || {})) {
         const meta = this.columnMeta.get(label);
         if (!meta) continue;
-        if (!out[meta.section]) out[meta.section] = {};
-        out[meta.section][meta.name] = val;
+        const resolved = this.resolvedImportFields.get(label);
+        const section = resolved?.section || meta.section;
+        const field = resolved?.field || { name: meta.name, type: "text", constraints: {} };
+        if (!out[section]) out[section] = {};
+        out[section][field.name || meta.name] = this.normalizeImportedFieldValue(val, field);
       }
       return out;
+    },
+
+    normalizeImportedFieldValue(value, field) {
+      if (value == null || value === "") return value;
+      const type = String(field?.type || "text").toLowerCase();
+      const text = String(value).trim();
+
+      if (type === "number" || type === "slider") {
+        const number = Number(text.replace(/,/g, "."));
+        return Number.isFinite(number) ? number : value;
+      }
+
+      if (type === "checkbox") {
+        const normalized = text.toLowerCase();
+        if (["true", "yes", "y", "1", "checked"].includes(normalized)) return true;
+        if (["false", "no", "n", "0", "unchecked"].includes(normalized)) return false;
+        return value;
+      }
+
+      if (
+        (type === "select" || type === "radio") &&
+        field?.constraints?.allowMultiple &&
+        typeof value === "string"
+      ) {
+        return value.split(",").map(item => item.trim()).filter(Boolean);
+      }
+
+      return value;
     },
 
     // ---------- Structure inference ----------
@@ -825,6 +1389,11 @@ export default {
       this.failures = [];
       this.successStudyId = null;
       this.structureReady = false;
+
+      if (this.fieldSchemaError) {
+        this.saveError = "Please fix or remove the field schema JSON before inferring the study structure.";
+        return;
+      }
 
       if (!this.mapping.subject.idCol) {
         this.saveError = "Please map Subject ID column.";
@@ -1017,13 +1586,7 @@ export default {
           );
           return resp.data;
         };
-        const postOne = async (item) => {
-          await axios.post(
-            `/forms/studies/${studyId}/data`,
-            item,
-            { headers: { Authorization: `Bearer ${this.token}` } }
-          );
-        };
+        const postOne = async (item) => this.postImportedEntry(studyId, item);
 
         const CHUNK_SIZE = 1000;
 
@@ -1076,6 +1639,7 @@ export default {
       this.rowCount = 0;
       this.columns = [];
       this.columnMeta = new Map();
+      this.resolvedImportFields = new Map();
       this.mapping.subject = { idCol: "", dateCol: "" };
       this.mapping.group = { nameCol: "", cols: {}, fixed: {} };
       this.mapping.visit = { nameCol: "", cols: {}, fixed: {} };
@@ -1091,6 +1655,8 @@ export default {
       this.failures = [];
       this.saveError = "";
       this.successStudyId = null;
+      this.fieldSchemaError = "";
+      this.fieldSchemaAppliedCount = 0;
 
       // keep default OFF on new file
       this.createBidsOnImport = false;
@@ -1135,6 +1701,128 @@ export default {
   background:#fafafa;
   min-width: 0;
   max-width: 100%;
+}
+
+.upload-inputs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(260px, 1fr));
+  gap: 16px;
+  align-items: start;
+}
+
+.upload-input-group {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  background: #fff;
+}
+
+.upload-label {
+  font-weight: 600;
+  color: #333;
+}
+
+.schema-upload-heading,
+.schema-file-status {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.schema-info-button,
+.schema-modal-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  background: transparent;
+  color: #2f6fed;
+  cursor: pointer;
+}
+
+.schema-info-button {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+}
+
+.schema-info-button:hover {
+  background: #eff6ff;
+}
+
+.schema-clear-button {
+  padding: 0;
+}
+
+.schema-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 5000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(15, 23, 42, 0.55);
+}
+
+.schema-modal {
+  width: min(820px, 100%);
+  max-height: calc(100vh - 48px);
+  overflow: auto;
+  padding: 20px;
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 24px 70px rgba(15, 23, 42, 0.28);
+}
+
+.schema-modal-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.schema-modal-header h3 {
+  margin: 0 0 6px;
+}
+
+.schema-modal-close {
+  flex: 0 0 auto;
+  width: 34px;
+  height: 34px;
+  color: #4b5563;
+  font-size: 26px;
+}
+
+.schema-example {
+  max-height: 420px;
+  overflow: auto;
+  margin: 16px 0 10px;
+  padding: 14px;
+  border: 1px solid #dbe3ef;
+  border-radius: 8px;
+  background: #f8fafc;
+  color: #172033;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre;
+}
+
+.schema-example-notes {
+  line-height: 1.5;
+}
+
+.schema-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 16px;
+  flex-wrap: wrap;
 }
 
 .grid { display:grid; grid-template-columns: repeat(2, minmax(220px, 1fr)); gap:14px; min-width:0; }
@@ -1191,6 +1879,12 @@ input, select { padding:10px; border:1px solid #ddd; border-radius:8px; }
 .success { margin-top: 12px; }
 .link { background:none; border:none; color:#2f6fed; cursor:pointer; text-decoration: underline; }
 .hint { color:#555; margin-top:6px; }
+
+@media (max-width: 760px) {
+  .upload-inputs {
+    grid-template-columns: 1fr;
+  }
+}
 
 /* schema mapping grid */
 .schema-grid { display: grid; grid-template-columns: 1fr; gap: 10px; margin-top: 8px; min-width:0; }

@@ -78,7 +78,19 @@
     </div>
 
     <div class="table-wrapper">
-      <div class="loading" v-if="isLoadingEntries">Building dashboard…</div>
+      <div
+        v-if="isBootstrapping || isLoadingEntries"
+        class="dashboard-loading-state"
+        role="status"
+        aria-live="polite"
+        aria-busy="true"
+      >
+        <div class="dashboard-loading-card">
+          <div class="dashboard-loading-spinner" aria-hidden="true"></div>
+          <div class="dashboard-loading-title">Please wait</div>
+          <div class="dashboard-loading-message">Study data is being loaded.</div>
+        </div>
+      </div>
 
       <table class="dashboard-table" v-else>
         <thead>
@@ -137,22 +149,40 @@
 
           <tr class="filter-row">
               <th class="sticky-col sticky-subject">
-                <input v-model="filters.subjectId" placeholder="Filter Subject ID">
+                <select v-model="filters.subjectId" aria-label="Filter by subject">
+                  <option value="">All Subjects</option>
+                  <option v-for="subjectId in subjectFilterOptions" :key="`subject-${subjectId}`" :value="subjectId">
+                    {{ subjectId }}
+                  </option>
+                </select>
               </th>
 
               <th v-if="canViewGroupColumn" class="sticky-col sticky-group">
-                <input v-model="filters.group" placeholder="Filter Group">
+                <select v-model="filters.group" aria-label="Filter by group">
+                  <option value="">All Groups</option>
+                  <option v-for="group in groupFilterOptions" :key="`group-${group}`" :value="group">
+                    {{ group }}
+                  </option>
+                </select>
               </th>
 
               <th class="sticky-col sticky-visit">
-                <input v-model="filters.visit" placeholder="Filter Visit">
+                <select v-model="filters.visit" aria-label="Filter by visit">
+                  <option value="">All Visits</option>
+                  <option v-for="visit in visitFilterOptions" :key="`visit-${visit}`" :value="visit">
+                    {{ visit }}
+                  </option>
+                </select>
               </th>
 
             <template v-for="col in dashboardColumns" :key="'filter-'+col.key">
               <th>
                 <input
-                  v-model="filters[col.key]"
+                  :value="filterDrafts[col.key] || ''"
                   :placeholder="`Filter ${col.label}`"
+                  @input="onFieldFilterInput(col.key, $event.target.value)"
+                  @blur="applyFieldFilter(col.key)"
+                  @keydown.enter="applyFieldFilter(col.key)"
                 />
               </th>
             </template>
@@ -162,7 +192,22 @@
         <tbody>
           <template v-for="(row, rowIdx) in paginatedData" :key="'row-'+rowIdx">
             <tr>
-              <td class="fixed-col sticky-col sticky-subject">{{ row.subjectId }}</td>
+              <td class="fixed-col sticky-col sticky-subject">
+                <span class="dashboard-subject-identity">
+                  <span>{{ row.subjectId }}</span>
+                  <span
+                    v-if="row.__subjectStatus !== 'ACTIVE'"
+                    class="dashboard-dropout-label"
+                    :class="{ 'dashboard-dropout-deleted': row.__subjectStatus === 'DROPPED_DATA_DELETED' }"
+                    :title="row.__subjectDropoutTitle"
+                  >
+                    <i class="fas fa-user-slash" aria-hidden="true"></i>
+                    {{ row.__subjectStatus === 'DROPPED_DATA_DELETED'
+                      ? 'Dropped out · Data deleted'
+                      : 'Dropped out · Data retained' }}
+                  </span>
+                </span>
+              </td>
               <td v-if="canViewGroupColumn" class="fixed-col sticky-col sticky-group">{{ row.group }}</td>
               <td class="fixed-col sticky-col sticky-visit">
                 <span class="visit-cell-content">
@@ -212,15 +257,30 @@
       </table>
 
       <div class="pagination-controls" v-if="!viewAll && !isLoadingEntries">
-        <button :disabled="currentPage === 1" @click="goFirst">First</button>
-        <button :disabled="currentPage === 1" @click="goPrev">Previous</button>
-        <span>Page {{ currentPage }} of {{ totalPages }}</span>
-        <button :disabled="currentPage === totalPages" @click="goNext">Next</button>
-        <button :disabled="currentPage === totalPages" @click="goLast">Last</button>
+        <span>Loaded first {{ loadedGridRows }} of {{ totalGridRows }} rows</span>
+        <button :disabled="currentPage === totalPages || isLoadingMore" @click="goNext">
+          {{ loadingMode === "next" ? "Loading…" : "Next" }}
+        </button>
+        <button
+          class="load-everything-button"
+          :disabled="currentPage === totalPages || isLoadingMore"
+          @click="loadEverything"
+        >
+          Load Everything
+        </button>
+        <span
+          v-if="loadingMode === 'all'"
+          class="load-everything-status"
+          role="status"
+          aria-live="polite"
+        >
+          <span class="pagination-spinner" aria-hidden="true"></span>
+          Loading all rows… This may take a while.
+        </span>
       </div>
     </div>
 
-    <div v-if="!filteredData.length && !isLoadingEntries" class="no-data">
+    <div v-if="!filteredData.length && !isBootstrapping && !isLoadingEntries" class="no-data">
       No data entries found. Please enter data for the assigned sections using the data entry form.
     </div>
 
@@ -234,8 +294,12 @@
     />
   </div>
 
-  <div v-else class="loading">
-    Loading study data…
+  <div v-else class="dashboard-loading-state dashboard-loading-standalone" role="status" aria-live="polite" aria-busy="true">
+    <div class="dashboard-loading-card">
+      <div class="dashboard-loading-spinner" aria-hidden="true"></div>
+      <div class="dashboard-loading-title">Please wait</div>
+      <div class="dashboard-loading-message">Study data is being loaded.</div>
+    </div>
   </div>
 </template>
 
@@ -257,7 +321,11 @@ export default {
   props: {
     studyId: { type: [String, Number], default: null },
     embedded: { type: Boolean, default: false },
+    active: { type: Boolean, default: true },
     fullscreen: { type: Boolean, default: false },
+    initialStudy: { type: Object, default: null },
+    initialVersions: { type: Array, default: null },
+    initialStudyFiles: { type: Array, default: null },
   },
   data() {
     return {
@@ -272,12 +340,18 @@ export default {
 
       sortConfig: { key: "subjectId", direction: "asc" },
       filters: { subjectId: "", group: "", visit: "" },
+      filterDrafts: {},
+      filterDebounceTimers: {},
+      entryIndexCache: new WeakMap(),
 
       currentPage: 1,
       pageSize: 50,
       VIEW_ALL_MAX_ROWS: 1000,
       viewAll: false,
       isLoadingEntries: false,
+      isLoadingMore: false,
+      loadingMode: null,
+      isBootstrapping: true,
 
       studyVersions: [],
       selectedVersion: null,
@@ -362,14 +436,46 @@ export default {
       return this.buildHeaderGroupsForColumns(this.dashboardColumns);
     },
 
-    filteredData() {
+    dashboardData() {
       return this.buildDashboardRows({
         entries: this.entries,
         columns: this.dashboardColumns,
         forceAllPairs: this.viewAll,
-        applyFilters: true,
-        applySort: true,
+        applyFilters: false,
+        applySort: false,
       });
+    },
+
+    subjectFilterOptions() {
+      return this.uniqueDashboardValues("subjectId");
+    },
+
+    groupFilterOptions() {
+      return this.uniqueDashboardValues("group");
+    },
+
+    visitFilterOptions() {
+      return this.uniqueDashboardValues("visit");
+    },
+
+    currentEntrySlotIndex() {
+      return this.buildEntrySlotIndex(this.entries);
+    },
+
+    studyFileSlotIndex() {
+      const index = new Map();
+      (this.studyFiles || []).forEach((file) => {
+        const key = this.studyFileSlotKey(file?.subject_index, file?.visit_index);
+        const files = index.get(key);
+        if (files) files.push(file);
+        else index.set(key, [file]);
+      });
+      return index;
+    },
+
+    filteredData() {
+      const filtered = this.applyDashboardFilters(this.dashboardData, this.dashboardColumns);
+      return this.applyDashboardSort(filtered);
     },
 
     totalPages() {
@@ -378,19 +484,27 @@ export default {
       return Math.max(1, wholeGridPages);
     },
 
+    loadedGridRows() {
+      return Math.min(this.currentPage * this.pageSize, this.totalGridRows);
+    },
+
     paginatedData() {
       return this.filteredData;
     },
   },
 
   watch: {
+    initialStudyFiles(nextFiles) {
+      if (Array.isArray(nextFiles)) this.studyFiles = nextFiles;
+    },
+    initialVersions(nextVersions) {
+      if (Array.isArray(nextVersions)) {
+        this.studyVersions = [...nextVersions].sort((a, b) => a.version - b.version);
+      }
+    },
     pageSize() {
       if (this.viewAll) return;
       this.currentPage = 1;
-      this.fetchPageEntries();
-    },
-    currentPage() {
-      if (this.viewAll) return;
       this.fetchPageEntries();
     },
     viewAll() {
@@ -402,15 +516,15 @@ export default {
         this.updateStickyColumnOffsets?.();
       });
     },
-    filters: {
-      handler() {
-        if (!this.viewAll) this.fetchPageEntries();
-      },
-      deep: true,
+    active(isActive) {
+      if (!isActive) return;
+      this.$nextTick(() => {
+        this.updateStickyColumnOffsets?.();
+      });
     },
     selectedVersion: {
       async handler() {
-        if (!this.study) return;
+        if (!this.study || this.isBootstrapping) return;
         await this.loadTemplateForSelectedVersion();
         this.initDynamicFilters();
         this.currentPage = 1;
@@ -436,6 +550,7 @@ export default {
 
   beforeUnmount() {
       window.removeEventListener("resize", this.updateStickyColumnOffsets);
+      Object.values(this.filterDebounceTimers).forEach((timer) => clearTimeout(timer));
     },
 
   methods: {
@@ -552,17 +667,29 @@ export default {
     async bootstrap() {
       const studyId = this.getStudyId();
       try {
-        const studyResp = await axios.get(`/forms/studies/${studyId}`, {
-          headers: { Authorization: `Bearer ${this.token}` },
-        });
-        this.study = studyResp.data;
+        if (this.initialStudy) {
+          this.study = this.cloneStudyPayload(this.initialStudy);
+        } else {
+          const studyResp = await axios.get(`/forms/studies/${studyId}`, {
+            headers: { Authorization: `Bearer ${this.token}` },
+          });
+          this.study = studyResp.data;
+        }
 
-        await this.loadVersions(studyId);
+        if (Array.isArray(this.initialVersions)) {
+          this.studyVersions = [...this.initialVersions].sort((a, b) => a.version - b.version);
+        } else {
+          await this.loadVersions(studyId);
+        }
         if (!this.selectedVersion && this.studyVersions.length) {
           this.selectedVersion = this.studyVersions[this.studyVersions.length - 1].version;
         }
         await this.loadTemplateForSelectedVersion();
-        await this.loadStudyFiles(studyId);
+        if (Array.isArray(this.initialStudyFiles)) {
+          this.studyFiles = this.initialStudyFiles;
+        } else {
+          await this.loadStudyFiles(studyId);
+        }
 
         this.initDynamicFilters();
 
@@ -575,7 +702,20 @@ export default {
         } else {
           alert("Could not load study data");
         }
+      } finally {
+        this.isBootstrapping = false;
       }
+    },
+
+    cloneStudyPayload(payload) {
+      if (typeof structuredClone === "function") {
+        try {
+          return structuredClone(payload);
+        } catch {
+          // Vue props may be reactive proxies, which structuredClone cannot clone.
+        }
+      }
+      return JSON.parse(JSON.stringify(payload));
     },
 
     async loadStudyFiles(studyId) {
@@ -608,6 +748,11 @@ export default {
         next[col.key] = this.filters[col.key] || "";
       });
 
+      this.filterDrafts = this.dashboardColumns.reduce((drafts, col) => {
+        drafts[col.key] = this.filterDrafts[col.key] ?? next[col.key] ?? "";
+        return drafts;
+      }, {});
+
       if (!this.canViewGroupColumn) next.group = "";
 
       const currentKeys = Object.keys(this.filters).sort();
@@ -624,6 +769,31 @@ export default {
       if (sameValues) return;
 
       this.filters = next;
+    },
+
+    uniqueDashboardValues(key) {
+      return Array.from(
+        new Set(
+          this.dashboardData
+            .map((row) => String(row?.[key] ?? "").trim())
+            .filter(Boolean)
+        )
+      );
+    },
+
+    onFieldFilterInput(key, value) {
+      this.filterDrafts[key] = value;
+      clearTimeout(this.filterDebounceTimers[key]);
+      this.filterDebounceTimers[key] = setTimeout(() => {
+        this.filters[key] = value;
+        delete this.filterDebounceTimers[key];
+      }, 300);
+    },
+
+    applyFieldFilter(key) {
+      clearTimeout(this.filterDebounceTimers[key]);
+      delete this.filterDebounceTimers[key];
+      this.filters[key] = this.filterDrafts[key] || "";
     },
 
     async loadVersions(studyId) {
@@ -697,8 +867,9 @@ export default {
         };
       }
 
-      const pageStart = (this.currentPage - 1) * this.pageSize;
-      const pageEndExcl = Math.min(pageStart + this.pageSize, S * V);
+      const page = Number.isInteger(options.page) ? options.page : this.currentPage;
+      const pageStart = options.pageOnly === true ? (page - 1) * this.pageSize : 0;
+      const pageEndExcl = Math.min(page * this.pageSize, S * V);
 
       const subjSet = new Set();
       const visitSet = new Set();
@@ -725,22 +896,27 @@ export default {
       return windowInfo.pairKeySet.has(`${subjIdx}:${visitIdx}`);
     },
 
-    async fetchPageEntries() {
+    async fetchPageEntries(options = {}) {
       if (!this.study) return;
       const studyId = this.getStudyId();
+      const append = options.append === true;
+      const loadAll = options.loadAll === true;
 
-      const { subjectIdxPageSet, visitIdxPageSet } = this.currentWindowIndexSets();
+      const { subjectIdxPageSet, visitIdxPageSet } = this.currentWindowIndexSets({
+        ...options,
+        forceAll: loadAll,
+      });
 
-      const subject_indexes = this.viewAll
+      const subject_indexes = this.viewAll || loadAll
         ? null
         : Array.from(subjectIdxPageSet).sort((a, b) => a - b).join(",");
 
-      const visit_indexes = this.viewAll
+      const visit_indexes = this.viewAll || loadAll
         ? null
         : Array.from(visitIdxPageSet).sort((a, b) => a - b).join(",");
 
       const params = new URLSearchParams();
-      if (this.viewAll) params.append("all", "true");
+      if (this.viewAll || loadAll) params.append("all", "true");
       if (subject_indexes) params.append("subject_indexes", subject_indexes);
       if (visit_indexes) params.append("visit_indexes", visit_indexes);
       if (Number.isFinite(this.selectedVersion)) params.append("version", String(this.selectedVersion));
@@ -748,21 +924,53 @@ export default {
       const url = `/forms/studies/${studyId}/data_entries` + (params.toString() ? `?${params.toString()}` : "");
 
       try {
-        this.isLoadingEntries = true;
+        if (append) {
+          this.isLoadingMore = true;
+          this.loadingMode = loadAll ? "all" : "next";
+        }
+        else this.isLoadingEntries = true;
         const resp = await axios.get(url, {
           headers: { Authorization: `Bearer ${this.token}` },
         });
         const payload = Array.isArray(resp.data)
           ? { entries: resp.data, total: resp.data.length }
           : resp.data || {};
-        this.entries = payload.entries || [];
+        const incomingEntries = payload.entries || [];
+        this.entries = append
+          ? this.mergeDashboardEntries(this.entries, incomingEntries)
+          : incomingEntries;
         this.totalEntries = payload.total ?? this.entries.length;
+        return true;
       } catch (err) {
         console.error("Failed to load entries:", err);
-        this.entries = [];
+        if (!append) this.entries = [];
+        return false;
       } finally {
-        this.isLoadingEntries = false;
+        if (append) {
+          this.isLoadingMore = false;
+          this.loadingMode = null;
+        }
+        else this.isLoadingEntries = false;
       }
+    },
+
+    mergeDashboardEntries(existingEntries, incomingEntries) {
+      const merged = new Map();
+      const entryKey = (entry) => {
+        if (entry?.id != null) return `id:${entry.id}`;
+        return [
+          entry?.subject_index,
+          entry?.visit_index,
+          entry?.group_index,
+          entry?.form_version,
+        ].join(":");
+      };
+
+      [...(existingEntries || []), ...(incomingEntries || [])].forEach((entry) => {
+        merged.set(entryKey(entry), entry);
+      });
+
+      return Array.from(merged.values());
     },
 
     toggleExportMenu() {
@@ -793,24 +1001,66 @@ export default {
     },
 
     findBestEntryFromEntries(entries, subjIdx, visitIdx, groupIdx) {
-      const all = (entries || []).filter(
-        (e) =>
-          e.subject_index === subjIdx &&
-          e.visit_index === visitIdx &&
-          e.group_index === groupIdx
-      );
+      const index = this.entrySlotIndexFor(entries);
+      const all = index.get(this.entrySlotKey(subjIdx, visitIdx, groupIdx)) || [];
       if (!all.length) return null;
 
       const target = Number(this.selectedVersion);
       const exact = all.find((e) => Number(e.form_version) === target);
       if (exact) return exact;
 
-      const le = all
-        .filter((e) => Number(e.form_version) <= target)
-        .sort((a, b) => Number(b.form_version) - Number(a.form_version))[0];
-      if (le) return le;
+      let bestAtOrBefore = null;
+      let bestAtOrBeforeVersion = -Infinity;
+      let latest = all[0];
+      let latestVersion = Number(latest?.form_version);
 
-      return all.sort((a, b) => Number(b.form_version) - Number(a.form_version))[0];
+      all.forEach((entry) => {
+        const version = Number(entry?.form_version);
+        if (version <= target && version > bestAtOrBeforeVersion) {
+          bestAtOrBefore = entry;
+          bestAtOrBeforeVersion = version;
+        }
+        if (version > latestVersion) {
+          latest = entry;
+          latestVersion = version;
+        }
+      });
+
+      if (bestAtOrBefore) return bestAtOrBefore;
+
+      return latest;
+    },
+
+    entrySlotKey(subjIdx, visitIdx, groupIdx) {
+      const typed = (value) => `${typeof value}:${String(value)}`;
+      return `${typed(subjIdx)}|${typed(visitIdx)}|${typed(groupIdx)}`;
+    },
+
+    buildEntrySlotIndex(entries) {
+      const index = new Map();
+      (entries || []).forEach((entry) => {
+        const key = this.entrySlotKey(
+          entry?.subject_index,
+          entry?.visit_index,
+          entry?.group_index
+        );
+        const slotEntries = index.get(key);
+        if (slotEntries) slotEntries.push(entry);
+        else index.set(key, [entry]);
+      });
+      return index;
+    },
+
+    entrySlotIndexFor(entries) {
+      if (entries === this.entries) return this.currentEntrySlotIndex;
+      if (!entries || typeof entries !== "object") return new Map();
+
+      const cached = this.entryIndexCache.get(entries);
+      if (cached) return cached;
+
+      const index = this.buildEntrySlotIndex(entries);
+      this.entryIndexCache.set(entries, index);
+      return index;
     },
 
     getValue(subjIdx, visitIdx, sectionIdx, fieldIdx) {
@@ -820,6 +1070,10 @@ export default {
     getValueFromEntries(entries, subjIdx, visitIdx, sectionIdx, fieldIdx) {
       const groupIdx = this.resolveGroup(subjIdx);
       const entry = this.findBestEntryFromEntries(entries, subjIdx, visitIdx, groupIdx);
+      return this.getValueFromEntry(entry, sectionIdx, fieldIdx);
+    },
+
+    getValueFromEntry(entry, sectionIdx, fieldIdx) {
       if (!entry || !entry.data) return "";
 
       const d = entry.data;
@@ -837,7 +1091,13 @@ export default {
     },
 
     getTableRowsFromEntries(entries, subjIdx, visitIdx, sectionIdx, fieldIdx) {
-      const raw = this.getValueFromEntries(entries, subjIdx, visitIdx, sectionIdx, fieldIdx);
+      const groupIdx = this.resolveGroup(subjIdx);
+      const entry = this.findBestEntryFromEntries(entries, subjIdx, visitIdx, groupIdx);
+      return this.getTableRowsFromEntry(entry, sectionIdx, fieldIdx);
+    },
+
+    getTableRowsFromEntry(entry, sectionIdx, fieldIdx) {
+      const raw = this.getValueFromEntry(entry, sectionIdx, fieldIdx);
       if (!raw || typeof raw !== "object") return [];
       if (!Array.isArray(raw.rows)) return [];
       return raw.rows;
@@ -1006,6 +1266,10 @@ export default {
             subjectId: subject.id,
             group: groupName,
             visit: visit.name,
+            __subjectStatus: String(subject?.status || "ACTIVE").toUpperCase(),
+            __subjectDropoutTitle: subject?.status
+              ? `Dropped out${subject.dropout_date ? ` on ${subject.dropout_date}` : ""}${subject.dropout_reason ? `: ${subject.dropout_reason}${subject.dropout_reason === "Other" && subject.dropout_other_reason ? ` — ${subject.dropout_other_reason}` : ""}` : ""}`
+              : "",
             __sIdx: subjIdx,
             __vIdx: vIdx,
             __gIdx: groupIdx,
@@ -1014,6 +1278,7 @@ export default {
           };
 
           const entry = this.findBestEntryFromEntries(entries, subjIdx, vIdx, groupIdx);
+          row.__skippedRequiredFlags = entry?.skipped_required_flags || null;
           row.__uploadedFiles = this.uploadedFilesForRow(subjIdx, vIdx, entry?.data || []);
 
           columns.forEach((col) => {
@@ -1026,7 +1291,7 @@ export default {
 
             if (col.kind === "normal") {
               const field = this.sections?.[col.sIdx]?.fields?.[col.fIdx];
-              const raw = this.getValueFromEntries(entries, subjIdx, vIdx, col.sIdx, col.fIdx);
+              const raw = this.getValueFromEntry(entry, col.sIdx, col.fIdx);
               const type = String(field?.type || "").toLowerCase();
 
               if (type === "checkbox") {
@@ -1050,12 +1315,12 @@ export default {
             }
 
             if (col.kind === "tableCell") {
-                const field = this.sections?.[col.sIdx]?.fields?.[col.fIdx];
-                const tableRows = this.getTableRowsFromEntries(entries, subjIdx, vIdx, col.sIdx, col.fIdx);
-                const tableRow = tableRows[col.tableRowIdx] || null;
-                const tableColDef = field?.tableConfig?.columns?.[col.tIdx] || {};
-                const raw = this.readTableCellValue(tableRow, tableColDef, col.tIdx);
-                const tableColType = String(tableColDef?.type || "").toLowerCase();
+              const field = this.sections?.[col.sIdx]?.fields?.[col.fIdx];
+              const tableRows = this.getTableRowsFromEntry(entry, col.sIdx, col.fIdx);
+              const tableRow = tableRows[col.tableRowIdx] || null;
+              const tableColDef = field?.tableConfig?.columns?.[col.tIdx] || {};
+              const raw = this.readTableCellValue(tableRow, tableColDef, col.tIdx);
+              const tableColType = String(tableColDef?.type || "").toLowerCase();
 
               if (tableColType === "checkbox") {
                 row[col.key] = raw === true ? "Yes" : raw === false ? "No" : "";
@@ -1093,14 +1358,14 @@ export default {
 
     applyDashboardFilters(data, columns) {
       return data.filter((row) => {
-        if (this.filters.subjectId && !String(row.subjectId).toLowerCase().includes(this.filters.subjectId.toLowerCase())) return false;
-        if (this.canViewGroupColumn && this.filters.group && !String(row.group).toLowerCase().includes(this.filters.group.toLowerCase())) return false;
-        if (this.filters.visit && !String(row.visit).toLowerCase().includes(this.filters.visit.toLowerCase())) return false;
+        if (this.filters.subjectId && String(row.subjectId) !== String(this.filters.subjectId)) return false;
+        if (this.canViewGroupColumn && this.filters.group && String(row.group) !== String(this.filters.group)) return false;
+        if (this.filters.visit && String(row.visit) !== String(this.filters.visit)) return false;
 
         for (const col of columns) {
-          const filterVal = this.filters[col.key];
+          const filterVal = String(this.filters[col.key] ?? "").trim().toLowerCase();
           if (!filterVal) continue;
-          if (!String(row[col.key] ?? "").toLowerCase().includes(String(filterVal).toLowerCase())) {
+          if (!String(row[col.key] ?? "").toLowerCase().includes(filterVal)) {
             return false;
           }
         }
@@ -1143,24 +1408,18 @@ export default {
       });
     },
 
-    isCellSkipped(subjIdx, visitIdx, sectionIdx, fieldIdx) {
-      const groupIdx = this.resolveGroup(subjIdx);
-      const entry = this.findBestEntry(subjIdx, visitIdx, groupIdx);
-      if (!entry) return false;
-      const flags = entry.skipped_required_flags;
-      return !!(
-        Array.isArray(flags) &&
-        Array.isArray(flags[sectionIdx]) &&
-        flags[sectionIdx][fieldIdx] === true
-      );
-    },
-
     dashboardCellClass(row, col) {
       if (col.kind === "normal") {
         const assigned = this.isAssigned(col.sIdx, row.__vIdx, row.__gIdx);
+        const skippedFlags = row.__skippedRequiredFlags;
+        const skipped = !!(
+          Array.isArray(skippedFlags) &&
+          Array.isArray(skippedFlags[col.sIdx]) &&
+          skippedFlags[col.sIdx][col.fIdx] === true
+        );
         return {
           "cell-unassigned": !assigned,
-          "cell-skipped": assigned && this.isCellSkipped(row.__sIdx, row.__vIdx, col.sIdx, col.fIdx),
+          "cell-skipped": assigned && skipped,
         };
       }
 
@@ -1216,11 +1475,11 @@ export default {
     },
 
     studyFileRecordsForCell(sIdx, vIdx) {
-      return (this.studyFiles || []).filter(
-        (file) =>
-          Number(file?.subject_index) === Number(sIdx) &&
-          Number(file?.visit_index) === Number(vIdx)
-      );
+      return this.studyFileSlotIndex.get(this.studyFileSlotKey(sIdx, vIdx)) || [];
+    },
+
+    studyFileSlotKey(sIdx, vIdx) {
+      return `${Number(sIdx)}:${Number(vIdx)}`;
     },
 
     uploadedFilesForRow(sIdx, vIdx, data) {
@@ -1321,17 +1580,24 @@ export default {
       }
     },
 
-    goFirst() {
-      this.currentPage = 1;
+    async goNext() {
+      if (this.currentPage >= this.totalPages || this.isLoadingMore) return;
+      const nextPage = this.currentPage + 1;
+      const loaded = await this.fetchPageEntries({
+        append: true,
+        page: nextPage,
+        pageOnly: true,
+      });
+      if (loaded) this.currentPage = nextPage;
     },
-    goPrev() {
-      if (this.currentPage > 1) this.currentPage--;
-    },
-    goNext() {
-      if (this.currentPage < this.totalPages) this.currentPage++;
-    },
-    goLast() {
-      this.currentPage = this.totalPages;
+    async loadEverything() {
+      if (this.currentPage >= this.totalPages || this.isLoadingMore) return;
+      const lastPage = this.totalPages;
+      const loaded = await this.fetchPageEntries({
+        append: true,
+        loadAll: true,
+      });
+      if (loaded) this.currentPage = lastPage;
     },
 
     async exportCSV() {
@@ -1891,11 +2157,34 @@ export default {
   background: #fee2e2 !important;
 }
 
+.dashboard-subject-identity {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 5px;
+}
+
+.dashboard-dropout-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: #be123c;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.dashboard-dropout-deleted {
+  color: #991b1b;
+}
+
 /* ============================================================
    FILTER ROW
    ============================================================ */
 
-.filter-row input {
+.filter-row input,
+.filter-row select {
   width: 100%;
   min-width: 120px;
   padding: 4px;
@@ -1913,6 +2202,58 @@ export default {
   text-align: center;
   padding: 24px;
   color: #6b7280;
+}
+
+.dashboard-loading-state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-height: 240px;
+  padding: 24px;
+  box-sizing: border-box;
+}
+
+.dashboard-loading-standalone {
+  min-height: 100vh;
+}
+
+.dashboard-loading-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  min-width: 260px;
+  padding: 24px 28px;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: 0 18px 45px rgba(15, 23, 42, 0.14);
+  color: #111827;
+  text-align: center;
+}
+
+.dashboard-loading-spinner {
+  width: 34px;
+  height: 34px;
+  border: 4px solid #e5e7eb;
+  border-top-color: #2563eb;
+  border-radius: 50%;
+  animation: dashboard-loading-spin 0.8s linear infinite;
+}
+
+.dashboard-loading-title {
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.dashboard-loading-message {
+  font-size: 14px;
+  color: #4b5563;
+}
+
+@keyframes dashboard-loading-spin {
+  to { transform: rotate(360deg); }
 }
 
 .no-data {
@@ -1964,6 +2305,35 @@ export default {
 .pagination-controls button:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+.pagination-controls .load-everything-button {
+  color: #1d4ed8;
+  background: #eff6ff;
+  border-color: #93c5fd;
+}
+
+.load-everything-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: #4b5563;
+}
+
+.pagination-spinner {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 16px;
+  border: 2px solid #bfdbfe;
+  border-top-color: #2563eb;
+  border-radius: 50%;
+  animation: pagination-spin 0.8s linear infinite;
+}
+
+@keyframes pagination-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .pagination-controls span {
