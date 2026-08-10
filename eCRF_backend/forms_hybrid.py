@@ -128,6 +128,22 @@ def _assert_subject_active_for_study(db: Session, study_id: int, subject_index: 
     _assert_subject_active(content.study_data or {}, int(subject_index))
 
 
+def _assert_entry_subject_update_allowed(
+    study_data: Dict[str, Any],
+    target_entry: Dict[str, Any],
+    requested_subject_index: int,
+) -> None:
+    try:
+        target_subject_index = int(target_entry.get("subject_index"))
+        requested_index = int(requested_subject_index)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="Invalid entry subject")
+
+    _assert_subject_active(study_data, target_subject_index)
+    if requested_index != target_subject_index:
+        raise HTTPException(status_code=409, detail="An existing entry cannot be moved to another subject")
+
+
 def _validate_subject_identity_and_status_update(old_sd: Dict[str, Any], new_sd: Dict[str, Any]) -> None:
     old_subjects = (old_sd or {}).get("subjects") or []
     new_subjects = (new_sd or {}).get("subjects") or []
@@ -1607,6 +1623,13 @@ def update_study_data_entry(
     if not target_entry:
         raise HTTPException(status_code=404, detail="Entry not found")
 
+    content_row = _get_content_row_or_404(db, study_id)
+    _assert_entry_subject_update_allowed(
+        content_row.study_data or {},
+        target_entry,
+        payload.subject_index,
+    )
+
     form_version = int(target_entry.get("form_version") or 1)
 
     try:
@@ -1637,7 +1660,6 @@ def update_study_data_entry(
             },
         )
 
-    content_row = _get_content_row_or_404(db, study_id)
     selected_models = ((content_row.study_data or {}).get("selectedModels") or [])
 
     try:

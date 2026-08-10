@@ -6,6 +6,7 @@ from fastapi import HTTPException
 
 from eCRF_backend.datalad_repo import DataladStudyRepo
 from eCRF_backend.forms_hybrid import (
+    _assert_entry_subject_update_allowed,
     _assert_subject_active,
     _validate_subject_identity_and_status_update,
 )
@@ -46,6 +47,39 @@ def test_generic_study_update_cannot_remove_reorder_or_change_dropout_status():
             old,
             {"subjects": [{"id": "SUB-001"}, {"id": "SUB-002", "status": "DROPPED_DATA_RETAINED", "group": "B"}]},
         )
+
+
+def test_entry_update_validates_existing_owner_and_prevents_subject_reassignment():
+    study_data = {
+        "subjects": [
+            {"id": "SUB-001", "status": "DROPPED_DATA_RETAINED", "dropout_date": "2026-08-06"},
+            {"id": "SUB-002", "status": "ACTIVE"},
+            {"id": "SUB-003", "status": "ACTIVE"},
+        ]
+    }
+
+    with pytest.raises(HTTPException) as dropped_owner:
+        _assert_entry_subject_update_allowed(
+            study_data,
+            {"id": 77, "subject_index": 0},
+            requested_subject_index=1,
+        )
+    assert dropped_owner.value.status_code == 409
+    assert "SUB-001" in dropped_owner.value.detail
+
+    with pytest.raises(HTTPException, match="cannot be moved") as reassignment:
+        _assert_entry_subject_update_allowed(
+            study_data,
+            {"id": 78, "subject_index": 1},
+            requested_subject_index=2,
+        )
+    assert reassignment.value.status_code == 409
+
+    _assert_entry_subject_update_allowed(
+        study_data,
+        {"id": 78, "subject_index": 1},
+        requested_subject_index=1,
+    )
 
 
 def test_delete_subject_active_data_removes_only_target_and_invalidates_links(tmp_path, monkeypatch):
