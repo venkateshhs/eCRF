@@ -609,12 +609,14 @@
 
           <div class="form-actions">
             <button
+              type="button"
               @click="submitData"
               class="btn-save"
-              :disabled="blockingErrorsPresent || !canEdit"
-              :title="!canEdit ? 'This shared link is view-only' : (blockingErrorsPresent ? 'Fix validation errors before saving' : 'Save Data')"
+              :disabled="savingData || blockingErrorsPresent || !canEdit || !canSubmitEntryChanges"
+              :title="saveButtonTitle"
             >
-              Save Data
+              <span v-if="savingData" class="btn-save-spinner" aria-hidden="true"></span>
+              <span>{{ saveButtonLabel }}</span>
             </button>
 
             <button
@@ -743,6 +745,14 @@
       @jump="jumpToField"
     />
 
+    <CheckboxNoConfirmationDialog
+      :visible="showCheckboxNoConfirmationDialog"
+      :candidates="uncheckedCheckboxCandidates"
+      @confirm="confirmUncheckedCheckboxesAndSave"
+      @cancel="cancelUncheckedCheckboxConfirmation"
+      @jump="jumpToUncheckedCheckbox"
+    />
+
     <StudyDataImportDialog
       v-if="showImportDialog"
       :visible="showImportDialog"
@@ -807,10 +817,11 @@
             type="button"
             class="btn-save"
             @click="saveAndLeaveFromUnsavedDialog"
-            :disabled="blockingErrorsPresent || !canEdit"
+            :disabled="savingData || blockingErrorsPresent || !canEdit"
             :title="!canEdit ? 'This shared link is view-only' : (blockingErrorsPresent ? 'Fix validation errors before saving' : 'Save and leave')"
           >
-            Save and Leave
+            <span v-if="savingData" class="btn-save-spinner" aria-hidden="true"></span>
+            <span>{{ savingData ? 'Saving data…' : 'Save and Leave' }}</span>
           </button>
 
           <button
@@ -869,6 +880,7 @@ import StudyConstraintDialog from "@/components/dataentry/StudyConstraintDialog.
 import StudyLegendDialogs from "@/components/dataentry/StudyLegendDialogs.vue";
 import GroupAssignDialog from "@/components/dataentry/GroupAssignDialog.vue";
 import SkipRequiredDialog from "@/components/dataentry/SkipRequiredDialog.vue";
+import CheckboxNoConfirmationDialog from "@/components/dataentry/CheckboxNoConfirmationDialog.vue";
 import StudyDataImportDialog from "@/components/dataentry/StudyDataImportDialog.vue";
 import PreviousVisitImportDialog from "@/components/dataentry/PreviousVisitImportDialog.vue";
 import DataEntryConflictDialog from "@/components/dataentry/DataEntryConflictDialog.vue";
@@ -939,6 +951,7 @@ export default {
     StudyLegendDialogs,
     GroupAssignDialog,
     SkipRequiredDialog,
+    CheckboxNoConfirmationDialog,
     StudyDataImportDialog,
     PreviousVisitImportDialog,
     DataEntryConflictDialog,
@@ -996,6 +1009,10 @@ export default {
       showSkipDialog: false,
       skipCandidates: [],
       skipSelections: {},
+      showCheckboxNoConfirmationDialog: false,
+      uncheckedCheckboxCandidates: [],
+      checkboxNoConfirmedForCurrentSave: false,
+      confirmedUncheckedCheckboxCount: 0,
       showEntryConflictDialog: false,
       entryConflicts: [],
       pendingEntryConflict: null,
@@ -1091,6 +1108,7 @@ export default {
       importedPreviousVisitLocks: {},
       entryBaselineSnapshot: "",
       entryDirty: false,
+      savingData: false,
       validationMountAllSections: false,
       runtimeFieldLookup: null,
       runtimeFieldLookupModels: null,
@@ -1171,6 +1189,29 @@ export default {
       if (this.showSelection) return false;
       if (!this.canEdit) return false;
       return this.entryDirty;
+    },
+    hasCurrentSavedEntry() {
+      const s = this.currentSubjectIndex;
+      const v = this.currentVisitIndex;
+      const g = this.currentGroupIndex;
+
+      if (s == null || v == null || g == null) return false;
+      return !!this.entryIds?.[s]?.[v]?.[g];
+    },
+    canSubmitEntryChanges() {
+      return !this.hasCurrentSavedEntry || this.hasUnsavedEntryChanges;
+    },
+    saveButtonLabel() {
+      if (this.savingData) return "Saving data…";
+      if (!this.canSubmitEntryChanges) return "No new changes to save";
+      return "Save Data";
+    },
+    saveButtonTitle() {
+      if (!this.canEdit) return "This shared link is view-only";
+      if (this.savingData) return "Data is being saved";
+      if (this.blockingErrorsPresent) return "Fix validation errors before saving";
+      if (!this.canSubmitEntryChanges) return "No new changes to save";
+      return "Save Data";
     },
     importDialogSubjects() {
       const subjects = Array.isArray(this.sd?.subjects) ? this.sd.subjects : [];
@@ -1722,6 +1763,8 @@ export default {
         calculated: this.isCalculatedRuntimeField(mIdx, fIdx),
         hasError: !!this.fieldErrors(mIdx, fIdx),
         tableCellErrors: this.getTableValidationState(mIdx, fIdx)?.cellErrors || {},
+        checkboxFalseIsComplete:
+          this.hasCurrentSavedEntry || this.checkboxNoConfirmedForCurrentSave,
       });
     },
 
@@ -1877,6 +1920,8 @@ export default {
         hasFieldError: (mIdx, fIdx) => !!this.fieldErrors(mIdx, fIdx),
         getTableCellErrors: (mIdx, fIdx) =>
           this.getTableValidationState(mIdx, fIdx)?.cellErrors || {},
+        checkboxFalseIsComplete:
+          this.hasCurrentSavedEntry || this.checkboxNoConfirmedForCurrentSave,
       });
     },
 
@@ -1944,6 +1989,7 @@ export default {
             this.isCalculatedRuntimeField(mIdx, fIdx),
           hasFieldError: () => false,
           getTableCellErrors: () => ({}),
+          checkboxFalseIsComplete: true,
         });
       } catch (error) {
         console.warn("Failed to calculate saved entry progress", error);
@@ -5862,7 +5908,7 @@ applyImportedRowFromDialog(payload) {
       if (!displayConflicts.length) {
         this.setConflictRetryState(dataMerge.merged, mergedSkipArray, latest);
         await this.$nextTick();
-        await this.submitData();
+        await this.performSubmitData();
         return;
       }
 
@@ -5881,6 +5927,7 @@ applyImportedRowFromDialog(payload) {
       this.entryConflicts = [];
       this.pendingEntryConflict = null;
       this.entryDirty = true;
+      this.resetCheckboxNoConfirmationState();
     },
 
     async confirmEntryConflictResolution(decisions) {
@@ -6005,6 +6052,7 @@ applyImportedRowFromDialog(payload) {
       }
     },
     async selectCell(sIdx, vIdx) {
+      this.resetCheckboxNoConfirmationState();
       const selectedSubject = this.sd.subjects?.[sIdx];
       if (String(selectedSubject?.status || "ACTIVE").toUpperCase() !== "ACTIVE") {
         this.showDialogMessage(
@@ -6057,6 +6105,7 @@ applyImportedRowFromDialog(payload) {
 
     backToSelection() {
       if (this.isShared) return;
+      this.resetCheckboxNoConfirmationState();
       this.detachFloatingScrollListener();
       this.buildStatusCache();
       this.showSelection = true;
@@ -6122,7 +6171,11 @@ applyImportedRowFromDialog(payload) {
       );
 
       const isEmpty = () => {
-        if (def.type === "checkbox") return val !== true;
+        if (def.type === "checkbox") {
+          const falseIsConfirmed =
+            this.hasCurrentSavedEntry || this.checkboxNoConfirmedForCurrentSave;
+          return falseIsConfirmed ? typeof val !== "boolean" : val !== true;
+        }
 
         if (def.type === "table") {
           const rows = val?.rows;
@@ -6394,9 +6447,13 @@ applyImportedRowFromDialog(payload) {
         if (this.skipFlags[s]?.[v]?.[g]?.[mIdx]?.[fIdx]) return;
 
         const val = this.entryData[s][v][g][mIdx][fIdx];
+          const checkboxFalseIsConfirmed =
+            this.hasCurrentSavedEntry || this.checkboxNoConfirmedForCurrentSave;
           const empty =
             f.type === "checkbox"
-              ? val !== true
+              ? checkboxFalseIsConfirmed
+                ? typeof val !== "boolean"
+                : val !== true
               : f.type === "file"
               ? c.allowMultipleFiles
                 ? !(Array.isArray(val) && val.length > 0)
@@ -6587,7 +6644,96 @@ applyImportedRowFromDialog(payload) {
       }
     },
 
+    collectUncheckedCheckboxCandidates() {
+      const s = this.currentSubjectIndex;
+      const v = this.currentVisitIndex;
+      const g = this.currentGroupIndex;
+
+      if (s == null || v == null || g == null) return [];
+      this.ensureSlot(s, v, g);
+
+      const candidates = [];
+      (this.assignedModelIndices || []).forEach((mIdx) => {
+        const section = this.selectedModels?.[mIdx];
+        if (!section) return;
+
+        (section.fields || []).forEach((field, fIdx) => {
+          if (String(field?.type || "").toLowerCase() !== "checkbox") return;
+          if (!this.isFieldVisible(mIdx, fIdx)) return;
+          if (this.isReadonlyField(field, mIdx, fIdx)) return;
+          if (this.entryData?.[s]?.[v]?.[g]?.[mIdx]?.[fIdx] === true) return;
+
+          candidates.push({
+            key: this.errorKey(mIdx, fIdx),
+            sectionIndex: mIdx,
+            fieldIndex: fIdx,
+            sectionTitle: section.title || `Section ${mIdx + 1}`,
+            fieldLabel:
+              field.label || field.name || field.title || `Field ${fIdx + 1}`,
+          });
+        });
+      });
+
+      return candidates;
+    },
+
+    resetCheckboxNoConfirmationState() {
+      this.showCheckboxNoConfirmationDialog = false;
+      this.uncheckedCheckboxCandidates = [];
+      this.checkboxNoConfirmedForCurrentSave = false;
+      this.confirmedUncheckedCheckboxCount = 0;
+    },
+
+    async confirmUncheckedCheckboxesAndSave() {
+      const candidates = this.collectUncheckedCheckboxCandidates();
+      const s = this.currentSubjectIndex;
+      const v = this.currentVisitIndex;
+      const g = this.currentGroupIndex;
+
+      candidates.forEach((item) => {
+        this.setDeepValue(s, v, g, item.sectionIndex, item.fieldIndex, false);
+        this.setDeepSkip(s, v, g, item.sectionIndex, item.fieldIndex, false);
+        this.clearError(item.sectionIndex, item.fieldIndex);
+      });
+
+      this.confirmedUncheckedCheckboxCount = candidates.length;
+      this.checkboxNoConfirmedForCurrentSave = true;
+      this.showCheckboxNoConfirmationDialog = false;
+      this.rebuildEntryProgressCache();
+      await this.submitData();
+    },
+
+    cancelUncheckedCheckboxConfirmation() {
+      this.resetCheckboxNoConfirmationState();
+    },
+
+    jumpToUncheckedCheckbox(item) {
+      this.resetCheckboxNoConfirmationState();
+      if (!item) return;
+
+      this.$nextTick(() => {
+        this.revealValidationError(item);
+      });
+    },
+
     async submitData() {
+      if (this.savingData) return;
+
+      if (!this.canSubmitEntryChanges) {
+        this.showDialogMessage("No new changes to save.");
+        return;
+      }
+
+      this.savingData = true;
+      try {
+        await this.performSubmitData();
+      } finally {
+        this.savingData = false;
+        if (!this.showSelection) this.rebuildEntryProgressCache();
+      }
+    },
+
+    async performSubmitData() {
       if (!this.canEdit) {
         this.showDialogMessage("This shared link is view-only.");
         return;
@@ -6597,6 +6743,15 @@ applyImportedRowFromDialog(payload) {
       this.applyTransformsForSection();
       this.cancelAllRuntimeFieldCommits();
       this.runAllCalculationsForCurrentCell();
+
+      if (!this.checkboxNoConfirmedForCurrentSave) {
+        const uncheckedCheckboxes = this.collectUncheckedCheckboxCandidates();
+        if (uncheckedCheckboxes.length) {
+          this.uncheckedCheckboxCandidates = uncheckedCheckboxes;
+          this.showCheckboxNoConfirmationDialog = true;
+          return;
+        }
+      }
 
       this.validationMountAllSections = true;
       await this.$nextTick();
@@ -6622,6 +6777,7 @@ applyImportedRowFromDialog(payload) {
       });
 
       if ((!ok && blocking.length) || tableFieldsInvalid) {
+          this.resetCheckboxNoConfirmationState();
           this.$nextTick(() => {
             this.goToFirstValidationError();
           });
@@ -6646,6 +6802,7 @@ applyImportedRowFromDialog(payload) {
       try {
         await this.uploadPendingFilesForCurrentSection();
       } catch (e) {
+        this.resetCheckboxNoConfirmationState();
         console.error("File upload/register failed:", e);
         this.showDialogMessage("File upload failed. Please try again.");
         return;
@@ -6670,6 +6827,10 @@ applyImportedRowFromDialog(payload) {
       const hasAnySkip = !!(
         Array.isArray(rawSkipFlags) && rawSkipFlags.some((row) => Array.isArray(row) && row.some((x) => !!x))
       );
+      const confirmedCheckboxCount = this.confirmedUncheckedCheckboxCount;
+      const checkboxAuditSuffix = confirmedCheckboxCount > 0
+        ? ` (Confirmed ${confirmedCheckboxCount} Unchecked Checkbox${confirmedCheckboxCount === 1 ? "" : "es"} as No)`
+        : "";
 
       const payload = {
         study_id: this.study?.metadata?.id,
@@ -6683,7 +6844,7 @@ applyImportedRowFromDialog(payload) {
 
       try {
         if (this.isShared) {
-          const auditLabel = hasAnySkip ? "Shared link data Entry (Skipped Required)" : "Shared link data Entry";
+          const auditLabel = `${hasAnySkip ? "Shared link data Entry (Skipped Required)" : "Shared link data Entry"}${checkboxAuditSuffix}`;
           const resp = await axios.post(`/forms/shared/${this.shareToken}/data`, payload, {
             params: {
               audit_label: auditLabel,
@@ -6722,6 +6883,7 @@ applyImportedRowFromDialog(payload) {
           this.hydrateCache.delete(`${s}|${v}|${g}|${this.selectedVersion}`);
           this.applyVersionView();
           this.updateStatusCacheFor(s, v, g);
+          this.resetCheckboxNoConfirmationState();
           this.showDialogMessage(
             fileDeletionError
               ? this.fileDeletionFailureMessage(fileDeletionError)
@@ -6742,7 +6904,7 @@ applyImportedRowFromDialog(payload) {
         }
 
         if (existingId) {
-          const auditLabel = hasAnySkip ? "Update/Edit Data Entry (Skipped Required)" : "Update/Edit Data Entry";
+          const auditLabel = `${hasAnySkip ? "Update/Edit Data Entry (Skipped Required)" : "Update/Edit Data Entry"}${checkboxAuditSuffix}`;
           const resp = await axios.put(
             `/forms/studies/${this.study.metadata.id}/data_entries/${existingId}`,
             payload,
@@ -6760,7 +6922,7 @@ applyImportedRowFromDialog(payload) {
           else this.existingEntries.push(resp.data);
         } else {
           const params = this.safeVersionParams(this.selectedVersion);
-          const auditLabel = hasAnySkip ? "New Data Entry (Skipped Required)" : params ? "New Data Entry (Versioned)" : "New Data Entry";
+          const auditLabel = `${hasAnySkip ? "New Data Entry (Skipped Required)" : params ? "New Data Entry (Versioned)" : "New Data Entry"}${checkboxAuditSuffix}`;
           const resp = await axios.post(
             `/forms/studies/${this.study.metadata.id}/data`,
             payload,
@@ -6810,6 +6972,7 @@ applyImportedRowFromDialog(payload) {
         this.hydrateCache.delete(`${s}|${v}|${g}|${this.selectedVersion}`);
         this.applyVersionView();
         this.updateStatusCacheFor(s, v, g);
+        this.resetCheckboxNoConfirmationState();
         this.showDialogMessage(
           fileDeletionError
             ? this.fileDeletionFailureMessage(fileDeletionError)
@@ -6824,6 +6987,7 @@ applyImportedRowFromDialog(payload) {
           return;
         }
 
+        this.resetCheckboxNoConfirmationState();
         this.showDialogMessage(
           err?.response?.status === 503
             ? this.getApiErrorDetail(err)
@@ -6885,6 +7049,7 @@ applyImportedRowFromDialog(payload) {
     cancelSkipSelection() {
       this.showSkipDialog = false;
       this.skipSelections = {};
+      this.resetCheckboxNoConfirmationState();
 
       this.$nextTick(() => {
         this.validateCurrentSection();
@@ -6894,6 +7059,7 @@ applyImportedRowFromDialog(payload) {
     },
     jumpToField(item) {
       this.showSkipDialog = false;
+      this.resetCheckboxNoConfirmationState();
 
       if (!item) return;
 
@@ -8597,6 +8763,26 @@ select:focus {
   font-size: 14px;
   cursor: pointer;
   transition: background 0.2s;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.btn-save-spinner {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 14px;
+  border: 2px solid rgba(255, 255, 255, 0.45);
+  border-top-color: #ffffff;
+  border-radius: 50%;
+  animation: btn-save-spin 0.75s linear infinite;
+}
+
+@keyframes btn-save-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .btn-save[disabled] {

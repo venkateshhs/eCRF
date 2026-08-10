@@ -114,7 +114,12 @@ class _Db:
 
 def test_hybrid_bulk_route_uses_repo_batch_and_returns_legacy_shape(monkeypatch):
     metadata = SimpleNamespace(id=11, study_name="Bulk import study", status="PUBLISHED")
-    content = SimpleNamespace(study_data={"selectedModels": []})
+    content = SimpleNamespace(
+        study_data={
+            "selectedModels": [],
+            "subjects": [{"status": "ACTIVE"}, {"status": "ACTIVE"}],
+        }
+    )
     user = SimpleNamespace(id=1, email="admin@example.test", username="admin", profile=None)
     captured = {}
 
@@ -154,7 +159,12 @@ def test_hybrid_bulk_route_uses_repo_batch_and_returns_legacy_shape(monkeypatch)
 
 def test_hybrid_bulk_route_reports_slot_conflict(monkeypatch):
     metadata = SimpleNamespace(id=11, study_name="Bulk import study", status="PUBLISHED")
-    content = SimpleNamespace(study_data={"selectedModels": []})
+    content = SimpleNamespace(
+        study_data={
+            "selectedModels": [],
+            "subjects": [{"status": "ACTIVE"}],
+        }
+    )
     user = SimpleNamespace(id=1, email="admin@example.test", username="admin", profile=None)
 
     monkeypatch.setattr(forms_hybrid, "_assert_has_study_permission", lambda *_args, **_kwargs: None)
@@ -180,3 +190,89 @@ def test_hybrid_bulk_route_reports_slot_conflict(monkeypatch):
 
     assert exc_info.value.status_code == 409
     assert exc_info.value.detail["conflict"] is True
+
+
+def _progress_entry_payload():
+    return schemas.StudyDataEntryCreate(
+        **_entry(0, 0),
+        progress_status="complete",
+        progress_percentage=100,
+        progress_completed=30,
+        progress_total=30,
+        progress_skipped=0,
+    )
+
+
+def _patch_regular_entry_route_dependencies(monkeypatch, content):
+    monkeypatch.setattr(forms_hybrid, "_assert_has_study_permission", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(forms_hybrid, "_assert_not_locked_by_other", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(forms_hybrid, "_assert_subject_active_for_study", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(forms_hybrid, "_assert_entry_subject_update_allowed", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(forms_hybrid, "_resolve_form_version_or_400", lambda *_args, **_kwargs: 1)
+    monkeypatch.setattr(forms_hybrid, "_get_content_row_or_404", lambda *_args, **_kwargs: content)
+    monkeypatch.setattr(forms_hybrid.repo, "assert_slot_revision_unchanged", lambda **_kwargs: None)
+
+
+def test_regular_create_route_persists_frontend_progress_snapshot(monkeypatch):
+    metadata = SimpleNamespace(id=11, study_name="Progress study", status="PUBLISHED")
+    content = SimpleNamespace(study_data={"selectedModels": []})
+    user = SimpleNamespace(id=1, email="admin@example.test", username="admin", profile=None)
+    captured = {}
+    _patch_regular_entry_route_dependencies(monkeypatch, content)
+
+    monkeypatch.setattr(
+        forms_hybrid.repo,
+        "save_entry",
+        lambda **kwargs: captured.update(kwargs) or kwargs,
+    )
+
+    forms_hybrid.save_study_data(
+        study_id=11,
+        payload=_progress_entry_payload(),
+        version=None,
+        expected_revision_token="revision-1",
+        audit_label="New Data Entry",
+        db=_Db(metadata),
+        current_user=user,
+    )
+
+    assert captured["progress_status"] == "complete"
+    assert captured["progress_percentage"] == 100
+    assert captured["progress_completed"] == 30
+    assert captured["progress_total"] == 30
+    assert captured["progress_skipped"] == 0
+
+
+def test_regular_update_route_persists_frontend_progress_snapshot(monkeypatch):
+    metadata = SimpleNamespace(id=11, study_name="Progress study", status="PUBLISHED")
+    content = SimpleNamespace(study_data={"selectedModels": []})
+    user = SimpleNamespace(id=1, email="admin@example.test", username="admin", profile=None)
+    captured = {}
+    _patch_regular_entry_route_dependencies(monkeypatch, content)
+    monkeypatch.setattr(
+        forms_hybrid.repo,
+        "list_entries",
+        lambda *_args, **_kwargs: [{"id": 51, "subject_index": 0, "form_version": 1}],
+    )
+    monkeypatch.setattr(
+        forms_hybrid.repo,
+        "update_entry",
+        lambda **kwargs: captured.update(kwargs) or kwargs["payload"],
+    )
+
+    forms_hybrid.update_study_data_entry(
+        study_id=11,
+        entry_id=51,
+        payload=_progress_entry_payload(),
+        expected_revision_token="revision-1",
+        audit_label="Update/Edit Data Entry",
+        db=_Db(metadata),
+        user=user,
+    )
+
+    stored_payload = captured["payload"]
+    assert stored_payload["progress_status"] == "complete"
+    assert stored_payload["progress_percentage"] == 100
+    assert stored_payload["progress_completed"] == 30
+    assert stored_payload["progress_total"] == 30
+    assert stored_payload["progress_skipped"] == 0

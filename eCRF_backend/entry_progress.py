@@ -375,7 +375,16 @@ def calculate_overall_entry_progress(
                 field,
                 calculated_targets,
             )
-            blank = _is_blank(value, field_type)
+            # A saved top-level checkbox is an explicit boolean answer. False
+            # means "No" and is complete after the save confirmation flow.
+            blank = (
+                not isinstance(value, bool)
+                if field_type == "checkbox"
+                else _is_blank(value, field_type)
+            )
+
+            if system_managed and field_type == "checkbox" and value is not True:
+                continue
 
             if field_type == "table":
                 if system_managed and blank:

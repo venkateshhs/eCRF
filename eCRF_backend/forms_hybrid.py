@@ -21,6 +21,7 @@ from .datalad_repo import DataladStudyRepo, _deepcopy_json, local_now
 from .versions import VersionManager
 from .settings import get_settings
 from .entry_progress import calculate_overall_entry_progress
+from .compliance import build_compliance_summary
 
 router = APIRouter(prefix="/forms", tags=["forms"])
 repo = DataladStudyRepo()
@@ -952,6 +953,25 @@ def subject_dropout_summary(
     return counts
 
 
+@router.get("/studies/{study_id}/compliance-summary")
+def study_compliance_summary(
+    study_id: int,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    meta = db.query(models.StudyMetadata).filter(models.StudyMetadata.id == study_id).first()
+    if not meta:
+        raise HTTPException(status_code=404, detail="Study not found")
+    _assert_has_study_permission(db, meta, current_user, required="view")
+    study_data = _get_content_row_or_404(db, study_id).study_data or {}
+    summary = build_compliance_summary(
+        study_data,
+        repo.list_entries(study_id, meta.study_name),
+    )
+    summary["generated_at"] = local_now().isoformat()
+    return summary
+
+
 @router.post("/studies/{study_id}/subjects/{subject_index}/dropout")
 def drop_out_subject(
     study_id: int,
@@ -1501,6 +1521,11 @@ def save_study_data(
             form_version=form_version,
             data=payload.data,
             skipped_required_flags=_flags_dict_to_list(payload.skipped_required_flags, selected_models),
+            progress_status=payload.progress_status,
+            progress_percentage=payload.progress_percentage,
+            progress_completed=payload.progress_completed,
+            progress_total=payload.progress_total,
+            progress_skipped=payload.progress_skipped,
             actor=_actor_identifier(current_user),
             actor_name=_display_name(current_user),
             user_id=current_user.id,
@@ -1673,6 +1698,11 @@ def update_study_data_entry(
                 "group_index": payload.group_index,
                 "data": payload.data,
                 "skipped_required_flags": _flags_dict_to_list(payload.skipped_required_flags, selected_models),
+                "progress_status": payload.progress_status,
+                "progress_percentage": payload.progress_percentage,
+                "progress_completed": payload.progress_completed,
+                "progress_total": payload.progress_total,
+                "progress_skipped": payload.progress_skipped,
             },
             actor=_actor_identifier(user),
             actor_name=_display_name(user),

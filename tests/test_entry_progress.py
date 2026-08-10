@@ -164,3 +164,55 @@ def test_skipped_field_is_not_counted_as_completed_and_sets_skipped_status():
     assert progress["progress_completed"] == 1
     assert progress["progress_total"] == 2
     assert progress["progress_skipped"] == 1
+
+
+def test_saved_false_checkbox_is_a_completed_no_answer():
+    study_data = make_study(section_count=1, fields_per_section=1)
+    checkbox = study_data["selectedModels"][0]["fields"][0]
+    checkbox["type"] = "checkbox"
+
+    progress = calculate_overall_entry_progress(
+        study_data=study_data,
+        data={"Section 1": {checkbox["id"]: False}},
+        skipped_required_flags=empty_skips(study_data),
+        visit_index=0,
+        group_index=0,
+    )
+
+    assert progress["progress_percentage"] == 100
+    assert progress["progress_completed"] == progress["progress_total"] == 1
+
+
+def test_missing_checkbox_answer_remains_incomplete():
+    study_data = make_study(section_count=1, fields_per_section=1)
+    study_data["selectedModels"][0]["fields"][0]["type"] = "checkbox"
+
+    progress = calculate_overall_entry_progress(
+        study_data=study_data,
+        data={},
+        skipped_required_flags=empty_skips(study_data),
+        visit_index=0,
+        group_index=0,
+    )
+
+    assert progress["progress_percentage"] == 0
+    assert progress["progress_completed"] == 0
+    assert progress["progress_total"] == 1
+
+
+def test_unchecked_readonly_checkbox_does_not_reduce_progress():
+    study_data = make_study(section_count=1, fields_per_section=1)
+    checkbox = study_data["selectedModels"][0]["fields"][0]
+    checkbox["type"] = "checkbox"
+    checkbox["constraints"] = {"readonly": True}
+
+    progress = calculate_overall_entry_progress(
+        study_data=study_data,
+        data={"Section 1": {checkbox["id"]: False}},
+        skipped_required_flags=empty_skips(study_data),
+        visit_index=0,
+        group_index=0,
+    )
+
+    assert progress["progress_total"] == 0
+    assert progress["progress_completed"] == 0
