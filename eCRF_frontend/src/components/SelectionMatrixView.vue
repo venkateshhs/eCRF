@@ -160,12 +160,6 @@
                   <i class="fas fa-user-slash"></i>
                   {{ subjectStatus(item.subject) === 'DROPPED_DATA_DELETED' ? 'Data deleted' : 'Dropped out' }}
                 </span>
-                <button
-                  v-if="isAdmin && subjectStatus(item.subject) === 'DROPPED_DATA_RETAINED'"
-                  type="button"
-                  class="reactivate-btn"
-                  @click="$emit('reactivate-subject', item.sIdx)"
-                >Reactivate</button>
               </td>
 
 
@@ -184,15 +178,15 @@
               >
                 <button
                   class="select-btn"
-                  :class="statusClass(item.sIdx, vIdx)"
-                  :style="progressStyle(item.sIdx, vIdx)"
+                  :class="isDropped(item.subject) ? droppedStatusClass(item.subject) : statusClass(item.sIdx, vIdx)"
+                  :style="isDropped(item.subject) ? droppedProgressStyle : progressStyle(item.sIdx, vIdx)"
                   :disabled="isDropped(item.subject)"
                   :title="isDropped(item.subject) ? dropoutTitle(item.subject) : ''"
                   @click="$emit('select-cell', item.sIdx, vIdx)"
                 >
                   <span class="select-btn-fill"></span>
                   <span class="select-btn-label">
-                    {{ isDropped(item.subject) ? 'Dropped out' : (progressLabel(item.sIdx, vIdx) || "Select") }}
+                    {{ isDropped(item.subject) ? droppedCellLabel(item.subject) : (progressLabel(item.sIdx, vIdx) || "Select") }}
                   </span>
                 </button>
               </td>
@@ -243,13 +237,11 @@ export default {
 
     showGroupColumn: { type: Boolean, default: false },
     canManageSubjectDropout: { type: Boolean, default: false },
-    isAdmin: { type: Boolean, default: false },
   },
   emits: [
     "update:selectedVisitIndex",
     "add-subjects",
     "dropout-subject",
-    "reactivate-subject",
     "select-cell",
     "open-status-legend",
   ],
@@ -260,7 +252,7 @@ export default {
       matchedSubjectIndices: [],
       activeMatchPosition: 0,
       subjectRowRefs: {},
-      subjectStatusFilter: "active_and_retained",
+      subjectStatusFilter: "all",
     };
   },
 
@@ -287,6 +279,9 @@ export default {
       });
       return counts;
     },
+    droppedProgressStyle() {
+      return { "--progress-pct": "0%" };
+    },
   },
 
   methods: {
@@ -295,6 +290,16 @@ export default {
     },
     isDropped(subject) {
       return this.subjectStatus(subject) !== "ACTIVE";
+    },
+    droppedStatusClass(subject) {
+      return this.subjectStatus(subject) === "DROPPED_DATA_DELETED"
+        ? "status-dropped-deleted"
+        : "status-dropped-retained";
+    },
+    droppedCellLabel(subject) {
+      return this.subjectStatus(subject) === "DROPPED_DATA_DELETED"
+        ? "Dropped · Data deleted"
+        : "Dropped · Data retained";
     },
     dropoutTitle(subject) {
       const reason = subject?.dropout_reason || "Reason not available";
@@ -1060,6 +1065,26 @@ export default {
   border-color: #b91c1c;
 }
 
+.select-btn.status-dropped-retained {
+  background: #eef2ff;
+  border-color: #818cf8;
+  color: #4338ca;
+  box-shadow: none;
+}
+
+.select-btn.status-dropped-deleted {
+  background: #e2e8f0;
+  border-color: #64748b;
+  color: #334155;
+  box-shadow: none;
+}
+
+.select-btn.status-dropped-retained .select-btn-fill,
+.select-btn.status-dropped-deleted .select-btn-fill {
+  display: none;
+  width: 0;
+}
+
 /* ========= Scrollbars ========= */
 .matrix-wrap::-webkit-scrollbar {
   height: 10px;
@@ -1132,6 +1157,7 @@ export default {
   border-radius: 7px;
   padding: 9px 12px;
   font-weight: 700;
+  cursor: pointer;
 }
 
 .subject-status-filter {
@@ -1146,9 +1172,8 @@ export default {
 .dropout-summary { padding: 7px 9px; border-radius: 999px; background: #f1f5f9; color: #334155; font-size: 12px; font-weight: 700; white-space: nowrap; }
 .subject-row-dropped { background: #fff1f2; color: #881337; }
 .subject-row-deleted { background: #f1f5f9; color: #64748b; }
-.subject-row-dropped .select-btn { cursor: not-allowed; filter: grayscale(.65); opacity: .6; }
+.subject-row-dropped .select-btn { cursor: not-allowed; filter: none; opacity: 1; }
 .dropout-badge { display: block; margin-top: 5px; color: #be123c; font-size: 12px; font-weight: 700; }
-.reactivate-btn { margin-top: 7px; padding: 4px 7px; border: 1px solid #047857; border-radius: 5px; color: #047857; background: #ecfdf5; font-size: 12px; }
 
 /* ========= Responsive ========= */
 @media (max-width: 900px) {

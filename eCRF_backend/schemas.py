@@ -338,9 +338,6 @@ class SubjectDropoutRequest(BaseModel):
     confirmation_subject_id: Optional[str] = None
 
 
-class SubjectReactivateRequest(BaseModel):
-    reason: constr(min_length=1, max_length=1000)
-
 class StudyDataEntryUpdate(BaseModel):
     data: Optional[Dict[str, Any]] = None
     skipped_required_flags: Optional[List[List[bool]]] = None

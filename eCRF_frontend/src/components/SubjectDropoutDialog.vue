@@ -16,8 +16,9 @@
       </template>
 
       <form v-else @submit.prevent="submit">
+        <p class="required-note"><span class="required-mark">*</span> Required fields</p>
         <label>
-          Subject ID
+          <span>Subject ID <span class="required-mark">*</span></span>
           <select v-model.number="subjectIndex" required>
             <option :value="null" disabled>Select a subject</option>
             <option v-for="item in activeSubjects" :key="item.index" :value="item.index">
@@ -32,12 +33,12 @@
         </div>
 
         <label>
-          Dropout date
+          <span>Dropout date <span class="required-mark">*</span></span>
           <input v-model="dropoutDate" type="date" required />
         </label>
 
         <label>
-          Dropout reason
+          <span>Dropout reason <span class="required-mark">*</span></span>
           <select v-model="reason" required>
             <option value="" disabled>Select a reason</option>
             <option v-for="item in reasons" :key="item" :value="item">{{ item }}</option>
@@ -45,7 +46,7 @@
         </label>
 
         <label v-if="reason === 'Other'">
-          Other reason
+          <span>Other reason <span class="required-mark">*</span></span>
           <textarea v-model.trim="otherReason" rows="3" maxlength="1000" required></textarea>
         </label>
 
@@ -63,12 +64,12 @@
 
         <template v-if="mode === 'delete_data' && selectedSubject">
           <label class="acknowledge">
-            <input v-model="acknowledged" type="checkbox" />
-            I understand that the active application data cannot be restored through Case-e.
+            <input v-model="acknowledged" type="checkbox" required />
+            <span>I understand that the active application data cannot be restored through Case-e. <span class="required-mark">*</span></span>
           </label>
           <label>
-            Type <strong>{{ selectedSubject.id }}</strong> to confirm
-            <input v-model="confirmationId" autocomplete="off" />
+            <span>Type <strong>{{ selectedSubject.id }}</strong> to confirm <span class="required-mark">*</span></span>
+            <input v-model="confirmationId" autocomplete="off" required />
           </label>
         </template>
 
@@ -160,8 +161,10 @@ export default {
 .dropout-backdrop { position: fixed; inset: 0; z-index: 1200; background: rgba(15,23,42,.55); display: grid; place-items: center; padding: 24px; }
 .dropout-dialog { width: min(620px, 100%); max-height: 90vh; overflow: auto; background: white; border-radius: 12px; padding: 24px; box-shadow: 0 24px 70px rgba(0,0,0,.25); }
 .dropout-dialog h3 { margin-top: 0; }
-.choice { width: 100%; display: flex; flex-direction: column; gap: 5px; text-align: left; padding: 14px; margin: 10px 0; border: 1px solid #cbd5e1; border-radius: 8px; background: #f8fafc; }
+.choice { width: 100%; display: flex; flex-direction: column; gap: 5px; text-align: left; padding: 14px; margin: 10px 0; border: 1px solid #cbd5e1; border-radius: 8px; background: #f8fafc; cursor: pointer; transition: background-color .15s ease, border-color .15s ease, box-shadow .15s ease; }
+.choice:hover, .choice:focus-visible { background: #eef2ff; border-color: #818cf8; box-shadow: 0 2px 10px rgba(79,70,229,.1); }
 .danger-choice { border-color: #fca5a5; background: #fff7f7; }
+.danger-choice:hover, .danger-choice:focus-visible { background: #ffe4e6; border-color: #fb7185; box-shadow: 0 2px 10px rgba(190,24,93,.1); }
 label { display: grid; gap: 6px; margin: 14px 0; font-weight: 600; }
 select, input, textarea { padding: 9px 10px; border: 1px solid #94a3b8; border-radius: 6px; font: inherit; }
 .subject-facts { display: flex; justify-content: space-between; gap: 12px; padding: 10px; background: #f1f5f9; border-radius: 6px; }
@@ -169,8 +172,10 @@ select, input, textarea { padding: 9px 10px; border: 1px solid #94a3b8; border-r
 .destructive { border: 1px solid #dc2626; border-left-width: 5px; }
 .acknowledge { display: flex; grid-template-columns: auto 1fr; align-items: flex-start; font-weight: 500; }
 .error { color: #b91c1c; }
+.required-note { margin: 0 0 8px; color: #64748b; font-size: 13px; }
+.required-mark { color: #dc2626; }
 footer { display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px; }
-footer button { padding: 9px 13px; border-radius: 6px; border: 1px solid #94a3b8; }
+footer button { padding: 9px 13px; border-radius: 6px; border: 1px solid #94a3b8; cursor: pointer; }
 .confirm { background: #9f1239; color: white; border-color: #9f1239; }
 .danger { background: #b91c1c; }
 button:disabled { opacity: .55; cursor: not-allowed; }

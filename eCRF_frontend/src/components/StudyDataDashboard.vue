@@ -192,7 +192,22 @@
         <tbody>
           <template v-for="(row, rowIdx) in paginatedData" :key="'row-'+rowIdx">
             <tr>
-              <td class="fixed-col sticky-col sticky-subject">{{ row.subjectId }}</td>
+              <td class="fixed-col sticky-col sticky-subject">
+                <span class="dashboard-subject-identity">
+                  <span>{{ row.subjectId }}</span>
+                  <span
+                    v-if="row.__subjectStatus !== 'ACTIVE'"
+                    class="dashboard-dropout-label"
+                    :class="{ 'dashboard-dropout-deleted': row.__subjectStatus === 'DROPPED_DATA_DELETED' }"
+                    :title="row.__subjectDropoutTitle"
+                  >
+                    <i class="fas fa-user-slash" aria-hidden="true"></i>
+                    {{ row.__subjectStatus === 'DROPPED_DATA_DELETED'
+                      ? 'Dropped out · Data deleted'
+                      : 'Dropped out · Data retained' }}
+                  </span>
+                </span>
+              </td>
               <td v-if="canViewGroupColumn" class="fixed-col sticky-col sticky-group">{{ row.group }}</td>
               <td class="fixed-col sticky-col sticky-visit">
                 <span class="visit-cell-content">
@@ -1251,6 +1266,10 @@ export default {
             subjectId: subject.id,
             group: groupName,
             visit: visit.name,
+            __subjectStatus: String(subject?.status || "ACTIVE").toUpperCase(),
+            __subjectDropoutTitle: subject?.status
+              ? `Dropped out${subject.dropout_date ? ` on ${subject.dropout_date}` : ""}${subject.dropout_reason ? `: ${subject.dropout_reason}${subject.dropout_reason === "Other" && subject.dropout_other_reason ? ` — ${subject.dropout_other_reason}` : ""}` : ""}`
+              : "",
             __sIdx: subjIdx,
             __vIdx: vIdx,
             __gIdx: groupIdx,
@@ -2136,6 +2155,28 @@ export default {
 
 .dashboard-table tbody td.cell-skipped.sticky-col {
   background: #fee2e2 !important;
+}
+
+.dashboard-subject-identity {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 5px;
+}
+
+.dashboard-dropout-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: #be123c;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.dashboard-dropout-deleted {
+  color: #991b1b;
 }
 
 /* ============================================================

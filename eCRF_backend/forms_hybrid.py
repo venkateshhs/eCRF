@@ -41,7 +41,6 @@ ACTIVE_SUBJECT_STATUS = "ACTIVE"
 SUBJECT_STATUS_FIELDS = {
     "status", "dropout_date", "dropout_reason", "dropout_other_reason",
     "dropped_at", "dropped_by", "dropped_by_name", "deletion_status",
-    "reactivated_at", "reactivated_by", "reactivation_reason",
 }
 
 
@@ -972,9 +971,6 @@ def drop_out_subject(
         "dropped_at": now_iso,
         "dropped_by": current_user.id,
         "dropped_by_name": _display_name(current_user),
-        "reactivated_at": None,
-        "reactivated_by": None,
-        "reactivation_reason": None,
     }
     audit_payload = {
         "subject_index": subject_index,
@@ -1070,61 +1066,6 @@ def drop_out_subject(
             pass
         raise HTTPException(status_code=500, detail="Subject data deletion did not complete. The subject remains blocked; contact an administrator.")
 
-
-@router.post("/studies/{study_id}/subjects/{subject_index}/reactivate")
-def reactivate_subject(
-    study_id: int,
-    subject_index: int,
-    payload: schemas.SubjectReactivateRequest,
-    db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
-):
-    meta = db.query(models.StudyMetadata).filter(models.StudyMetadata.id == study_id).first()
-    if not meta:
-        raise HTTPException(status_code=404, detail="Study not found")
-    if not _is_admin(current_user):
-        raise HTTPException(status_code=403, detail="Only administrators can reactivate subjects")
-    content_row = _get_content_row_or_404(db, study_id)
-    study_data = _deepcopy_json(content_row.study_data or {})
-    subject = _subject_from_study_data(study_data, subject_index)
-    if _subject_status(subject) != "DROPPED_DATA_RETAINED":
-        raise HTTPException(status_code=409, detail="Only data-retained dropout subjects can be reactivated")
-    subject_id = str(subject.get("id") or subject.get("subject_id") or f"Subject {subject_index + 1}").strip()
-    previous_status = _subject_status(subject)
-    subject.update({
-        "status": ACTIVE_SUBJECT_STATUS,
-        "reactivated_at": local_now().isoformat(),
-        "reactivated_by": current_user.id,
-        "reactivation_reason": str(payload.reason).strip(),
-    })
-    content_row.study_data = study_data
-    db.commit()
-    latest_tv = _latest_template_or_500(db, study_id)
-    _write_published_snapshot_to_datalad(
-        meta=meta,
-        study_data=study_data,
-        template_version=latest_tv.version,
-        template_schema=latest_tv.schema or {},
-        actor=_actor_identifier(current_user),
-        actor_name=_display_name(current_user),
-        user_id=current_user.id,
-        audit_label="Subject reactivated",
-    )
-    repo.record_subject_status_event(
-        study_id=study_id,
-        study_name=meta.study_name,
-        subject_index=subject_index,
-        action="subject_reactivated",
-        payload={
-            "subject_index": subject_index,
-            "subject_raw": subject_id,
-            "previous_status": previous_status,
-            "new_status": ACTIVE_SUBJECT_STATUS,
-            "reactivation_reason": str(payload.reason).strip(),
-            **repo._build_actor_payload(actor=_actor_identifier(current_user), actor_name=_display_name(current_user), user_id=current_user.id),
-        },
-    )
-    return {"ok": True, "subject_index": subject_index, "subject_id": subject_id, "status": ACTIVE_SUBJECT_STATUS}
 
 @router.get("/studies/{study_id}/files", response_model=List[schemas.FileOut])
 def read_files_for_study(

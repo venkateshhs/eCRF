@@ -108,11 +108,9 @@
           :infoIcon="icons.info"
           :showGroupColumn="canSeeGroupColumn"
           :canManageSubjectDropout="canManageSubjectDropout"
-          :isAdmin="isAdminUser"
           @update:selectedVisitIndex="selectedVisitIndex = $event"
           @add-subjects="openSubjectDialog"
           @dropout-subject="openSubjectDropoutDialog"
-          @reactivate-subject="reactivateSubject"
           @select-cell="selectCell"
           @open-status-legend="openStatusLegend"
         />
@@ -7281,27 +7279,6 @@ applyImportedRowFromDialog(payload) {
         this.subjectDropoutError = this.getApiErrorDetail(error) || "Failed to drop out subject.";
       } finally {
         this.savingSubjectDropout = false;
-      }
-    },
-
-    async reactivateSubject(subjectIndex) {
-      if (!this.isAdminUser) return;
-      const subject = this.sd.subjects?.[subjectIndex];
-      if (!subject) return;
-      const reason = window.prompt(`Reason for reactivating subject ${subject.id}:`);
-      if (!reason || !reason.trim()) return;
-      try {
-        await axios.post(
-          `/forms/studies/${this.study.metadata.id}/subjects/${subjectIndex}/reactivate`,
-          { reason: reason.trim() },
-          { headers: { Authorization: `Bearer ${this.token}` } }
-        );
-        await this.loadStudy(this.study.metadata.id);
-        await this.loadExistingEntries(this.study.metadata.id);
-        this.buildStatusCache();
-        this.showDialogMessage(`Subject ${subject.id} was reactivated.`);
-      } catch (error) {
-        this.showDialogMessage(this.getApiErrorDetail(error) || "Failed to reactivate subject.");
       }
     },
 
