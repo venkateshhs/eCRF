@@ -18,7 +18,7 @@ from .database import get_db
 from . import schemas, models
 from .users import get_current_user
 from .datalad_repo import DataladStudyRepo, _deepcopy_json, local_now
-from .versions import VersionManager
+from .versions import VersionManager, normalize_study_data_ids
 from .settings import get_settings
 from .entry_progress import calculate_overall_entry_progress
 from .compliance import build_compliance_summary
@@ -521,9 +521,10 @@ def create_study(
     db.commit()
     db.refresh(meta)
 
+    normalized_study_data = normalize_study_data_ids(study_content.study_data or {})
     content_row = models.StudyContent(
         study_id=meta.id,
-        study_data=_deepcopy_json(study_content.study_data or {}),
+        study_data=normalized_study_data,
     )
     db.add(content_row)
     db.commit()
@@ -799,8 +800,14 @@ def update_study(
     # _require_lock_holder(meta, user)
 
     content_row = _get_content_row_or_404(db, study_id)
-    old_sd = _deepcopy_json(content_row.study_data or {})
-    new_sd = _deepcopy_json(study_content.study_data or {})
+    latest_template = VersionManager.latest(db, study_id)
+    latest_schema = (
+        latest_template.schema
+        if latest_template and isinstance(latest_template.schema, dict)
+        else {}
+    )
+    old_sd = normalize_study_data_ids(content_row.study_data or {}, latest_schema)
+    new_sd = normalize_study_data_ids(study_content.study_data or {}, old_sd)
     _validate_subject_identity_and_status_update(old_sd, new_sd)
 
     incoming_status = _norm_status(getattr(study_metadata, "status", None)) or (meta.status or "PUBLISHED")
