@@ -1,0 +1,305 @@
+{
+  "version": 1,
+  "fields": [
+    {
+      "column": "Therapy Administered",
+      "name": "therapy_administered",
+      "label": "Infusion/Therapie verabreicht",
+      "section": "Navigation QA",
+      "description": "Select Ja to reveal the required therapy date, or Nein to reveal an optional reason.",
+      "type": "radio",
+      "options": ["Ja", "Nein"],
+      "constraints": {
+        "required": true,
+        "helpText": "Change between Ja and Nein while using the floating navigator."
+      }
+    },
+    {
+      "column": "Therapy Date",
+      "name": "therapy_date",
+      "label": "Datum der Therapie",
+      "section": "Navigation QA",
+      "type": "date",
+      "constraints": {
+        "required": true,
+        "dateFormat": "dd.MM.yyyy",
+        "minDate": "01.01.2020",
+        "maxDate": "31.12.2030",
+        "helpText": "Required and visible only when Therapy Administered is Ja.",
+        "visibilityLogic": {
+          "action": "show",
+          "match": "all",
+          "rules": [
+            {
+              "sourceFieldKey": "therapy_administered",
+              "operator": "eq",
+              "value": "Ja",
+              "valueTo": ""
+            }
+          ]
+        }
+      }
+    },
+    {
+      "column": "No Therapy Reason",
+      "name": "no_therapy_reason",
+      "label": "Grund für keine Therapie",
+      "section": "Navigation QA",
+      "type": "textarea",
+      "constraints": {
+        "required": false,
+        "maxLength": 120,
+        "helpText": "Optional and visible only when Therapy Administered is Nein.",
+        "visibilityLogic": {
+          "action": "show",
+          "match": "all",
+          "rules": [
+            {
+              "sourceFieldKey": "therapy_administered",
+              "operator": "eq",
+              "value": "Nein",
+              "valueTo": ""
+            }
+          ]
+        }
+      }
+    },
+    {
+      "column": "Age (years)",
+      "name": "age_years",
+      "label": "Age (years)",
+      "section": "Navigation QA",
+      "type": "number",
+      "constraints": {
+        "required": true,
+        "min": 18,
+        "max": 100,
+        "step": 1,
+        "integerOnly": true,
+        "helpText": "Leave empty to test Required, then try 150 to create an Error."
+      }
+    },
+    {
+      "column": "Site Code",
+      "name": "site_code",
+      "label": "Site Code",
+      "section": "Navigation QA",
+      "type": "text",
+      "constraints": {
+        "required": true,
+        "minLength": 7,
+        "maxLength": 7,
+        "pattern": "^SITE-[0-9]{2}$",
+        "helpText": "The CSV deliberately imports BAD. Blur or save to produce a validation error; use SITE-01 to fix it."
+      }
+    },
+    {
+      "column": "Investigator Decision",
+      "name": "investigator_decision",
+      "label": "Investigator Decision",
+      "section": "Navigation QA",
+      "type": "select",
+      "options": ["Approved", "Rejected", "Pending"],
+      "constraints": {
+        "required": true,
+        "helpText": "Keep empty and save to test Skip for now and the Skipped filter."
+      }
+    },
+    {
+      "column": "Optional Notes",
+      "name": "optional_notes",
+      "label": "Optional Notes",
+      "section": "Navigation QA",
+      "type": "textarea",
+      "constraints": {
+        "required": false,
+        "maxLength": 40,
+        "helpText": "Tests the Optional filter. Enter more than 40 characters to create an error."
+      }
+    },
+    {
+      "column": "Severity",
+      "name": "severity",
+      "label": "Clinical Severity",
+      "section": "Navigation QA",
+      "type": "select",
+      "options": ["Mild", "Moderate", "Severe"],
+      "constraints": {
+        "required": false,
+        "helpText": "Severe raises a popup warning and participates in conditional visibility.",
+        "popupLogic": {
+          "enabled": true,
+          "operator": "eq",
+          "value": "Severe",
+          "valueTo": "",
+          "message": "Warning: severe status requires escalation review.",
+          "showInTargetField": true,
+          "targetFieldKey": "escalation_notes"
+        }
+      }
+    },
+    {
+      "column": "Escalation Notes",
+      "name": "escalation_notes",
+      "label": "Escalation Notes",
+      "section": "Navigation QA",
+      "type": "textarea",
+      "constraints": {
+        "required": true,
+        "maxLength": 200,
+        "helpText": "Nested required field shown only when Therapy is Ja AND Severity is Severe.",
+        "visibilityLogic": {
+          "action": "show",
+          "match": "all",
+          "rules": [
+            {
+              "sourceFieldKey": "therapy_administered",
+              "operator": "eq",
+              "value": "Ja",
+              "valueTo": ""
+            },
+            {
+              "sourceFieldKey": "severity",
+              "operator": "eq",
+              "value": "Severe",
+              "valueTo": ""
+            }
+          ]
+        }
+      }
+    },
+    {
+      "column": "Follow-up Required",
+      "name": "follow_up_required",
+      "label": "Follow-up Required",
+      "section": "Navigation QA",
+      "type": "radio",
+      "options": ["Yes", "No"],
+      "constraints": {
+        "required": false,
+        "helpText": "Yes reveals an optional follow-up date."
+      }
+    },
+    {
+      "column": "Follow-up Date",
+      "name": "follow_up_date",
+      "label": "Follow-up Date",
+      "section": "Navigation QA",
+      "type": "date",
+      "constraints": {
+        "required": false,
+        "dateFormat": "dd.MM.yyyy",
+        "helpText": "Optional field dynamically added when Follow-up Required is Yes.",
+        "visibilityLogic": {
+          "action": "show",
+          "match": "all",
+          "rules": [
+            {
+              "sourceFieldKey": "follow_up_required",
+              "operator": "eq",
+              "value": "Yes",
+              "valueTo": ""
+            }
+          ]
+        }
+      }
+    },
+    {
+      "column": "Safety Contact Time",
+      "name": "safety_contact_time",
+      "label": "Safety Contact Time",
+      "section": "Navigation QA",
+      "type": "time",
+      "constraints": {
+        "required": false,
+        "hourCycle": "24",
+        "minTime": "00:00",
+        "maxTime": "23:59",
+        "helpText": "ANY logic: shown for Severe severity OR when follow-up is required.",
+        "visibilityLogic": {
+          "action": "show",
+          "match": "any",
+          "rules": [
+            {
+              "sourceFieldKey": "severity",
+              "operator": "eq",
+              "value": "Severe",
+              "valueTo": ""
+            },
+            {
+              "sourceFieldKey": "follow_up_required",
+              "operator": "eq",
+              "value": "Yes",
+              "valueTo": ""
+            }
+          ]
+        }
+      }
+    },
+    {
+      "column": "Routine Comments",
+      "name": "routine_comments",
+      "label": "Routine Comments",
+      "section": "Navigation QA",
+      "type": "text",
+      "constraints": {
+        "required": false,
+        "helpText": "Tests a HIDE action: this optional field disappears when Severity is Severe.",
+        "visibilityLogic": {
+          "action": "hide",
+          "match": "all",
+          "rules": [
+            {
+              "sourceFieldKey": "severity",
+              "operator": "eq",
+              "value": "Severe",
+              "valueTo": ""
+            }
+          ]
+        }
+      }
+    },
+    {
+      "column": "Study Code",
+      "name": "study_code",
+      "label": "Study Code (read-only)",
+      "section": "Navigation QA",
+      "type": "text",
+      "constraints": {
+        "required": false,
+        "readonly": true,
+        "helpText": "Read-only/system-managed control. It should not obstruct progress when empty."
+      }
+    },
+    {
+      "column": "Satisfaction",
+      "name": "satisfaction",
+      "label": "Satisfaction",
+      "section": "Navigation QA",
+      "type": "slider",
+      "constraints": {
+        "required": false,
+        "mode": "linear",
+        "min": 1,
+        "max": 5,
+        "leftLabel": "Low",
+        "rightLabel": "High",
+        "helpText": "Optional linear-scale field."
+      }
+    },
+    {
+      "column": "Dose (mg)",
+      "name": "dose_mg",
+      "label": "Dose (mg)",
+      "section": "Navigation QA",
+      "type": "number",
+      "constraints": {
+        "required": false,
+        "min": 0,
+        "max": 500,
+        "step": 0.1,
+        "helpText": "The CSV deliberately imports 999. Blur or save to create a second validation error."
+      }
+    }
+  ]
+}

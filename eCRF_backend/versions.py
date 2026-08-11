@@ -176,6 +176,114 @@ def _ensure_section_and_field_ids(study_data: Dict[str, Any]) -> Dict[str, Any]:
     return sd
 
 
+def _stable_object_id(obj: Any) -> str:
+    if not isinstance(obj, dict):
+        return ""
+    return _norm_str(obj.get("_id") or obj.get("id") or obj.get("uuid"))
+
+
+def _unique_reference_match(
+    obj: Dict[str, Any],
+    reference_items: Any,
+    identity_keys: List[str],
+    peer_items: Any = None,
+) -> Optional[Dict[str, Any]]:
+    """Match an object to one unambiguous reference object.
+
+    Stable IDs take precedence. Natural keys are only used when exactly one
+    reference item matches, which prevents duplicate labels/names from silently
+    inheriting the wrong UUID.
+    """
+    refs = [item for item in (reference_items or []) if isinstance(item, dict)]
+    object_id = _stable_object_id(obj)
+    if object_id:
+        id_matches = [item for item in refs if _stable_object_id(item) == object_id]
+        if len(id_matches) == 1:
+            return id_matches[0]
+
+    for key in identity_keys:
+        value = _norm_str(obj.get(key)).lower()
+        if not value:
+            continue
+        if peer_items is not None:
+            peer_matches = [
+                item
+                for item in (peer_items or [])
+                if isinstance(item, dict)
+                and _norm_str(item.get(key)).lower() == value
+            ]
+            if len(peer_matches) != 1:
+                continue
+        matches = [item for item in refs if _norm_str(item.get(key)).lower() == value]
+        if len(matches) == 1:
+            return matches[0]
+
+    return None
+
+
+def normalize_study_data_ids(
+    study_data: Dict[str, Any],
+    reference_schema: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Return study data with stable section/field UUIDs persisted in-place.
+
+    For legacy canonical studies that did not retain IDs, unchanged objects
+    inherit their UUIDs from the latest template snapshot. New objects receive
+    new UUIDs. A matched reference UUID wins over a replacement UUID supplied
+    for the same natural field identity.
+    """
+    sd = _json_clone(study_data or {})
+    reference_models = (
+        (reference_schema or {}).get("selectedModels")
+        or (reference_schema or {}).get("models")
+        or []
+    )
+    if not isinstance(reference_models, list):
+        reference_models = []
+    selected_models = sd.get("selectedModels") or []
+    if not isinstance(selected_models, list):
+        return sd
+
+    for section in selected_models:
+        if not isinstance(section, dict):
+            continue
+
+        reference_section = _unique_reference_match(
+            section,
+            reference_models,
+            ["title", "name"],
+            selected_models,
+        )
+        reference_section_id = _stable_object_id(reference_section)
+        if reference_section_id:
+            section["_id"] = reference_section_id
+
+        reference_fields = (
+            reference_section.get("fields") or []
+            if isinstance(reference_section, dict)
+            else []
+        )
+        fields = section.get("fields") or []
+        if not isinstance(fields, list):
+            continue
+
+        for field in fields:
+            if not isinstance(field, dict):
+                continue
+            reference_field = _unique_reference_match(
+                field,
+                reference_fields,
+                ["name", "key", "field_id", "label", "title"],
+                fields,
+            )
+            reference_field_id = _stable_object_id(reference_field)
+            if reference_field_id:
+                field["_id"] = reference_field_id
+
+    sd["selectedModels"] = selected_models
+    return _ensure_section_and_field_ids(sd)
+
+
 _STRUCTURAL_CONSTRAINT_KEYS = {
     "required",
     "pattern",
@@ -918,11 +1026,12 @@ class VersionManager:
         new_sd: Dict[str, Any],
         audit_callback=None,
     ) -> VersionDecision:
-        old_sd = _ensure_section_and_field_ids(old_sd or {})
-        new_sd = _ensure_section_and_field_ids(new_sd or {})
+        latest = VersionManager.latest(db, study_id)
+        latest_schema = latest.schema if latest and isinstance(latest.schema, dict) else {}
+        old_sd = normalize_study_data_ids(old_sd or {}, latest_schema)
+        new_sd = normalize_study_data_ids(new_sd or {}, old_sd)
 
         decision = VersionManager.preview_decision(db, study_id, old_sd, new_sd)
-        latest = VersionManager.latest(db, study_id)
         latest_version = latest.version if latest else 0
         rich_snap = _coerce_rich_snapshot(new_sd)
 

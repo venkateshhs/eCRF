@@ -1275,6 +1275,11 @@ export default {
       return (this.fieldSchema?.fields || []).find(field => field.column === column) || null;
     },
 
+    uuidForImport() {
+      if (typeof crypto !== "undefined" && crypto.randomUUID) return crypto.randomUUID();
+      return `id_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+    },
+
     buildSelectedModels() {
       this.resolvedImportFields = new Map();
       const samplesByLabel = {};
@@ -1292,6 +1297,7 @@ export default {
         const type = definition?.type || this.inferFieldType(samplesByLabel[label] || []);
         const arr = bySection.get(section) || [];
         const field = {
+          _id: this.uuidForImport(),
           name: definition?.name || meta.name,
           label: definition?.label || meta.field,
           description: definition?.description || "",
@@ -1307,10 +1313,10 @@ export default {
 
       const models = [];
       for (const [section, fields] of bySection.entries()) {
-        models.push({ title: section, fields, source: "import" });
+        models.push({ _id: this.uuidForImport(), title: section, fields, source: "import" });
       }
       if (!models.length) {
-        models.push({ title: "Imported Fields", fields: [], source: "import" });
+        models.push({ _id: this.uuidForImport(), title: "Imported Fields", fields: [], source: "import" });
       }
       return models;
     },

@@ -270,6 +270,7 @@ export function calculateDataEntryProgress({
   isCalculatedField = () => false,
   hasFieldError = () => false,
   getTableCellErrors = () => ({}),
+  checkboxFalseIsComplete = false,
 } = {}) {
   let total = 0;
   let completed = 0;
@@ -290,6 +291,7 @@ export function calculateDataEntryProgress({
         calculated: isCalculatedField(sectionIndex, fieldIndex),
         hasError: hasFieldError(sectionIndex, fieldIndex),
         tableCellErrors: getTableCellErrors(sectionIndex, fieldIndex),
+        checkboxFalseIsComplete,
       });
 
       total += contribution.total;
@@ -319,6 +321,7 @@ export function calculateDataEntryFieldProgress({
   calculated = false,
   hasError = false,
   tableCellErrors = {},
+  checkboxFalseIsComplete = false,
 } = {}) {
   if (!field || !visible) {
     return { total: 0, completed: 0, skipped: 0 };
@@ -349,7 +352,9 @@ export function calculateDataEntryFieldProgress({
     };
   }
 
-  const hasValue = !isBlankValue(value, fieldType);
+  const hasValue = fieldType === "checkbox" && checkboxFalseIsComplete && !isSystemManaged
+    ? typeof value === "boolean"
+    : !isBlankValue(value, fieldType);
 
   // Preserve the full-calculation rule exactly: empty read-only/calculated
   // fields do not reduce progress, while populated ones count as data points.

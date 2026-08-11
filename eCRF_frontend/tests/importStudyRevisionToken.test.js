@@ -94,6 +94,24 @@ const item = {
   assert.equal(methods.inferFieldType.call(inferenceContext, ["Yes", "No"]), "checkbox");
   assert.equal(methods.isStrictDateValue("2025-02-29"), false);
 
+  let generatedId = 0;
+  const importStructureContext = {
+    resolvedImportFields: new Map(),
+    mapping: { otherCols: ["Assessment Date"] },
+    rows: [{ "Assessment Date": "2026-08-10" }],
+    columnMeta: new Map([
+      ["Assessment Date", { section: "Visit Information", name: "assessment_date", field: "Assessment Date" }],
+    ]),
+    fieldSchema: null,
+    fieldSchemaDefinitionForColumn: methods.fieldSchemaDefinitionForColumn,
+    inferFieldType: methods.inferFieldType,
+    isStrictDateValue: methods.isStrictDateValue,
+    uuidForImport: () => `generated-${++generatedId}`,
+  };
+  const importedModels = methods.buildSelectedModels.call(importStructureContext);
+  assert.equal(importedModels[0]._id, "generated-2");
+  assert.equal(importedModels[0].fields[0]._id, "generated-1");
+
   const normalizedSchema = methods.normalizeFieldSchemaDocument({
     version: 1,
     fields: [
@@ -153,6 +171,7 @@ const item = {
     inferFieldType(samples) {
       return methods.inferFieldType.call(inferenceContext, samples);
     },
+    uuidForImport: methods.uuidForImport,
   };
   const selectedModels = methods.buildSelectedModels.call(modelContext);
   const importedFields = selectedModels.flatMap((section) => section.fields);

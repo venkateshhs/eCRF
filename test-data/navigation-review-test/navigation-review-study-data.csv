@@ -1,0 +1,2 @@
+Study Title,Study Description,Subject ID,Group,Visit,Therapy Administered,Therapy Date,No Therapy Reason,Age (years),Site Code,Investigator Decision,Optional Notes,Severity,Escalation Notes,Follow-up Required,Follow-up Date,Safety Contact Time,Routine Comments,Study Code,Satisfaction,Dose (mg)
+Navigation Review QA Study,"Compact study for testing required, optional, errors, skips, warnings, visibility changes, circular navigation, and Save handoff.",NAV-001,Navigation QA,Baseline,,,,,BAD,,,,,,,,,NAV-QA,,999

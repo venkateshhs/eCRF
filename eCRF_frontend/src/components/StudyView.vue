@@ -40,6 +40,7 @@
       class="sv-content card"
       :class="{
         'sv-viewdata': activeTab === 'viewdata',
+        'sv-compliance': activeTab === 'compliance',
         'sv-sidebar-collapsed': activeTab === 'viewdata' && dataSidebarCollapsed,
         'sv-dashboard-fullscreen': activeTab === 'viewdata' && dashboardFullscreen
       }"
@@ -79,7 +80,13 @@
       </aside>
 
       <!-- Panels -->
-      <section class="v-panel" :class="{ 'v-panel-tight': activeTab === 'viewdata' }">
+      <section
+        class="v-panel"
+        :class="{
+          'v-panel-tight': activeTab === 'viewdata',
+          'v-panel-compliance': activeTab === 'compliance'
+        }"
+      >
         <!-- META-DATA -->
         <div v-if="activeTab === 'meta'">
           <h2 class="panel-title center">Meta-data</h2>
@@ -318,6 +325,11 @@
               </div>
             </div>
           </div>
+        </div>
+
+        <!-- COMPLIANCE VIEW -->
+        <div v-else-if="activeTab === 'compliance'">
+          <StudyComplianceView :study-id="studyId" :active="activeTab === 'compliance'" />
         </div>
 
         <!-- EDIT STUDY TAB -->
@@ -714,13 +726,14 @@ import FieldFileUpload from "@/components/fields/FieldFileUpload.vue";
 import StudyAuditLogs from "@/components/StudyAuditLogs.vue";
 import TemplateDiffView, { computeTemplateDiff, buildVersionSummary } from "@/components/TemplateDiffView.vue";
 import StudyDataDashboard from "@/components/StudyDataDashboard.vue";
+import StudyComplianceView from "@/components/StudyComplianceView.vue";
 import icons from "@/assets/styles/icons";
 import { downloadStudyBundle } from "@/utils/studyDownload";
 import ExportStudy from "@/components/ExportStudy.vue";
 
 export default {
   name: "StudyView",
-  components: { FieldFileUpload, StudyAuditLogs, TemplateDiffView, StudyDataDashboard, ExportStudy },
+  components: { FieldFileUpload, StudyAuditLogs, TemplateDiffView, StudyDataDashboard, StudyComplianceView, ExportStudy },
   data() {
     return {
       deleteConfirm: {
@@ -769,6 +782,7 @@ export default {
       activeTab: "meta",
       tabs: [
         { key: "meta", label: "Meta-data" },
+        { key: "compliance", label: "Compliance view" },
         { key: "edit", label: "Edit Study", requiresEdit: true },
         { key: "docs", label: "Documents" },
         { key: "team", label: "Study Access" },
@@ -2156,6 +2170,31 @@ export default {
 .card.sv-viewdata .viewdata-host > * {
   height: 100%;
   min-height: 0;
+}
+
+/* Compliance keeps Study View navigation fixed and scrolls only its panel. */
+.card.sv-compliance {
+  height: calc(100vh - 120px);
+  min-height: 520px;
+  overflow: hidden;
+}
+
+.card.sv-compliance .v-tabs {
+  height: 100%;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.card.sv-compliance .v-panel-compliance {
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  box-sizing: border-box;
+  padding-bottom: 36px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scroll-padding-bottom: 36px;
+  scrollbar-gutter: stable;
 }
 /* Responsive */
 @media (max-width: 900px) {
