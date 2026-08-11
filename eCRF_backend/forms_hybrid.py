@@ -11,6 +11,7 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException, Depends, Query, UploadFile, File, Form, Body, Request, status
 from fastapi.responses import FileResponse, RedirectResponse
+from starlette.background import BackgroundTask
 
 from sqlalchemy.orm import Session
 
@@ -22,6 +23,7 @@ from .versions import VersionManager, normalize_study_data_ids
 from .settings import get_settings
 from .entry_progress import calculate_overall_entry_progress
 from .compliance import build_compliance_summary
+from .study_export import ExportOptions, build_analysis_export
 
 router = APIRouter(prefix="/forms", tags=["forms"])
 repo = DataladStudyRepo()
@@ -1149,6 +1151,98 @@ def download_full_study(
         path=str(zip_path),
         filename=zip_name,
         media_type="application/zip",
+    )
+
+
+def _export_int_set(value: Optional[str], *, field: str) -> Optional[set[int]]:
+    if value is None or not str(value).strip():
+        return None
+    output = set()
+    try:
+        for item in str(value).split(","):
+            output.add(int(item.strip()))
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail=f"Invalid {field} selection")
+    if any(item < 0 for item in output):
+        raise HTTPException(status_code=400, detail=f"Invalid {field} selection")
+    return output
+
+
+@router.get("/studies/{study_id}/export")
+def export_study_analysis_package(
+    study_id: int,
+    versions: str = Query("latest", description="latest, all, or comma-separated version numbers"),
+    subject_indexes: Optional[str] = Query(None),
+    group_indexes: Optional[str] = Query(None),
+    visit_indexes: Optional[str] = Query(None),
+    include_data: bool = Query(True),
+    include_template: bool = Query(True),
+    include_files: bool = Query(False),
+    file_scope: str = Query("all", pattern="^(all|study|subject)$"),
+    include_audit: bool = Query(False),
+    audit_only: bool = Query(False),
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    """Download a filtered, human-labelled BIDS analysis package."""
+    meta = db.query(models.StudyMetadata).filter(models.StudyMetadata.id == study_id).first()
+    if not meta:
+        raise HTTPException(status_code=404, detail="Study not found")
+    _assert_owner_or_admin(meta, user)
+    content = _get_content_row_or_404(db, study_id)
+
+    template_rows = (
+        db.query(models.StudyTemplateVersion)
+        .filter(models.StudyTemplateVersion.study_id == study_id)
+        .order_by(models.StudyTemplateVersion.version.asc())
+        .all()
+    )
+    if not template_rows:
+        raise HTTPException(status_code=404, detail="No study template versions found")
+
+    available = {int(row.version): (row.schema or {}) for row in template_rows}
+    versions_value = str(versions or "latest").strip().lower()
+    if versions_value == "latest":
+        selected_versions = {max(available)}
+    elif versions_value == "all":
+        selected_versions = set(available)
+    else:
+        selected_versions = _export_int_set(versions, field="versions") or set()
+        missing = selected_versions - set(available)
+        if missing:
+            raise HTTPException(status_code=400, detail=f"Unknown study version(s): {', '.join(map(str, sorted(missing)))}")
+
+    options = ExportOptions(
+        versions=selected_versions,
+        subject_indexes=_export_int_set(subject_indexes, field="subjects"),
+        group_indexes=_export_int_set(group_indexes, field="groups"),
+        visit_indexes=_export_int_set(visit_indexes, field="visits"),
+        include_data=include_data,
+        include_template=include_template,
+        include_files=include_files,
+        file_scope=file_scope,
+        include_audit=include_audit,
+        audit_only=audit_only,
+    )
+    try:
+        zip_path, zip_name = build_analysis_export(
+            repo=repo,
+            study_id=study_id,
+            study_name=meta.study_name,
+            study_data=content.study_data or {},
+            schemas_by_version={version: available[version] for version in selected_versions},
+            options=options,
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to build BIDS export: {exc}")
+
+    return FileResponse(
+        path=str(zip_path),
+        filename=zip_name,
+        media_type="application/zip",
+        background=BackgroundTask(shutil.rmtree, zip_path.parent, True),
     )
 
 @router.post("/studies/{study_id}/files", response_model=schemas.FileOut)
