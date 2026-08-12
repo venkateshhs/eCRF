@@ -39,7 +39,13 @@
             <span><i class="fas fa-check"></i> Participants table</span>
             <span><i class="fas fa-check"></i> Human-labelled eCRF data</span>
             <span><i class="fas fa-check"></i> Latest study template</span>
+            <span><i class="fas fa-check"></i> Subject and study-level files</span>
           </div>
+          <label class="subject-folder-option">
+            <input v-model="includeSubjectFolders" type="checkbox" />
+            <i class="fas fa-folder-open"></i>
+            <span><strong>Individual subject folders</strong><small>Place each subject's visit data in its own folder, with uploaded files grouped under modality folders.</small></span>
+          </label>
           <p>UUID field keys are replaced by their actual field names in analysis tables. The original template remains in <code>code/</code> for reproducibility.</p>
         </div>
 
@@ -87,6 +93,7 @@
               <label :class="{ disabled: scope === 'audit' }"><input v-model="includeTemplate" type="checkbox" :disabled="scope === 'audit'" /><i class="fas fa-file-code"></i><span><strong>Study template</strong><small>Versioned schema for reproducibility</small></span></label>
               <label :class="{ disabled: scope === 'audit' }"><input v-model="includeFiles" type="checkbox" :disabled="scope === 'audit'" /><i class="fas fa-paperclip"></i><span><strong>Uploaded files</strong><small>Subject and study-level files</small></span></label>
               <label><input v-model="includeAudit" type="checkbox" :disabled="scope === 'audit'" /><i class="fas fa-history"></i><span><strong>Audit log</strong><small>Study and subject change history</small></span></label>
+              <label :class="{ disabled: scope === 'audit' }"><input v-model="includeSubjectFolders" type="checkbox" :disabled="scope === 'audit'" /><i class="fas fa-folder-open"></i><span><strong>Individual subject folders</strong><small>Visit data and files grouped per subject</small></span></label>
             </div>
             <label v-if="includeFiles && scope !== 'audit'" class="field-row">
               <span>Files to include</span>
@@ -130,7 +137,7 @@ export default {
     return {
       mode: "bids", versionMode: "latest", specificVersion: null, scope: "whole",
       selectedSubjects: [], selectedGroups: [], selectedVisits: [],
-      includeData: true, includeTemplate: true, includeFiles: false, includeAudit: false, fileScope: "all",
+      includeData: true, includeTemplate: true, includeFiles: true, includeAudit: false, includeSubjectFolders: true, fileScope: "all",
       scopes: [
         { value: "whole", icon: "fas fa-th-large", label: "Whole study", help: "All subjects and visits" },
         { value: "subjects", icon: "fas fa-user", label: "Subject-wise", help: "Selected subjects" },
@@ -169,7 +176,7 @@ export default {
     submit() {
       if (this.invalidSelection) return;
       if (this.mode === "bids") {
-        this.$emit("download", { versions: "latest", include_data: true, include_template: true, include_files: false, include_audit: false });
+        this.$emit("download", { versions: "latest", include_data: true, include_template: true, include_files: true, file_scope: "all", include_audit: false, include_subject_folders: this.includeSubjectFolders });
         return;
       }
       const payload = {
@@ -180,6 +187,7 @@ export default {
         file_scope: this.fileScope,
         include_audit: this.scope === "audit" ? true : this.includeAudit,
         audit_only: this.scope === "audit",
+        include_subject_folders: this.scope === "audit" ? false : this.includeSubjectFolders,
       };
       if (this.scope === "subjects") payload.subject_indexes = this.selectedSubjects.join(",");
       if (this.scope === "groups") payload.group_indexes = this.selectedGroups.join(",");
@@ -203,6 +211,7 @@ export default {
 .mode-copy { display: flex; flex-direction: column; min-width: 0; }.mode-title { font-size: 15px; font-weight: 700; }.mode-description { margin-top: 5px; color: #4b5563; font-size: 12px; line-height: 1.45; }.mode-meta { margin-top: auto; padding-top: 8px; color: #6b7280; font-size: 11px; font-weight: 600; }
 .default-pill { position: absolute; top: -9px; right: 11px; padding: 3px 8px; border-radius: 999px; background: #111827; color: #fff; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; }
 .package-preview { margin-top: 14px; padding: 14px; border: 1px solid #e0e0e0; border-radius: 10px; background: #fafafa; font-size: 13px; }.preview-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 18px; margin-top: 10px; color: #374151; }.preview-grid i { width: 15px; color: #111827; font-size: 10px; }.package-preview p { margin: 12px 0 0; color: #6b7280; font-size: 12px; line-height: 1.5; }
+.subject-folder-option { display: grid; grid-template-columns: auto 24px 1fr; gap: 8px; align-items: center; margin-top: 12px; padding: 10px; border: 1px solid #d1d5db; border-radius: 8px; background: #fff; cursor: pointer; }.subject-folder-option > i { color: #4b5563; text-align: center; }.subject-folder-option strong, .subject-folder-option small { display: block; }.subject-folder-option small { margin-top: 3px; color: #6b7280; font-size: 11px; line-height: 1.4; }
 .form-section { padding: 18px 0; border-bottom: 1px solid #e5e7eb; }.form-section:last-child { border-bottom: 0; }.section-heading { display: flex; gap: 10px; align-items: flex-start; margin-bottom: 12px; }.section-heading > span { display: grid; place-items: center; flex: 0 0 24px; height: 24px; border-radius: 50%; background: #111827; color: #fff; font-size: 11px; font-weight: 700; }.section-heading h4 { margin: 0; font-size: 14px; font-weight: 700; }.section-heading small { display: block; margin-top: 2px; color: #6b7280; font-size: 11px; }.section-content { margin-left: 34px; }
 .scope-options strong, .scope-options small, .checkbox-options strong, .checkbox-options small { display: block; }.scope-options small, .checkbox-options small { margin-top: 3px; color: #6b7280; font-size: 11px; }
 .inline-options { display: flex; flex-wrap: wrap; gap: 9px; align-items: center; font-size: 13px; }.inline-options > label { padding: 8px 10px; border: 1px solid #e0e0e0; border-radius: 8px; background: #fff; }

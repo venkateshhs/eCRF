@@ -13,6 +13,11 @@ class FakeRepo:
         self.audit_study = self.dataset / "canonical" / "audit" / "system" / "study"
         self.audit_subject = self.dataset / "canonical" / "audit" / "subject"
         self.dataset.mkdir(parents=True)
+        self.uploaded_file = self.dataset / "canonical" / "files" / "heart-scan.txt"
+        self.uploaded_file.parent.mkdir(parents=True)
+        self.uploaded_file.write_text("scan payload", encoding="utf-8")
+        self.study_file = self.dataset / "canonical" / "files" / "protocol.pdf"
+        self.study_file.write_text("study protocol", encoding="utf-8")
 
     def paths(self, study_id, study_name):
         return SimpleNamespace(
@@ -44,7 +49,29 @@ class FakeRepo:
         ]
 
     def list_files(self, study_id, study_name):
-        return []
+        return [{
+            "id": 7,
+            "study_id": study_id,
+            "file_name": "heart-scan.txt",
+            "file_path": "canonical/files/heart-scan.txt",
+            "storage_option": "bids",
+            "subject_index": 0,
+            "visit_index": 0,
+            "group_index": 0,
+            "modalities": ["imaging"],
+            "form_version": 2,
+        }, {
+            "id": 8,
+            "study_id": study_id,
+            "file_name": "protocol.pdf",
+            "file_path": "canonical/files/protocol.pdf",
+            "storage_option": "bids",
+            "subject_index": None,
+            "visit_index": None,
+            "group_index": None,
+            "modalities": ["documents"],
+            "form_version": 2,
+        }]
 
 
 def _schema():
@@ -77,6 +104,9 @@ def test_bids_export_has_required_root_files_and_human_columns(tmp_path):
         assert root + "dataset_description.json" in names
         assert root + "participants.tsv" in names
         assert root + "phenotype/ecrf_version_002.tsv" in names
+        assert root + "sourcedata/sub-SUBJA/imaging/file-7_heart-scan.txt" in names
+        assert root + "sourcedata/study/documents/file-8_protocol.pdf" in names
+        assert root + "sourcedata/files_manifest.json" in names
         description = json.loads(bundle.read(root + "dataset_description.json"))
         assert description["DatasetType"] == "raw"
         table = bundle.read(root + "phenotype/ecrf_version_002.tsv").decode()
@@ -86,6 +116,8 @@ def test_bids_export_has_required_root_files_and_human_columns(tmp_path):
         assert "sub-SUBJA" in table
         assert "subject_name" not in table.splitlines()[0]
         assert participants.splitlines()[0] == "participant_id\tgroup"
+        assert bundle.read(root + "sourcedata/sub-SUBJA/imaging/file-7_heart-scan.txt").decode() == "scan payload"
+        assert bundle.read(root + "sourcedata/study/documents/file-8_protocol.pdf").decode() == "study protocol"
 
 
 def test_subject_scope_filters_participants_and_entries(tmp_path):
@@ -106,3 +138,32 @@ def test_subject_scope_filters_participants_and_entries(tmp_path):
         assert "sub-SUBJB" in participants and "sub-SUBJA" not in participants
         assert "sub-SUBJB" in table and "sub-SUBJA" not in table
         assert root + "sourcedata/case-e/audit_log.jsonl" in bundle.namelist()
+
+
+def test_individual_subject_folders_group_visit_data_and_modality_files(tmp_path):
+    repo = FakeRepo(tmp_path)
+    archive, _ = build_analysis_export(
+        repo=repo,
+        study_id=4,
+        study_name="Heart Study",
+        study_data=_schema(),
+        schemas_by_version={2: _schema()},
+        options=ExportOptions(
+            versions={2},
+            include_files=True,
+            include_subject_folders=True,
+        ),
+    )
+
+    with zipfile.ZipFile(archive) as bundle:
+        root = "study-4-heart-study_bids-export/"
+        subject_visit = root + "sourcedata/sub-SUBJA/ses-Baseline/"
+        names = set(bundle.namelist())
+        subject_tsv = subject_visit + "ecrf/sub-SUBJA_ses-Baseline_version-002_ecrf.tsv"
+        subject_json = subject_visit + "ecrf/sub-SUBJA_ses-Baseline_version-002_ecrf.json"
+        subject_file = subject_visit + "imaging/file-7_heart-scan.txt"
+        assert subject_tsv in names
+        assert subject_json in names
+        assert subject_file in names
+        assert "heart_rate" in bundle.read(subject_tsv).decode()
+        assert bundle.read(subject_file).decode() == "scan payload"

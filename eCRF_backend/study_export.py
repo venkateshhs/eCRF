@@ -153,10 +153,11 @@ class ExportOptions:
     visit_indexes: Optional[Set[int]] = None
     include_data: bool = True
     include_template: bool = True
-    include_files: bool = False
+    include_files: bool = True
     file_scope: str = "all"
     include_audit: bool = False
     audit_only: bool = False
+    include_subject_folders: bool = False
 
 
 def build_analysis_export(
@@ -273,6 +274,15 @@ def build_analysis_export(
                     **_entry_values(entry, catalog),
                 }
                 rows.append(row)
+                if options.include_subject_folders:
+                    participant_id = row["participant_id"]
+                    session_id = f"ses-{_bids_label(visit_name, f'{visit_index + 1:02d}') }"
+                    subject_name = f"{participant_id}_{session_id}_version-{version:03d}_ecrf"
+                    subject_dir = root / "sourcedata" / participant_id / session_id / "ecrf"
+                    _write_tsv(subject_dir / f"{subject_name}.tsv", [row], columns)
+                    (subject_dir / f"{subject_name}.json").write_text(
+                        json.dumps(sidecar, ensure_ascii=False, indent=2), encoding="utf-8"
+                    )
             phenotype_name = f"ecrf_version_{version:03d}"
             _write_tsv(root / "phenotype" / f"{phenotype_name}.tsv", rows, columns)
             (root / "phenotype" / f"{phenotype_name}.json").write_text(
@@ -312,9 +322,24 @@ def build_analysis_export(
                 except ValueError:
                     source = Path()
                 if source.is_file():
-                    scope = "study" if is_study_file else f"sub-{_bids_label(subjects[int(subject_index)].get('id') if int(subject_index) < len(subjects) else subject_index, str(subject_index))}"
+                    if is_study_file:
+                        file_dir = root / "sourcedata" / "study"
+                    else:
+                        subject_number = int(subject_index)
+                        participant_id = f"sub-{_bids_label(subjects[subject_number].get('id') if subject_number < len(subjects) else subject_number, str(subject_number))}"
+                        file_dir = root / "sourcedata" / participant_id
+                        if options.include_subject_folders and record.get("visit_index") is not None:
+                            visit_number = int(record["visit_index"])
+                            visit = visits[visit_number] if visit_number < len(visits) else {}
+                            visit_name = _display(visit, f"Visit {visit_number + 1}")
+                            file_dir = file_dir / f"ses-{_bids_label(visit_name, f'{visit_number + 1:02d}') }"
+                    modalities = record.get("modalities") or []
+                    if isinstance(modalities, str):
+                        modalities = [modalities]
+                    modality = _slug(modalities[0] if modalities else "misc", "misc")
+                    file_dir = file_dir / modality
                     filename = _safe_export_filename(record.get("file_name"), f"file-{record.get('id')}")
-                    target = root / "sourcedata" / scope / f"file-{record.get('id')}_{filename}"
+                    target = file_dir / f"file-{record.get('id')}_{filename}"
                     target.parent.mkdir(parents=True, exist_ok=True)
                     shutil.copy2(source, target)
                     item["export_path"] = str(target.relative_to(root))

@@ -1177,10 +1177,11 @@ def export_study_analysis_package(
     visit_indexes: Optional[str] = Query(None),
     include_data: bool = Query(True),
     include_template: bool = Query(True),
-    include_files: bool = Query(False),
+    include_files: bool = Query(True),
     file_scope: str = Query("all", pattern="^(all|study|subject)$"),
     include_audit: bool = Query(False),
     audit_only: bool = Query(False),
+    include_subject_folders: bool = Query(False),
     db: Session = Depends(get_db),
     user=Depends(get_current_user),
 ):
@@ -1223,6 +1224,7 @@ def export_study_analysis_package(
         file_scope=file_scope,
         include_audit=include_audit,
         audit_only=audit_only,
+        include_subject_folders=include_subject_folders,
     )
     try:
         zip_path, zip_name = build_analysis_export(
