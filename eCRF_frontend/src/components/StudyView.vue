@@ -605,38 +605,35 @@
             <div class="subsection">
               <h3 class="sub-title">Study exports</h3>
               <p class="muted">
-                Export the study template or download a ZIP bundle of the study.
+                Prepare analysis-ready data, a focused study package, or a reusable template.
               </p>
 
-              <div class="bids-actions export-actions">
-                  <button class="btn-primary" type="button" @click="exportStudyTemplate">
-                    Export Study Template
+              <div class="study-export-grid">
+                <button v-if="canDownloadFullStudy" class="main-export-option" type="button" :disabled="downloadingFullStudyZip" @click="showDownloadDialog = true">
+                  <span class="export-option-icon"><i class="fas fa-download"></i></span>
+                  <span class="export-option-copy">
+                    <span class="export-option-label">RECOMMENDED</span>
+                    <strong>{{ downloadingFullStudyZip ? "Preparing…" : "Download Study" }}</strong>
+                    <small>BIDS-compliant study by default, with subject, group, visit, file, audit, and version controls.</small>
+                    <span class="export-option-action">Choose download options <i class="fas fa-arrow-right"></i></span>
+                  </span>
+                </button>
+                <div class="secondary-export-options">
+                  <button type="button" @click="exportStudyTemplate">
+                    <span class="secondary-export-icon"><i class="fas fa-file-export"></i></span>
+                    <span><strong>Export Study Template</strong><small>Reusable study structure without collected data</small></span>
+                    <i class="fas fa-chevron-right"></i>
                   </button>
-
-                  <!-- Only owner/admin -->
-                  <template v-if="canDownloadFullStudy">
-                    <button
-                      class="btn-primary"
-                      type="button"
-                      :disabled="downloadingMergeZip"
-                      @click="downloadStudyZip"
-                    >
-                      {{ downloadingMergeZip ? "Downloading…" : "Download Study For Merge" }}
-                    </button>
-
-                    <button
-                      class="btn-primary"
-                      type="button"
-                      :disabled="downloadingFullStudyZip"
-                      @click="downloadFullStudyZip"
-                    >
-                      {{ downloadingFullStudyZip ? "Downloading…" : "Download Study" }}
-                    </button>
-                  </template>
-                  <div v-else class="muted" style="margin-top: 10px;">
+                  <button v-if="canDownloadFullStudy" type="button" :disabled="downloadingMergeZip" @click="downloadStudyZip">
+                    <span class="secondary-export-icon"><i class="fas fa-exchange-alt"></i></span>
+                    <span><strong>{{ downloadingMergeZip ? "Preparing…" : "Download Study For Merge" }}</strong><small>Template and CSV bundle for importing elsewhere</small></span>
+                    <i class="fas fa-chevron-right"></i>
+                  </button>
+                </div>
+                <div v-if="!canDownloadFullStudy" class="muted export-permission-note">
                   Only the study owner or an administrator can download the full study.
                 </div>
-                </div>
+              </div>
             </div>
 
             <!-- Existing dataset (kept as-is) -->
@@ -717,6 +714,16 @@
         </div>
       </div>
     </div>
+    <StudyDownloadDialog
+      :open="showDownloadDialog"
+      :downloading="downloadingFullStudyZip"
+      :subjects="subjects"
+      :groups="groups"
+      :visits="visits"
+      :versions="versions"
+      @close="showDownloadDialog = false"
+      @download="downloadFullStudyZip"
+    />
   </div>
 </template>
 
@@ -730,10 +737,11 @@ import StudyComplianceView from "@/components/StudyComplianceView.vue";
 import icons from "@/assets/styles/icons";
 import { downloadStudyBundle } from "@/utils/studyDownload";
 import ExportStudy from "@/components/ExportStudy.vue";
+import StudyDownloadDialog from "@/components/StudyDownloadDialog.vue";
 
 export default {
   name: "StudyView",
-  components: { FieldFileUpload, StudyAuditLogs, TemplateDiffView, StudyDataDashboard, StudyComplianceView, ExportStudy },
+  components: { FieldFileUpload, StudyAuditLogs, TemplateDiffView, StudyDataDashboard, StudyComplianceView, ExportStudy, StudyDownloadDialog },
   data() {
     return {
       deleteConfirm: {
@@ -793,6 +801,7 @@ export default {
 
       // Export template embedding state (NO new tab, no route)
       showExportTemplate: false,
+      showDownloadDialog: false,
 
       //  7-step edit launcher (kept)
       editSteps: [
@@ -1029,7 +1038,7 @@ export default {
       }
     },
 
-    async downloadFullStudyZip() {
+    async downloadFullStudyZip(options = {}) {
       const token = this.token;
       if (!token) {
         alert("Please log in again.");
@@ -1040,10 +1049,11 @@ export default {
       this.downloadingFullStudyZip = true;
       try {
         const response = await axios.get(
-          `/forms/studies/${this.studyId}/download`,
+          `/forms/studies/${this.studyId}/export`,
           {
             headers: { Authorization: `Bearer ${token}` },
             responseType: "blob",
+            params: options,
           }
         );
 
@@ -1070,6 +1080,7 @@ export default {
         link.remove();
 
         window.URL.revokeObjectURL(url);
+        this.showDownloadDialog = false;
       } catch (e) {
         console.error("Failed to download full study:", e?.response?.data || e.message);
         alert("Failed to download full study.");
@@ -2210,6 +2221,12 @@ export default {
 .bids-actions.export-actions .btn-primary {
   margin: 0;
 }
+.study-export-grid { display: grid; grid-template-columns: minmax(320px, 1.1fr) minmax(300px, .9fr); gap: 12px; margin-top: 16px; }
+.main-export-option { display: flex; gap: 14px; min-height: 166px; padding: 18px; text-align: left; border: 1px solid #111827; border-radius: 12px; background: #f9fafb; color: #111827; cursor: pointer; transition: background .2s, box-shadow .2s, transform .05s; }
+.main-export-option:hover:not(:disabled) { background: #f3f4f6; box-shadow: 0 6px 18px rgba(0,0,0,.08); transform: translateY(-1px); }.main-export-option:disabled { opacity: .6; cursor: wait; }
+.export-option-icon { display: grid; place-items: center; flex: 0 0 44px; height: 44px; border-radius: 9px; background: #111827; color: #fff; font-size: 16px; }.export-option-copy { display: flex; flex-direction: column; align-items: flex-start; }.export-option-label { margin-bottom: 4px; color: #6b7280; font-size: 10px; font-weight: 700; letter-spacing: .08em; }.export-option-copy strong { font-size: 18px; }.export-option-copy small { margin-top: 6px; color: #4b5563; font-size: 12px; line-height: 1.5; }.export-option-action { margin-top: auto; padding-top: 12px; font-size: 12px; font-weight: 700; }.export-option-action i { margin-left: 5px; font-size: 10px; }
+.secondary-export-options { display: flex; flex-direction: column; gap: 10px; }.secondary-export-options button { display: grid; grid-template-columns: 38px 1fr auto; gap: 10px; align-items: center; min-height: 78px; padding: 12px; text-align: left; border: 1px solid #e0e0e0; border-radius: 10px; background: #fff; color: #111827; cursor: pointer; transition: background .2s, border-color .2s; }.secondary-export-options button:hover:not(:disabled) { border-color: #b8bcc3; background: #f9fafb; }.secondary-export-options button:disabled { opacity: .6; cursor: wait; }.secondary-export-options strong, .secondary-export-options small { display: block; }.secondary-export-options strong { font-size: 13px; }.secondary-export-options small { margin-top: 3px; color: #6b7280; font-size: 11px; line-height: 1.35; }.secondary-export-options > button > i { color: #9ca3af; font-size: 11px; }.secondary-export-icon { display: grid; place-items: center; width: 36px; height: 36px; border: 1px solid #e0e0e0; border-radius: 8px; background: #f3f4f6; color: #374151; }.export-permission-note { grid-column: 1 / -1; }
+@media (max-width: 820px) { .study-export-grid { grid-template-columns: 1fr; } }
 .edit-danger-zone {
   margin-top: 18px;
   display: flex;

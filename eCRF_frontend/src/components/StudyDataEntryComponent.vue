@@ -4921,7 +4921,7 @@ applyImportedRowFromDialog(payload) {
           file_name: file.file_name || uploadedFileName(file),
         };
 
-        slotData[mIdx][fIdx] = field.constraints?.allowMultipleFiles
+        slotData[mIdx][fIdx] = field.constraints?.allowMultipleFiles !== false
           ? [...currentFiles, mergedFile]
           : mergedFile;
       });
@@ -5352,7 +5352,7 @@ applyImportedRowFromDialog(payload) {
         const sizeNum = Number(c.maxSizeMB);
         if (Number.isFinite(sizeNum) && sizeNum > 0)
           parts.push(`Max size: ${sizeNum} MB`);
-        if (c.allowMultipleFiles)
+        if (c.allowMultipleFiles !== false)
           parts.push("Multiple files: allowed");
         if (Array.isArray(c.modalities) && c.modalities.length)
           parts.push(`Modalities: ${c.modalities.join(", ")}`);
@@ -5682,7 +5682,7 @@ applyImportedRowFromDialog(payload) {
       const t = String(f?.type || "").toLowerCase();
       const allowMulti = !!c.allowMultiple;
       if (t === "slider") return null;
-      if (t === "file") return c.allowMultipleFiles ? [] : null;
+      if (t === "file") return c.allowMultipleFiles !== false ? [] : null;
       if (t === "table") {
       if (
           !ignoreDefaults &&
@@ -6446,7 +6446,7 @@ applyImportedRowFromDialog(payload) {
       const cons = def.constraints || {};
       const label = def.label || def.name || "This field";
       const val = this.entryData[s][v][g][mIdx][fIdx];
-      const allowMultiFiles = !!cons.allowMultipleFiles;
+      const allowMultiFiles = cons.allowMultipleFiles !== false;
       let isSkipped = !!(
         this.skipFlags[s]?.[v]?.[g]?.[mIdx]?.[fIdx]
       );
@@ -6736,7 +6736,7 @@ applyImportedRowFromDialog(payload) {
                 ? typeof val !== "boolean"
                 : val !== true
               : f.type === "file"
-              ? c.allowMultipleFiles
+              ? c.allowMultipleFiles !== false
                 ? !(Array.isArray(val) && val.length > 0)
                 : !val || (val.source === "url" ? !(val.url && String(val.url).trim()) : !(val.name && Number.isFinite(Number(val.size))))
               : Array.isArray(val)
@@ -6772,7 +6772,10 @@ applyImportedRowFromDialog(payload) {
 
           const key = this.errorKey(mIdx, fIdx);
           const cons = def.constraints || {};
-          const allowMulti = !!cons.allowMultipleFiles;
+          // FieldFileUpload defaults to multiple files unless explicitly disabled.
+          // Keep persistence semantics identical or filename metadata is saved while
+          // the corresponding File objects are silently skipped.
+          const allowMulti = cons.allowMultipleFiles !== false;
           const val = this.entryData[s][v][g][mIdx][fIdx];
           if (!val && !allowMulti) continue;
 
@@ -6800,7 +6803,9 @@ applyImportedRowFromDialog(payload) {
 
               if (it.source === "local") {
                 const file = matchFile(it);
-                if (!file) continue;
+                if (!file) {
+                  throw new Error(`Selected file ${it.name || "(unnamed)"} is no longer available for upload.`);
+                }
                 const fd = new FormData();
                 fd.append("uploaded_file", file);
                 fd.append("description", def.label || def.name || "");
@@ -6859,8 +6864,11 @@ applyImportedRowFromDialog(payload) {
           } else {
             if (!val) continue;
 
-            if (val.source === "local" && pendingArr[0] instanceof File) {
-              const file = pendingArr[0];
+            if (val.source === "local" && !val.dbId) {
+              const file = matchFile(val);
+              if (!(file instanceof File)) {
+                throw new Error(`Selected file ${val.name || "(unnamed)"} is no longer available for upload.`);
+              }
               const fd = new FormData();
               fd.append("uploaded_file", file);
               fd.append("description", def.label || def.name || "");
@@ -6892,7 +6900,7 @@ applyImportedRowFromDialog(payload) {
               delete this.pendingFiles[key];
             }
 
-            if (val.source === "url" && val.url) {
+            if (val.source === "url" && val.url && !val.dbId) {
               const fd = new FormData();
               fd.append("url", val.url);
               fd.append("description", def.label || def.name || "");
