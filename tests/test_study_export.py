@@ -167,3 +167,187 @@ def test_individual_subject_folders_group_visit_data_and_modality_files(tmp_path
         assert subject_file in names
         assert "heart_rate" in bundle.read(subject_tsv).decode()
         assert bundle.read(subject_file).decode() == "scan payload"
+
+
+class MultiVersionRepo(FakeRepo):
+    def list_entries(self, study_id, study_name):
+        return [
+            {
+                "id": 11,
+                "subject_index": 0,
+                "visit_index": 0,
+                "group_index": 0,
+                "form_version": 1,
+                "updated_at": "2026-01-01T00:00:00Z",
+                "data": {
+                    "section-vitals": {
+                        "field-heart-rate": 72,
+                        "field-site-code": "Earlier value",
+                        "field-old-score": 8,
+                        "field-medications": {"rows": [
+                            {"table-drug": "Drug A", "table-dose": "5 mg"},
+                        ]},
+                    },
+                },
+            },
+            {
+                "id": 12,
+                "subject_index": 0,
+                "visit_index": 0,
+                "group_index": 0,
+                "form_version": 2,
+                "updated_at": "2026-02-01T00:00:00Z",
+                "data": {
+                    "section-vitals": {
+                        "field-heart-rate": 75,
+                        "field-site-code": "Latest value",
+                        "field-new-measure": 98,
+                        "field-medications": {"rows": [
+                            {"table-drug": "Drug A", "table-dose": "10 mg"},
+                            {"table-drug": "Drug B", "table-dose": "2 mg"},
+                        ]},
+                    },
+                },
+            },
+        ]
+
+
+def _versioned_schema(version):
+    fields = [{
+        "_id": "field-heart-rate",
+        "name": "heart_rate" if version == 1 else "pulse_rate",
+        "label": "Heart rate" if version == 1 else "Pulse rate",
+        "type": "number",
+    }, {
+        "_id": "field-site-code",
+        "name": "site_code",
+        "label": "Site code",
+        "type": "text",
+    }]
+    if version == 1:
+        fields.append({"_id": "field-old-score", "name": "old_score", "label": "Old score", "type": "number"})
+    else:
+        fields.append({"_id": "field-new-measure", "name": "new_measure", "label": "New measure", "type": "number"})
+    fields.append({
+        "_id": "field-medications",
+        "name": "medications",
+        "label": "Medications",
+        "type": "table",
+        "tableConfig": {"columns": [
+            {"id": "table-drug", "key": "drug", "label": "Drug", "type": "text"},
+            {"id": "table-dose", "key": "dose", "label": "Dose", "type": "text"},
+        ]},
+    })
+    return {
+        "subjects": [{"id": "SUBJ-A", "group": "Control"}],
+        "visits": [{"name": "Baseline"}],
+        "groups": [{"name": "Control"}],
+        "selectedModels": [{"_id": "section-vitals", "title": "Vitals", "fields": fields}],
+    }
+
+
+def test_all_versions_only_expand_fields_affected_by_form_changes(tmp_path):
+    repo = MultiVersionRepo(tmp_path)
+    schema_v1 = _versioned_schema(1)
+    schema_v2 = _versioned_schema(2)
+    archive, _ = build_analysis_export(
+        repo=repo,
+        study_id=4,
+        study_name="Heart Study",
+        study_data=schema_v2,
+        schemas_by_version={1: schema_v1, 2: schema_v2},
+        options=ExportOptions(versions={1, 2}, include_subject_folders=True),
+    )
+
+    with zipfile.ZipFile(archive) as bundle:
+        root = "study-4-heart-study_bids-export/"
+        names = set(bundle.namelist())
+        combined_tsv = root + "phenotype/ecrf.tsv"
+        combined_json = root + "phenotype/ecrf.json"
+        assert combined_tsv in names
+        assert combined_json in names
+        assert root + "phenotype/ecrf_version_001.tsv" not in names
+        assert root + "phenotype/ecrf_version_002.tsv" not in names
+
+        lines = bundle.read(combined_tsv).decode().splitlines()
+        assert len(lines) == 2
+        headers = lines[0].split("\t")
+        values = dict(zip(headers, lines[1].split("\t")))
+        assert headers[:3] == ["participant_id", "visit", "group"]
+        assert "study_version" not in headers
+        assert values["site_code"] == "Latest value"
+        assert "site_code__v001" not in headers
+        assert "site_code__v002" not in headers
+        assert values["pulse_rate__v001"] == "72"
+        assert values["pulse_rate__v002"] == "75"
+        assert values["old_score__v001"] == "8"
+        assert values["old_score__v002"] == "n/a"
+        assert values["new_measure__v001"] == "n/a"
+        assert values["new_measure__v002"] == "98"
+        assert values["medications__row01__dose"] == "10 mg"
+        assert values["medications__row02__drug"] == "Drug B"
+        assert values["medications__row02__dose"] == "2 mg"
+        assert not any(header.startswith("medications__v") for header in headers)
+
+        sidecar = json.loads(bundle.read(combined_json))
+        assert sidecar["new_measure__v001"]["FieldAvailableInVersion"] is False
+        assert sidecar["new_measure__v002"]["FieldAvailableInVersion"] is True
+        assert sidecar["MeasurementToolMetadata"]["VersionsIncluded"] == [1, 2]
+
+        subject_tsv = root + "sourcedata/sub-SUBJA/ses-Baseline/ecrf/sub-SUBJA_ses-Baseline_ecrf.tsv"
+        assert subject_tsv in names
+        assert bundle.read(subject_tsv).decode() == bundle.read(combined_tsv).decode()
+
+
+def test_only_removed_notes_gets_version_columns_when_everything_else_is_unchanged(tmp_path):
+    class NotesRemovedRepo(FakeRepo):
+        def list_entries(self, study_id, study_name):
+            return [{
+                "id": 21,
+                "subject_index": 0,
+                "visit_index": 0,
+                "group_index": 0,
+                "form_version": 1,
+                "updated_at": "2026-01-01T00:00:00Z",
+                "data": {"section": {"temperature": 36.5, "notes": "Initial note"}},
+            }, {
+                "id": 22,
+                "subject_index": 0,
+                "visit_index": 0,
+                "group_index": 0,
+                "form_version": 2,
+                "updated_at": "2026-02-01T00:00:00Z",
+                "data": {"section": {"temperature": 36.7, "notes": "Initial note"}},
+            }]
+
+    common = {"_id": "temperature", "name": "temperature", "label": "Temperature", "type": "number"}
+    notes = {"_id": "notes", "name": "notes", "label": "Notes", "type": "textarea"}
+
+    def schema(fields):
+        return {
+            "subjects": [{"id": "SUBJ-A", "group": "Control"}],
+            "visits": [{"name": "Baseline"}],
+            "groups": [{"name": "Control"}],
+            "selectedModels": [{"_id": "section", "title": "Assessment", "fields": fields}],
+        }
+
+    schema_v1 = schema([common, notes])
+    schema_v2 = schema([common])
+    archive, _ = build_analysis_export(
+        repo=NotesRemovedRepo(tmp_path),
+        study_id=4,
+        study_name="Notes Removed Study",
+        study_data=schema_v2,
+        schemas_by_version={1: schema_v1, 2: schema_v2},
+        options=ExportOptions(versions={1, 2}, include_files=False),
+    )
+
+    with zipfile.ZipFile(archive) as bundle:
+        root = "study-4-notes-removed-study_bids-export/"
+        lines = bundle.read(root + "phenotype/ecrf.tsv").decode().splitlines()
+        headers = lines[0].split("\t")
+        values = dict(zip(headers, lines[1].split("\t")))
+        assert headers == ["participant_id", "visit", "group", "temperature", "notes__v001", "notes__v002"]
+        assert values["temperature"] == "36.7"
+        assert values["notes__v001"] == "Initial note"
+        assert values["notes__v002"] == "n/a"

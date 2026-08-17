@@ -107,6 +107,372 @@ def _entry_values(entry: Dict[str, Any], catalog) -> Dict[str, str]:
     return output
 
 
+def _entry_field_value(
+    entry: Dict[str, Any],
+    section_index: int,
+    field_index: int,
+    section: Dict[str, Any],
+    field: Dict[str, Any],
+) -> Any:
+    data = entry.get("data") or {}
+    if isinstance(data, list):
+        section_data = data[section_index] if section_index < len(data) else []
+        if isinstance(section_data, list) and field_index < len(section_data):
+            return section_data[field_index]
+        return None
+    if isinstance(data, dict):
+        section_data = _read_key(data, _candidate_keys(section, section_index, "s"))
+        if isinstance(section_data, dict):
+            return _read_key(section_data, _candidate_keys(field, field_index, "f"))
+    return None
+
+
+def _stable_id(obj: Dict[str, Any]) -> str:
+    return str(obj.get("_id") or obj.get("id") or obj.get("uuid") or "").strip()
+
+
+_VERSIONED_CONSTRAINT_KEYS = {
+    "required", "pattern", "min", "max", "minLength", "maxLength", "step",
+    "allowMultiple", "dominantOptions", "integerOnly", "dateFormat", "minDate",
+    "maxDate", "minTime", "maxTime", "hourCycle", "minDigits", "maxDigits",
+}
+
+
+def _normalized_options(options: Any) -> List[Any]:
+    if not isinstance(options, list):
+        return []
+    normalized = []
+    for option in options:
+        if isinstance(option, dict):
+            normalized.append({
+                "value": option.get("value") or option.get("label") or option.get("name") or option.get("title"),
+            })
+        else:
+            normalized.append(str(option))
+    return normalized
+
+
+def _structural_constraints(obj: Dict[str, Any]) -> Dict[str, Any]:
+    constraints = obj.get("constraints") or {}
+    return {key: constraints.get(key) for key in sorted(_VERSIONED_CONSTRAINT_KEYS) if key in constraints}
+
+
+def _field_export_signature(field: Dict[str, Any]) -> str:
+    """Return the form aspects that require separate data columns when changed."""
+    field_type = str(field.get("type") or "").lower()
+    signature: Dict[str, Any] = {
+        "name": str(field.get("name") or field.get("key") or "").strip(),
+        "type": field_type,
+        "constraints": _structural_constraints(field),
+    }
+    if field_type in {"select", "radio", "checkbox"}:
+        signature["options"] = _normalized_options(field.get("options") or [])
+    if field_type == "table":
+        config = field.get("tableConfig") or {}
+        signature["table"] = {
+            "mode": config.get("mode") or "2d",
+            "initialRows": int(config.get("initialRows") or 1),
+            "allowAddRows": bool(config.get("allowAddRows", True)),
+            "columns": [{
+                "id": _stable_id(column),
+                "key": str(column.get("key") or column.get("name") or "").strip(),
+                "type": str(column.get("type") or "").lower(),
+                "options": _normalized_options(column.get("options") or []),
+                "constraints": _structural_constraints(column),
+            } for column in (config.get("columns") or []) if isinstance(column, dict)],
+        }
+    return json.dumps(signature, ensure_ascii=False, sort_keys=True, default=str)
+
+
+def _table_rows(value: Any) -> List[Dict[str, Any]]:
+    rows = value.get("rows") if isinstance(value, dict) else value
+    if not isinstance(rows, list):
+        return []
+    return [row for row in rows if isinstance(row, dict)]
+
+
+def _latest_entry_by_subject_visit_version(entries: Iterable[Dict[str, Any]]) -> Dict[Tuple[int, int, int], Dict[str, Any]]:
+    latest: Dict[Tuple[int, int, int], Dict[str, Any]] = {}
+    for row in entries:
+        try:
+            key = (int(row["subject_index"]), int(row["visit_index"]), int(row["form_version"]))
+        except (KeyError, TypeError, ValueError):
+            continue
+        previous = latest.get(key)
+        sort_key = (str(row.get("updated_at") or ""), str(row.get("created_at") or ""), int(row.get("id") or 0))
+        previous_key = (
+            str(previous.get("updated_at") or ""),
+            str(previous.get("created_at") or ""),
+            int(previous.get("id") or 0),
+        ) if previous else None
+        if previous is None or sort_key > previous_key:
+            latest[key] = row
+    return latest
+
+
+def _combined_version_export(
+    *,
+    versions: Sequence[int],
+    schemas_by_version: Dict[int, Dict[str, Any]],
+    entries: Sequence[Dict[str, Any]],
+    subjects: Sequence[Dict[str, Any]],
+    visits: Sequence[Dict[str, Any]],
+) -> Tuple[List[Dict[str, Any]], List[str], Dict[str, Any]]:
+    """Build one wide phenotype table with one row per participant and visit."""
+    version_list = sorted(int(version) for version in versions)
+    lineages: Dict[Tuple[str, ...], Dict[str, Any]] = {}
+    lineage_order: List[Tuple[str, ...]] = []
+
+    for version in version_list:
+        schema = schemas_by_version.get(version) or {}
+        for section_index, section in enumerate(schema.get("selectedModels") or []):
+            for field_index, field in enumerate(section.get("fields") or []):
+                field_id = _stable_id(field)
+                key = ("id", field_id) if field_id else (
+                    "legacy", str(version), str(section_index), str(field_index)
+                )
+                if key not in lineages:
+                    lineages[key] = {"instances": {}}
+                    lineage_order.append(key)
+                lineages[key]["instances"][version] = (section_index, field_index, section, field)
+
+    used_bases: Dict[str, int] = {}
+    for key in lineage_order:
+        lineage = lineages[key]
+        latest_version = max(lineage["instances"])
+        latest_field = lineage["instances"][latest_version][3]
+        base = _column_name(
+            latest_field.get("name") or latest_field.get("label") or latest_field.get("title"),
+            "field",
+        )
+        used_bases[base] = used_bases.get(base, 0) + 1
+        lineage["base"] = base if used_bases[base] == 1 else f"{base}_{used_bases[base]}"
+
+    entry_index = _latest_entry_by_subject_visit_version(entries)
+    descriptors: List[Dict[str, Any]] = []
+    sidecar: Dict[str, Any] = {
+        "MeasurementToolMetadata": {
+            "Description": "case-e electronic case report form with selected study versions combined horizontally",
+            "VersionsIncluded": version_list,
+            "RowRule": "Exactly one row per participant_id and visit",
+            "TableRowMatching": "Structurally changed tables use version snapshots; row positions are not matched across versions",
+        },
+        "visit": {"LongName": "Visit", "Description": "Human-readable study visit name"},
+        "group": {"LongName": "Study group", "Description": "Current human-readable study group name"},
+    }
+
+    def add_descriptor(column: str, descriptor: Dict[str, Any], metadata: Dict[str, Any]) -> None:
+        descriptors.append({"column": column, **descriptor})
+        sidecar[column] = metadata
+
+    for key in lineage_order:
+        lineage = lineages[key]
+        instances = lineage["instances"]
+        base = lineage["base"]
+        latest_instance = instances[max(instances)]
+        latest_section, latest_field = latest_instance[2], latest_instance[3]
+        field_id = _stable_id(latest_field) or None
+        affected = (
+            len(instances) != len(version_list)
+            or len({_field_export_signature(instance[3]) for instance in instances.values()}) > 1
+        )
+        has_scalar = any(str(instance[3].get("type") or "").lower() != "table" for instance in instances.values())
+        has_table = any(str(instance[3].get("type") or "").lower() == "table" for instance in instances.values())
+
+        if has_scalar:
+            scalar_instances = {
+                version: instance for version, instance in instances.items()
+                if str(instance[3].get("type") or "").lower() != "table"
+            }
+            latest_scalar_version = max(scalar_instances)
+            latest_scalar_instance = scalar_instances[latest_scalar_version]
+            if not affected:
+                source_field = latest_scalar_instance[3]
+                metadata = {
+                    "LongName": _display(source_field, base),
+                    "Description": str(source_field.get("description") or f"{_display(latest_section, 'Form')} — {_display(source_field, base)}"),
+                    "StudyVersions": version_list,
+                    "VersionedBecauseFormChanged": False,
+                    "ValueSelection": "Latest available selected version",
+                    "SourceFieldID": _stable_id(source_field) or field_id,
+                    "SourceType": str(source_field.get("type") or ""),
+                }
+                constraints = source_field.get("constraints") or {}
+                options = source_field.get("options") or constraints.get("options") or []
+                if options:
+                    metadata["Levels"] = {str(value): str(value) for value in options}
+                add_descriptor(base, {
+                    "kind": "scalar_common", "instances": scalar_instances,
+                }, metadata)
+            else:
+                for version in version_list:
+                    instance = scalar_instances.get(version)
+                    available = instance is not None
+                    source_field = instance[3] if available else latest_scalar_instance[3]
+                    column = f"{base}__v{version:03d}"
+                    metadata = {
+                        "LongName": f"{_display(source_field, base)} — version {version}",
+                        "Description": str(source_field.get("description") or f"{_display(latest_section, 'Form')} — {_display(source_field, base)}"),
+                        "StudyVersion": version,
+                        "VersionedBecauseFormChanged": True,
+                        "FieldAvailableInVersion": available,
+                        "SourceFieldID": _stable_id(source_field) or field_id,
+                        "SourceType": str(source_field.get("type") or ""),
+                    }
+                    constraints = source_field.get("constraints") or {}
+                    options = source_field.get("options") or constraints.get("options") or []
+                    if options:
+                        metadata["Levels"] = {str(value): str(value) for value in options}
+                    add_descriptor(column, {
+                        "kind": "scalar_versioned", "version": version,
+                        "instance": instance,
+                    }, metadata)
+
+        if has_table:
+            table_columns: Dict[Tuple[str, ...], Dict[str, Any]] = {}
+            table_column_order: List[Tuple[str, ...]] = []
+            max_rows = 1
+            for version, instance in instances.items():
+                section_index, field_index, section, field = instance
+                if str(field.get("type") or "").lower() != "table":
+                    continue
+                for column_index, table_column in enumerate((field.get("tableConfig") or {}).get("columns") or []):
+                    table_column_id = _stable_id(table_column)
+                    natural_key = str(table_column.get("key") or table_column.get("name") or "").strip().lower()
+                    column_key = (
+                        ("id", table_column_id) if table_column_id
+                        else ("natural", natural_key) if natural_key
+                        else ("legacy", str(version), str(column_index))
+                    )
+                    if column_key not in table_columns:
+                        table_columns[column_key] = {"instances": {}}
+                        table_column_order.append(column_key)
+                    table_columns[column_key]["instances"][version] = (column_index, table_column)
+                for (subject_index, visit_index, entry_version), entry in entry_index.items():
+                    if entry_version != version:
+                        continue
+                    value = _entry_field_value(entry, section_index, field_index, section, field)
+                    max_rows = max(max_rows, len(_table_rows(value)))
+
+            used_table_bases: Dict[str, int] = {}
+            for column_key in table_column_order:
+                table_lineage = table_columns[column_key]
+                latest_column_version = max(table_lineage["instances"])
+                latest_table_column = table_lineage["instances"][latest_column_version][1]
+                table_base = _column_name(
+                    latest_table_column.get("key") or latest_table_column.get("name") or latest_table_column.get("label"),
+                    "column",
+                )
+                used_table_bases[table_base] = used_table_bases.get(table_base, 0) + 1
+                if used_table_bases[table_base] > 1:
+                    table_base = f"{table_base}_{used_table_bases[table_base]}"
+                table_lineage["base"] = table_base
+
+            table_instances = {
+                version: instance for version, instance in instances.items()
+                if str(instance[3].get("type") or "").lower() == "table"
+            }
+            if not affected:
+                for row_index in range(max_rows):
+                    for column_key in table_column_order:
+                        table_lineage = table_columns[column_key]
+                        source_column = table_lineage["instances"][max(table_lineage["instances"])][1]
+                        column = f"{base}__row{row_index + 1:02d}__{table_lineage['base']}"
+                        metadata = {
+                            "LongName": f"{_display(latest_field, base)} — row {row_index + 1}, {_display(source_column, table_lineage['base'])}",
+                            "Description": "Flattened repeating-table cell from the latest available selected version",
+                            "StudyVersions": version_list,
+                            "VersionedBecauseFormChanged": False,
+                            "ValueSelection": "Latest available selected version",
+                            "SourceFieldID": field_id,
+                            "SourceType": str(source_column.get("type") or ""),
+                            "TableRowNumber": row_index + 1,
+                            "SourceTableColumnID": _stable_id(source_column) or None,
+                        }
+                        add_descriptor(column, {
+                            "kind": "table_common", "instances": table_instances,
+                            "table_columns": table_lineage["instances"],
+                            "row_index": row_index,
+                        }, metadata)
+            else:
+                for version in version_list:
+                    field_instance = table_instances.get(version)
+                    table_available = field_instance is not None
+                    for row_index in range(max_rows):
+                        for column_key in table_column_order:
+                            table_lineage = table_columns[column_key]
+                            table_column_instance = table_lineage["instances"].get(version)
+                            available = bool(table_available and table_column_instance)
+                            source_column = table_column_instance[1] if table_column_instance else table_lineage["instances"][max(table_lineage["instances"])][1]
+                            column = f"{base}__v{version:03d}__row{row_index + 1:02d}__{table_lineage['base']}"
+                            metadata = {
+                                "LongName": f"{_display(latest_field, base)} — version {version}, row {row_index + 1}, {_display(source_column, table_lineage['base'])}",
+                                "Description": "Flattened repeating-table cell from an independent version snapshot",
+                                "StudyVersion": version,
+                                "VersionedBecauseFormChanged": True,
+                                "FieldAvailableInVersion": table_available,
+                                "TableColumnAvailableInVersion": available,
+                                "SourceFieldID": _stable_id(field_instance[3]) if field_instance else field_id,
+                                "SourceType": str(source_column.get("type") or ""),
+                                "TableRowNumber": row_index + 1,
+                                "SourceTableColumnID": _stable_id(source_column) or None,
+                            }
+                            add_descriptor(column, {
+                                "kind": "table_versioned", "version": version,
+                                "instance": field_instance,
+                                "table_column": table_column_instance,
+                                "row_index": row_index,
+                            }, metadata)
+
+    row_keys = sorted({(subject, visit) for subject, visit, _version in entry_index})
+    rows: List[Dict[str, Any]] = []
+    for subject_index, visit_index in row_keys:
+        subject = subjects[subject_index] if subject_index < len(subjects) else {}
+        visit = visits[visit_index] if visit_index < len(visits) else {}
+        subject_name = str(subject.get("id") or f"Subject {subject_index + 1}")
+        visit_name = _display(visit, f"Visit {visit_index + 1}")
+        group_name = str(subject.get("group") or "")
+        row: Dict[str, Any] = {
+            "participant_id": f"sub-{_bids_label(subject_name, f'{subject_index + 1:05d}')}",
+            "visit": visit_name,
+            "group": group_name,
+        }
+        for descriptor in descriptors:
+            value: Any = None
+            entry = None
+            instance = None
+            table_column_instance = None
+            if descriptor["kind"].endswith("_common"):
+                for version in reversed(version_list):
+                    candidate_entry = entry_index.get((subject_index, visit_index, version))
+                    candidate_instance = descriptor["instances"].get(version)
+                    if candidate_entry is not None and candidate_instance is not None:
+                        entry = candidate_entry
+                        instance = candidate_instance
+                        if descriptor["kind"] == "table_common":
+                            table_column_instance = descriptor["table_columns"].get(version)
+                        break
+            else:
+                entry = entry_index.get((subject_index, visit_index, descriptor["version"]))
+                instance = descriptor.get("instance")
+                table_column_instance = descriptor.get("table_column")
+            if entry is not None and instance is not None:
+                section_index, field_index, section, field = instance
+                value = _entry_field_value(entry, section_index, field_index, section, field)
+                if descriptor["kind"].startswith("table_"):
+                    table_rows = _table_rows(value)
+                    row_index = descriptor["row_index"]
+                    value = None
+                    if row_index < len(table_rows) and table_column_instance:
+                        column_index, table_column = table_column_instance
+                        value = _read_key(table_rows[row_index], _candidate_keys(table_column, column_index, "column_"))
+            row[descriptor["column"]] = _cell(value) if value is not None else "n/a"
+        rows.append(row)
+
+    columns = ["participant_id", "visit", "group"] + [descriptor["column"] for descriptor in descriptors]
+    return rows, columns, sidecar
+
+
 def _latest_by_slot(entries: Iterable[Dict[str, Any]]) -> List[Dict[str, Any]]:
     latest: Dict[Tuple[int, int, int, int], Dict[str, Any]] = {}
     for row in entries:
@@ -206,7 +572,13 @@ def build_analysis_export(
     (root / "CHANGES").write_text("1.0.0 Exported from case-e\n", encoding="utf-8")
     (root / "README").write_text(
         "case-e BIDS analysis export\n\nField and structure UUIDs are replaced by human-readable labels in all TSV data files.\n"
-        "The template JSON is retained separately when requested so the original study definition remains reproducible.\n",
+        "The template JSON is retained separately when requested so the original study definition remains reproducible.\n"
+        + (
+            "\nSelected study versions are combined in phenotype/ecrf.tsv. Each participant and visit appears once. "
+            "Unchanged fields remain single columns; only fields affected by a form change expand using __vNNN suffixes. "
+            "Repeating tables use __rowNN columns and become versioned only when their structure changes.\n"
+            if len(versions) > 1 else ""
+        ),
         encoding="utf-8",
     )
 
@@ -231,7 +603,30 @@ def build_analysis_export(
     }, indent=2), encoding="utf-8")
 
     entries = [row for row in _latest_by_slot(repo.list_entries(study_id, study_name)) if selected(row)]
-    if options.include_data and not options.audit_only:
+    if options.include_data and not options.audit_only and len(versions) > 1:
+        rows, columns, sidecar = _combined_version_export(
+            versions=versions,
+            schemas_by_version=schemas_by_version,
+            entries=entries,
+            subjects=subjects,
+            visits=visits,
+        )
+        _write_tsv(root / "phenotype" / "ecrf.tsv", rows, columns)
+        (root / "phenotype" / "ecrf.json").write_text(
+            json.dumps(sidecar, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+        if options.include_subject_folders:
+            for row in rows:
+                participant_id = row["participant_id"]
+                visit_name = row["visit"]
+                session_id = f"ses-{_bids_label(visit_name, '01')}"
+                subject_name = f"{participant_id}_{session_id}_ecrf"
+                subject_dir = root / "sourcedata" / participant_id / session_id / "ecrf"
+                _write_tsv(subject_dir / f"{subject_name}.tsv", [row], columns)
+                (subject_dir / f"{subject_name}.json").write_text(
+                    json.dumps(sidecar, ensure_ascii=False, indent=2), encoding="utf-8"
+                )
+    elif options.include_data and not options.audit_only:
         for version in versions:
             schema = schemas_by_version.get(version) or study_data
             catalog = _field_catalog(schema)

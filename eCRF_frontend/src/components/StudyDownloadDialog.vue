@@ -17,7 +17,7 @@
             <span class="mode-copy">
               <span class="mode-title">BIDS-compliant study</span>
               <span class="mode-description">Analysis-ready data with human-readable field names in a fully structured BIDS package.</span>
-              <span class="mode-meta">Latest version · all subjects · template included</span>
+              <span class="mode-meta">{{ versionMode === 'all' ? 'All versions combined' : 'Latest version' }} · all subjects · template included</span>
             </span>
             <span class="default-pill">Default</span>
           </label>
@@ -38,8 +38,25 @@
             <span><i class="fas fa-check"></i> Dataset metadata</span>
             <span><i class="fas fa-check"></i> Participants table</span>
             <span><i class="fas fa-check"></i> Human-labelled eCRF data</span>
-            <span><i class="fas fa-check"></i> Latest study template</span>
+            <span><i class="fas fa-check"></i> {{ versionMode === 'all' ? 'All study templates' : 'Latest study template' }}</span>
             <span><i class="fas fa-check"></i> Subject and study-level files</span>
+          </div>
+          <div class="bids-version-choice">
+            <strong>Data version</strong>
+            <div class="inline-options">
+              <label><input v-model="versionMode" type="radio" value="latest" /> Latest (v{{ latestVersion }})</label>
+              <label :class="{ disabled: normalizedVersions.length < 2 }"><input v-model="versionMode" type="radio" value="all" :disabled="normalizedVersions.length < 2" /> Combine all versions</label>
+            </div>
+          </div>
+          <div v-if="versionMode === 'all'" class="combined-version-info">
+            <div class="combined-title"><i class="fas fa-columns"></i><span><strong>One row per participant and visit</strong><small>All versions are placed side by side in one <code>phenotype/ecrf.tsv</code>.</small></span></div>
+            <code class="column-example">age&nbsp;&nbsp; notes__v001&nbsp;&nbsp; notes__v002&nbsp;&nbsp; medication__row01__dose</code>
+            <ul>
+              <li>Unchanged fields appear once and use their latest available value.</li>
+              <li>Only added, removed, renamed, or structurally changed fields receive version columns.</li>
+              <li>Changed repeating tables become version snapshots; historical rows are not matched automatically.</li>
+            </ul>
+            <div class="estimate-strip"><span>{{ normalizedVersions.length }} versions</span><span>Up to {{ combinedRowEstimate }} participant/visit rows</span><span>Columns calculated during export</span></div>
           </div>
           <label class="subject-folder-option">
             <input v-model="includeSubjectFolders" type="checkbox" />
@@ -54,11 +71,21 @@
             <div class="section-heading"><span>1</span><div><h4>Study version</h4><small>Select the data and template version to export.</small></div></div>
             <div class="inline-options section-content">
               <label><input v-model="versionMode" type="radio" value="latest" /> Latest (v{{ latestVersion }})</label>
-              <label><input v-model="versionMode" type="radio" value="all" /> All versions</label>
+              <label :class="{ disabled: normalizedVersions.length < 2 }"><input v-model="versionMode" type="radio" value="all" :disabled="normalizedVersions.length < 2" /> Combine all versions</label>
               <label><input v-model="versionMode" type="radio" value="specific" /> Specific version</label>
               <select v-if="versionMode === 'specific'" v-model.number="specificVersion" class="form-select">
                 <option v-for="version in normalizedVersions" :key="version" :value="version">Version {{ version }}</option>
               </select>
+            </div>
+            <div v-if="versionMode === 'all' && includeData && scope !== 'audit'" class="combined-version-info section-content">
+              <div class="combined-title"><i class="fas fa-columns"></i><span><strong>One row per participant and visit</strong><small>All versions are placed side by side in one <code>phenotype/ecrf.tsv</code>.</small></span></div>
+              <code class="column-example">age&nbsp;&nbsp; notes__v001&nbsp;&nbsp; notes__v002&nbsp;&nbsp; medication__row01__dose</code>
+              <ul>
+                <li>Unchanged fields appear once and use their latest available value.</li>
+                <li>Only added, removed, renamed, or structurally changed fields receive version columns.</li>
+                <li>Changed repeating tables become version snapshots; historical rows are not matched automatically.</li>
+              </ul>
+              <div class="estimate-strip"><span>{{ normalizedVersions.length }} versions</span><span>Up to {{ combinedRowEstimate }} participant/visit rows</span><span>Columns calculated during export</span></div>
             </div>
           </div>
 
@@ -151,17 +178,33 @@ export default {
   computed: {
     normalizedVersions() { return (this.versions || []).map(v => Number(v.version ?? v)).filter(Number.isFinite).sort((a, b) => a - b); },
     latestVersion() { return this.normalizedVersions[this.normalizedVersions.length - 1] || 1; },
+    combinedRowEstimate() {
+      let subjectCount = this.subjects.length;
+      let visitCount = this.visits.length;
+      if (this.mode === "custom" && this.scope === "subjects") subjectCount = this.selectedSubjects.length;
+      if (this.mode === "custom" && this.scope === "groups") {
+        const selectedNames = new Set(this.selectedGroups.map(index => String(this.groups[index]?.name || this.groups[index]?.label || "").trim().toLowerCase()));
+        subjectCount = this.subjects.filter(subject => selectedNames.has(String(subject?.group || "").trim().toLowerCase())).length;
+      }
+      if (this.mode === "custom" && this.scope === "visits") visitCount = this.selectedVisits.length;
+      return subjectCount * visitCount;
+    },
     invalidSelection() {
       return this.mode === "custom" && ((this.scope === "subjects" && !this.selectedSubjects.length) || (this.scope === "groups" && !this.selectedGroups.length) || (this.scope === "visits" && !this.selectedVisits.length));
     },
     summaryTitle() { return this.mode === "bids" ? "BIDS-compliant whole study" : this.scopes.find(item => item.value === this.scope)?.label || "Custom export"; },
     summaryText() {
-      if (this.mode === "bids") return `Latest version (v${this.latestVersion}), ${this.subjects.length} subject${this.subjects.length === 1 ? "" : "s"}`;
-      return this.versionMode === "all" ? "All study versions" : this.versionMode === "specific" ? `Study version ${this.specificVersion}` : `Latest version (v${this.latestVersion})`;
+      if (this.mode === "bids") return this.versionMode === "all" ? `${this.normalizedVersions.length} versions combined, ${this.subjects.length} subject${this.subjects.length === 1 ? "" : "s"}` : `Latest version (v${this.latestVersion}), ${this.subjects.length} subject${this.subjects.length === 1 ? "" : "s"}`;
+      return this.versionMode === "all" ? `${this.normalizedVersions.length} study versions combined` : this.versionMode === "specific" ? `Study version ${this.specificVersion}` : `Latest version (v${this.latestVersion})`;
     },
   },
   watch: {
-    open(value) { if (value && !this.specificVersion) this.specificVersion = this.latestVersion; },
+    open(value) {
+      if (!value) return;
+      if (!this.specificVersion) this.specificVersion = this.latestVersion;
+      if (this.normalizedVersions.length < 2 && this.versionMode === "all") this.versionMode = "latest";
+    },
+    mode(value) { if (value === "bids" && this.versionMode === "specific") this.versionMode = "latest"; },
     scope(value) {
       if (value === "audit") { this.includeAudit = true; this.includeData = false; this.includeTemplate = false; this.includeFiles = false; }
       if (value === "files") { this.includeFiles = true; this.includeData = false; this.includeTemplate = false; this.includeAudit = false; }
@@ -176,7 +219,7 @@ export default {
     submit() {
       if (this.invalidSelection) return;
       if (this.mode === "bids") {
-        this.$emit("download", { versions: "latest", include_data: true, include_template: true, include_files: true, file_scope: "all", include_audit: false, include_subject_folders: this.includeSubjectFolders });
+        this.$emit("download", { versions: this.versionMode === "all" ? "all" : "latest", include_data: true, include_template: true, include_files: true, file_scope: "all", include_audit: false, include_subject_folders: this.includeSubjectFolders });
         return;
       }
       const payload = {
@@ -211,6 +254,7 @@ export default {
 .mode-copy { display: flex; flex-direction: column; min-width: 0; }.mode-title { font-size: 15px; font-weight: 700; }.mode-description { margin-top: 5px; color: #4b5563; font-size: 12px; line-height: 1.45; }.mode-meta { margin-top: auto; padding-top: 8px; color: #6b7280; font-size: 11px; font-weight: 600; }
 .default-pill { position: absolute; top: -9px; right: 11px; padding: 3px 8px; border-radius: 999px; background: #111827; color: #fff; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; }
 .package-preview { margin-top: 14px; padding: 14px; border: 1px solid #e0e0e0; border-radius: 10px; background: #fafafa; font-size: 13px; }.preview-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 18px; margin-top: 10px; color: #374151; }.preview-grid i { width: 15px; color: #111827; font-size: 10px; }.package-preview p { margin: 12px 0 0; color: #6b7280; font-size: 12px; line-height: 1.5; }
+.bids-version-choice { margin-top: 14px; padding-top: 12px; border-top: 1px solid #e5e7eb; }.bids-version-choice > strong { display: block; margin-bottom: 8px; font-size: 12px; }.combined-version-info { margin-top: 10px; padding: 12px; border: 1px solid #d1d5db; border-radius: 9px; background: #fff; color: #374151; }.combined-title { display: flex; gap: 9px; align-items: flex-start; }.combined-title > i { width: 22px; padding-top: 2px; color: #111827; text-align: center; }.combined-title strong, .combined-title small { display: block; }.combined-title small { margin-top: 3px; color: #6b7280; font-size: 11px; line-height: 1.4; }.column-example { display: block; margin-top: 10px; padding: 8px; overflow-x: auto; border-radius: 6px; background: #f3f4f6; color: #374151; font-size: 10px; white-space: nowrap; }.combined-version-info ul { margin: 9px 0 0 18px; padding: 0; color: #4b5563; font-size: 11px; line-height: 1.55; }.estimate-strip { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }.estimate-strip span { padding: 4px 7px; border: 1px solid #e5e7eb; border-radius: 999px; background: #f9fafb; color: #4b5563; font-size: 10px; font-weight: 600; }
 .subject-folder-option { display: grid; grid-template-columns: auto 24px 1fr; gap: 8px; align-items: center; margin-top: 12px; padding: 10px; border: 1px solid #d1d5db; border-radius: 8px; background: #fff; cursor: pointer; }.subject-folder-option > i { color: #4b5563; text-align: center; }.subject-folder-option strong, .subject-folder-option small { display: block; }.subject-folder-option small { margin-top: 3px; color: #6b7280; font-size: 11px; line-height: 1.4; }
 .form-section { padding: 18px 0; border-bottom: 1px solid #e5e7eb; }.form-section:last-child { border-bottom: 0; }.section-heading { display: flex; gap: 10px; align-items: flex-start; margin-bottom: 12px; }.section-heading > span { display: grid; place-items: center; flex: 0 0 24px; height: 24px; border-radius: 50%; background: #111827; color: #fff; font-size: 11px; font-weight: 700; }.section-heading h4 { margin: 0; font-size: 14px; font-weight: 700; }.section-heading small { display: block; margin-top: 2px; color: #6b7280; font-size: 11px; }.section-content { margin-left: 34px; }
 .scope-options strong, .scope-options small, .checkbox-options strong, .checkbox-options small { display: block; }.scope-options small, .checkbox-options small { margin-top: 3px; color: #6b7280; font-size: 11px; }
@@ -219,5 +263,5 @@ export default {
 .form-select { min-height: 36px; padding: 7px 10px; border: 1px solid #d1d5db; border-radius: 8px; background: #fff; color: #111827; font-size: 13px; }.selection-box { margin: 10px 0 0 34px; padding: 12px; max-height: 170px; overflow: auto; border: 1px solid #e0e0e0; border-radius: 8px; background: #fafafa; }.selection-head { display: flex; justify-content: space-between; margin-bottom: 10px; font-size: 13px; }.selection-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; font-size: 13px; }.text-button { padding: 0; border: 0; background: none; color: #374151; text-decoration: underline; cursor: pointer; }.disabled { opacity: .5; }
 .checkbox-options { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; font-size: 13px; }.checkbox-options > label { display: grid; grid-template-columns: auto 26px 1fr; gap: 8px; align-items: center; padding: 10px; border: 1px solid #e0e0e0; border-radius: 8px; background: #fff; cursor: pointer; }.checkbox-options > label > i { color: #4b5563; font-size: 14px; text-align: center; }.field-row { display: flex; align-items: center; gap: 12px; margin: 12px 0 0 34px; color: #4b5563; font-size: 13px; }
 .dialog-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; padding-top: 14px; border-top: 1px solid #e5e7eb; }.download-summary { display: flex; flex: 1; flex-direction: column; gap: 2px; font-size: 12px; }.download-summary small { color: #6b7280; }.btn-primary { padding: 10px 12px; border: 1px solid transparent; border-radius: 10px; background: #111827; color: #fff; font-size: 14px; cursor: pointer; }.btn-primary[disabled] { opacity: .6; cursor: not-allowed; }.btn-minimal { padding: 8px 12px; border: 1px solid #e0e0e0; border-radius: 8px; background: none; color: #555; font-size: 14px; cursor: pointer; }.btn-minimal:hover:not([disabled]) { background: #e8e8e8; color: #000; }.btn-minimal.icon-only { padding: 5px 10px; font-size: 20px; line-height: 1; }input { accent-color: #111827; }
-@media (max-width: 700px) { .mode-grid, .checkbox-options { grid-template-columns: 1fr; }.scope-options, .selection-grid { grid-template-columns: 1fr 1fr; }.download-summary { display: none; }.section-content, .selection-box, .field-row { margin-left: 0; } }
+@media (max-width: 700px) { .mode-grid, .checkbox-options { grid-template-columns: 1fr; }.scope-options, .selection-grid { grid-template-columns: 1fr 1fr; }.download-summary { display: none; }.section-content, .selection-box, .field-row { margin-left: 0; }.estimate-strip { flex-direction: column; align-items: flex-start; } }
 </style>
