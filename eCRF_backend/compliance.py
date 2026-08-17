@@ -130,7 +130,10 @@ def build_compliance_summary(
             continue
 
         group_stats[group_index]["evaluable_subjects"] += 1
-        totals = subject_totals.setdefault(subject_index, {"completed_visits": 0, "expected_visits": 0})
+        totals = subject_totals.setdefault(
+            subject_index,
+            {"completed_visits": 0, "expected_visits": 0, "progress_percent_sum": 0},
+        )
 
         for visit_index, visit_stat in enumerate(visit_stats):
             entry = latest.get((subject_index, visit_index, group_index)) or {}
@@ -168,6 +171,7 @@ def build_compliance_summary(
             group_stats[group_index]["expected_subject_visits"] += 1
             group_stats[group_index]["progress_percent_sum"] += progress_percent
             totals["expected_visits"] += 1
+            totals["progress_percent_sum"] += progress_percent
             overall_progress_percent_sum += progress_percent
 
             if progress_status == "complete" or (progress_percent >= 100 and skipped == 0):
@@ -200,12 +204,41 @@ def build_compliance_summary(
 
     expected_subject_visits = sum(row["expected_subjects"] for row in visit_stats)
     evaluable_subjects = sum(1 for value in statuses if value != DELETED)
-    subjects_with_expected_data = sum(1 for row in subject_totals.values() if row["expected_visits"] > 0)
+    subjects_with_expected_data = sum(
+        1 for row in subject_totals.values() if row["expected_visits"] > 0
+    )
     completed_subjects = sum(
         1
         for row in subject_totals.values()
         if row["expected_visits"] > 0 and row["completed_visits"] >= row["expected_visits"]
     )
+    subject_completeness = [
+        _percent(row["progress_percent_sum"], row["expected_visits"] * 100)
+        for row in subject_totals.values()
+        if row["expected_visits"] > 0
+    ]
+    completeness_histogram = []
+    for lower_bound in range(0, 100, 10):
+        upper_bound = lower_bound + 10
+        completeness_histogram.append(
+            {
+                "range_start": lower_bound,
+                "range_end": upper_bound,
+                "subject_count": sum(
+                    1
+                    for value in subject_completeness
+                    if lower_bound <= value < upper_bound
+                    or (upper_bound == 100 and value == 100)
+                ),
+            }
+        )
+    completeness_threshold_curve = [
+        {
+            "threshold": threshold,
+            "subject_count": sum(1 for value in subject_completeness if value >= threshold),
+        }
+        for threshold in range(101)
+    ]
 
     return {
         "recruitment": {
@@ -226,6 +259,8 @@ def build_compliance_summary(
             "skipped_fields": sum(row["skipped_fields"] for row in visit_stats),
         },
         "subject_visit_status": distribution,
+        "completeness_histogram": completeness_histogram,
+        "completeness_threshold_curve": completeness_threshold_curve,
         "visit_stats": visit_stats,
         "group_stats": group_rows,
     }

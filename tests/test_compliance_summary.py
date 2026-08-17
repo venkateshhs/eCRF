@@ -69,6 +69,26 @@ def test_compliance_summary_covers_recruitment_visits_groups_and_latest_version(
         "partial": 1,
         "not_started": 3,
     }
+    assert summary["completeness_histogram"] == [
+        {"range_start": 0, "range_end": 10, "subject_count": 1},
+        {"range_start": 10, "range_end": 20, "subject_count": 0},
+        {"range_start": 20, "range_end": 30, "subject_count": 0},
+        {"range_start": 30, "range_end": 40, "subject_count": 0},
+        {"range_start": 40, "range_end": 50, "subject_count": 0},
+        {"range_start": 50, "range_end": 60, "subject_count": 1},
+        {"range_start": 60, "range_end": 70, "subject_count": 0},
+        {"range_start": 70, "range_end": 80, "subject_count": 1},
+        {"range_start": 80, "range_end": 90, "subject_count": 0},
+        {"range_start": 90, "range_end": 100, "subject_count": 0},
+    ]
+    assert summary["completeness_threshold_curve"][80] == {
+        "threshold": 80,
+        "subject_count": 0,
+    }
+    assert summary["completeness_threshold_curve"][100] == {
+        "threshold": 100,
+        "subject_count": 0,
+    }
 
     group_b = summary["group_stats"][1]
     assert group_b["recruited_subjects"] == 2
@@ -81,6 +101,8 @@ def test_compliance_summary_handles_empty_study():
     assert summary["recruitment"]["recruited_subjects"] == 0
     assert summary["compliance"]["data_compliance_percent"] == 0
     assert summary["visit_stats"] == []
+    assert len(summary["completeness_histogram"]) == 10
+    assert summary["completeness_threshold_curve"][80]["subject_count"] == 0
 
 
 def test_each_subject_visit_has_equal_weight_regardless_of_assigned_field_count():

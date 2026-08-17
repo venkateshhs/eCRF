@@ -31,8 +31,14 @@ assert.doesNotMatch(source, /width: `\$\{visit\.subject_completion_percent\}%`/)
 assert.match(source, /Data compliance by group/);
 assert.match(source, /excluded from data-compliance denominators/);
 assert.doesNotMatch(source, /<th>Skipped fields<\/th>/);
-assert.match(source, /Visits at ≥80%/);
+assert.match(source, /Subject completeness distribution/);
+assert.match(source, /Number of subjects in each completeness range/);
+assert.doesNotMatch(source, /Subjects by 10% band/);
+assert.match(source, /Completeness threshold curve/);
+assert.match(source, /At least \{\{ marker\.threshold \}\}% complete/);
+assert.doesNotMatch(source, /Visits at ≥80%/);
 assert.match(source, /Needs attention/);
+assert.match(source, /Partially completed subject-visits/);
 
 const context = {
   summary: {
@@ -44,6 +50,14 @@ const context = {
     },
     compliance: { data_compliance_percent: 65 },
     subject_visit_status: { complete: 6, partial: 3, not_started: 1 },
+    completeness_histogram: [
+      { range_start: 0, range_end: 10, subject_count: 1 },
+      { range_start: 90, range_end: 100, subject_count: 3 },
+    ],
+    completeness_threshold_curve: Array.from({ length: 101 }, (_, threshold) => ({
+      threshold,
+      subject_count: threshold <= 65 ? 4 : 2,
+    })),
     visit_stats: [],
     group_stats: [],
   },
@@ -52,10 +66,15 @@ context.recruitment = component.computed.recruitment.call(context);
 context.compliance = component.computed.compliance.call(context);
 context.distribution = component.computed.distribution.call(context);
 context.distributionTotal = component.computed.distributionTotal.call(context);
+context.histogramBars = component.computed.histogramBars.call(context);
 
 assert.equal(context.recruitment.recruited_subjects, 10);
 assert.equal(context.compliance.data_compliance_percent, 65);
 assert.equal(component.methods.distributionWidth.call(context, "complete"), "60%");
+assert.equal(component.computed.subjectVisitsNeedingAttention.call(context), 3);
+assert.equal(context.histogramBars[0].label, "0–9%");
+assert.equal(context.histogramBars[1].label, "90–100%");
+assert.equal(component.computed.histogramSubjectTotal.call(context), 4);
 assert.match(component.computed.complianceRadialStyle.call(context).background, /65%/);
 assert.match(component.computed.recruitmentDonutStyle.call(context).background, /conic-gradient/);
 assert.equal(component.methods.percentClass({ data_compliance_percent: 90, skipped_fields: 1 }), "skipped");

@@ -48,14 +48,9 @@
           <small>Subjects not dropped out</small>
         </article>
         <article>
-          <span>Visits at ≥80%</span>
-          <strong>{{ visitsAtEighty }}</strong>
-          <small>Based on average subject progress</small>
-        </article>
-        <article>
           <span>Needs attention</span>
           <strong>{{ subjectVisitsNeedingAttention }}</strong>
-          <small>Partial or not-started subject-visits</small>
+          <small>Partially completed subject-visits</small>
         </article>
         <article>
           <span>Lowest coverage visit</span>
@@ -63,6 +58,36 @@
           <small v-if="lowestCoverageVisit">{{ lowestCoverageVisit.data_compliance_percent }}% average progress</small>
           <small v-else>No visit data available</small>
         </article>
+      </section>
+
+      <section class="chart-card histogram-card">
+        <div class="chart-heading">
+          <div>
+            <span class="insight-label">Subject progress</span>
+            <h3>Subject completeness distribution</h3>
+            <p>Number of subjects in each completeness range, based on their average progress across expected visits.</p>
+          </div>
+          <span class="metric-note">{{ histogramSubjectTotal }} subjects</span>
+        </div>
+        <div v-if="histogramSubjectTotal" class="histogram-scroll">
+          <div class="histogram-plot" role="img" aria-label="Distribution of subjects by completeness range">
+            <div
+              v-for="bin in histogramBars"
+              :key="bin.range_start"
+              class="histogram-column"
+              tabindex="0"
+              :aria-label="`${bin.label}: ${bin.subject_count} subject${bin.subject_count === 1 ? '' : 's'}`"
+            >
+              <strong>{{ bin.subject_count }}</strong>
+              <div class="histogram-bar-area">
+                <span :style="{ height: `${bin.heightPercent}%` }"></span>
+              </div>
+              <small>{{ bin.label }}</small>
+            </div>
+          </div>
+          <div class="histogram-axis-title">Subject completeness range</div>
+        </div>
+        <div v-else class="empty-state">No subject completeness data is available.</div>
       </section>
 
       <section class="insight-grid">
@@ -97,6 +122,62 @@
             </ul>
           </div>
         </article>
+      </section>
+
+      <section class="chart-card threshold-card">
+        <div class="chart-heading">
+          <div>
+            <span class="insight-label">Subject completeness</span>
+            <h3>Completeness threshold curve</h3>
+          </div>
+          <span class="metric-note">Subjects at or above each threshold</span>
+        </div>
+        <div v-if="thresholdCurveMax" class="threshold-chart-wrap">
+          <svg
+            class="threshold-chart"
+            viewBox="0 0 820 300"
+            role="img"
+            :aria-label="`Completeness threshold curve for ${thresholdCurveMax} subjects`"
+          >
+            <g class="chart-grid">
+              <line v-for="tick in thresholdYTicks" :key="`y-grid-${tick.value}`" x1="60" x2="760" :y1="tick.y" :y2="tick.y" />
+              <line v-for="tick in thresholdXTicks" :key="`x-grid-${tick.value}`" :x1="tick.x" :x2="tick.x" y1="18" y2="242" />
+            </g>
+            <g class="chart-axes">
+              <line x1="60" x2="760" y1="242" y2="242" />
+              <line x1="60" x2="60" y1="18" y2="242" />
+            </g>
+            <g class="axis-labels">
+              <text v-for="tick in thresholdYTicks" :key="`y-label-${tick.value}`" x="51" :y="tick.y + 4" text-anchor="end">{{ tick.value }}</text>
+              <text v-for="tick in thresholdXTicks" :key="`x-label-${tick.value}`" :x="tick.x" y="260" text-anchor="middle">{{ tick.value }}</text>
+              <text x="410" y="286" text-anchor="middle">Data completeness threshold (%)</text>
+              <text transform="translate(15 130) rotate(-90)" text-anchor="middle">Subjects at or above threshold</text>
+            </g>
+            <polyline class="threshold-line" :points="thresholdPolyline" />
+            <circle
+              v-for="point in thresholdCurvePoints"
+              :key="`curve-point-${point.threshold}`"
+              class="curve-hit-point"
+              :cx="point.x"
+              :cy="point.y"
+              r="7"
+            >
+              <title>{{ point.threshold }}%: {{ point.subject_count }} subject{{ point.subject_count === 1 ? '' : 's' }}</title>
+            </circle>
+            <g v-for="marker in thresholdMarkers" :key="`marker-${marker.threshold}`" class="threshold-marker">
+              <line :class="`marker-${marker.threshold}`" :x1="marker.x" :x2="marker.x" :y1="marker.y" y2="242" />
+              <circle :class="`marker-${marker.threshold}`" :cx="marker.x" :cy="marker.y" r="5" />
+            </g>
+          </svg>
+          <div class="threshold-summary" aria-label="Selected completeness thresholds">
+            <article v-for="marker in thresholdMarkers" :key="`summary-${marker.threshold}`">
+              <i :class="`marker-${marker.threshold}`"></i>
+              <span>At least {{ marker.threshold }}% complete</span>
+              <strong>{{ marker.subject_count }} subject{{ marker.subject_count === 1 ? '' : 's' }}</strong>
+            </article>
+          </div>
+        </div>
+        <div v-else class="empty-state">No subject completeness data is available.</div>
       </section>
 
       <section class="dashboard-grid">
@@ -250,11 +331,48 @@ export default {
       if (!recruited) return 0;
       return Math.round((Number(this.recruitment.active_subjects || 0) / recruited) * 100);
     },
-    visitsAtEighty() {
-      return this.visitStats.filter((visit) => Number(visit.data_compliance_percent || 0) >= 80).length;
-    },
     subjectVisitsNeedingAttention() {
-      return Number(this.distribution.partial || 0) + Number(this.distribution.not_started || 0);
+      return Number(this.distribution.partial || 0);
+    },
+    histogramBars() {
+      const bins = this.summary?.completeness_histogram || [];
+      const maximum = Math.max(0, ...bins.map((bin) => Number(bin.subject_count || 0)));
+      return bins.map((bin) => ({
+        ...bin,
+        heightPercent: maximum ? (Number(bin.subject_count || 0) / maximum) * 100 : 0,
+        label: `${bin.range_start}–${bin.range_end === 100 ? 100 : bin.range_end - 1}%`,
+      }));
+    },
+    histogramSubjectTotal() {
+      return this.histogramBars.reduce((total, bin) => total + Number(bin.subject_count || 0), 0);
+    },
+    thresholdCurveMax() {
+      return Math.max(0, ...(this.summary?.completeness_threshold_curve || []).map((point) => Number(point.subject_count || 0)));
+    },
+    thresholdCurvePoints() {
+      const maximum = this.thresholdCurveMax;
+      if (!maximum) return [];
+      return (this.summary?.completeness_threshold_curve || []).map((point) => ({
+        ...point,
+        x: 60 + (Number(point.threshold || 0) / 100) * 700,
+        y: 18 + (1 - Number(point.subject_count || 0) / maximum) * 224,
+      }));
+    },
+    thresholdPolyline() {
+      return this.thresholdCurvePoints.map((point) => `${point.x},${point.y}`).join(" ");
+    },
+    thresholdXTicks() {
+      return [0, 20, 40, 60, 80, 100].map((value) => ({ value, x: 60 + value * 7 }));
+    },
+    thresholdYTicks() {
+      if (!this.thresholdCurveMax) return [];
+      const values = [...new Set([0, 0.25, 0.5, 0.75, 1].map((ratio) => Math.round(this.thresholdCurveMax * ratio)))];
+      return values.map((value) => ({ value, y: 18 + (1 - value / this.thresholdCurveMax) * 224 }));
+    },
+    thresholdMarkers() {
+      return [80, 90, 95]
+        .map((threshold) => this.thresholdCurvePoints.find((point) => Number(point.threshold) === threshold))
+        .filter(Boolean);
     },
     lowestCoverageVisit() {
       const eligible = this.visitStats.filter((visit) => Number(visit.expected_subjects || 0) > 0);
@@ -344,7 +462,7 @@ export default {
 .kpi-label { display: block; color: #6b7280; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
 .kpi-card strong { display: block; margin: 7px 0 5px; color: #111827; font-size: 26px; line-height: 1; }
 .kpi-card small { color: #6b7280; font-size: 12px; line-height: 1.4; }
-.operational-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin: 0 0 12px; padding: 12px; border: 1px solid #e5e7eb; border-radius: 12px; background: #f3f4f6; }
+.operational-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: 0 0 12px; padding: 12px; border: 1px solid #e5e7eb; border-radius: 12px; background: #f3f4f6; }
 .operational-grid article { min-height: 72px; padding: 10px 12px; border: 1px solid #f1f1f1; border-radius: 8px; background: #fff; }
 .operational-grid span { display: block; color: #6b7280; font-size: 12px; }
 .operational-grid strong { display: block; margin: 5px 0 3px; color: #111827; font-size: 19px; }
@@ -361,6 +479,7 @@ export default {
 .radial span { position: relative; z-index: 1; color: #0f766e; font-size: 21px; font-weight: 700; }
 .chart-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
 .chart-heading h3 { margin: 2px 0 0; color: #111827; font-size: 14px; font-weight: 700; }
+.chart-heading p { max-width: 680px; margin: 6px 0 0; color: #6b7280; font-size: 12px; line-height: 1.45; }
 .metric-note { color: #6b7280; font-size: 11px; }
 .recruitment-chart-wrap { display: flex; align-items: center; gap: 18px; margin-top: 14px; }
 .donut { position: relative; flex: 0 0 104px; width: 104px; height: 104px; display: grid; place-items: center; border-radius: 50%; }
@@ -370,6 +489,33 @@ export default {
 .legend-list li, .status-breakdown li { display: grid; grid-template-columns: 9px 1fr auto; align-items: center; gap: 8px; padding: 5px 0; color: #374151; font-size: 12px; }
 .dot { width: 8px; height: 8px; border-radius: 50%; }.dot.active { background: #2563eb; }.dot.retained { background: #818cf8; }.dot.deleted { background: #64748b; }
 .chart-card { padding: 16px; }
+.histogram-card { margin-bottom: 12px; }
+.histogram-scroll { margin-top: 16px; overflow-x: auto; }
+.histogram-plot { min-width: 620px; height: 210px; display: grid; grid-template-columns: repeat(10, minmax(48px, 1fr)); align-items: end; gap: clamp(6px, 1.4vw, 16px); padding: 12px 8px 0; border-bottom: 1px solid #9ca3af; background: repeating-linear-gradient(to top, transparent 0, transparent 49px, #eef2f7 50px); }
+.histogram-column { height: 100%; min-width: 0; display: grid; grid-template-rows: 22px 1fr 30px; align-items: end; outline: none; }
+.histogram-column > strong { color: #374151; font-size: 12px; text-align: center; }
+.histogram-bar-area { height: 144px; display: flex; align-items: end; }
+.histogram-bar-area span { width: 100%; min-height: 0; border-radius: 5px 5px 0 0; background: linear-gradient(180deg, #38bdf8, #2563eb); box-shadow: 0 1px 2px rgba(37, 99, 235, .18); transition: height .35s ease, filter .2s ease, transform .2s ease; transform-origin: bottom; }
+.histogram-column:hover .histogram-bar-area span, .histogram-column:focus .histogram-bar-area span { filter: saturate(1.25); transform: scaleX(1.04); }
+.histogram-column small { align-self: center; color: #6b7280; font-size: 10px; font-weight: 600; text-align: center; white-space: nowrap; }
+.histogram-axis-title { padding: 8px 0 1px; color: #6b7280; font-size: 11px; text-align: center; }
+.threshold-card { margin-bottom: 12px; }
+.threshold-chart-wrap { width: 100%; margin-top: 12px; overflow-x: auto; }
+.threshold-chart { display: block; width: 100%; min-width: 620px; height: auto; }
+.chart-grid line { stroke: #e5e7eb; stroke-width: 1; }
+.chart-axes line { stroke: #9ca3af; stroke-width: 1; }
+.axis-labels { fill: #6b7280; font-size: 10px; }
+.threshold-line { fill: none; stroke: #2563eb; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
+.curve-hit-point { fill: transparent; cursor: crosshair; }
+.curve-hit-point:hover { fill: #2563eb; opacity: .35; }
+.threshold-marker line { stroke-width: 1; stroke-dasharray: 3 4; opacity: .55; }
+.threshold-marker circle { stroke: #fff; stroke-width: 2; }
+.marker-80 { fill: #2563eb; stroke: #2563eb; background: #2563eb; }.marker-90 { fill: #f97316; stroke: #f97316; background: #f97316; }.marker-95 { fill: #16a34a; stroke: #16a34a; background: #16a34a; }
+.threshold-summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 2px 8px 4px 60px; }
+.threshold-summary article { display: grid; grid-template-columns: 8px 1fr; gap: 3px 8px; padding: 9px 10px; border: 1px solid #e5e7eb; border-radius: 8px; background: #f9fafb; }
+.threshold-summary i { grid-row: 1 / 3; align-self: center; width: 8px; height: 8px; border-radius: 50%; }
+.threshold-summary span { color: #6b7280; font-size: 10px; }
+.threshold-summary strong { color: #111827; font-size: 12px; }
 .bar-list { display: grid; gap: 14px; margin-top: 16px; padding-right: 4px; }
 .bar-row { display: grid; grid-template-columns: minmax(180px, 1fr) minmax(150px, 1.4fr) 44px; align-items: center; gap: 12px; }
 .bar-meta { min-width: 0; display: grid; gap: 3px; }.bar-meta strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }.bar-meta span { color: #6b7280; font-size: 11px; }
@@ -390,6 +536,7 @@ export default {
 .percent-pill { display: inline-block; min-width: 46px; padding: 3px 7px; border-radius: 999px; font-weight: 700; text-align: center; }.percent-pill.good { color: #166534; background: #dcfce7; }.percent-pill.moderate { color: #92400e; background: #fef3c7; }.percent-pill.low, .percent-pill.skipped { color: #991b1b; background: #fee2e2; }.percent-pill.skipped { outline: 1px solid #fca5a5; }
 .empty-state, .empty-cell { padding: 24px; color: #6b7280; text-align: center; }
 .method-note { padding: 11px 12px; border: 1px solid #e5e7eb; border-radius: 8px; background: #f9fafb; color: #6b7280; font-size: 11px; line-height: 1.55; }.method-note span { display: block; margin-top: 4px; }.method-note::after { content: ""; display: block; height: 1px; }
-@media (max-width: 1050px) { .kpi-grid, .operational-grid { grid-template-columns: repeat(2, 1fr); }.insight-grid, .dashboard-grid { grid-template-columns: 1fr; } }
-@media (max-width: 640px) { .compliance-header, .primary-insight { align-items: stretch; flex-direction: column; }.kpi-grid, .operational-grid { grid-template-columns: 1fr; }.radial { align-self: center; }.recruitment-chart-wrap { flex-direction: column; }.bar-row { grid-template-columns: 1fr 44px; }.bar-meta { grid-column: 1 / -1; } }
+@media (max-width: 1050px) { .kpi-grid { grid-template-columns: repeat(2, 1fr); }.insight-grid, .dashboard-grid { grid-template-columns: 1fr; } }
+@media (max-width: 760px) { .operational-grid, .threshold-summary { grid-template-columns: 1fr; }.threshold-summary { margin-left: 0; }.chart-heading { flex-direction: column; }.metric-note { align-self: flex-start; } }
+@media (max-width: 640px) { .compliance-header, .primary-insight { align-items: stretch; flex-direction: column; }.kpi-grid { grid-template-columns: 1fr; }.radial { align-self: center; }.recruitment-chart-wrap { flex-direction: column; }.bar-row { grid-template-columns: 1fr 44px; }.bar-meta { grid-column: 1 / -1; } }
 </style>
