@@ -32,17 +32,28 @@
       <div class="step1-header">
         <h2 class="step-title">{{ panelTitle }}</h2>
 
-        <!-- Import Study Template (ONLY for new study creation) -->
+        <!-- Import options (ONLY for new study creation) -->
         <div v-if="!isEditing" class="import-template-actions">
-          <button
-            type="button"
-            class="btn-option"
-            :disabled="importingTemplate"
-            @click.prevent="triggerTemplatePick"
-            title="Import a template-only JSON exported from another device"
-          >
-            {{ importingTemplate ? "Importing…" : "Import Study Template" }}
-          </button>
+          <div class="import-action-buttons">
+            <button
+              type="button"
+              class="btn-option"
+              :disabled="importingTemplate"
+              @click.prevent="triggerTemplatePick"
+              title="Import a template-only JSON exported from another device"
+            >
+              {{ importingTemplate ? "Importing…" : "Import Study Template" }}
+            </button>
+
+            <button
+              type="button"
+              class="btn-option"
+              @click.prevent="openStudyDataImport"
+              title="Import participant data from a CSV or Excel file"
+            >
+              Import Study (Data)
+            </button>
+          </div>
 
           <input
             ref="templateFileInput"
@@ -979,6 +990,18 @@ export default {
       if (el) el.click();
     }
 
+    function openStudyDataImport() {
+      allowInternalNav.value = true;
+      router
+        .push({
+          name: "Dashboard",
+          query: { view: "import-data", returnTo: "create-study" },
+        })
+        .finally(() => {
+          allowInternalNav.value = false;
+        });
+    }
+
     async function onTemplatePicked(e) {
       const f = e?.target?.files && e.target.files[0];
       if (e?.target) e.target.value = "";
@@ -1822,6 +1845,7 @@ export default {
       templateFileName,
       templateImportError,
       triggerTemplatePick,
+      openStudyDataImport,
       onTemplatePicked,
 
       closeDialog,
@@ -1860,6 +1884,12 @@ export default {
   gap: 6px;
   min-width: 240px;
 }
+.import-action-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
 .hidden-file {
   display: none;
 }
@@ -1885,6 +1915,9 @@ export default {
   .import-template-actions {
     align-items: flex-start;
     min-width: 0;
+  }
+  .import-action-buttons {
+    justify-content: flex-start;
   }
   .import-file-name {
     max-width: 100%;

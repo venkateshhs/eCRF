@@ -145,7 +145,7 @@
           <div class="study-management-header">
             <h1 class="study-management-title">Study Management</h1>
             <p class="study-management-subtitle">
-              Create a new study, import data, or open an existing one to manage and collect data.
+              Create a new study or open an existing one to manage and collect data.
             </p>
           </div>
 
@@ -173,15 +173,6 @@
                 <span class="action-card-desc">Continue work on an existing study</span>
               </button>
 
-              <button
-                v-if="isAdmin || isPI || isInvestigator"
-                type="button"
-                class="action-card"
-                @click="openImportData"
-              >
-                <span class="action-card-title">Import Study (Data)</span>
-                <span class="action-card-desc">Ingest participant data from CSV/Excel</span>
-              </button>
             </div>
 
             <!-- Wide buttons -->
@@ -204,14 +195,6 @@
                 Open Existing Study
               </button>
 
-              <button
-                v-if="isAdmin || isPI || isInvestigator"
-                type="button"
-                @click="openImportData"
-                class="btn-primary"
-              >
-                Import Study (Data)
-              </button>
             </div>
           </div>
 
@@ -1002,6 +985,12 @@ export default {
     closeImportData() {
       this.showImportData = false;
       this.importMaximized = false;
+
+      if (this.$route.query.returnTo === "create-study") {
+        this.$router.push({ name: "CreateStudy", query: { step: "1" } });
+        return;
+      }
+
       this.$router.push({ name: "Dashboard", query: { openStudies: "false" } });
     },
 
@@ -1356,13 +1345,19 @@ export default {
   font-size: 14px;
 }
 
-/* Primary Actions — Cards (VERTICAL) */
+/* Primary Actions — two-card horizontal row */
 .primary-actions-cards {
   display: grid;
-  grid-template-columns: minmax(260px, 520px);
+  grid-template-columns: repeat(2, minmax(260px, 420px));
   justify-content: center;
   gap: 18px;
   margin-top: 20px;
+}
+
+@media (max-width: 700px) {
+  .primary-actions-cards {
+    grid-template-columns: minmax(0, 520px);
+  }
 }
 
 .action-card {
@@ -1896,7 +1891,7 @@ export default {
 
   /* ---- ACTION CARDS -> HORIZONTAL GRID ---- */
   .primary-actions-cards {
-    grid-template-columns: repeat(3, minmax(320px, 1fr));
+    grid-template-columns: repeat(2, minmax(320px, 520px));
     justify-content: center;
     gap: 28px;
     margin-top: 32px;
