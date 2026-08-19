@@ -23,6 +23,13 @@ jobs:
             requirements.txt
             requirements-hosted.txt
 
+      - name: Install git-annex and configure Git
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes git-annex
+          git config --global user.name "Case-E CI"
+          git config --global user.email "case-e-ci@invalid.example"
+
       - name: Install backend test dependencies
         run: |
           python -m pip install --upgrade pip
