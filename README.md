@@ -55,6 +55,26 @@ cd ..
 pyinstaller -y ecrf.spec
 ```
 
+### Verification
+
+Run the backend and frontend regression suites from a clean checkout with
+Python 3.11 and Node.js 20:
+
+```bash
+python -m pip install -r requirements-hosted.txt
+python -m pip install pytest
+python -m pytest -q
+
+cd eCRF_frontend
+npm ci
+npm test
+```
+
+`pytest.ini` limits backend discovery to the repository's `tests/` directory,
+so dependency, virtual-environment, and frontend files are not collected as
+Python tests. The frontend command uses Node's built-in test runner and is
+also executed in continuous integration.
+
 ### Usage  
 Once the eCRF application is running, you can access its user interface through a web browser or the provided application window:
 
