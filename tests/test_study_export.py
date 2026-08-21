@@ -281,8 +281,8 @@ def test_all_versions_only_expand_fields_affected_by_form_changes(tmp_path):
         assert values["pulse_rate__v001"] == "72"
         assert values["pulse_rate__v002"] == "75"
         assert values["old_score__v001"] == "8"
-        assert values["old_score__v002"] == "n/a"
-        assert values["new_measure__v001"] == "n/a"
+        assert "old_score__v002" not in headers
+        assert "new_measure__v001" not in headers
         assert values["new_measure__v002"] == "98"
         assert values["medications__row01__dose"] == "10 mg"
         assert values["medications__row02__drug"] == "Drug B"
@@ -290,8 +290,8 @@ def test_all_versions_only_expand_fields_affected_by_form_changes(tmp_path):
         assert not any(header.startswith("medications__v") for header in headers)
 
         sidecar = json.loads(bundle.read(combined_json))
-        assert sidecar["new_measure__v001"]["FieldAvailableInVersion"] is False
         assert sidecar["new_measure__v002"]["FieldAvailableInVersion"] is True
+        assert "new_measure__v001" not in sidecar
         assert sidecar["MeasurementToolMetadata"]["VersionsIncluded"] == [1, 2]
 
         subject_tsv = root + "sourcedata/sub-SUBJA/ses-Baseline/ecrf/sub-SUBJA_ses-Baseline_ecrf.tsv"
@@ -347,7 +347,58 @@ def test_only_removed_notes_gets_version_columns_when_everything_else_is_unchang
         lines = bundle.read(root + "phenotype/ecrf.tsv").decode().splitlines()
         headers = lines[0].split("\t")
         values = dict(zip(headers, lines[1].split("\t")))
-        assert headers == ["participant_id", "visit", "group", "temperature", "notes__v001", "notes__v002"]
+        assert headers == ["participant_id", "visit", "group", "temperature", "notes__v001"]
         assert values["temperature"] == "36.7"
         assert values["notes__v001"] == "Initial note"
-        assert values["notes__v002"] == "n/a"
+        assert "notes__v002" not in headers
+
+
+def test_added_unentered_field_uses_label_and_only_emits_empty_actual_version(tmp_path):
+    class AddedFieldRepo(FakeRepo):
+        def list_entries(self, study_id, study_name):
+            return [{
+                "id": 31,
+                "subject_index": 0,
+                "visit_index": 0,
+                "group_index": 0,
+                "form_version": 3,
+                "updated_at": "2026-03-01T00:00:00Z",
+                "data": {"section": {}},
+            }]
+
+    def schema(fields):
+        return {
+            "subjects": [{"id": "SUBJ-A", "group": "Control"}],
+            "visits": [{"name": "Baseline"}],
+            "groups": [{"name": "Control"}],
+            "selectedModels": [{"_id": "section", "title": "Assessment", "fields": fields}],
+        }
+
+    added = {
+        "_id": "age-at-assessment",
+        "name": "number_2_1787209163717",
+        "label": "Age as of assessment date",
+        "type": "number",
+    }
+    archive, _ = build_analysis_export(
+        repo=AddedFieldRepo(tmp_path),
+        study_id=4,
+        study_name="Added Field Study",
+        study_data=schema([added]),
+        schemas_by_version={1: schema([]), 2: schema([]), 3: schema([added])},
+        options=ExportOptions(versions={1, 2, 3}, include_files=False),
+    )
+
+    with zipfile.ZipFile(archive) as bundle:
+        root = "study-4-added-field-study_bids-export/"
+        lines = bundle.read(root + "phenotype/ecrf.tsv").decode().splitlines()
+        headers = lines[0].split("\t")
+        values = dict(zip(headers, lines[1].split("\t")))
+        expected = "age_as_of_assessment_date__v003"
+        assert headers == ["participant_id", "visit", "group", expected]
+        assert values[expected] == ""
+        assert not any(header.startswith("number_2_1787209163717") for header in headers)
+
+        sidecar = json.loads(bundle.read(root + "phenotype/ecrf.json"))
+        assert sidecar[expected]["LongName"] == "Age as of assessment date — version 3"
+        assert sidecar[expected]["StudyVersion"] == 3
