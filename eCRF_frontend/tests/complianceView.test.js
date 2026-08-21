@@ -29,16 +29,19 @@ assert.match(source, /Visit completion/);
 assert.match(source, /width: `\$\{visit\.data_compliance_percent\}%`/);
 assert.doesNotMatch(source, /width: `\$\{visit\.subject_completion_percent\}%`/);
 assert.match(source, /Data compliance by group/);
-assert.match(source, /excluded from data-compliance denominators/);
+assert.match(source, /Dropped subjects whose data was deleted are excluded/);
 assert.doesNotMatch(source, /<th>Skipped fields<\/th>/);
 assert.match(source, /Subject completeness distribution/);
-assert.match(source, /Number of subjects in each completeness range/);
+assert.match(source, /Subjects appear after they have entered data for at least one visit/);
 assert.doesNotMatch(source, /Subjects by 10% band/);
 assert.match(source, /Completeness threshold curve/);
 assert.match(source, /At least \{\{ marker\.threshold \}\}% complete/);
 assert.doesNotMatch(source, /Visits at ≥80%/);
 assert.match(source, /Needs attention/);
 assert.match(source, /Partially completed subject-visits/);
+assert.match(source, /Current compliance scope/);
+assert.match(source, /Subjects with no started visits and future visits with no entered data are excluded/);
+assert.match(source, /expected visit not yet started by that subject is 0%/);
 
 const context = {
   summary: {

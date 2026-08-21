@@ -32,12 +32,12 @@
         <article class="kpi-card accent-teal">
           <span class="kpi-label">Data entered</span>
           <strong>{{ compliance.data_compliance_percent }}%</strong>
-          <small>Average across {{ compliance.expected_subject_visits }} expected subject-visits</small>
+          <small>Across {{ compliance.expected_subject_visits }} expected subject-visits in {{ compliance.started_visits }} started visit{{ compliance.started_visits === 1 ? '' : 's' }}</small>
         </article>
         <article class="kpi-card accent-violet">
           <span class="kpi-label">Subjects complete</span>
           <strong>{{ compliance.completed_subjects }}</strong>
-          <small>{{ compliance.subject_completion_percent }}% of subjects with expected data</small>
+          <small>{{ compliance.subject_completion_percent }}% of subjects in the current scope</small>
         </article>
       </section>
 
@@ -60,12 +60,26 @@
         </article>
       </section>
 
+      <aside class="scope-note" aria-label="Compliance calculation scope">
+        <div>
+          <strong>Current compliance scope</strong>
+          <span>
+            {{ compliance.evaluable_subjects }} subject{{ compliance.evaluable_subjects === 1 ? '' : 's' }} with entered data
+            · {{ compliance.started_visits }} started visit{{ compliance.started_visits === 1 ? '' : 's' }}
+          </span>
+        </div>
+        <small>
+          Excludes {{ compliance.excluded_not_started_subjects }} untouched subject{{ compliance.excluded_not_started_subjects === 1 ? '' : 's' }}
+          and {{ compliance.excluded_not_started_visits }} future visit{{ compliance.excluded_not_started_visits === 1 ? '' : 's' }} with no data yet.
+        </small>
+      </aside>
+
       <section class="chart-card histogram-card">
         <div class="chart-heading">
           <div>
             <span class="insight-label">Subject progress</span>
             <h3>Subject completeness distribution</h3>
-            <p>Number of subjects in each completeness range, based on their average progress across expected visits.</p>
+            <p>Subjects appear after they have entered data for at least one visit. Future visits with no data are excluded.</p>
           </div>
           <span class="metric-note">{{ histogramSubjectTotal }} subjects</span>
         </div>
@@ -96,7 +110,7 @@
             <span class="insight-label">Overall data compliance</span>
             <strong>On average, {{ compliance.data_compliance_percent }}% of expected data is entered.</strong>
             <p>
-              Each assigned subject-visit contributes equally across {{ compliance.evaluable_subjects }} evaluable subjects.
+              Each expected subject-visit in the current scope contributes equally across {{ compliance.evaluable_subjects }} subjects with entered data and {{ compliance.started_visits }} started visits.
             </p>
           </div>
           <div class="radial" :style="complianceRadialStyle" role="img" :aria-label="`${compliance.data_compliance_percent}% data compliance`">
@@ -130,7 +144,7 @@
             <span class="insight-label">Subject completeness</span>
             <h3>Completeness threshold curve</h3>
           </div>
-          <span class="metric-note">Subjects at or above each threshold</span>
+          <span class="metric-note">Current compliance scope only</span>
         </div>
         <div v-if="thresholdCurveMax" class="threshold-chart-wrap">
           <svg
@@ -288,7 +302,7 @@
 
       <footer class="method-note">
         <strong>How compliance is calculated:</strong>
-        Data compliance is the simple average of each evaluable subject’s progress percentage for each assigned visit. Every subject-visit contributes equally, regardless of how many fields are assigned to that visit. A visit is complete only when its progress reaches 100%. Subjects whose active data was deleted are included in recruitment and dropout totals but excluded from data-compliance denominators; retained dropouts remain included.
+        A subject enters the calculation after data is entered or a required field is skipped in at least one assigned visit. A visit enters the calculation after at least one included subject starts it. Subjects with no started visits and future visits with no entered data are excluded. Within the remaining subject × visit scope, every expected subject-visit contributes equally: complete is 100%, partial uses its saved progress, and an expected visit not yet started by that subject is 0%. This prevents untouched subjects and future visits from lowering today’s compliance while still showing genuine gaps inside the active study scope. Dropped subjects whose data was deleted are excluded; retained dropouts remain included after they have started data entry.
         <span v-if="summary.generated_at">Updated {{ formatDateTime(summary.generated_at) }}.</span>
       </footer>
     </template>
@@ -468,6 +482,11 @@ export default {
 .operational-grid strong { display: block; margin: 5px 0 3px; color: #111827; font-size: 19px; }
 .operational-grid .text-value { overflow: hidden; font-size: 14px; text-overflow: ellipsis; white-space: nowrap; }
 .operational-grid small { color: #6b7280; font-size: 11px; }
+.scope-note { display: flex; align-items: center; justify-content: space-between; gap: 18px; margin: 0 0 12px; padding: 11px 13px; border: 1px solid #bfdbfe; border-radius: 10px; background: #eff6ff; }
+.scope-note div { display: grid; gap: 3px; }
+.scope-note strong { color: #1e3a8a; font-size: 12px; }
+.scope-note span { color: #1e40af; font-size: 12px; }
+.scope-note small { max-width: 520px; color: #475569; font-size: 11px; line-height: 1.4; text-align: right; }
 .insight-grid, .dashboard-grid { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(280px, .65fr); gap: 12px; margin-bottom: 12px; }
 .insight-card, .chart-card, .table-card { border: 1px solid #f1f1f1; border-radius: 12px; background: #fff; }
 .insight-card { min-height: 160px; padding: 16px; }
@@ -537,6 +556,6 @@ export default {
 .empty-state, .empty-cell { padding: 24px; color: #6b7280; text-align: center; }
 .method-note { padding: 11px 12px; border: 1px solid #e5e7eb; border-radius: 8px; background: #f9fafb; color: #6b7280; font-size: 11px; line-height: 1.55; }.method-note span { display: block; margin-top: 4px; }.method-note::after { content: ""; display: block; height: 1px; }
 @media (max-width: 1050px) { .kpi-grid { grid-template-columns: repeat(2, 1fr); }.insight-grid, .dashboard-grid { grid-template-columns: 1fr; } }
-@media (max-width: 760px) { .operational-grid, .threshold-summary { grid-template-columns: 1fr; }.threshold-summary { margin-left: 0; }.chart-heading { flex-direction: column; }.metric-note { align-self: flex-start; } }
+@media (max-width: 760px) { .operational-grid, .threshold-summary { grid-template-columns: 1fr; }.threshold-summary { margin-left: 0; }.chart-heading, .scope-note { align-items: flex-start; flex-direction: column; }.scope-note small { text-align: left; }.metric-note { align-self: flex-start; } }
 @media (max-width: 640px) { .compliance-header, .primary-insight { align-items: stretch; flex-direction: column; }.kpi-grid { grid-template-columns: 1fr; }.radial { align-self: center; }.recruitment-chart-wrap { flex-direction: column; }.bar-row { grid-template-columns: 1fr 44px; }.bar-meta { grid-column: 1 / -1; } }
 </style>
