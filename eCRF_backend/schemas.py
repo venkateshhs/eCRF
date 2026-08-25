@@ -147,6 +147,10 @@ class FileOut(FileBase):
         from_attributes = True
 
 
+class FileDescriptionUpdate(BaseModel):
+    description: str = ""
+
+
 # Pydantic model that accepts arbitrary fields
 class SettingsModel(BaseModel):
     model_config = {"extra": "allow"}
