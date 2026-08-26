@@ -160,7 +160,7 @@
                 @click="navigate({ name: 'CreateStudy' })"
               >
                 <span class="action-card-title">Create Study</span>
-                <span class="action-card-desc">Start a new protocol and forms</span>
+                <span class="action-card-desc">Set up or import a new study</span>
               </button>
 
               <button
@@ -1345,12 +1345,12 @@ export default {
   font-size: 14px;
 }
 
-/* Primary Actions — two-card horizontal row */
+/* Primary Actions — large vertical cards */
 .primary-actions-cards {
   display: grid;
-  grid-template-columns: repeat(2, minmax(260px, 420px));
+  grid-template-columns: minmax(320px, 720px);
   justify-content: center;
-  gap: 18px;
+  gap: 20px;
   margin-top: 20px;
 }
 
@@ -1363,14 +1363,16 @@ export default {
 .action-card {
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
+  align-items: center;
+  justify-content: center;
   gap: 6px;
-  padding: 18px 20px;
+  min-height: 112px;
+  padding: 24px 28px;
   background: #fafafa;
   border: 1px solid #e3e3e3;
   border-radius: 12px;
   cursor: pointer;
-  text-align: left;
+  text-align: center;
   transition: transform 0.06s ease, box-shadow 0.2s ease, border-color 0.2s ease,
     background 0.2s ease;
 }
@@ -1378,14 +1380,14 @@ export default {
 /* force desc visible even if some global CSS is hiding it */
 .action-card-title {
   display: block !important;
-  font-size: 16px;
+  font-size: 18px;
   font-weight: 600;
   color: #222;
   line-height: 1.3;
 }
 .action-card-desc {
   display: block !important;
-  font-size: 13px;
+  font-size: 14px;
   color: #666;
   line-height: 1.35;
   white-space: normal !important;
@@ -1889,9 +1891,9 @@ export default {
     margin: 0 auto;
   }
 
-  /* ---- ACTION CARDS -> HORIZONTAL GRID ---- */
+  /* Keep primary actions prominent and vertically stacked. */
   .primary-actions-cards {
-    grid-template-columns: repeat(2, minmax(320px, 520px));
+    grid-template-columns: minmax(420px, 760px);
     justify-content: center;
     gap: 28px;
     margin-top: 32px;
@@ -1899,16 +1901,17 @@ export default {
 
   /* cards become slightly larger */
   .action-card {
-    padding: 24px 26px;
+    min-height: 132px;
+    padding: 30px 34px;
     border-radius: 14px;
   }
 
   .action-card-title {
-    font-size: 18px;
+    font-size: 20px;
   }
 
   .action-card-desc {
-    font-size: 15px;
+    font-size: 16px;
   }
 
   /* optional: nicer hover presence on large screens */
