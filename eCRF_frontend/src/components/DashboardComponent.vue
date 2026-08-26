@@ -3,7 +3,6 @@
     :class="[
       'dashboard-layout',
       {
-        collapsed: sidebarCollapsed && !hideSidebar,
         'import-open': showImportData,
         'sidebar-hidden': hideSidebar
       }
@@ -52,37 +51,30 @@
     </header>
 
     <!-- Sidebar (HIDDEN for View Study + Add Data + Scratch Form) -->
-    <aside v-if="!hideSidebar" :class="['dashboard-sidebar', { collapsed: sidebarCollapsed }]">
-      <button type="button" class="hamburger-menu" @click="toggleSidebar" aria-label="Toggle sidebar">
-        <span></span>
-        <span></span>
-        <span></span>
-      </button>
+    <aside v-if="!hideSidebar" class="dashboard-sidebar">
       <nav>
         <ul>
           <!-- Study Management: only Admin, PI or Investigator -->
           <li
             v-if="isAdmin || isPI || isInvestigator"
             @click="setActiveSection('study-management')"
-            class="nav-item"
+            :class="['nav-item', { active: activeSection === 'study-management' && $route.name === 'Dashboard' }]"
             tabindex="0"
             @keydown.enter="setActiveSection('study-management')"
             @keydown.space.prevent="setActiveSection('study-management')"
           >
-            <i :class="icons.book || 'fas fa-book'" v-if="sidebarCollapsed"></i>
-            <span v-if="!sidebarCollapsed">Study Management</span>
+            <span>Study Management</span>
           </li>
 
           <!-- User Management: visible to all roles -->
           <li
             @click="() => { setActiveSection(''); navigate({ name: 'UserInfo' }) }"
-            class="nav-item"
+            :class="['nav-item', { active: $route.name === 'UserInfo' }]"
             tabindex="0"
             @keydown.enter="() => { setActiveSection(''); navigate({ name: 'UserInfo' }) }"
             @keydown.space.prevent="() => { setActiveSection(''); navigate({ name: 'UserInfo' }) }"
           >
-            <i :class="icons.user || 'fas fa-user'" v-if="sidebarCollapsed"></i>
-            <span v-if="!sidebarCollapsed">User Management</span>
+            <span>User Management</span>
           </li>
         </ul>
       </nav>
@@ -93,7 +85,6 @@
       :class="[
         'dashboard-main',
         {
-          expanded: sidebarCollapsed && !hideSidebar,
           'dashboard-index': $route.name === 'Dashboard'
         }
       ]"
@@ -441,7 +432,6 @@ export default {
   components: { ImportStudy, BuildInfoFooter },
   data() {
     return {
-      sidebarCollapsed: false,
       activeSection: "study-management",
       showStudyOptions: false,
       studies: [],
@@ -923,10 +913,6 @@ export default {
       }
     },
 
-    toggleSidebar() {
-      this.sidebarCollapsed = !this.sidebarCollapsed;
-    },
-
     async setActiveSection(section) {
       if (!this.isLoggedIn) {
         this.$router.push("/login").catch(() => null);
@@ -1197,8 +1183,9 @@ export default {
   justify-content: space-between;
   align-items: center;
   padding: 10px 20px;
-  background: #f5f5f5;
-  border-bottom: 1px solid #e0e0e0;
+  background: #ffffff;
+  border-bottom: 1px solid #e5e7eb;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
 }
 
 .logo-container img {
@@ -1225,7 +1212,7 @@ export default {
 .user-name {
   font-weight: 600;
   font-size: 14px;
-  color: #222;
+  color: #111827;
   max-width: 260px;
   white-space: nowrap;
   overflow: hidden;
@@ -1233,43 +1220,17 @@ export default {
 }
 .user-role {
   font-size: 12px;
-  color: #666;
+  color: #6b7280;
 }
 
 /* Sidebar */
 .dashboard-sidebar {
   grid-area: sidebar;
-  background: #f9f9f9;
+  background: #f8fafc;
   padding: 20px;
-  border-right: 1px solid #e0e0e0;
+  border-right: 1px solid #dbe4ee;
   transition: width 0.3s ease, padding 0.3s ease;
 }
-.dashboard-sidebar.collapsed {
-  width: 70px;
-  padding: 10px;
-}
-
-.hamburger-menu {
-  background: none;
-  border: none;
-  padding: 10px;
-  cursor: pointer;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 4px;
-}
-.hamburger-menu span {
-  display: block;
-  width: 20px;
-  height: 2px;
-  background: #333;
-  transition: all 0.3s ease;
-}
-.hamburger-menu:hover span {
-  background: #000;
-}
-
 /* Sidebar Navigation */
 .dashboard-sidebar nav ul {
   list-style: none;
@@ -1278,7 +1239,7 @@ export default {
 .nav-item {
   padding: 10px;
   font-size: 15px;
-  color: #555;
+  color: #4b5563;
   cursor: pointer;
   border-radius: 6px;
   transition: background 0.3s ease;
@@ -1287,7 +1248,14 @@ export default {
   gap: 10px;
 }
 .nav-item:hover {
-  background: #e8e8e8;
+  background: #eef2ff;
+  color: #1d4ed8;
+}
+.nav-item.active {
+  background: #eff6ff;
+  color: #1d4ed8;
+  font-weight: 700;
+  box-shadow: inset 3px 0 0 #2563eb;
 }
 
 /* Main Content */
@@ -1308,14 +1276,11 @@ export default {
 .dashboard-main.dashboard-index {
   display: flex;
   flex-direction: column;
+  background: #f8fafc;
 }
 
 .dashboard-build-footer {
   margin-top: auto;
-}
-
-.dashboard-main.expanded {
-  margin-left: -150px;
 }
 
 /* If sidebar hidden, ensure no funky shift */
@@ -1337,11 +1302,11 @@ export default {
 }
 .study-management-title {
   margin: 0 0 6px 0;
-  color: #333;
+  color: #111827;
 }
 .study-management-subtitle {
   margin: 0 auto;
-  color: #666;
+  color: #4b5563;
   font-size: 14px;
 }
 
@@ -1368,8 +1333,8 @@ export default {
   gap: 6px;
   min-height: 112px;
   padding: 24px 28px;
-  background: #fafafa;
-  border: 1px solid #e3e3e3;
+  background: #ffffff;
+  border: 1px solid #dbe4ee;
   border-radius: 12px;
   cursor: pointer;
   text-align: center;
@@ -1382,13 +1347,13 @@ export default {
   display: block !important;
   font-size: 18px;
   font-weight: 600;
-  color: #222;
+  color: #111827;
   line-height: 1.3;
 }
 .action-card-desc {
   display: block !important;
   font-size: 14px;
-  color: #666;
+  color: #4b5563;
   line-height: 1.35;
   white-space: normal !important;
   opacity: 1 !important;
@@ -1396,9 +1361,14 @@ export default {
 }
 
 .action-card:hover {
-  background: #f5f5f5;
-  border-color: #dcdcdc;
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.06);
+  background: #eff6ff;
+  border-color: #60a5fa;
+  box-shadow: 0 6px 16px rgba(37, 99, 235, 0.1);
+}
+.action-card:focus-visible {
+  outline: none;
+  border-color: #2563eb;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.14);
 }
 .action-card:active {
   transform: translateY(1px);
@@ -1415,8 +1385,8 @@ export default {
 .btn-primary {
   min-width: 260px;
   padding: 14px 24px;
-  background: #2f6fed;
-  border: 1px solid #245fe0;
+  background: #2563eb;
+  border: 1px solid #2563eb;
   border-radius: 10px;
   font-size: 16px;
   color: #fff;
@@ -1424,8 +1394,9 @@ export default {
   transition: background 0.15s ease, transform 0.02s ease, box-shadow 0.2s ease;
 }
 .btn-primary:hover {
-  background: #285fce;
-  box-shadow: 0 2px 10px rgba(47, 111, 237, 0.25);
+  background: #1d4ed8;
+  border-color: #1d4ed8;
+  box-shadow: 0 6px 14px rgba(37, 99, 235, 0.18);
 }
 .btn-primary:active {
   transform: translateY(1px);
@@ -1434,6 +1405,11 @@ export default {
 /* Study Dashboard Styles */
 .study-dashboard {
   margin-top: 22px;
+  padding: 20px;
+  background: #ffffff;
+  border: 1px solid #dbe4ee;
+  border-radius: 14px;
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.04);
 }
 
 .back-header-row {
@@ -1453,7 +1429,7 @@ export default {
 .existing-studies-title {
   margin: 0;
   font-size: 20px;
-  color: #333;
+  color: #111827;
   text-align: center;
 }
 
@@ -1482,10 +1458,10 @@ export default {
   width: 100%;
   min-height: 40px;
   padding: 9px 38px 9px 36px;
-  border: 1px solid #e0e0e0;
+  border: 1px solid #d1d5db;
   border-radius: 10px;
   background: #fff;
-  color: #333;
+  color: #111827;
   font-size: 14px;
   outline: none;
   transition: border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
@@ -1494,8 +1470,8 @@ export default {
   color: #9ca3af;
 }
 .study-search-input:focus {
-  border-color: #2f6fed;
-  box-shadow: 0 0 0 3px rgba(47, 111, 237, 0.12);
+  border-color: #2563eb;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
 }
 .study-search-clear {
   position: absolute;
@@ -1519,7 +1495,7 @@ export default {
   color: #111827;
 }
 .study-search-count {
-  color: #666;
+  color: #6b7280;
   font-size: 13px;
   white-space: nowrap;
 }
@@ -1534,7 +1510,7 @@ export default {
   text-align: center !important;
   color: #666 !important;
   padding: 22px 12px !important;
-  background: #fafafa;
+  background: #f8fafc;
 }
 
 /* Table */
@@ -1547,18 +1523,18 @@ export default {
 .study-table td {
   padding: 12px;
   text-align: left;
-  border-bottom: 1px solid #e8e8e8;
+  border-bottom: 1px solid #e5e7eb;
 }
 .study-table td {
-  color: #333;
+  color: #374151;
 }
 .study-table th {
-  background: #f5f5f5;
+  background: #f8fafc;
   font-weight: 600;
-  color: #555;
+  color: #374151;
 }
 .study-table tr:hover {
-  background-color: #f9f9f9;
+  background-color: #f8fafc;
 }
 .study-table tbody tr.study-row-search-match {
   background: #eff6ff;
@@ -1612,12 +1588,12 @@ export default {
 
 /* Uniform minimal button */
 .btn-minimal {
-  background: none;
-  border: 1px solid #e0e0e0;
-  border-radius: 6px;
+  background: #ffffff;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
   padding: 8px 12px;
   font-size: 14px;
-  color: #555;
+  color: #374151;
   cursor: pointer;
   transition: background 0.3s ease, color 0.3s ease, border-color 0.3s ease;
   display: inline-flex;
@@ -1625,9 +1601,9 @@ export default {
   gap: 8px;
 }
 .btn-minimal:hover {
-  background: #e8e8e8;
-  color: #000;
-  border-color: #d6d6d6;
+  background: #f3f4f6;
+  color: #111827;
+  border-color: #9ca3af;
 }
 .btn-minimal.icon-only {
   padding: 8px 10px;
@@ -1638,8 +1614,8 @@ export default {
 
 /* solid/outline buttons for dialog */
 .btn-primary-solid {
-  border: 1px solid #245fe0;
-  background: #2f6fed;
+  border: 1px solid #2563eb;
+  background: #2563eb;
   color: #fff;
   border-radius: 10px;
   padding: 10px 14px;
@@ -1647,19 +1623,20 @@ export default {
   cursor: pointer;
 }
 .btn-primary-solid:hover {
-  background: #285fce;
+  background: #1d4ed8;
+  border-color: #1d4ed8;
 }
 .btn-primary-outline {
-  border: 1px solid #245fe0;
+  border: 1px solid #2563eb;
   background: transparent;
-  color: #245fe0;
+  color: #1d4ed8;
   border-radius: 10px;
   padding: 10px 14px;
   font-size: 14px;
   cursor: pointer;
 }
 .btn-primary-outline:hover {
-  background: rgba(47, 111, 237, 0.08);
+  background: #eff6ff;
 }
 .btn-danger {
   border-color: #fecaca !important;
