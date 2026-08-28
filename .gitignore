@@ -26,13 +26,7 @@ ecrf_data/
 logs/
 testing/.DS_Store
 
-# Project-specific
-public/favicon.ico
-
-
 eCRF_frontend/node_modules/
 eCRF_frontend/.DS_Store
-eCRF_frontend/public/favicon.ico
 /hosted/bin/*
 /hosted/lib/*
-

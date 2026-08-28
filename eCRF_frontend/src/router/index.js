@@ -1,6 +1,7 @@
 import { createRouter, createWebHistory } from "vue-router";
 import LoginComponent from "../components/LoginComponent.vue";
 import RegistrationComponent from "../components/RegistrationComponent.vue";
+import ContactUsComponent from "../components/ContactUsComponent.vue";
 import DashboardComponent from "../components/DashboardComponent.vue";
 import UserInfoComponent from "../components/UserInfoComponent.vue";
 // import CreateFormComponent from "../components/CreateFormComponent.vue";
@@ -20,6 +21,7 @@ const routes = [
   { path: "/", redirect: "/login" },
   { path: "/login", name: "Login", component: LoginComponent },
   { path: "/register", name: "Registration", component: RegistrationComponent },
+  { path: "/contact", name: "Contact", component: ContactUsComponent },
   {
     path: "/dashboard",
     name: "Dashboard",
