@@ -1,5 +1,6 @@
 from datetime import timedelta, datetime, timezone
 import jwt
+import ipaddress
 import re
 import secrets
 from fastapi import APIRouter, Depends, HTTPException, Header, Request, status
@@ -15,6 +16,14 @@ from .crud import get_user_by_username
 from .auth import hash_password, verify_password, create_access_token, SECRET_KEY, ALGORITHM
 from .database import get_db
 from .logger import logger
+from .password_reset import (
+    build_reset_url,
+    mask_email,
+    new_token,
+    send_password_reset_email,
+    token_hash,
+)
+from .settings import get_settings
 
 # unified audit (DB + optional BIDS)
 from .bids_exporter import audit_change_both
@@ -30,6 +39,7 @@ LAST_ACTIVITY_THROTTLE_SECONDS = 30  # reduce DB writes
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="users/login")
 
 router = APIRouter(prefix="/users", tags=["users"])
+settings = get_settings()
 
 
 def _display_name(u: Optional[models.User]) -> str:
@@ -348,6 +358,246 @@ class ChangePasswordRequest(BaseModel):
 
 
 PASSWORD_RE = re.compile(r"^(?=.*[0-9])(?=.*[!@#$%^&*])\S{8,}$")
+
+
+class PasswordResetLookupRequest(BaseModel):
+    username: str = Field(..., min_length=1, max_length=50)
+
+
+class PasswordResetLookupResponse(BaseModel):
+    eligible: bool
+    masked_email: Optional[str] = None
+    confirmation_token: Optional[str] = None
+
+
+class PasswordResetEmailRequest(BaseModel):
+    confirmation_token: str = Field(..., min_length=20, max_length=200)
+
+
+class PasswordResetConfirmRequest(BaseModel):
+    token: str = Field(..., min_length=20, max_length=200)
+    new_password: str
+
+
+def _request_ip(request: Request) -> str:
+    if settings.trust_proxy_headers:
+        forwarded_for = request.headers.get("x-forwarded-for", "")
+        # Apache appends the peer it observed to the right-hand side. Using the
+        # last valid value avoids trusting a client-prepended address.
+        for candidate in reversed(forwarded_for.split(",")):
+            candidate = candidate.strip()
+            try:
+                return str(ipaddress.ip_address(candidate))
+            except ValueError:
+                continue
+    return request.client.host if request.client else "unknown"
+
+
+def _valid_reset_token(row: Optional[models.PasswordResetToken], now: datetime) -> bool:
+    if not row or row.used_at is not None:
+        return False
+    expires_at = _to_naive_utc(row.expires_at)
+    current = _to_naive_utc(now) or datetime.utcnow()
+    return bool(expires_at and expires_at >= current)
+
+
+def _create_reset_token_row(
+    *,
+    db: Session,
+    user_id: Optional[int],
+    purpose: str,
+    requested_ip: str,
+    ttl_minutes: int,
+) -> tuple[str, models.PasswordResetToken]:
+    raw_token = new_token()
+    now = local_now()
+    row = models.PasswordResetToken(
+        user_id=user_id,
+        purpose=purpose,
+        token_hash=token_hash(raw_token),
+        requested_ip=requested_ip,
+        created_at=now,
+        expires_at=now + timedelta(minutes=ttl_minutes),
+    )
+    db.add(row)
+    return raw_token, row
+
+
+def _require_password_reset_enabled() -> None:
+    if not settings.password_reset_enabled:
+        raise HTTPException(status_code=503, detail="Password reset is not configured.")
+
+
+@router.post("/password-reset/lookup", response_model=PasswordResetLookupResponse)
+def password_reset_lookup(
+    payload: PasswordResetLookupRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    """Resolve a username and return only a masked delivery-address hint."""
+    _require_password_reset_enabled()
+    now = local_now()
+    requested_ip = _request_ip(request)
+    cutoff = now - timedelta(hours=1)
+    lookup_count = (
+        db.query(models.PasswordResetToken)
+        .filter(
+            models.PasswordResetToken.requested_ip == requested_ip,
+            models.PasswordResetToken.purpose.in_(("email_confirmation", "lookup_unknown")),
+            models.PasswordResetToken.created_at >= cutoff,
+        )
+        .count()
+    )
+    if lookup_count >= settings.password_reset_max_lookups_per_ip_hour:
+        raise HTTPException(status_code=429, detail="Too many password reset attempts. Try again later.")
+
+    username = payload.username.strip()
+    user = get_user_by_username(db, username)
+    if not user or not getattr(user, "email", None):
+        _create_reset_token_row(
+            db=db,
+            user_id=None,
+            purpose="lookup_unknown",
+            requested_ip=requested_ip,
+            ttl_minutes=settings.password_reset_confirmation_ttl_minutes,
+        )
+        db.commit()
+        return PasswordResetLookupResponse(eligible=False)
+
+    confirmation_token, _ = _create_reset_token_row(
+        db=db,
+        user_id=user.id,
+        purpose="email_confirmation",
+        requested_ip=requested_ip,
+        ttl_minutes=settings.password_reset_confirmation_ttl_minutes,
+    )
+    db.commit()
+    return PasswordResetLookupResponse(
+        eligible=True,
+        masked_email=mask_email(user.email),
+        confirmation_token=confirmation_token,
+    )
+
+
+@router.post("/password-reset/request")
+def password_reset_request_email(
+    payload: PasswordResetEmailRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    """Consume an address confirmation and email a one-time password-reset link."""
+    _require_password_reset_enabled()
+    now = local_now()
+    confirmation = (
+        db.query(models.PasswordResetToken)
+        .filter(
+            models.PasswordResetToken.token_hash == token_hash(payload.confirmation_token),
+            models.PasswordResetToken.purpose == "email_confirmation",
+        )
+        .first()
+    )
+    if not _valid_reset_token(confirmation, now) or not confirmation.user:
+        raise HTTPException(status_code=400, detail="This confirmation has expired. Start again.")
+
+    cutoff = now - timedelta(hours=1)
+    sent_count = (
+        db.query(models.PasswordResetToken)
+        .filter(
+            models.PasswordResetToken.user_id == confirmation.user_id,
+            models.PasswordResetToken.purpose == "password_reset",
+            models.PasswordResetToken.created_at >= cutoff,
+        )
+        .count()
+    )
+    if sent_count >= settings.password_reset_max_per_user_hour:
+        raise HTTPException(status_code=429, detail="Too many reset emails. Try again later.")
+
+    confirmation.used_at = now
+    db.query(models.PasswordResetToken).filter(
+        models.PasswordResetToken.user_id == confirmation.user_id,
+        models.PasswordResetToken.purpose == "password_reset",
+        models.PasswordResetToken.used_at.is_(None),
+    ).update({"used_at": now}, synchronize_session=False)
+
+    raw_token, reset_row = _create_reset_token_row(
+        db=db,
+        user_id=confirmation.user_id,
+        purpose="password_reset",
+        requested_ip=_request_ip(request),
+        ttl_minutes=settings.password_reset_ttl_minutes,
+    )
+    db.commit()
+
+    try:
+        send_password_reset_email(
+            recipient=confirmation.user.email,
+            username=confirmation.user.username,
+            reset_url=build_reset_url(raw_token),
+        )
+    except Exception:
+        logger.exception("Password reset email delivery failed for user_id=%s", confirmation.user_id)
+        reset_row.used_at = local_now()
+        db.commit()
+        raise HTTPException(status_code=503, detail="The reset email could not be sent. Try again later.")
+
+    logger.info("Password reset email sent for user_id=%s", confirmation.user_id)
+    return {"message": "Password reset email sent."}
+
+
+@router.post("/password-reset/confirm")
+def password_reset_confirm(
+    payload: PasswordResetConfirmRequest,
+    db: Session = Depends(get_db),
+):
+    """Consume a reset token, update the password, and revoke existing sessions."""
+    _require_password_reset_enabled()
+    if not PASSWORD_RE.match(payload.new_password):
+        raise HTTPException(
+            status_code=400,
+            detail="Password must be at least 8 characters, include a number, and a special character.",
+        )
+
+    now = local_now()
+    reset_row = (
+        db.query(models.PasswordResetToken)
+        .filter(
+            models.PasswordResetToken.token_hash == token_hash(payload.token),
+            models.PasswordResetToken.purpose == "password_reset",
+        )
+        .first()
+    )
+    if not _valid_reset_token(reset_row, now) or not reset_row.user:
+        raise HTTPException(status_code=400, detail="This password reset link is invalid or expired.")
+
+    user = reset_row.user
+    _set_user_password_hash(user, hash_password(payload.new_password))
+    user.must_change_password = False
+    reset_row.used_at = now
+    db.query(models.PasswordResetToken).filter(
+        models.PasswordResetToken.user_id == user.id,
+        models.PasswordResetToken.used_at.is_(None),
+    ).update({"used_at": now}, synchronize_session=False)
+    db.query(models.UserSession).filter(
+        models.UserSession.user_id == user.id,
+        models.UserSession.revoked_at.is_(None),
+    ).update({"revoked_at": now}, synchronize_session=False)
+    db.commit()
+
+    try:
+        audit_change_both(
+            scope="system",
+            action="user_password_reset",
+            actor=user.username,
+            extra={"username": user.username, "method": "email_reset"},
+            db=db,
+            actor_id=user.id,
+            actor_name=user.username,
+        )
+    except Exception:
+        pass
+
+    logger.info("Password reset completed for user_id=%s", user.id)
+    return {"message": "Password reset successfully."}
 
 
 @router.post("/change-password")

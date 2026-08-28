@@ -35,6 +35,8 @@
             <button type="submit" class="btn-login">Sign in</button>
           </form>
           <div class="login-links">
+            <router-link to="/forgot-password">Forgot password?</router-link>
+            <span aria-hidden="true">·</span>
             <router-link to="/register">Create account</router-link>
           </div>
           <p v-if="error" class="error" role="alert">{{ error }}</p>

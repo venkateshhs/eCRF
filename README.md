@@ -23,6 +23,15 @@ Once the eCRF application is running, you can access its user interface through 
 - **Accessing the Application:** If you started eCRF on a local server, open your web browser and navigate to : http://127.0.0.1:8000/login . If you are using the standalone **case-e** application, launching it will either open a built-in window or start a local service and open a browser automatically.  
 - **Logging In:** Use the default administrator account to log in for the first time. The default credentials are **Username:** `admin` and **Password:** `Admin123!`.  After entering these on the login screen, you will gain access to the system as an administrator.  
 - **Post-Login Setup:** After logging in, it is **strongly recommended to change the default password** for security. Navigate to the **User Management** section of the application. There you can change the password for the admin account (`admin`) and add other user accounts. Always ensure that the admin password is updated from the default, especially if the system is deployed in a production or shared environment.  
+
+### Email password reset
+
+case-e supports a public username → masked-email confirmation → one-time reset-link flow.
+It is disabled until the deployment has an approved SMTP account or relay. Copy the
+values from `deploy/password-reset.env.example` into the server environment file
+(`/opt/casee/.env` for the provided systemd service), replace the example values,
+and restart case-e. Never commit the SMTP password to Git.
+
 - **Creating Studies and Forms:** As an admin or user with the appropriate role, you can create a new study and then design the case report forms for that study. Define the fields for each form and any validation rules. Once forms are set up, they become available for data entry.  
 - **Data Entry:** Users with data entry privileges can enter participant data into the eCRF forms per subject per visit. Typically, you would select a study (and a subject) and fill out the forms for each visit. The system will enforce any field validations and will provide instant feedback if data doesn’t meet the specified criteria (for example, an out-of-range value).  
 - **Saving and Editing Data:** After entering data on a form, save the form. Saved data can later be edited by authorized users. Thanks to the audit trail, any changes are tracked. Saved data for study can be viewd in Study Dashboard.
