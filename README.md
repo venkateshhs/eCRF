@@ -370,20 +370,6 @@ reproduction steps, expected and actual behavior, and exact error message.
 Software and documentation contribution history is recorded in the respective
 Git repositories.
 
-## AI-generation disclosure
-
-This README and the linked case-e documentation site were generated entirely by
-ChatGPT. This statement is provided expressly for transparency and legal
-attribution. ChatGPT and OpenAI are not the author, maintainer, publisher,
-operator, sponsor, or legal guarantor of case-e. The named human maintainer is
-responsible for reviewing, accepting, publishing, correcting, and versioning
-the documentation.
-
-AI-generated material can contain errors or omissions. If documentation
-conflicts with validated behavior, stop the affected workflow and ask the
-maintainer or deployment administrator to resolve the discrepancy before
-continuing regulated or production activity.
-
 ## License
 
 case-e is distributed under the [MIT License](LICENSE).
