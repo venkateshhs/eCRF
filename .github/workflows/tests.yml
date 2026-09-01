@@ -1,0 +1,58 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-hosted.txt
+
+      - name: Install git-annex and configure Git
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes git-annex
+          git config --global user.name "Case-E CI"
+          git config --global user.email "case-e-ci@invalid.example"
+
+      - name: Install backend test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-hosted.txt pytest
+
+      - name: Run backend tests
+        run: python -m pytest -q
+
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: eCRF_frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: eCRF_frontend
+        run: npm ci
+
+      - name: Run frontend tests
+        working-directory: eCRF_frontend
+        run: npm test

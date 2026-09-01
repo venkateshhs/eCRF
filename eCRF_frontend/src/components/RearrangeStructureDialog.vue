@@ -399,16 +399,16 @@ export default {
     dropFieldAt(targetSectionIndex, targetFieldIndex) {
       if (!this.fieldDrag.active) return;
 
-      const fromS = this.fieldDrag.fromSection;
+      const sourceSectionIndex = this.fieldDrag.fromSection;
       const fromF = this.fieldDrag.fromField;
 
-      if (!Number.isInteger(fromS) || !Number.isInteger(fromF)) {
+      if (!Number.isInteger(sourceSectionIndex) || !Number.isInteger(fromF)) {
         this.resetFieldDrag();
         return;
       }
 
       const sections = this.localSections.slice();
-      const sourceSection = sections[fromS];
+      const sourceSection = sections[sourceSectionIndex];
       const targetSection = sections[targetSectionIndex];
 
       if (!sourceSection || !targetSection) {
@@ -426,7 +426,7 @@ export default {
       }
 
       let insertAt = targetFieldIndex;
-      if (fromS === targetSectionIndex && fromF < targetFieldIndex) {
+      if (sourceSectionIndex === targetSectionIndex && fromF < targetFieldIndex) {
         insertAt -= 1;
       }
 
@@ -441,16 +441,16 @@ export default {
       if (!this.fieldDrag.active) return;
       if (this.isExpanded(this.localSections[targetSectionIndex]?._id)) return;
 
-      const fromS = this.fieldDrag.fromSection;
+      const sourceSectionIndex = this.fieldDrag.fromSection;
       const fromF = this.fieldDrag.fromField;
 
-      if (!Number.isInteger(fromS) || !Number.isInteger(fromF)) {
+      if (!Number.isInteger(sourceSectionIndex) || !Number.isInteger(fromF)) {
         this.resetFieldDrag();
         return;
       }
 
       const sections = this.localSections.slice();
-      const sourceSection = sections[fromS];
+      const sourceSection = sections[sourceSectionIndex];
       const targetSection = sections[targetSectionIndex];
 
       if (!sourceSection || !targetSection) {

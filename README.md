@@ -23,6 +23,32 @@ The standalone documentation contains detailed, screenshot-based workflows for
 every major function. If the published documentation is not available yet, see
 [View the documentation locally](#view-the-documentation-locally).
 
+## Runtime profiles and dependencies
+
+Case-e selects its storage profile automatically:
+
+- Standalone executable and normal development runs use local SQLite and
+  filesystem storage. DataLad and git-annex are not required.
+- Production/server runs use DataLad-backed storage. PostgreSQL or RIA
+  configuration also selects the server profile when `ECRF_PROFILE` is unset.
+
+Environment variables remain available as deployment overrides. Copy
+`.env.example` to `.env` for a hosted installation. Docker deployments should
+copy `deploy/docker/.env.example` to `deploy/docker/.env`.
+
+Install the dependency set for the intended target:
+
+```bash
+# Local source run
+python -m pip install -r requirements.txt
+
+# Local executable build
+python -m pip install -r requirements-build.txt
+
+# Hosted server
+python -m pip install -r requirements-hosted.txt
+```
+
 ## Hosted access and collaboration
 
 To evaluate or collaborate using the managed service:
@@ -225,7 +251,7 @@ Set `ECRF_DATA_DIR` to choose the data directory without the folder dialog:
 
 ```bash
 source .venv/bin/activate
-python -m pip install -r requirements.txt
+python -m pip install -r requirements-build.txt
 
 cd eCRF_frontend
 npm ci
@@ -304,6 +330,23 @@ revocation with a non-privileged account before enabling recovery for users.
 python -m eCRF_backend.preflight
 curl -fsS http://127.0.0.1:8000/health
 ```
+
+Run the backend and frontend regression suites from a clean checkout with
+Python 3.11 and Node.js 20:
+
+```bash
+python -m pip install -r requirements-hosted.txt
+python -m pip install pytest
+python -m pytest -q
+
+cd eCRF_frontend
+npm ci
+npm test
+```
+
+`pytest.ini` limits backend discovery to the repository's `tests/` directory.
+The frontend command uses Node's built-in test runner; both suites also run in
+continuous integration.
 
 For the supplied Linux service:
 

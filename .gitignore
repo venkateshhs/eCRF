@@ -1,6 +1,10 @@
 # macOS + IDE
 .DS_Store
 .idea/
+.env
+.env.*
+!.env.example
+!deploy/docker/.env.example
 
 # Python
 __pycache__/

@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from .logger import logger
-from .datalad_config import get_datalad_config
+from .datalad_config import get_datalad_config, is_datalad_enabled
 from .datalad_lock import dataset_lock, LockSpec
 from .datalad_runtime import get_datalad_worker
 from .settings import get_settings
@@ -326,12 +326,37 @@ class DataladStudyRepo:
             p.dataset_path,
         )
 
-        if Dataset is None:
+        cfg = self._cfg()
+        datalad_enabled = is_datalad_enabled(cfg)
+
+        if datalad_enabled and Dataset is None:
             logger.error(
                 "[DataladStudyRepo.ensure_dataset] DataLad is not installed for dataset_path=%s",
                 p.dataset_path,
             )
             raise RuntimeError("DataLad is not installed")
+
+        directories = [
+            p.canonical_dir,
+            p.templates_dir,
+            p.entries_dir,
+            p.files_dir,
+            p.audit_dir,
+            p.audit_system_dir,
+            p.audit_system_study_dir,
+            p.audit_subject_dir,
+            p.shares_dir,
+            p.access_dir,
+        ]
+
+        if not datalad_enabled:
+            for directory in directories:
+                directory.mkdir(parents=True, exist_ok=True)
+            logger.info(
+                "[DataladStudyRepo.ensure_dataset] Filesystem-only dataset ready path=%s",
+                p.dataset_path,
+            )
+            return p
 
         logger.info(
             "[DataladStudyRepo.ensure_dataset] About to acquire dataset lock dataset_path=%s",
@@ -386,18 +411,7 @@ class DataladStudyRepo:
                 p.dataset_path,
             )
 
-            for d in [
-                p.canonical_dir,
-                p.templates_dir,
-                p.entries_dir,
-                p.files_dir,
-                p.audit_dir,
-                p.audit_system_dir,
-                p.audit_system_study_dir,
-                p.audit_subject_dir,
-                p.shares_dir,
-                p.access_dir,
-            ]:
+            for d in directories:
                 d.mkdir(parents=True, exist_ok=True)
                 logger.info(
                     "[DataladStudyRepo.ensure_dataset] Ensured directory exists path=%s",
@@ -434,6 +448,14 @@ class DataladStudyRepo:
     # ------------------------------------------------------------------
 
     def save(self, ds_path: Path, message: str) -> None:
+        if not is_datalad_enabled(self._cfg()):
+            logger.info(
+                "[DataladStudyRepo.save] Filesystem-only mode; skipping DataLad save path=%s message=%s",
+                ds_path,
+                message,
+            )
+            return
+
         if Dataset is None:
             logger.error(
                 "[DataladStudyRepo.save] DataLad is not installed ds_path=%s message=%s",
@@ -1002,7 +1024,7 @@ class DataladStudyRepo:
         if not metadata or not content:
             raise FileNotFoundError("Study not found")
 
-        old_content = self.previous_study_content(p.dataset_path) if p.dataset_path.exists() else {}
+        old_content = _deepcopy_json(content or {})
 
         if study_name is not None:
             metadata["study_name"] = study_name
@@ -1020,7 +1042,7 @@ class DataladStudyRepo:
 
         latest_version = self.latest_template_version(p)
         latest_schema_path = p.templates_dir / f"v{latest_version:03d}" / "schema.json"
-        old_schema = self.previous_template_schema(p.dataset_path, latest_version)
+        old_schema = _json_load(latest_schema_path, {}) or {}
         new_schema = self._snapshot_schema(content["study_data"], study_id, version=latest_version)
 
         with dataset_lock(LockSpec(dataset_path=p.dataset_path)):
