@@ -20,14 +20,14 @@
     <template v-else-if="summary">
       <section class="kpi-grid" aria-label="Compliance key performance indicators">
         <article class="kpi-card accent-blue">
-          <span class="kpi-label">Subjects recruited</span>
+          <span class="kpi-label">Subjects enrolled with data</span>
           <strong>{{ recruitment.recruited_subjects }}</strong>
-          <small>{{ recruitment.active_subjects }} currently active</small>
+          <small>At least one visit started · {{ recruitment.active_subjects }} currently active</small>
         </article>
         <article class="kpi-card accent-rose">
           <span class="kpi-label">Dropped out</span>
           <strong>{{ recruitment.dropped_subjects }}</strong>
-          <small>{{ recruitment.dropout_percent }}% of recruited subjects</small>
+          <small>{{ recruitment.dropout_percent }}% of enrolled subjects with data</small>
         </article>
         <article class="kpi-card accent-teal">
           <span class="kpi-label">Data entered</span>
@@ -122,7 +122,7 @@
           <div class="chart-heading">
             <div>
               <span class="insight-label">Recruitment status</span>
-              <strong>{{ recruitment.recruited_subjects }} subjects enrolled</strong>
+              <strong>{{ recruitment.recruited_subjects }} enrolled subjects with data</strong>
             </div>
           </div>
           <div class="recruitment-chart-wrap">
@@ -255,7 +255,7 @@
               <span>{{ group.data_compliance_percent }}%</span>
             </div>
             <div class="bar-track"><span class="bar-fill group-fill" :style="{ width: `${group.data_compliance_percent}%` }"></span></div>
-            <small>{{ group.evaluable_subjects }} evaluable / {{ group.recruited_subjects }} recruited</small>
+            <small>{{ group.recruited_subjects }} enrolled with data</small>
           </div>
         </div>
       </section>
@@ -302,7 +302,7 @@
 
       <footer class="method-note">
         <strong>How compliance is calculated:</strong>
-        A subject enters the calculation after data is entered or a required field is skipped in at least one assigned visit. A visit enters the calculation after at least one included subject starts it. Subjects with no started visits and future visits with no entered data are excluded. Within the remaining subject × visit scope, every expected subject-visit contributes equally: complete is 100%, partial uses its saved progress, and an expected visit not yet started by that subject is 0%. This prevents untouched subjects and future visits from lowering today’s compliance while still showing genuine gaps inside the active study scope. Dropped subjects whose data was deleted are excluded; retained dropouts remain included after they have started data entry.
+        A subject is counted as enrolled/recruited only after data is entered or a required field is skipped in at least one assigned visit. The dropout percentage is the share of this enrolled-with-data cohort whose status is dropped out. A visit enters the calculation after at least one included subject starts it. Subjects with no started visits and future visits with no entered data are excluded. Within the remaining subject × visit scope, every expected subject-visit contributes equally: complete is 100%, partial uses its saved progress, and an expected visit not yet started by that subject is 0%. This prevents untouched subjects and future visits from lowering today’s compliance while still showing genuine gaps inside the active study scope. Dropped subjects whose data was deleted are excluded; retained dropouts remain included after they have started data entry.
         <span v-if="summary.generated_at">Updated {{ formatDateTime(summary.generated_at) }}.</span>
       </footer>
     </template>

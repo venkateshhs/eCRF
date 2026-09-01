@@ -76,11 +76,6 @@ def build_compliance_summary(
     latest = _latest_entries(entries or [])
 
     statuses = [_status(subject) for subject in subjects]
-    active = sum(1 for value in statuses if value == ACTIVE)
-    retained = sum(1 for value in statuses if value == "DROPPED_DATA_RETAINED")
-    deleted = sum(1 for value in statuses if value == DELETED)
-    dropped = sum(1 for value in statuses if value.startswith("DROPPED_") or value.startswith("DROPOUT_"))
-
     visit_stats = [
         {
             "visit_index": index,
@@ -126,7 +121,6 @@ def build_compliance_summary(
         group_index = _group_index(subject_obj, groups)
         if group_index not in group_stats:
             group_index = 0
-        group_stats[group_index]["recruited_subjects"] += 1
         if status_value == DELETED:
             continue
 
@@ -181,7 +175,19 @@ def build_compliance_summary(
                 started_visits.add(visit_index)
 
     for subject_index in started_subjects:
-        group_stats[subject_groups[subject_index]]["evaluable_subjects"] += 1
+        group_stat = group_stats[subject_groups[subject_index]]
+        group_stat["recruited_subjects"] += 1
+        group_stat["evaluable_subjects"] += 1
+
+    recruited_statuses = [statuses[index] for index in started_subjects]
+    active = sum(1 for value in recruited_statuses if value == ACTIVE)
+    retained = sum(1 for value in recruited_statuses if value == "DROPPED_DATA_RETAINED")
+    deleted = sum(1 for value in recruited_statuses if value == DELETED)
+    dropped = sum(
+        1
+        for value in recruited_statuses
+        if value.startswith("DROPPED_") or value.startswith("DROPOUT_")
+    )
 
     subject_totals: Dict[int, Dict[str, int]] = {}
     distribution = {"complete": 0, "partial": 0, "not_started": 0}
@@ -287,12 +293,12 @@ def build_compliance_summary(
 
     return {
         "recruitment": {
-            "recruited_subjects": len(subjects),
+            "recruited_subjects": len(started_subjects),
             "active_subjects": active,
             "dropped_subjects": dropped,
             "dropped_data_retained": retained,
             "dropped_data_deleted": deleted,
-            "dropout_percent": _percent(dropped, len(subjects)),
+            "dropout_percent": _percent(dropped, len(started_subjects)),
         },
         "compliance": {
             "evaluable_subjects": evaluable_subjects,

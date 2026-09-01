@@ -44,11 +44,11 @@ def test_compliance_summary_covers_recruitment_visits_groups_and_latest_version(
     )
 
     assert summary["recruitment"] == {
-        "recruited_subjects": 4,
-        "active_subjects": 2,
-        "dropped_subjects": 2,
+        "recruited_subjects": 2,
+        "active_subjects": 1,
+        "dropped_subjects": 1,
         "dropped_data_retained": 1,
-        "dropped_data_deleted": 1,
+        "dropped_data_deleted": 0,
         "dropout_percent": 50,
     }
     assert summary["compliance"]["evaluable_subjects"] == 2
@@ -95,7 +95,7 @@ def test_compliance_summary_covers_recruitment_visits_groups_and_latest_version(
     }
 
     group_b = summary["group_stats"][1]
-    assert group_b["recruited_subjects"] == 2
+    assert group_b["recruited_subjects"] == 1
     assert group_b["evaluable_subjects"] == 1
     assert group_b["data_compliance_percent"] == 50
 
@@ -148,6 +148,49 @@ def test_untouched_subjects_and_future_visits_are_excluded_from_scope():
     assert summary["visit_stats"][0]["data_compliance_percent"] == 100
     assert summary["compliance"]["expected_subject_visits"] == 1
     assert summary["compliance"]["data_compliance_percent"] == 100
+
+
+def test_recruitment_and_dropout_only_use_subjects_with_started_data():
+    study_data = {
+        "subjects": [
+            {"id": "SUB-001", "status": "ACTIVE"},
+            {"id": "SUB-002", "status": "DROPPED_DATA_RETAINED"},
+            {"id": "SUB-003", "status": "ACTIVE"},
+            {"id": "SUB-004", "status": "DROPPED_DATA_RETAINED"},
+        ],
+        "visits": [{"name": "Visit 1"}],
+        "selectedModels": [{"title": "Form", "fields": [{"id": "field"}]}],
+        "assignments": [[[True]]],
+    }
+    entries = [
+        {
+            "id": 1,
+            "subject_index": 0,
+            "visit_index": 0,
+            "group_index": 0,
+            "form_version": 1,
+            "data": {"Form": {"field": "active data"}},
+        },
+        {
+            "id": 2,
+            "subject_index": 1,
+            "visit_index": 0,
+            "group_index": 0,
+            "form_version": 1,
+            "data": {"Form": {"field": "retained data"}},
+        },
+    ]
+
+    summary = build_compliance_summary(study_data, entries)
+
+    assert summary["recruitment"] == {
+        "recruited_subjects": 2,
+        "active_subjects": 1,
+        "dropped_subjects": 1,
+        "dropped_data_retained": 1,
+        "dropped_data_deleted": 0,
+        "dropout_percent": 50,
+    }
 
 
 def test_saved_entry_progress_is_used_to_match_add_data_matrix():

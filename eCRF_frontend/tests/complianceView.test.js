@@ -23,7 +23,8 @@ new Function("require", "module", "exports", transformed)(
 );
 const component = loaded.exports.default;
 
-assert.match(source, /Subjects recruited/);
+assert.match(source, /Subjects enrolled with data/);
+assert.match(source, /At least one visit started/);
 assert.match(source, /Overall data compliance/);
 assert.match(source, /Visit completion/);
 assert.match(source, /width: `\$\{visit\.data_compliance_percent\}%`/);
@@ -41,6 +42,7 @@ assert.match(source, /Needs attention/);
 assert.match(source, /Partially completed subject-visits/);
 assert.match(source, /Current compliance scope/);
 assert.match(source, /Subjects with no started visits and future visits with no entered data are excluded/);
+assert.match(source, /dropout percentage is the share of this enrolled-with-data cohort/);
 assert.match(source, /expected visit not yet started by that subject is 0%/);
 
 const context = {
