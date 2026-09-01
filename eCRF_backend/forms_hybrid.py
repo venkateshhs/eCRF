@@ -1387,6 +1387,43 @@ def delete_study_file(
     return {"deleted": True, "file_id": file_id, "file_name": deleted.get("file_name")}
 
 
+@router.patch("/studies/{study_id}/files/{file_id}", response_model=schemas.FileOut)
+def update_study_file_description(
+    study_id: int,
+    file_id: int,
+    payload: schemas.FileDescriptionUpdate,
+    audit_label: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    meta = db.query(models.StudyMetadata).filter(models.StudyMetadata.id == study_id).first()
+    if not meta:
+        raise HTTPException(status_code=404, detail="Study not found")
+
+    _assert_has_study_permission(db, meta, user, required="add_data")
+    _assert_not_locked_by_other(meta, user)
+
+    try:
+        existing_file = repo.get_file_record(
+            study_id=study_id,
+            study_name=meta.study_name,
+            file_id=file_id,
+        )
+        _assert_subject_active_for_study(db, study_id, existing_file.get("subject_index"))
+        return repo.update_file_description(
+            study_id=study_id,
+            study_name=meta.study_name,
+            file_id=file_id,
+            description=payload.description,
+            actor=_actor_identifier(user),
+            actor_name=_display_name(user),
+            user_id=user.id,
+            audit_label=audit_label,
+        )
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="File not found")
+
+
 @router.post("/shared/{token}/files", response_model=schemas.FileOut)
 def shared_upload_file(
     token: str,

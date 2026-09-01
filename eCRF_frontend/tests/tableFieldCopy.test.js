@@ -121,4 +121,3 @@ assert.throws(
   ),
   /requires a table field/
 );
-

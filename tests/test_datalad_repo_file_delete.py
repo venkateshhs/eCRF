@@ -212,3 +212,53 @@ def test_delete_file_rejects_intermediate_symlink_escape(tmp_path, monkeypatch):
 
     assert protected.read_bytes() == b"keep"
     assert record_path.exists()
+
+
+def test_update_file_description_preserves_payload_and_other_metadata(tmp_path, monkeypatch):
+    repo, files_dir, audits = _configured_repo(tmp_path, monkeypatch)
+    payload = files_dir / "metadata" / "000000008_protocol.pdf"
+    payload.parent.mkdir(parents=True, exist_ok=True)
+    payload.write_bytes(b"protocol")
+    record = _file_record(8, str(payload.relative_to(tmp_path)), modalities=[])
+    record.update(
+        {
+            "file_name": "protocol.pdf",
+            "subject_index": None,
+            "visit_index": None,
+            "group_index": None,
+        }
+    )
+    record_path = files_dir / "file_000000008.json"
+    _write_json(record_path, record)
+
+    updated = repo.update_file_description(
+        study_id=11,
+        study_name="Description test",
+        file_id=8,
+        description="  Approved protocol v2  ",
+        actor="clinician@example.org",
+    )
+
+    assert payload.read_bytes() == b"protocol"
+    assert updated["description"] == "Approved protocol v2"
+    assert json.loads(record_path.read_text(encoding="utf-8"))["modalities"] == ["MRI"]
+    assert audits[0]["action"] == "file_description_updated"
+    assert audits[0]["payload"]["previous_description"] == "MRI"
+
+
+def test_update_file_description_can_clear_description(tmp_path, monkeypatch):
+    repo, files_dir, audits = _configured_repo(tmp_path, monkeypatch)
+    record = _file_record(9, "https://example.org/protocol", storage_option="url")
+    record_path = files_dir / "file_000000009.json"
+    _write_json(record_path, record)
+
+    updated = repo.update_file_description(
+        study_id=11,
+        study_name="Description test",
+        file_id=9,
+        description="   ",
+        actor="clinician@example.org",
+    )
+
+    assert updated["description"] == ""
+    assert audits[0]["payload"]["description"] == ""

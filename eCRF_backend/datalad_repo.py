@@ -2035,6 +2035,70 @@ class DataladStudyRepo:
                     out.append(row)
         return out
 
+    def update_file_description(
+        self,
+        *,
+        study_id: int,
+        study_name: str,
+        file_id: int,
+        description: str,
+        actor: str,
+        audit_label: Optional[str] = None,
+        user_id: Optional[int] = None,
+        actor_name: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        p = self.paths(study_id, study_name)
+        record_path = p.files_dir / f"file_{int(file_id):09d}.json"
+
+        with dataset_lock(LockSpec(dataset_path=p.dataset_path)):
+            record = _json_load(record_path)
+            if not record or int(record.get("study_id") or 0) != int(study_id):
+                raise FileNotFoundError("File record not found")
+
+            previous_description = str(record.get("description") or "")
+            next_description = str(description or "").strip()
+            if previous_description == next_description:
+                return record
+
+            record["description"] = next_description
+            _json_dump(record_path, record)
+
+            labels = self._resolve_subject_visit_group_labels(
+                p,
+                subject_index=record.get("subject_index"),
+                visit_index=record.get("visit_index"),
+                group_index=record.get("group_index"),
+            )
+            actor_payload = self._build_actor_payload(
+                actor=actor,
+                actor_name=actor_name,
+                user_id=user_id,
+            )
+            self._append_audit(
+                p,
+                action="file_description_updated",
+                study_id=study_id,
+                payload={
+                    "file_id": int(file_id),
+                    "file_name": record.get("file_name"),
+                    "previous_description": previous_description,
+                    "description": next_description,
+                    "subject_index": record.get("subject_index"),
+                    "visit_index": record.get("visit_index"),
+                    "group_index": record.get("group_index"),
+                    "ui_label": audit_label,
+                    **labels,
+                    **actor_payload,
+                },
+                subject_index=record.get("subject_index"),
+            )
+
+        self.save(
+            p.dataset_path,
+            f"case-e: update_file_description study={study_id} file={int(file_id)}",
+        )
+        return record
+
     def delete_file(
         self,
         *,

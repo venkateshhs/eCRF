@@ -67,12 +67,29 @@ class AppSettings:
     jwt_algorithm: str
     password_hashing_enabled: bool
 
+    password_reset_enabled: bool
+    password_reset_ttl_minutes: int
+    password_reset_confirmation_ttl_minutes: int
+    password_reset_max_per_user_hour: int
+    password_reset_max_lookups_per_ip_hour: int
+    frontend_base_url: str
+
+    smtp_host: str
+    smtp_port: int
+    smtp_username: Optional[str]
+    smtp_password: Optional[str]
+    smtp_starttls: bool
+    smtp_ssl: bool
+    smtp_timeout_seconds: float
+    mail_from: str
+
     cors_allow_origins: Tuple[str, ...]
     cors_allow_origin_regex: Optional[str]
 
     bind_host: str
     port: int
     open_browser: bool
+    trust_proxy_headers: bool
 
     data_dir: Path
     bids_root: Path
@@ -125,6 +142,24 @@ class AppSettings:
                     "ECRF_ADMIN_PASSWORD must be set when ECRF_BOOTSTRAP_ADMIN=1 in production."
                 )
 
+        if self.password_reset_enabled:
+            if not self.frontend_base_url:
+                errors.append("ECRF_FRONTEND_BASE_URL must be set when password reset is enabled.")
+            if not self.smtp_host:
+                errors.append("ECRF_SMTP_HOST must be set when password reset is enabled.")
+            if not self.mail_from:
+                errors.append("ECRF_MAIL_FROM must be set when password reset is enabled.")
+            if self.smtp_starttls and self.smtp_ssl:
+                errors.append("Only one of ECRF_SMTP_STARTTLS and ECRF_SMTP_SSL may be enabled.")
+            if bool(self.smtp_username) != bool(self.smtp_password):
+                errors.append(
+                    "ECRF_SMTP_USERNAME and ECRF_SMTP_PASSWORD must either both be set or both be empty."
+                )
+            if self.password_reset_ttl_minutes < 1:
+                errors.append("ECRF_PASSWORD_RESET_TTL_MINUTES must be at least 1.")
+            if self.password_reset_confirmation_ttl_minutes < 1:
+                errors.append("ECRF_PASSWORD_RESET_CONFIRMATION_TTL_MINUTES must be at least 1.")
+
         if errors:
             raise RuntimeError("Invalid case-e configuration:\n- " + "\n- ".join(errors))
 
@@ -155,11 +190,34 @@ def get_settings() -> AppSettings:
         secret_key=os.getenv("ECRF_SECRET_KEY", "your-very-secure-secret-key"),
         jwt_algorithm=os.getenv("ECRF_JWT_ALGORITHM", "HS256"),
         password_hashing_enabled=_as_bool(os.getenv("ECRF_PASSWORD_HASHING_ENABLED"), default=True),
+        password_reset_enabled=_as_bool(os.getenv("ECRF_PASSWORD_RESET_ENABLED"), default=False),
+        password_reset_ttl_minutes=int(os.getenv("ECRF_PASSWORD_RESET_TTL_MINUTES", "20")),
+        password_reset_confirmation_ttl_minutes=int(
+            os.getenv("ECRF_PASSWORD_RESET_CONFIRMATION_TTL_MINUTES", "10")
+        ),
+        password_reset_max_per_user_hour=int(
+            os.getenv("ECRF_PASSWORD_RESET_MAX_PER_USER_HOUR", "3")
+        ),
+        password_reset_max_lookups_per_ip_hour=int(
+            os.getenv("ECRF_PASSWORD_RESET_MAX_LOOKUPS_PER_IP_HOUR", "10")
+        ),
+        frontend_base_url=os.getenv("ECRF_FRONTEND_BASE_URL", "").strip().rstrip("/"),
+        smtp_host=os.getenv("ECRF_SMTP_HOST", "").strip(),
+        smtp_port=int(os.getenv("ECRF_SMTP_PORT", "587")),
+        smtp_username=(os.getenv("ECRF_SMTP_USERNAME") or "").strip() or None,
+        smtp_password=(os.getenv("ECRF_SMTP_PASSWORD") or "").strip() or None,
+        smtp_starttls=_as_bool(os.getenv("ECRF_SMTP_STARTTLS"), default=True),
+        smtp_ssl=_as_bool(os.getenv("ECRF_SMTP_SSL"), default=False),
+        smtp_timeout_seconds=float(os.getenv("ECRF_SMTP_TIMEOUT_SECONDS", "15")),
+        mail_from=os.getenv("ECRF_MAIL_FROM", "").strip(),
         cors_allow_origins=_as_csv(os.getenv("ECRF_CORS_ALLOW_ORIGINS")),
         cors_allow_origin_regex=os.getenv("ECRF_CORS_ALLOW_ORIGIN_REGEX") or None,
         bind_host=os.getenv("ECRF_BIND_HOST", "127.0.0.1" if profile == "local" else "0.0.0.0"),
         port=int(os.getenv("ECRF_PORT", "8000")),
         open_browser=_as_bool(os.getenv("ECRF_OPEN_BROWSER"), default=(profile == "local")),
+        trust_proxy_headers=_as_bool(
+            os.getenv("ECRF_TRUST_PROXY_HEADERS"), default=(profile == "server")
+        ),
         data_dir=data_dir,
         bids_root=bids_root,
         templates_dir=templates_dir,

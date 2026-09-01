@@ -3,7 +3,6 @@
     :class="[
       'dashboard-layout',
       {
-        collapsed: sidebarCollapsed && !hideSidebar,
         'import-open': showImportData,
         'sidebar-hidden': hideSidebar
       }
@@ -52,37 +51,30 @@
     </header>
 
     <!-- Sidebar (HIDDEN for View Study + Add Data + Scratch Form) -->
-    <aside v-if="!hideSidebar" :class="['dashboard-sidebar', { collapsed: sidebarCollapsed }]">
-      <button type="button" class="hamburger-menu" @click="toggleSidebar" aria-label="Toggle sidebar">
-        <span></span>
-        <span></span>
-        <span></span>
-      </button>
+    <aside v-if="!hideSidebar" class="dashboard-sidebar">
       <nav>
         <ul>
           <!-- Study Management: only Admin, PI or Investigator -->
           <li
             v-if="isAdmin || isPI || isInvestigator"
             @click="setActiveSection('study-management')"
-            class="nav-item"
+            :class="['nav-item', { active: activeSection === 'study-management' && $route.name === 'Dashboard' }]"
             tabindex="0"
             @keydown.enter="setActiveSection('study-management')"
             @keydown.space.prevent="setActiveSection('study-management')"
           >
-            <i :class="icons.book || 'fas fa-book'" v-if="sidebarCollapsed"></i>
-            <span v-if="!sidebarCollapsed">Study Management</span>
+            <span>Study Management</span>
           </li>
 
           <!-- User Management: visible to all roles -->
           <li
             @click="() => { setActiveSection(''); navigate({ name: 'UserInfo' }) }"
-            class="nav-item"
+            :class="['nav-item', { active: $route.name === 'UserInfo' }]"
             tabindex="0"
             @keydown.enter="() => { setActiveSection(''); navigate({ name: 'UserInfo' }) }"
             @keydown.space.prevent="() => { setActiveSection(''); navigate({ name: 'UserInfo' }) }"
           >
-            <i :class="icons.user || 'fas fa-user'" v-if="sidebarCollapsed"></i>
-            <span v-if="!sidebarCollapsed">User Management</span>
+            <span>User Management</span>
           </li>
         </ul>
       </nav>
@@ -93,7 +85,6 @@
       :class="[
         'dashboard-main',
         {
-          expanded: sidebarCollapsed && !hideSidebar,
           'dashboard-index': $route.name === 'Dashboard'
         }
       ]"
@@ -143,128 +134,99 @@
         <!-- Dashboard home: Study Management -->
         <div v-else-if="activeSection === 'study-management'">
           <div class="study-management-header">
-            <h1 class="study-management-title">Study Management</h1>
+            <h1 class="study-management-title">Studies</h1>
             <p class="study-management-subtitle">
-              Create a new study, import data, or open an existing one to manage and collect data.
+              Open a study to manage its design and collect data.
             </p>
           </div>
 
-          <!-- Primary Actions -->
-          <div v-if="!showStudyOptions">
-            <!-- Cards -->
-            <div v-if="actionStyle === 'cards'" class="primary-actions-cards">
-              <button
-                v-if="isAdmin || isPI"
-                type="button"
-                class="action-card"
-                @click="navigate({ name: 'CreateStudy' })"
-              >
-                <span class="action-card-title">Create Study</span>
-                <span class="action-card-desc">Start a new protocol and forms</span>
-              </button>
-
-              <button
-                v-if="isAdmin || isPI || isInvestigator"
-                type="button"
-                class="action-card"
-                @click="toggleStudyOptions"
-              >
-                <span class="action-card-title">Open Existing Study</span>
-                <span class="action-card-desc">Continue work on an existing study</span>
-              </button>
-
-              <button
-                v-if="isAdmin || isPI || isInvestigator"
-                type="button"
-                class="action-card"
-                @click="openImportData"
-              >
-                <span class="action-card-title">Import Study (Data)</span>
-                <span class="action-card-desc">Ingest participant data from CSV/Excel</span>
-              </button>
-            </div>
-
-            <!-- Wide buttons -->
-            <div v-else class="button-container">
-              <button
-                v-if="isAdmin || isPI"
-                type="button"
-                @click="navigate({ name: 'CreateStudy' })"
-                class="btn-primary"
-              >
-                Create Study
-              </button>
-
-              <button
-                v-if="isAdmin || isPI || isInvestigator"
-                type="button"
-                @click="toggleStudyOptions"
-                class="btn-primary"
-              >
-                Open Existing Study
-              </button>
-
-              <button
-                v-if="isAdmin || isPI || isInvestigator"
-                type="button"
-                @click="openImportData"
-                class="btn-primary"
-              >
-                Import Study (Data)
-              </button>
-            </div>
-          </div>
-
           <!-- Existing Studies Table -->
-          <div v-if="showStudyOptions" class="study-dashboard">
-            <div class="back-header-row">
-              <div class="back-button-container">
-                <button type="button" @click="toggleStudyOptions" class="btn-minimal">Back</button>
+          <div class="study-dashboard">
+            <div class="studies-header-row">
+              <div>
+                <h2 class="existing-studies-title">Available studies</h2>
+                <p class="existing-studies-subtitle">Studies you own or can access.</p>
               </div>
-              <h2 class="existing-studies-title">Existing Studies</h2>
-            </div>
-
-            <div class="study-search-row">
-              <div class="study-search-box">
-                <i :class="icons.search || 'fas fa-search'" class="study-search-icon" aria-hidden="true"></i>
-                <input
-                  v-model.trim="studySearchQuery"
-                  type="search"
-                  class="study-search-input"
-                  placeholder="Search by study name or description"
-                  aria-label="Search studies by name or description"
-                />
+              <div v-if="isAdmin || isPI" class="create-study-action">
                 <button
-                  v-if="studySearchQuery"
                   type="button"
-                  class="study-search-clear"
-                  @click="clearStudySearch"
-                  aria-label="Clear study search"
+                  class="btn-primary-solid create-study-btn"
+                  @click="navigate({ name: 'CreateStudy' })"
                 >
-                  ×
+                  Create study
                 </button>
-              </div>
-              <div class="study-search-count" aria-live="polite">
-                <template v-if="studySearchQuery">
-                  Showing {{ filteredStudies.length }} of {{ studies.length }} studies
-                </template>
-                <template v-else>
-                  {{ studies.length }} studies
-                </template>
+                <small>Set up or import a new study</small>
               </div>
             </div>
 
-            <table class="study-table">
-              <thead>
-                <tr>
-                  <th>Study Name</th>
-                  <th>Description</th>
-                  <th>Created At</th>
-                  <th>Updated At</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
+            <div v-if="!authReady || studiesLoading" class="studies-state" role="status">
+              <strong>Loading studies…</strong>
+              <span>Retrieving the studies available to you.</span>
+            </div>
+
+            <div v-else-if="studiesError" class="studies-state studies-state--error" role="alert">
+              <strong>Unable to load studies</strong>
+              <span>{{ studiesError }}</span>
+              <button type="button" class="btn-minimal" @click="loadStudies">Retry</button>
+            </div>
+
+            <div v-else-if="!studies.length" class="studies-state studies-state--empty">
+              <template v-if="isAdmin || isPI">
+                <strong>No studies yet</strong>
+                <span>Create your first study to define visits, forms, and participant data collection.</span>
+                <button type="button" class="btn-primary-solid" @click="navigate({ name: 'CreateStudy' })">
+                  Create your first study
+                </button>
+              </template>
+              <template v-else>
+                <strong>No studies assigned to you</strong>
+                <span>You do not currently have access to any studies. Contact a study owner or administrator.</span>
+              </template>
+            </div>
+
+            <template v-else>
+              <div class="study-search-row">
+                <div class="study-search-box">
+                  <i :class="icons.search || 'fas fa-search'" class="study-search-icon" aria-hidden="true"></i>
+                  <input
+                    v-model.trim="studySearchQuery"
+                    type="search"
+                    class="study-search-input"
+                    placeholder="Search by study name or description"
+                    aria-label="Search studies by name or description"
+                  />
+                  <button
+                    v-if="studySearchQuery"
+                    type="button"
+                    class="study-search-clear"
+                    @click="clearStudySearch"
+                    aria-label="Clear study search"
+                  >
+                    ×
+                  </button>
+                </div>
+                <div class="study-search-count" aria-live="polite">
+                  <template v-if="studySearchQuery">
+                    Showing {{ filteredStudies.length }} of {{ studyCountLabel(studies.length) }}
+                  </template>
+                  <template v-else>
+                    {{ studyCountLabel(studies.length) }}
+                  </template>
+                </div>
+              </div>
+
+              <div class="study-table-wrap">
+                <table class="study-table">
+                <thead>
+                  <tr>
+                    <th>Study name</th>
+                    <th>Description</th>
+                    <th>Created</th>
+                    <th>Last updated</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
                 <tr
                   v-for="study in filteredStudies"
                   :key="study.id"
@@ -305,19 +267,19 @@
                   <td colspan="5" class="no-studies-cell">
                     <template v-if="studySearchQuery">
                       No studies found for “{{ studySearchQuery }}”.
-                    </template>
-                    <template v-else>
-                      No studies found.
+                      <button type="button" class="inline-clear-search" @click="clearStudySearch">Clear search</button>
                     </template>
                   </td>
                 </tr>
-              </tbody>
-            </table>
+                </tbody>
+                </table>
+              </div>
+            </template>
           </div>
         </div>
        </div>
        <BuildInfoFooter
-         v-if="!showStudyOptions && !showImportData"
+         v-if="!showImportData"
          class="dashboard-build-footer"
        />
       </template>
@@ -458,13 +420,12 @@ export default {
   components: { ImportStudy, BuildInfoFooter },
   data() {
     return {
-      sidebarCollapsed: false,
       activeSection: "study-management",
-      showStudyOptions: false,
       studies: [],
+      studiesLoading: false,
+      studiesError: "",
       studySearchQuery: "",
       icons,
-      actionStyle: "cards",
 
       showImportData: false,
       importMaximized: false,
@@ -483,19 +444,6 @@ export default {
     };
   },
   watch: {
-    "$route.query.openStudies"(val) {
-      if (!this.authReady) return;
-      if (this.showImportData) return;
-
-      if (val === "true") {
-        this.activeSection = "study-management";
-        this.showStudyOptions = true;
-        this.loadStudies();
-      } else {
-        this.activeSection = "study-management";
-        this.showStudyOptions = false;
-      }
-    },
     "$route.name"() {
       if (!this.authReady) return;
       this.syncFromRoute();
@@ -663,6 +611,11 @@ export default {
 
     clearStudySearch() {
       this.studySearchQuery = "";
+    },
+
+    studyCountLabel(count) {
+      const total = Number(count || 0);
+      return `${total} ${total === 1 ? "study" : "studies"}`;
     },
 
     setPageNoXScroll(on) {
@@ -856,13 +809,11 @@ export default {
         this.draftDialog.busy = false;
 
         // Keep user in Existing Studies list
-        await this.$router.push({ name: "Dashboard", query: { openStudies: "true" } }).catch(() => null);
+        await this.$router.push({ name: "Dashboard" }).catch(() => null);
 
         this.activeSection = "study-management";
         this.showImportData = false;
         this.importMaximized = false;
-        this.showStudyOptions = true;
-
         await this.loadStudies();
       } catch (e) {
         console.error("Failed to discard draft study:", e);
@@ -922,7 +873,6 @@ export default {
       const view = String(this.$route.query.view || "");
       if (view === "import-data") {
         this.showImportData = true;
-        this.showStudyOptions = false;
         this.activeSection = "study-management";
         return;
       }
@@ -931,17 +881,7 @@ export default {
       this.importMaximized = false;
       this.activeSection = "study-management";
 
-      const openStudies = String(this.$route.query.openStudies || "false");
-      if (openStudies === "true") {
-        this.showStudyOptions = true;
-        this.loadStudies();
-      } else {
-        this.showStudyOptions = false;
-      }
-    },
-
-    toggleSidebar() {
-      this.sidebarCollapsed = !this.sidebarCollapsed;
+      this.loadStudies();
     },
 
     async setActiveSection(section) {
@@ -956,31 +896,8 @@ export default {
 
       await this.$router.push({ name: "Dashboard" });
       this.activeSection = section;
-      this.showStudyOptions = false;
       this.showImportData = false;
       this.importMaximized = false;
-    },
-
-    toggleStudyOptions() {
-      if (!this.isLoggedIn) {
-        this.$router.push("/login").catch(() => null);
-        return;
-      }
-      if (this.mustChangePassword) {
-        this.redirectToPasswordChange();
-        return;
-      }
-
-      this.showStudyOptions = !this.showStudyOptions;
-      this.showImportData = false;
-      this.importMaximized = false;
-
-      if (this.showStudyOptions) {
-        this.$router.push({ name: "Dashboard", query: { openStudies: "true" } });
-        this.loadStudies();
-      } else {
-        this.$router.push({ name: "Dashboard", query: { openStudies: "false" } });
-      }
     },
 
     openImportData() {
@@ -993,7 +910,6 @@ export default {
         return;
       }
 
-      this.showStudyOptions = false;
       this.showImportData = true;
       this.importMaximized = false;
       this.$router.push({ name: "Dashboard", query: { view: "import-data" } });
@@ -1002,7 +918,13 @@ export default {
     closeImportData() {
       this.showImportData = false;
       this.importMaximized = false;
-      this.$router.push({ name: "Dashboard", query: { openStudies: "false" } });
+
+      if (this.$route.query.returnTo === "create-study") {
+        this.$router.push({ name: "CreateStudy", query: { step: "1" } });
+        return;
+      }
+
+      this.$router.push({ name: "Dashboard" });
     },
 
     toggleImportMaximize() {
@@ -1010,16 +932,19 @@ export default {
     },
 
     async loadStudies() {
+      if (this.studiesLoading) return;
       const token = this.$store.state.token;
       if (!token) {
         alert("Please log in again.");
         return this.$router.push("/login");
       }
+      this.studiesLoading = true;
+      this.studiesError = "";
       try {
         const { data } = await axios.get("/forms/studies", {
           headers: { Authorization: `Bearer ${token}` },
         });
-        this.studies = data;
+        this.studies = Array.isArray(data) ? data : [];
       } catch (e) {
         console.error("Failed to load studies:", e);
         if (e.response?.status === 401) {
@@ -1028,8 +953,10 @@ export default {
           localStorage.removeItem("access_token");
           this.$router.push("/login");
         } else {
-          alert("Failed to load studies.");
+          this.studiesError = e?.response?.data?.detail || "Please check your connection and try again.";
         }
+      } finally {
+        this.studiesLoading = false;
       }
     },
 
@@ -1208,8 +1135,9 @@ export default {
   justify-content: space-between;
   align-items: center;
   padding: 10px 20px;
-  background: #f5f5f5;
-  border-bottom: 1px solid #e0e0e0;
+  background: #ffffff;
+  border-bottom: 1px solid #e5e7eb;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
 }
 
 .logo-container img {
@@ -1236,7 +1164,7 @@ export default {
 .user-name {
   font-weight: 600;
   font-size: 14px;
-  color: #222;
+  color: #111827;
   max-width: 260px;
   white-space: nowrap;
   overflow: hidden;
@@ -1244,43 +1172,17 @@ export default {
 }
 .user-role {
   font-size: 12px;
-  color: #666;
+  color: #6b7280;
 }
 
 /* Sidebar */
 .dashboard-sidebar {
   grid-area: sidebar;
-  background: #f9f9f9;
+  background: #f8fafc;
   padding: 20px;
-  border-right: 1px solid #e0e0e0;
+  border-right: 1px solid #dbe4ee;
   transition: width 0.3s ease, padding 0.3s ease;
 }
-.dashboard-sidebar.collapsed {
-  width: 70px;
-  padding: 10px;
-}
-
-.hamburger-menu {
-  background: none;
-  border: none;
-  padding: 10px;
-  cursor: pointer;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 4px;
-}
-.hamburger-menu span {
-  display: block;
-  width: 20px;
-  height: 2px;
-  background: #333;
-  transition: all 0.3s ease;
-}
-.hamburger-menu:hover span {
-  background: #000;
-}
-
 /* Sidebar Navigation */
 .dashboard-sidebar nav ul {
   list-style: none;
@@ -1289,7 +1191,7 @@ export default {
 .nav-item {
   padding: 10px;
   font-size: 15px;
-  color: #555;
+  color: #4b5563;
   cursor: pointer;
   border-radius: 6px;
   transition: background 0.3s ease;
@@ -1298,7 +1200,14 @@ export default {
   gap: 10px;
 }
 .nav-item:hover {
-  background: #e8e8e8;
+  background: #eef2ff;
+  color: #1d4ed8;
+}
+.nav-item.active {
+  background: #eff6ff;
+  color: #1d4ed8;
+  font-weight: 700;
+  box-shadow: inset 3px 0 0 #2563eb;
 }
 
 /* Main Content */
@@ -1319,14 +1228,11 @@ export default {
 .dashboard-main.dashboard-index {
   display: flex;
   flex-direction: column;
+  background: #f8fafc;
 }
 
 .dashboard-build-footer {
   margin-top: auto;
-}
-
-.dashboard-main.expanded {
-  margin-left: -150px;
 }
 
 /* If sidebar hidden, ensure no funky shift */
@@ -1341,123 +1247,104 @@ export default {
   margin: 0;
 }
 
-/* Study Management Heading + Subtitle (centered) */
+/* Study Management Heading + Subtitle */
 .study-management-header {
   text-align: center;
   margin-bottom: 18px;
 }
 .study-management-title {
   margin: 0 0 6px 0;
-  color: #333;
+  color: #111827;
 }
 .study-management-subtitle {
   margin: 0 auto;
-  color: #666;
+  color: #4b5563;
   font-size: 14px;
-}
-
-/* Primary Actions — Cards (VERTICAL) */
-.primary-actions-cards {
-  display: grid;
-  grid-template-columns: minmax(260px, 520px);
-  justify-content: center;
-  gap: 18px;
-  margin-top: 20px;
-}
-
-.action-card {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 6px;
-  padding: 18px 20px;
-  background: #fafafa;
-  border: 1px solid #e3e3e3;
-  border-radius: 12px;
-  cursor: pointer;
-  text-align: left;
-  transition: transform 0.06s ease, box-shadow 0.2s ease, border-color 0.2s ease,
-    background 0.2s ease;
-}
-
-/* force desc visible even if some global CSS is hiding it */
-.action-card-title {
-  display: block !important;
-  font-size: 16px;
-  font-weight: 600;
-  color: #222;
-  line-height: 1.3;
-}
-.action-card-desc {
-  display: block !important;
-  font-size: 13px;
-  color: #666;
-  line-height: 1.35;
-  white-space: normal !important;
-  opacity: 1 !important;
-  visibility: visible !important;
-}
-
-.action-card:hover {
-  background: #f5f5f5;
-  border-color: #dcdcdc;
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.06);
-}
-.action-card:active {
-  transform: translateY(1px);
-}
-
-/* Primary Actions — Wide Buttons */
-.button-container {
-  display: flex;
-  gap: 16px;
-  margin-top: 20px;
-  justify-content: center;
-  flex-wrap: wrap;
-}
-.btn-primary {
-  min-width: 260px;
-  padding: 14px 24px;
-  background: #2f6fed;
-  border: 1px solid #245fe0;
-  border-radius: 10px;
-  font-size: 16px;
-  color: #fff;
-  cursor: pointer;
-  transition: background 0.15s ease, transform 0.02s ease, box-shadow 0.2s ease;
-}
-.btn-primary:hover {
-  background: #285fce;
-  box-shadow: 0 2px 10px rgba(47, 111, 237, 0.25);
-}
-.btn-primary:active {
-  transform: translateY(1px);
 }
 
 /* Study Dashboard Styles */
 .study-dashboard {
-  margin-top: 22px;
+  margin-top: 10px;
+  padding: 20px;
+  background: #ffffff;
+  border: 1px solid #dbe4ee;
+  border-radius: 14px;
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.04);
 }
 
-.back-header-row {
-  position: relative;
+.studies-header-row {
   display: flex;
   align-items: center;
-  justify-content: center;
-  min-height: 42px;
-  margin-bottom: 12px;
-}
-.back-button-container {
-  position: absolute;
-  left: 0;
-  top: 50%;
-  transform: translateY(-50%);
+  justify-content: space-between;
+  gap: 20px;
+  margin-bottom: 18px;
 }
 .existing-studies-title {
-  margin: 0;
+  margin: 0 0 4px;
   font-size: 20px;
-  color: #333;
+  color: #111827;
+  text-align: left;
+}
+.existing-studies-subtitle {
+  margin: 0;
+  color: #64748b;
+  font-size: 13px;
+}
+.create-study-action {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 5px;
+}
+.create-study-action small {
+  color: #64748b;
+  font-size: 12px;
+}
+.create-study-btn {
+  white-space: nowrap;
+}
+.studies-state {
+  min-height: 190px;
+  padding: 28px;
+  border: 1px dashed #cbd5e1;
+  border-radius: 12px;
+  background: #f8fafc;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  color: #475569;
   text-align: center;
+}
+.studies-state strong {
+  color: #0f172a;
+  font-size: 18px;
+}
+.studies-state span {
+  max-width: 560px;
+  line-height: 1.5;
+}
+.studies-state--error {
+  border-color: #fecaca;
+  background: #fff7f7;
+}
+.studies-state--error strong {
+  color: #991b1b;
+}
+.inline-clear-search {
+  margin-left: 8px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #2563eb;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 700;
+}
+.inline-clear-search:hover {
+  text-decoration: underline;
 }
 
 .study-search-row {
@@ -1485,10 +1372,10 @@ export default {
   width: 100%;
   min-height: 40px;
   padding: 9px 38px 9px 36px;
-  border: 1px solid #e0e0e0;
+  border: 1px solid #d1d5db;
   border-radius: 10px;
   background: #fff;
-  color: #333;
+  color: #111827;
   font-size: 14px;
   outline: none;
   transition: border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
@@ -1497,8 +1384,8 @@ export default {
   color: #9ca3af;
 }
 .study-search-input:focus {
-  border-color: #2f6fed;
-  box-shadow: 0 0 0 3px rgba(47, 111, 237, 0.12);
+  border-color: #2563eb;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
 }
 .study-search-clear {
   position: absolute;
@@ -1522,7 +1409,7 @@ export default {
   color: #111827;
 }
 .study-search-count {
-  color: #666;
+  color: #6b7280;
   font-size: 13px;
   white-space: nowrap;
 }
@@ -1537,10 +1424,14 @@ export default {
   text-align: center !important;
   color: #666 !important;
   padding: 22px 12px !important;
-  background: #fafafa;
+  background: #f8fafc;
 }
 
 /* Table */
+.study-table-wrap {
+  width: 100%;
+  overflow-x: auto;
+}
 .study-table {
   width: 100%;
   border-collapse: collapse;
@@ -1550,18 +1441,18 @@ export default {
 .study-table td {
   padding: 12px;
   text-align: left;
-  border-bottom: 1px solid #e8e8e8;
+  border-bottom: 1px solid #e5e7eb;
 }
 .study-table td {
-  color: #333;
+  color: #374151;
 }
 .study-table th {
-  background: #f5f5f5;
+  background: #f8fafc;
   font-weight: 600;
-  color: #555;
+  color: #374151;
 }
 .study-table tr:hover {
-  background-color: #f9f9f9;
+  background-color: #f8fafc;
 }
 .study-table tbody tr.study-row-search-match {
   background: #eff6ff;
@@ -1569,6 +1460,23 @@ export default {
 
 .study-table tbody tr.study-row-search-match:hover {
   background: #dbeafe;
+}
+
+@media (max-width: 700px) {
+  .studies-header-row {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .create-study-action,
+  .create-study-btn {
+    width: 100%;
+  }
+  .create-study-action {
+    align-items: flex-start;
+  }
+  .study-table {
+    min-width: 760px;
+  }
 }
 
 .study-table tbody tr.study-row-search-match td:first-child {
@@ -1615,12 +1523,12 @@ export default {
 
 /* Uniform minimal button */
 .btn-minimal {
-  background: none;
-  border: 1px solid #e0e0e0;
-  border-radius: 6px;
+  background: #ffffff;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
   padding: 8px 12px;
   font-size: 14px;
-  color: #555;
+  color: #374151;
   cursor: pointer;
   transition: background 0.3s ease, color 0.3s ease, border-color 0.3s ease;
   display: inline-flex;
@@ -1628,9 +1536,9 @@ export default {
   gap: 8px;
 }
 .btn-minimal:hover {
-  background: #e8e8e8;
-  color: #000;
-  border-color: #d6d6d6;
+  background: #f3f4f6;
+  color: #111827;
+  border-color: #9ca3af;
 }
 .btn-minimal.icon-only {
   padding: 8px 10px;
@@ -1641,8 +1549,8 @@ export default {
 
 /* solid/outline buttons for dialog */
 .btn-primary-solid {
-  border: 1px solid #245fe0;
-  background: #2f6fed;
+  border: 1px solid #2563eb;
+  background: #2563eb;
   color: #fff;
   border-radius: 10px;
   padding: 10px 14px;
@@ -1650,19 +1558,20 @@ export default {
   cursor: pointer;
 }
 .btn-primary-solid:hover {
-  background: #285fce;
+  background: #1d4ed8;
+  border-color: #1d4ed8;
 }
 .btn-primary-outline {
-  border: 1px solid #245fe0;
+  border: 1px solid #2563eb;
   background: transparent;
-  color: #245fe0;
+  color: #1d4ed8;
   border-radius: 10px;
   padding: 10px 14px;
   font-size: 14px;
   cursor: pointer;
 }
 .btn-primary-outline:hover {
-  background: rgba(47, 111, 237, 0.08);
+  background: #eff6ff;
 }
 .btn-danger {
   border-color: #fecaca !important;
@@ -1880,10 +1789,6 @@ export default {
     font-size: 14px;
   }
 
-  .action-card-desc {
-    font-size: 14px;
-  }
-
   .btn-minimal {
     font-size: 15px;
   }
@@ -1893,35 +1798,6 @@ export default {
     max-width: 1600px;
     margin: 0 auto;
   }
-
-  /* ---- ACTION CARDS -> HORIZONTAL GRID ---- */
-  .primary-actions-cards {
-    grid-template-columns: repeat(3, minmax(320px, 1fr));
-    justify-content: center;
-    gap: 28px;
-    margin-top: 32px;
-  }
-
-  /* cards become slightly larger */
-  .action-card {
-    padding: 24px 26px;
-    border-radius: 14px;
-  }
-
-  .action-card-title {
-    font-size: 18px;
-  }
-
-  .action-card-desc {
-    font-size: 15px;
-  }
-
-  /* optional: nicer hover presence on large screens */
-  .action-card:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
-  }
-
 
   .study-table th,
   .study-table td {

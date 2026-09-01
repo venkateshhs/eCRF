@@ -382,14 +382,45 @@
                 <span v-if="doc.bytes">{{ prettyBytes(doc.bytes) }}</span>
                 <span v-else-if="doc.size">{{ prettyBytes(doc.size) }}</span>
               </div>
-              <div v-if="doc.description" class="doc-desc">{{ doc.description }}</div>
+              <div v-if="isEditingFileDescription(doc)" class="doc-description-edit">
+                <label :for="`study-file-description-${doc.id}`">Description</label>
+                <textarea
+                  :id="`study-file-description-${doc.id}`"
+                  v-model="fileDescriptionDraft[fileDownloadKey(doc)]"
+                  class="pi-desc-input"
+                  rows="3"
+                  placeholder="Add a short description…"
+                  :disabled="isFileDescriptionBusy(doc)"
+                ></textarea>
+                <div class="doc-edit-actions">
+                  <button
+                    class="btn-primary compact"
+                    type="button"
+                    :disabled="isFileDescriptionBusy(doc)"
+                    @click="saveFileDescription(doc)"
+                  >
+                    {{ isFileDescriptionBusy(doc) ? "Saving…" : "Save" }}
+                  </button>
+                  <button
+                    class="btn-minimal compact"
+                    type="button"
+                    :disabled="isFileDescriptionBusy(doc)"
+                    @click="cancelFileDescriptionEdit(doc)"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+              <div v-else-if="doc.description" class="doc-desc">{{ doc.description }}</div>
+              <div v-else class="doc-desc muted">No description.</div>
               <div class="doc-path" :title="docPathTooltip(doc)">
                 <span class="label">On disk:</span>
                 <span class="file-path">{{ docRelativePath(doc) }}</span>
               </div>
 
-              <div v-if="canDownloadStudyAttachment" class="doc-actions">
+              <div v-if="canDownloadStudyAttachment || canManageStudyAttachments" class="doc-actions">
                 <button
+                  v-if="canDownloadStudyAttachment"
                   class="btn-minimal"
                   type="button"
                   :disabled="isDownloadBusy(doc)"
@@ -397,13 +428,31 @@
                 >
                   {{ isDownloadBusy(doc) ? "Downloading…" : "Download" }}
                 </button>
+                <button
+                  v-if="canManageStudyAttachments && !isEditingFileDescription(doc)"
+                  class="btn-minimal"
+                  type="button"
+                  :disabled="isFileDeleteBusy(doc)"
+                  @click="startFileDescriptionEdit(doc)"
+                >
+                  {{ doc.description ? "Edit description" : "Add description" }}
+                </button>
+                <button
+                  v-if="canManageStudyAttachments"
+                  class="btn-minimal danger"
+                  type="button"
+                  :disabled="isFileDeleteBusy(doc) || isFileDescriptionBusy(doc)"
+                  @click="openDocumentDeleteDialog(doc)"
+                >
+                  {{ isFileDeleteBusy(doc) ? "Deleting…" : "Delete" }}
+                </button>
               </div>
             </div>
           </div>
           <div v-else class="empty-state">No study-level attachments yet.</div>
 
           <!-- Attach New Study Documents -->
-          <div class="subsection">
+          <div v-if="canManageStudyAttachments" class="subsection">
             <h3 class="sub-title">Attach New Study Documents</h3>
 
             <div class="attach-row">
@@ -686,6 +735,45 @@
         </div>
       </section>
     </div>
+    <!-- Delete study document confirm dialog -->
+    <div
+      v-if="documentDeleteConfirm.visible"
+      class="modal-backdrop"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="delete-document-dialog-title"
+      @click.self="cancelDocumentDelete"
+    >
+      <div class="modal" tabindex="-1" @keydown.esc.prevent="cancelDocumentDelete">
+        <h3 id="delete-document-dialog-title" class="modal-title">Delete document?</h3>
+        <p class="modal-text">
+          This will permanently delete
+          <span class="strong">{{ documentDeleteName }}</span>
+          from the study.
+        </p>
+        <p class="modal-text" style="margin-top:-6px;">
+          This action cannot be undone.
+        </p>
+        <div class="modal-actions">
+          <button
+            class="btn-minimal"
+            type="button"
+            :disabled="documentDeleteConfirm.busy"
+            @click="cancelDocumentDelete"
+          >
+            Cancel
+          </button>
+          <button
+            class="btn-primary danger"
+            type="button"
+            :disabled="documentDeleteConfirm.busy"
+            @click="confirmDocumentDelete"
+          >
+            {{ documentDeleteConfirm.busy ? "Deleting…" : "Delete Document" }}
+          </button>
+        </div>
+      </div>
+    </div>
     <!-- Delete study confirm dialog -->
     <div
       v-if="deleteConfirm.visible"
@@ -747,6 +835,11 @@ export default {
       deleteConfirm: {
         visible: false,
         busy: false,
+      },
+      documentDeleteConfirm: {
+        visible: false,
+        busy: false,
+        target: null,
       },
       studyLoading: true,
       maintenanceMessage: "",
@@ -819,6 +912,9 @@ export default {
       pendingFiles: [],
       uploading: false,
       fileDownloadBusy: {},
+      fileDescriptionDraft: {},
+      fileDescriptionBusy: {},
+      fileDeleteBusy: {},
 
       // access management
       accessList: [],
@@ -906,6 +1002,10 @@ export default {
 
     canManageAccess() { return this.isAdmin || this.isOwner; },
     canSeeBidsButton() { return this.isAdmin || this.isOwner; },
+    canManageStudyAttachments() {
+      if (this.isAdmin || this.isOwner) return true;
+      return this.studyPerms?.add_data === true;
+    },
 
     // download attached study file access:
     // owner/admin OR grant with all 3 permissions
@@ -930,6 +1030,10 @@ export default {
       return (this.allUsers || [])
         .filter(u => u && u.id != null && !grantedIds.has(Number(u.id)))
         .sort((a, b) => this.userDisplay(a).localeCompare(this.userDisplay(b)));
+    },
+    documentDeleteName() {
+      const doc = this.documentDeleteConfirm.target;
+      return doc?.file_name || doc?.name || "this document";
     },
   },
   watch: {
@@ -1129,6 +1233,115 @@ export default {
     isDownloadBusy(doc) {
       const key = this.fileDownloadKey(doc);
       return !!this.fileDownloadBusy[key];
+    },
+
+    isEditingFileDescription(doc) {
+      return Object.prototype.hasOwnProperty.call(
+        this.fileDescriptionDraft,
+        this.fileDownloadKey(doc)
+      );
+    },
+
+    isFileDescriptionBusy(doc) {
+      return !!this.fileDescriptionBusy[this.fileDownloadKey(doc)];
+    },
+
+    isFileDeleteBusy(doc) {
+      return !!this.fileDeleteBusy[this.fileDownloadKey(doc)];
+    },
+
+    startFileDescriptionEdit(doc) {
+      const key = this.fileDownloadKey(doc);
+      this.fileDescriptionDraft = {
+        ...this.fileDescriptionDraft,
+        [key]: doc?.description || "",
+      };
+    },
+
+    cancelFileDescriptionEdit(doc) {
+      const key = this.fileDownloadKey(doc);
+      const next = { ...this.fileDescriptionDraft };
+      delete next[key];
+      this.fileDescriptionDraft = next;
+    },
+
+    async saveFileDescription(doc) {
+      const key = this.fileDownloadKey(doc);
+      const token = this.token;
+      if (!token) {
+        this.$router.push("/login");
+        return;
+      }
+
+      this.fileDescriptionBusy = { ...this.fileDescriptionBusy, [key]: true };
+      try {
+        const { data } = await axios.patch(
+          `/forms/studies/${this.studyId}/files/${doc.id}`,
+          { description: this.fileDescriptionDraft[key] || "" },
+          {
+            headers: { Authorization: `Bearer ${token}` },
+            params: { audit_label: "Update Study Document Description" },
+          }
+        );
+        const index = this.allFiles.findIndex((file) => Number(file.id) === Number(doc.id));
+        if (index >= 0) this.allFiles.splice(index, 1, data);
+        this.cancelFileDescriptionEdit(doc);
+      } catch (err) {
+        console.error("Description update failed:", err?.response?.data || err.message);
+        alert(this.apiErrorDetail(err) || "Failed to update the document description.");
+      } finally {
+        const next = { ...this.fileDescriptionBusy };
+        delete next[key];
+        this.fileDescriptionBusy = next;
+      }
+    },
+
+    openDocumentDeleteDialog(doc) {
+      this.documentDeleteConfirm = {
+        visible: true,
+        busy: false,
+        target: doc,
+      };
+      this.$nextTick(() => {
+        const dialogs = this.$el?.querySelectorAll(".modal");
+        dialogs?.[dialogs.length - 1]?.focus();
+      });
+    },
+
+    cancelDocumentDelete() {
+      if (this.documentDeleteConfirm.busy) return;
+      this.documentDeleteConfirm = { visible: false, busy: false, target: null };
+    },
+
+    async confirmDocumentDelete() {
+      const doc = this.documentDeleteConfirm.target;
+      if (!doc) return;
+      const key = this.fileDownloadKey(doc);
+      const token = this.token;
+      if (!token) {
+        this.$router.push("/login");
+        return;
+      }
+
+      this.documentDeleteConfirm.busy = true;
+      this.fileDeleteBusy = { ...this.fileDeleteBusy, [key]: true };
+      try {
+        await axios.delete(`/forms/studies/${this.studyId}/files/${doc.id}`, {
+          headers: { Authorization: `Bearer ${token}` },
+          params: { audit_label: "Delete Study Document" },
+        });
+        this.allFiles = this.allFiles.filter((file) => Number(file.id) !== Number(doc.id));
+        this.cancelFileDescriptionEdit(doc);
+        this.documentDeleteConfirm = { visible: false, busy: false, target: null };
+      } catch (err) {
+        console.error("Document deletion failed:", err?.response?.data || err.message);
+        alert(this.apiErrorDetail(err) || "Failed to delete the study document.");
+        this.documentDeleteConfirm.busy = false;
+      } finally {
+        const next = { ...this.fileDeleteBusy };
+        delete next[key];
+        this.fileDeleteBusy = next;
+      }
     },
 
     async downloadAttachedFile(doc) {
@@ -1981,6 +2194,9 @@ export default {
 .doc-name { font-weight: 700; word-break: break-word; }
 .doc-meta { font-size: 12px; margin: 6px 0 8px; color: #6b7280; }
 .doc-desc { margin-top: 4px; font-size: 13px; color: #374151; }
+.doc-description-edit { margin-top: 8px; display: flex; flex-direction: column; gap: 6px; }
+.doc-description-edit label { font-size: 12px; color: #6b7280; }
+.doc-edit-actions { display: flex; gap: 8px; }
 
 .doc-path { margin-top: 6px; font-size: 12px; color: #6b7280; display: flex; gap: 6px; align-items: flex-start; }
 .doc-path .label { flex: 0 0 auto; color: #6b7280; }
@@ -1990,6 +2206,8 @@ export default {
   margin-top: 12px;
   display: flex;
   justify-content: flex-start;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 /* Attach */
@@ -2012,6 +2230,9 @@ export default {
 .btn-minimal { background: none; border: 1px solid #e0e0e0; border-radius: 8px; padding: 8px 12px; font-size: 14px; color: #555; cursor: pointer; transition: background 0.3s ease, color 0.3s ease, border-color 0.3s ease; }
 .btn-minimal:hover { background: #e8e8e8; color: #000; border-color: #d6d6d6; }
 .btn-minimal.icon-only { padding: 8px 10px; }
+.btn-minimal.danger { color: #b91c1c; border-color: #fecaca; }
+.btn-minimal.danger:hover { color: #991b1b; background: #fef2f2; border-color: #fca5a5; }
+.btn-primary.compact, .btn-minimal.compact { padding: 6px 10px; font-size: 13px; }
 
 /* Empty + util */
 .empty-state { color: #6b7280; }

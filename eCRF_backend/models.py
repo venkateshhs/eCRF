@@ -28,6 +28,11 @@ class User(Base):
 
     # sessions (one-to-many)
     sessions = relationship("UserSession", back_populates="user", cascade="all, delete-orphan")
+    password_reset_tokens = relationship(
+        "PasswordResetToken",
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )
 
 
 class UserProfile(Base):
@@ -260,3 +265,30 @@ class UserSession(Base):
     revoked_at = Column(DateTime(timezone=True), nullable=True)
 
     user = relationship("User", back_populates="sessions")
+
+
+class PasswordResetToken(Base):
+    """Hashed, one-time tokens used by the public password-reset flow."""
+
+    __tablename__ = "password_reset_tokens"
+    __table_args__ = (
+        UniqueConstraint("token_hash", name="uq_password_reset_tokens_hash"),
+        Index("ix_password_reset_tokens_user_created", "user_id", "created_at"),
+        Index("ix_password_reset_tokens_ip_created", "requested_ip", "created_at"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(
+        Integer,
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    purpose = Column(String(32), nullable=False, index=True)
+    token_hash = Column(String(64), nullable=False, unique=True)
+    requested_ip = Column(String(64), nullable=True)
+    created_at = Column(DateTime(timezone=True), default=local_now, nullable=False)
+    expires_at = Column(DateTime(timezone=True), nullable=False, index=True)
+    used_at = Column(DateTime(timezone=True), nullable=True)
+
+    user = relationship("User", back_populates="password_reset_tokens")

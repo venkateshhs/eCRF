@@ -76,11 +76,6 @@ def build_compliance_summary(
     latest = _latest_entries(entries or [])
 
     statuses = [_status(subject) for subject in subjects]
-    active = sum(1 for value in statuses if value == ACTIVE)
-    retained = sum(1 for value in statuses if value == "DROPPED_DATA_RETAINED")
-    deleted = sum(1 for value in statuses if value == DELETED)
-    dropped = sum(1 for value in statuses if value.startswith("DROPPED_") or value.startswith("DROPOUT_"))
-
     visit_stats = [
         {
             "visit_index": index,
@@ -115,9 +110,10 @@ def build_compliance_summary(
             "progress_percent_sum": 0,
         }
 
-    subject_totals: Dict[int, Dict[str, int]] = {}
-    distribution = {"complete": 0, "partial": 0, "not_started": 0}
-    overall_progress_percent_sum = 0
+    candidate_rows: List[Dict[str, Any]] = []
+    started_subjects = set()
+    started_visits = set()
+    subject_groups: Dict[int, int] = {}
 
     for subject_index, subject in enumerate(subjects):
         subject_obj = subject if isinstance(subject, dict) else {}
@@ -125,14 +121,12 @@ def build_compliance_summary(
         group_index = _group_index(subject_obj, groups)
         if group_index not in group_stats:
             group_index = 0
-        group_stats[group_index]["recruited_subjects"] += 1
         if status_value == DELETED:
             continue
 
-        group_stats[group_index]["evaluable_subjects"] += 1
-        totals = subject_totals.setdefault(subject_index, {"completed_visits": 0, "expected_visits": 0})
+        subject_groups[subject_index] = group_index
 
-        for visit_index, visit_stat in enumerate(visit_stats):
+        for visit_index in range(len(visit_stats)):
             entry = latest.get((subject_index, visit_index, group_index)) or {}
             calculated_progress = calculate_overall_entry_progress(
                 study_data=study_data,
@@ -162,25 +156,86 @@ def build_compliance_summary(
                 or "none"
             ).strip().lower()
 
-            visit_stat["expected_subjects"] += 1
-            visit_stat["progress_percent_sum"] += progress_percent
-            visit_stat["skipped_fields"] += skipped
-            group_stats[group_index]["expected_subject_visits"] += 1
-            group_stats[group_index]["progress_percent_sum"] += progress_percent
-            totals["expected_visits"] += 1
-            overall_progress_percent_sum += progress_percent
+            candidate_rows.append(
+                {
+                    "subject_index": subject_index,
+                    "visit_index": visit_index,
+                    "group_index": group_index,
+                    "progress_percent": progress_percent,
+                    "skipped": skipped,
+                    "progress_status": progress_status,
+                }
+            )
+            if (
+                progress_status in {"complete", "partial", "skipped"}
+                or progress_percent > 0
+                or skipped > 0
+            ):
+                started_subjects.add(subject_index)
+                started_visits.add(visit_index)
 
-            if progress_status == "complete" or (progress_percent >= 100 and skipped == 0):
-                visit_stat["completed_subjects"] += 1
-                totals["completed_visits"] += 1
-                distribution["complete"] += 1
-            elif progress_status in {"partial", "skipped"} or progress_percent > 0 or skipped > 0:
-                visit_stat["partial_subjects"] += 1
-                distribution["partial"] += 1
-            else:
-                visit_stat["not_started_subjects"] += 1
-                distribution["not_started"] += 1
+    for subject_index in started_subjects:
+        group_stat = group_stats[subject_groups[subject_index]]
+        group_stat["recruited_subjects"] += 1
+        group_stat["evaluable_subjects"] += 1
 
+    recruited_statuses = [statuses[index] for index in started_subjects]
+    active = sum(1 for value in recruited_statuses if value == ACTIVE)
+    retained = sum(1 for value in recruited_statuses if value == "DROPPED_DATA_RETAINED")
+    deleted = sum(1 for value in recruited_statuses if value == DELETED)
+    dropped = sum(
+        1
+        for value in recruited_statuses
+        if value.startswith("DROPPED_") or value.startswith("DROPOUT_")
+    )
+
+    subject_totals: Dict[int, Dict[str, int]] = {}
+    distribution = {"complete": 0, "partial": 0, "not_started": 0}
+    overall_progress_percent_sum = 0
+
+    for row in candidate_rows:
+        subject_index = row["subject_index"]
+        visit_index = row["visit_index"]
+        if subject_index not in started_subjects or visit_index not in started_visits:
+            continue
+
+        group_index = row["group_index"]
+        progress_percent = row["progress_percent"]
+        skipped = row["skipped"]
+        progress_status = row["progress_status"]
+        visit_stat = visit_stats[visit_index]
+        totals = subject_totals.setdefault(
+            subject_index,
+            {"completed_visits": 0, "expected_visits": 0, "progress_percent_sum": 0},
+        )
+
+        visit_stat["expected_subjects"] += 1
+        visit_stat["progress_percent_sum"] += progress_percent
+        visit_stat["skipped_fields"] += skipped
+        group_stats[group_index]["expected_subject_visits"] += 1
+        group_stats[group_index]["progress_percent_sum"] += progress_percent
+        totals["expected_visits"] += 1
+        totals["progress_percent_sum"] += progress_percent
+        overall_progress_percent_sum += progress_percent
+
+        if progress_status == "complete" or (progress_percent >= 100 and skipped == 0):
+            visit_stat["completed_subjects"] += 1
+            totals["completed_visits"] += 1
+            distribution["complete"] += 1
+        elif (
+            progress_status in {"partial", "skipped"}
+            or progress_percent > 0
+            or skipped > 0
+        ):
+            visit_stat["partial_subjects"] += 1
+            distribution["partial"] += 1
+        else:
+            visit_stat["not_started_subjects"] += 1
+            distribution["not_started"] += 1
+
+    visit_stats = [
+        stat for stat in visit_stats if stat["visit_index"] in started_visits
+    ]
     for stat in visit_stats:
         stat["subject_completion_percent"] = _percent(
             stat["completed_subjects"], stat["expected_subjects"]
@@ -199,25 +254,59 @@ def build_compliance_summary(
         group_rows.append(stat)
 
     expected_subject_visits = sum(row["expected_subjects"] for row in visit_stats)
-    evaluable_subjects = sum(1 for value in statuses if value != DELETED)
-    subjects_with_expected_data = sum(1 for row in subject_totals.values() if row["expected_visits"] > 0)
+    evaluable_subjects = len(started_subjects)
+    subjects_with_expected_data = sum(
+        1 for row in subject_totals.values() if row["expected_visits"] > 0
+    )
     completed_subjects = sum(
         1
         for row in subject_totals.values()
         if row["expected_visits"] > 0 and row["completed_visits"] >= row["expected_visits"]
     )
+    subject_completeness = [
+        _percent(row["progress_percent_sum"], row["expected_visits"] * 100)
+        for row in subject_totals.values()
+        if row["expected_visits"] > 0
+    ]
+    completeness_histogram = []
+    for lower_bound in range(0, 100, 10):
+        upper_bound = lower_bound + 10
+        completeness_histogram.append(
+            {
+                "range_start": lower_bound,
+                "range_end": upper_bound,
+                "subject_count": sum(
+                    1
+                    for value in subject_completeness
+                    if lower_bound <= value < upper_bound
+                    or (upper_bound == 100 and value == 100)
+                ),
+            }
+        )
+    completeness_threshold_curve = [
+        {
+            "threshold": threshold,
+            "subject_count": sum(1 for value in subject_completeness if value >= threshold),
+        }
+        for threshold in range(101)
+    ]
 
     return {
         "recruitment": {
-            "recruited_subjects": len(subjects),
+            "recruited_subjects": len(started_subjects),
             "active_subjects": active,
             "dropped_subjects": dropped,
             "dropped_data_retained": retained,
             "dropped_data_deleted": deleted,
-            "dropout_percent": _percent(dropped, len(subjects)),
+            "dropout_percent": _percent(dropped, len(started_subjects)),
         },
         "compliance": {
             "evaluable_subjects": evaluable_subjects,
+            "started_visits": len(started_visits),
+            "excluded_not_started_subjects": sum(
+                1 for value in statuses if value != DELETED
+            ) - evaluable_subjects,
+            "excluded_not_started_visits": len(visits) - len(started_visits),
             "subjects_with_expected_data": subjects_with_expected_data,
             "completed_subjects": completed_subjects,
             "subject_completion_percent": _percent(completed_subjects, subjects_with_expected_data),
@@ -226,6 +315,8 @@ def build_compliance_summary(
             "skipped_fields": sum(row["skipped_fields"] for row in visit_stats),
         },
         "subject_visit_status": distribution,
+        "completeness_histogram": completeness_histogram,
+        "completeness_threshold_curve": completeness_threshold_curve,
         "visit_stats": visit_stats,
         "group_stats": group_rows,
     }

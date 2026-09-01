@@ -66,6 +66,15 @@ def _column_name(value: Any, fallback: str) -> str:
     return text[:80]
 
 
+def _field_column_source(field: Dict[str, Any]) -> Any:
+    """Prefer the label when the builder-generated name is not meaningful."""
+    name = str(field.get("name") or "").strip()
+    generated_name = bool(re.search(r"_\d{13}(?:_\d+)?$", name))
+    if generated_name:
+        return field.get("label") or field.get("title") or name
+    return name or field.get("label") or field.get("title")
+
+
 def _bids_label(value: Any, fallback: str) -> str:
     return re.sub(r"[^A-Za-z0-9]+", "", str(value or "").strip())[:64] or fallback
 
@@ -82,7 +91,7 @@ def _field_catalog(schema: Dict[str, Any]) -> List[Tuple[int, int, Dict[str, Any
     for section_index, section in enumerate(schema.get("selectedModels") or []):
         section_name = _display(section, f"Section {section_index + 1}")
         for field_index, field in enumerate(section.get("fields") or []):
-            field_name = field.get("name") or field.get("label") or field.get("title")
+            field_name = _field_column_source(field)
             base = _column_name(field_name, f"section_{section_index + 1}_field_{field_index + 1}")
             used[base] = used.get(base, 0) + 1
             column = base if used[base] == 1 else f"{base}_{used[base]}"
@@ -241,10 +250,7 @@ def _combined_version_export(
         lineage = lineages[key]
         latest_version = max(lineage["instances"])
         latest_field = lineage["instances"][latest_version][3]
-        base = _column_name(
-            latest_field.get("name") or latest_field.get("label") or latest_field.get("title"),
-            "field",
-        )
+        base = _column_name(_field_column_source(latest_field), "field")
         used_bases[base] = used_bases.get(base, 0) + 1
         lineage["base"] = base if used_bases[base] == 1 else f"{base}_{used_bases[base]}"
 
@@ -305,17 +311,16 @@ def _combined_version_export(
                     "kind": "scalar_common", "instances": scalar_instances,
                 }, metadata)
             else:
-                for version in version_list:
-                    instance = scalar_instances.get(version)
-                    available = instance is not None
-                    source_field = instance[3] if available else latest_scalar_instance[3]
+                for version in sorted(scalar_instances):
+                    instance = scalar_instances[version]
+                    source_field = instance[3]
                     column = f"{base}__v{version:03d}"
                     metadata = {
                         "LongName": f"{_display(source_field, base)} — version {version}",
                         "Description": str(source_field.get("description") or f"{_display(latest_section, 'Form')} — {_display(source_field, base)}"),
                         "StudyVersion": version,
                         "VersionedBecauseFormChanged": True,
-                        "FieldAvailableInVersion": available,
+                        "FieldAvailableInVersion": True,
                         "SourceFieldID": _stable_id(source_field) or field_id,
                         "SourceType": str(source_field.get("type") or ""),
                     }
@@ -395,24 +400,24 @@ def _combined_version_export(
                             "row_index": row_index,
                         }, metadata)
             else:
-                for version in version_list:
-                    field_instance = table_instances.get(version)
-                    table_available = field_instance is not None
+                for version in sorted(table_instances):
+                    field_instance = table_instances[version]
                     for row_index in range(max_rows):
                         for column_key in table_column_order:
                             table_lineage = table_columns[column_key]
                             table_column_instance = table_lineage["instances"].get(version)
-                            available = bool(table_available and table_column_instance)
-                            source_column = table_column_instance[1] if table_column_instance else table_lineage["instances"][max(table_lineage["instances"])][1]
+                            if table_column_instance is None:
+                                continue
+                            source_column = table_column_instance[1]
                             column = f"{base}__v{version:03d}__row{row_index + 1:02d}__{table_lineage['base']}"
                             metadata = {
                                 "LongName": f"{_display(latest_field, base)} — version {version}, row {row_index + 1}, {_display(source_column, table_lineage['base'])}",
                                 "Description": "Flattened repeating-table cell from an independent version snapshot",
                                 "StudyVersion": version,
                                 "VersionedBecauseFormChanged": True,
-                                "FieldAvailableInVersion": table_available,
-                                "TableColumnAvailableInVersion": available,
-                                "SourceFieldID": _stable_id(field_instance[3]) if field_instance else field_id,
+                                "FieldAvailableInVersion": True,
+                                "TableColumnAvailableInVersion": True,
+                                "SourceFieldID": _stable_id(field_instance[3]) or field_id,
                                 "SourceType": str(source_column.get("type") or ""),
                                 "TableRowNumber": row_index + 1,
                                 "SourceTableColumnID": _stable_id(source_column) or None,
@@ -466,7 +471,7 @@ def _combined_version_export(
                     if row_index < len(table_rows) and table_column_instance:
                         column_index, table_column = table_column_instance
                         value = _read_key(table_rows[row_index], _candidate_keys(table_column, column_index, "column_"))
-            row[descriptor["column"]] = _cell(value) if value is not None else "n/a"
+            row[descriptor["column"]] = _cell(value) if value is not None else ""
         rows.append(row)
 
     columns = ["participant_id", "visit", "group"] + [descriptor["column"] for descriptor in descriptors]
