@@ -30,7 +30,7 @@ export default {
 
 .header-inner {
   width: min(1180px, calc(100% - 40px));
-  min-height: 72px;
+  min-height: 60px;
   margin: 0 auto;
   display: flex;
   align-items: center;
@@ -39,6 +39,7 @@ export default {
 }
 
 .brand {
+  flex: 0 0 auto;
   display: inline-flex;
   align-items: center;
   gap: 10px;
@@ -47,7 +48,8 @@ export default {
 }
 
 .brand img {
-  width: 150px;
+  flex: 0 0 auto;
+  width: 136px;
   height: auto;
   display: block;
 }
@@ -61,7 +63,7 @@ nav {
 }
 
 nav a {
-  padding: 9px 11px;
+  padding: 8px 10px;
   border-radius: 8px;
   color: #42526b;
   font-size: 14px;
@@ -93,18 +95,21 @@ nav .contact-link:focus-visible {
 @media (max-width: 720px) {
   .header-inner {
     width: min(100% - 28px, 1180px);
-    align-items: flex-start;
-    padding: 16px 0;
+    min-height: 52px;
+    padding: 0;
   }
 
-  .brand img { width: 132px; }
+  .brand img { width: 112px; }
   nav { gap: 2px; }
   nav a { padding: 7px 8px; font-size: 13px; }
 }
 
 @media (max-width: 520px) {
-  .header-inner { display: block; }
-  nav { margin-top: 12px; justify-content: flex-start; }
+  .header-inner { width: calc(100% - 20px); gap: 8px; }
+  .brand img { width: 94px; }
+  nav { width: auto; flex: 0 0 auto; flex-wrap: nowrap; justify-content: flex-end; }
+  nav a { padding: 6px 5px; font-size: 10px; }
+  nav .contact-link { padding-inline: 8px; }
   nav .contact-link { margin-left: 0; }
 }
 </style>
