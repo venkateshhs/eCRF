@@ -24,6 +24,8 @@ from .settings import get_settings
 from .entry_progress import calculate_overall_entry_progress
 from .compliance import build_compliance_summary
 from .study_export import ExportOptions, build_analysis_export
+from .shared_link_email import send_shared_link_email
+from .logger import logger
 
 router = APIRouter(prefix="/forms", tags=["forms"])
 repo = DataladStudyRepo()
@@ -2245,8 +2247,33 @@ def create_share_link(
         expires_at=expires_at,
         allowed_section_ids=allowed_section_ids,
     )
+    frontend_base = settings.frontend_base_url or os.getenv("FRONTEND_BASE_URL", "").rstrip("/")
+    if not frontend_base:
+        frontend_base = f"{request.url.scheme}://{request.headers.get('host', request.url.netloc)}"
+    link = f"{frontend_base}/shared/{token}"
+
     db.add(access)
-    db.commit()
+    try:
+        db.flush()
+        if payload.recipient_email:
+            send_shared_link_email(
+                recipient=str(payload.recipient_email),
+                shared_url=link,
+                expires_at=expires_at,
+            )
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        if not payload.recipient_email:
+            raise
+        logger.error(
+            "Shared-link email delivery failed for study_id=%s subject_index=%s visit_index=%s error_type=%s",
+            payload.study_id,
+            payload.subject_index,
+            payload.visit_index,
+            type(exc).__name__,
+        )
+        raise HTTPException(status_code=503, detail="Unable to send the shared-link email.")
     db.refresh(access)
     repo.save_share_link(
         study_id=payload.study_id,
@@ -2264,11 +2291,7 @@ def create_share_link(
         user_id=current_user.id,
     )
 
-    frontend_base = os.getenv("FRONTEND_BASE_URL", "").rstrip("/")
-    if not frontend_base:
-        frontend_base = f"{request.url.scheme}://{request.headers.get('host', request.url.netloc)}"
-
-    return {"token": token, "link": f"{frontend_base}/shared/{token}"}
+    return {"token": token, "link": link, "email_sent": bool(payload.recipient_email)}
 
 
 @router.get("/shared-api/{token}", response_model=schemas.SharedFormAccessOut)

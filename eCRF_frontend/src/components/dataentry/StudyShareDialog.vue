@@ -93,6 +93,23 @@
           </div>
         </div>
 
+        <div v-if="!bulkEnabled" class="form-row recipient-email-row">
+          <label for="share-recipient-email">Recipient email (optional)</label>
+          <input
+            id="share-recipient-email"
+            v-model.trim="localRecipientEmail"
+            type="email"
+            autocomplete="off"
+            placeholder="patient@example.org"
+          />
+          <div class="selection-hint">
+            The link is sent immediately. This address is not saved in case-e.
+          </div>
+          <div v-if="localRecipientEmail && !isValidEmail(localRecipientEmail)" class="input-error">
+            Enter a valid email address.
+          </div>
+        </div>
+
         <div v-if="!bulkEnabled" class="form-row">
           <div class="sections-header">
             <label>Allowed Sections</label>
@@ -147,6 +164,7 @@
             Bulk links can only be generated for subjects in the same group as the selected subject
             because section assignments are group-specific. Subjects from other groups are not shown.
             To generate links for another group, select a subject from that group and open this dialog again.
+            Recipient addresses are used only for immediate delivery and are not saved in case-e.
           </p>
 
           <div v-if="bulkEnabled" class="bulk-grid">
@@ -164,18 +182,30 @@
               </div>
 
               <div class="bulk-list">
-                <label
+                <div
                   v-for="subject in sameGroupSubjects"
                   :key="'bulk-subject-' + subject.index"
                   class="bulk-row"
                 >
+                  <label class="bulk-subject-choice">
+                    <input
+                      type="checkbox"
+                      :value="subject.index"
+                      v-model="selectedSubjectIndexes"
+                    />
+                    <span>{{ subject.id }}</span>
+                  </label>
                   <input
-                    type="checkbox"
-                    :value="subject.index"
-                    v-model="selectedSubjectIndexes"
+                    class="bulk-email-input"
+                    type="email"
+                    autocomplete="off"
+                    :disabled="!isBulkSubjectSelected(subject.index)"
+                    :value="bulkRecipientEmails[subject.index] || ''"
+                    placeholder="Email (optional)"
+                    :aria-label="`Recipient email for ${subject.id}`"
+                    @input="setBulkRecipientEmail(subject.index, $event.target.value)"
                   />
-                  <span>{{ subject.id }}</span>
-                </label>
+                </div>
 
                 <div v-if="!sameGroupSubjects.length" class="bulk-empty">
                   No subjects available in this group.
@@ -273,6 +303,7 @@
                 <thead>
                   <tr>
                     <th>Subject</th>
+                    <th>Email</th>
                     <th>Group</th>
                     <th>Visit</th>
                     <th>Selected Sections</th>
@@ -287,6 +318,7 @@
                     :key="row.subjectIndex + '-' + row.visitIndex"
                   >
                     <td>{{ row.subjectId }}</td>
+                    <td>{{ row.recipientEmail || "Link only" }}</td>
                     <td>{{ row.group || "Unassigned" }}</td>
                     <td>{{ row.visitName }}</td>
                     <td>
@@ -310,7 +342,7 @@
                   </tr>
 
                   <tr v-if="!bulkPreviewRows.length">
-                    <td colspan="6" class="manager-empty-cell">
+                    <td colspan="7" class="manager-empty-cell">
                       Select at least one subject and one visit.
                     </td>
                   </tr>
@@ -323,6 +355,10 @@
         <!-- SINGLE GENERATED LINK -->
         <div v-if="generatedLink" class="generated-link-card">
           <label class="generated-label">Generated Link</label>
+
+          <div v-if="generatedRecipientEmail" class="delivery-summary">
+            Email sent to <strong>{{ generatedRecipientEmail }}</strong>. The address has not been saved.
+          </div>
 
           <div class="generated-link-row">
             <input
@@ -366,6 +402,9 @@
               <div>
                 <strong>{{ link.subjectId }}</strong>
                 <span> — {{ link.visitName }}</span>
+                <div class="delivery-summary compact">
+                  {{ link.recipientEmail ? `Sent to ${link.recipientEmail}` : "Link only (no email sent)" }}
+                </div>
               </div>
 
               <button
@@ -392,10 +431,10 @@
               v-if="!generatedLink && !generatedLinks.length && !bulkEnabled"
               type="button"
               class="btn-primary"
-              :disabled="generating || !selectedSectionIds.length"
+              :disabled="generating || !selectedSectionIds.length || !singleEmailValid"
               @click="onGenerate"
             >
-              {{ generating ? "Generating Link…" : "Generate Link" }}
+              {{ generating ? "Generating Link…" : (localRecipientEmail ? "Generate & Send Link" : "Generate Link") }}
             </button>
 
           <button
@@ -542,6 +581,7 @@ export default {
     },
 
     generatedLink: { type: String, default: "" },
+    generatedRecipientEmail: { type: String, default: "" },
     copyStatus: { type: String, default: "" },
     generating: { type: Boolean, default: false },
   },
@@ -562,12 +602,14 @@ export default {
         localPermission: "view",
         localMaxUses: 1,
         localExpiresInDays: 7,
+        localRecipientEmail: "",
         selectedSectionIds: [],
         activeMode: "create",
         bulkEnabled: false,
         selectedSubjectIndexes: [],
         selectedVisitIndexes: [],
         bulkSelectedSectionIdsByVisit: {},
+        bulkRecipientEmails: {},
       };
     },
 
@@ -663,6 +705,10 @@ export default {
               return matched?.title || id;
             });
 
+            const recipientEmail = String(this.bulkRecipientEmails?.[subjectIndex] || "").trim();
+            const emailValid = !recipientEmail || this.isValidEmail(recipientEmail);
+            const ready = selectedIds.length && emailValid;
+
             rows.push({
               subjectIndex: Number(subjectIndex),
               subjectId: subject.id,
@@ -671,10 +717,13 @@ export default {
               visitName: visitRow.visitName,
               sectionIds: selectedIds,
               sectionTitles: selectedTitles,
-              status: selectedIds.length ? "Ready" : "Error",
-              message: selectedIds.length
-                ? "Ready"
-                : "No sections selected for this visit.",
+              recipientEmail,
+              status: ready ? "Ready" : "Error",
+              message: !selectedIds.length
+                ? "No sections selected for this visit."
+                : emailValid
+                  ? (recipientEmail ? "Ready to send" : "Ready — link only")
+                  : "Invalid email address.",
             });
           });
         });
@@ -684,6 +733,10 @@ export default {
 
       readyBulkRowCount() {
         return this.bulkPreviewRows.filter((row) => row.status === "Ready").length;
+      },
+
+      singleEmailValid() {
+        return !this.localRecipientEmail || this.isValidEmail(this.localRecipientEmail);
       },
     },
 
@@ -695,11 +748,13 @@ export default {
             this.localPermission = this.permission || "view";
             this.localMaxUses = Number(this.maxUses) || 1;
             this.localExpiresInDays = Number(this.expiresInDays) || 7;
+            this.localRecipientEmail = "";
             this.selectedSectionIds = this.normalizedSections.map((s) => s.id);
 
             this.bulkEnabled = false;
             this.activeMode = "create";
             this.selectedSubjectIndexes = this.sameGroupSubjects.map((s) => s.index);
+            this.bulkRecipientEmails = {};
 
             // Default bulk flow: all visits selected.
             this.selectedVisitIndexes = this.visits.map((_, idx) => idx);
@@ -768,6 +823,23 @@ export default {
     },
 
   methods: {
+
+    isValidEmail(value) {
+      return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || "").trim());
+    },
+
+    isBulkSubjectSelected(subjectIndex) {
+      return this.selectedSubjectIndexes
+        .map((idx) => Number(idx))
+        .includes(Number(subjectIndex));
+    },
+
+    setBulkRecipientEmail(subjectIndex, value) {
+      this.bulkRecipientEmails = {
+        ...(this.bulkRecipientEmails || {}),
+        [subjectIndex]: value,
+      };
+    },
 
     selectAllSameGroupSubjects() {
       this.selectedSubjectIndexes = this.sameGroupSubjects.map((s) => s.index);
@@ -895,6 +967,7 @@ export default {
         permission: this.localPermission,
         maxUses: Math.max(1, Number(this.localMaxUses) || 1),
         expiresInDays: Math.max(1, Number(this.localExpiresInDays) || 7),
+        recipientEmail: this.localRecipientEmail.trim(),
         allowed_section_ids: [...this.selectedSectionIds],
       });
     },
@@ -1134,6 +1207,23 @@ export default {
   color: #6b7280;
 }
 
+.input-error {
+  margin-top: 6px;
+  color: #b91c1c;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.delivery-summary {
+  margin-bottom: 8px;
+  color: #374151;
+  font-size: 12px;
+}
+
+.delivery-summary.compact {
+  margin: 4px 0 0;
+}
+
 .generated-link-card {
   margin-top: 10px;
   margin-bottom: 8px;
@@ -1346,9 +1436,26 @@ export default {
   background: #ffffff;
 }
 
-.bulk-row input {
+.bulk-subject-choice {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 130px;
+}
+
+.bulk-subject-choice input {
   width: 16px;
   height: 16px;
+}
+
+.bulk-email-input {
+  flex: 1;
+  min-width: 170px;
+  height: 34px;
+  border: 1px solid #d1d5db;
+  border-radius: 7px;
+  padding: 6px 8px;
+  font-size: 12px;
 }
 
 .bulk-empty {

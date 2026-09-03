@@ -97,6 +97,9 @@ def test_complete_password_reset_flow_revokes_sessions(db, monkeypatch):
     assert sent["recipient"] == "nurse.one@example.org"
     raw_reset_token = parse_qs(urlparse(sent["reset_url"]).query)["token"][0]
 
+    token_info = users.password_reset_validate(raw_reset_token, db)
+    assert token_info.username == "nurse.one"
+
     result = users.password_reset_confirm(
         users.PasswordResetConfirmRequest(
             token=raw_reset_token,

@@ -188,6 +188,9 @@ class ShareLinkCreate(BaseModel):
     max_uses: int = Field(1, gt=0)
     expires_in_days: int = Field(7, gt=0)
     allowed_section_ids: Optional[List[str]] = []
+    # Transient delivery address. It is used by the endpoint to send the link
+    # and is deliberately not part of SharedFormAccess or any persisted record.
+    recipient_email: Optional[EmailStr] = None
 
 
 class SharedFormAccessOut(BaseModel):

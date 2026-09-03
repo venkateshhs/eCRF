@@ -35,6 +35,7 @@ from sqlalchemy.orm import Session
 import secrets
 from sqlalchemy import or_, text
 from .utils import local_now
+from .shared_link_email import send_shared_link_email
 from sqlalchemy.sql import func
 router = APIRouter(prefix="/forms", tags=["forms"])
 
@@ -1334,8 +1335,47 @@ def create_share_link(
         expires_at=expires_at,
         allowed_section_ids=allowed_section_ids,
     )
+    frontend_base = (
+        os.getenv("ECRF_FRONTEND_BASE_URL", "").strip().rstrip("/")
+        or os.getenv("FRONTEND_BASE_URL", "").strip().rstrip("/")
+    )
+    if not frontend_base:
+        origin = (request.headers.get("origin") or "").rstrip("/")
+        if origin:
+            frontend_base = origin
+    if not frontend_base:
+        referer = request.headers.get("referer")
+        if referer:
+            p = urlparse(referer)
+            frontend_base = f"{p.scheme}://{p.netloc}"
+    if not frontend_base:
+        scheme = request.headers.get("x-forwarded-proto", request.url.scheme)
+        host = request.headers.get("x-forwarded-host", request.headers.get("host", request.url.netloc))
+        frontend_base = f"{scheme}://{host}"
+    link = f"{frontend_base}/shared/{token}"
+
     db.add(access)
-    db.commit()
+    try:
+        db.flush()
+        if payload.recipient_email:
+            send_shared_link_email(
+                recipient=str(payload.recipient_email),
+                shared_url=link,
+                expires_at=expires_at,
+            )
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        if not payload.recipient_email:
+            raise
+        logger.error(
+            "Shared-link email delivery failed for study_id=%s subject_index=%s visit_index=%s error_type=%s",
+            payload.study_id,
+            payload.subject_index,
+            payload.visit_index,
+            type(exc).__name__,
+        )
+        raise HTTPException(status_code=503, detail="Unable to send the shared-link email.")
     db.refresh(access)
 
     try:
@@ -1360,23 +1400,7 @@ def create_share_link(
     except Exception:
         pass
 
-    frontend_base = os.getenv("FRONTEND_BASE_URL", "").rstrip("/")
-    if not frontend_base:
-        origin = (request.headers.get("origin") or "").rstrip("/")
-        if origin:
-            frontend_base = origin
-    if not frontend_base:
-        referer = request.headers.get("referer")
-        if referer:
-            p = urlparse(referer)
-            frontend_base = f"{p.scheme}://{p.netloc}"
-    if not frontend_base:
-        scheme = request.headers.get("x-forwarded-proto", request.url.scheme)
-        host   = request.headers.get("x-forwarded-host", request.headers.get("host", request.url.netloc))
-        frontend_base = f"{scheme}://{host}"
-
-    link = f"{frontend_base}/shared/{token}"
-    return {"token": token, "link": link}
+    return {"token": token, "link": link, "email_sent": bool(payload.recipient_email)}
 
 
 @router.get("/shared-api/{token}", response_model=schemas.SharedFormAccessOut)
