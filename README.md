@@ -14,7 +14,7 @@ Forschungszentrum Jülich.
 | Resource | Link |
 | --- | --- |
 | Hosted case-e application | [https://ecrf.inm7.de/login](https://ecrf.inm7.de/login) |
-| Complete user and administrator documentation | [https://biomarker-development-at-inm7.github.io/case-e-docs/](https://biomarker-development-at-inm7.github.io/case-e-docs/) |
+| Complete user and administrator documentation | [https://case-e.readthedocs.io/en/latest/](https://case-e.readthedocs.io/en/latest/) |
 | Documentation source repository | [Biomarker-Development-at-INM7/case-e-docs](https://github.com/Biomarker-Development-at-INM7/case-e-docs) |
 | Application source repository | [Biomarker-Development-at-INM7/eCRF](https://github.com/Biomarker-Development-at-INM7/eCRF) |
 | Application issues | [Issue tracker](https://github.com/Biomarker-Development-at-INM7/eCRF/issues) |
@@ -300,29 +300,20 @@ Never use example database/admin passwords or secret keys in a shared
 deployment. Do not expose PostgreSQL port 5432 publicly. Back up the database,
 runtime data, and RIA storage consistently and test restoration.
 
-See the [complete deployment guide](https://biomarker-development-at-inm7.github.io/case-e-docs/deployment.html)
-for Docker, systemd/Apache, HTTPS, SMTP recovery, validation, and operations.
+See the [complete deployment guide](https://case-e.readthedocs.io/en/latest/deployment.html)
+for Docker, systemd/Apache, HTTPS, SMTP delivery, validation, and operations.
 
-## Configure email password recovery
+## Email password recovery
 
-Password recovery is disabled by default. Start with
-`deploy/password-reset.env.example`, configure the public HTTPS origin and an
-approved SMTP relay/account, then restart case-e. Never commit SMTP passwords.
+Self-service email password recovery is temporarily disabled. Keep the feature
+flag off in local and hosted environments:
 
 ```bash
-ECRF_PASSWORD_RESET_ENABLED=1
-ECRF_FRONTEND_BASE_URL=https://ecrf.example.org
-ECRF_SMTP_HOST=smtp.example.org
-ECRF_SMTP_PORT=587
-ECRF_SMTP_USERNAME=casee@example.org
-ECRF_SMTP_PASSWORD=replace-with-a-secret
-ECRF_SMTP_STARTTLS=1
-ECRF_SMTP_SSL=0
-ECRF_MAIL_FROM=casee@example.org
+ECRF_PASSWORD_RESET_ENABLED=0
 ```
 
-Test delivery, public routing, expiry, single use, rate limits, and session
-revocation with a non-privileged account before enabling recovery for users.
+Users who cannot sign in must currently contact an Administrator. SMTP settings
+may still be configured for shared-link email delivery.
 
 ## Verify an installation
 

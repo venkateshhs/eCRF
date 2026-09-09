@@ -3,7 +3,7 @@ import jwt
 import ipaddress
 import re
 import secrets
-from fastapi import APIRouter, Depends, HTTPException, Header, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Header, Query, Request, status
 from fastapi.security import OAuth2PasswordBearer
 
 from sqlalchemy.orm import Session
@@ -379,6 +379,10 @@ class PasswordResetConfirmRequest(BaseModel):
     new_password: str
 
 
+class PasswordResetTokenInfoResponse(BaseModel):
+    username: str
+
+
 def _request_ip(request: Request) -> str:
     if settings.trust_proxy_headers:
         forwarded_for = request.headers.get("x-forwarded-for", "")
@@ -598,6 +602,26 @@ def password_reset_confirm(
 
     logger.info("Password reset completed for user_id=%s", user.id)
     return {"message": "Password reset successfully."}
+
+
+@router.get("/password-reset/validate", response_model=PasswordResetTokenInfoResponse)
+def password_reset_validate(
+    token: str = Query(..., min_length=20, max_length=200),
+    db: Session = Depends(get_db),
+):
+    """Validate a reset link and return the account name shown on the reset page."""
+    _require_password_reset_enabled()
+    reset_row = (
+        db.query(models.PasswordResetToken)
+        .filter(
+            models.PasswordResetToken.token_hash == token_hash(token),
+            models.PasswordResetToken.purpose == "password_reset",
+        )
+        .first()
+    )
+    if not _valid_reset_token(reset_row, local_now()) or not reset_row.user:
+        raise HTTPException(status_code=400, detail="This password reset link is invalid or expired.")
+    return PasswordResetTokenInfoResponse(username=reset_row.user.username)
 
 
 @router.post("/change-password")

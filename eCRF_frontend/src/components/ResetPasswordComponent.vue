@@ -13,6 +13,9 @@
 
       <template v-else>
         <h1>Choose a new password</h1>
+        <p v-if="username" class="account-name">
+          Account: <strong>{{ username }}</strong>
+        </p>
         <p class="intro">Use at least 8 characters, including a number and a special character.</p>
         <form @submit.prevent="resetPassword">
           <div class="form-group">
@@ -50,6 +53,7 @@ export default {
   data() {
     return {
       token: "",
+      username: "",
       newPassword: "",
       confirmPassword: "",
       busy: false,
@@ -61,9 +65,22 @@ export default {
     this.token = typeof this.$route.query.token === "string" ? this.$route.query.token : "";
     if (!this.token) {
       this.error = "This password reset link is incomplete. Request a new link.";
+    } else {
+      this.validateToken();
     }
   },
   methods: {
+    async validateToken() {
+      try {
+        const response = await axios.get(`${API_BASE_URL}/users/password-reset/validate`, {
+          params: { token: this.token },
+        });
+        this.username = response.data?.username || "";
+      } catch (err) {
+        this.token = "";
+        this.error = err.response?.data?.detail || "This password reset link is invalid or expired.";
+      }
+    },
     async resetPassword() {
       this.error = "";
       if (this.newPassword !== this.confirmPassword) {
@@ -117,6 +134,7 @@ export default {
 .logo-container { text-align: left; margin-bottom: 20px; }
 .logo { width: 150px; height: auto; }
 .intro { color: #4b5563; line-height: 1.5; }
+.account-name { margin: 18px 0 0; color: #1f2937; }
 .form-group { margin: 20px 0; text-align: left; }
 label { display: block; margin-bottom: 8px; font-weight: 600; }
 input {

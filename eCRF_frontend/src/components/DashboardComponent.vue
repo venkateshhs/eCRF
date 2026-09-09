@@ -25,6 +25,15 @@
       </div>
 
       <div class="user-actions">
+        <a
+          class="docs-link"
+          href="https://case-e.readthedocs.io/en/latest/"
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          Docs <span aria-hidden="true">↗</span>
+        </a>
+
         <div class="user-identity">
           <div class="user-name" :title="userName">{{ userName }}</div>
           <div class="user-role" :title="role || '—'">{{ role || '—' }}</div>
@@ -1154,6 +1163,20 @@ export default {
   display: flex;
   align-items: center;
   gap: 12px;
+}
+.docs-link {
+  padding: 7px 10px;
+  border-radius: 7px;
+  color: #2563eb;
+  font-size: 13px;
+  font-weight: 700;
+  text-decoration: none;
+}
+.docs-link:hover,
+.docs-link:focus-visible {
+  background: #eff6ff;
+  color: #1d4ed8;
+  outline: none;
 }
 .user-identity {
   display: flex;
