@@ -35,7 +35,7 @@ from sqlalchemy.orm import Session
 import secrets
 from sqlalchemy import or_, text
 from .utils import local_now
-from .shared_link_email import send_shared_link_email
+from .shared_link_email import send_shared_link_email, shared_link_email_configured
 from sqlalchemy.sql import func
 router = APIRouter(prefix="/forms", tags=["forms"])
 
@@ -1353,29 +1353,44 @@ def create_share_link(
         host = request.headers.get("x-forwarded-host", request.headers.get("host", request.url.netloc))
         frontend_base = f"{scheme}://{host}"
     link = f"{frontend_base}/shared/{token}"
+    email_requested = bool(payload.recipient_email)
+    email_delivery_available = shared_link_email_configured()
+    email_sent = False
+    email_delivery_status = "not_requested"
+    if email_requested and not email_delivery_available:
+        email_delivery_status = "unavailable"
 
     db.add(access)
     try:
         db.flush()
-        if payload.recipient_email:
+    except Exception:
+        db.rollback()
+        raise
+
+    if email_requested and email_delivery_available:
+        try:
             send_shared_link_email(
                 recipient=str(payload.recipient_email),
                 shared_url=link,
                 expires_at=expires_at,
             )
+            email_sent = True
+            email_delivery_status = "sent"
+        except Exception as exc:
+            email_delivery_status = "failed"
+            logger.error(
+                "Shared-link email delivery failed for study_id=%s subject_index=%s visit_index=%s error_type=%s",
+                payload.study_id,
+                payload.subject_index,
+                payload.visit_index,
+                type(exc).__name__,
+            )
+
+    try:
         db.commit()
-    except Exception as exc:
+    except Exception:
         db.rollback()
-        if not payload.recipient_email:
-            raise
-        logger.error(
-            "Shared-link email delivery failed for study_id=%s subject_index=%s visit_index=%s error_type=%s",
-            payload.study_id,
-            payload.subject_index,
-            payload.visit_index,
-            type(exc).__name__,
-        )
-        raise HTTPException(status_code=503, detail="Unable to send the shared-link email.")
+        raise
     db.refresh(access)
 
     try:
@@ -1400,7 +1415,13 @@ def create_share_link(
     except Exception:
         pass
 
-    return {"token": token, "link": link, "email_sent": bool(payload.recipient_email)}
+    return {
+        "token": token,
+        "link": link,
+        "email_sent": email_sent,
+        "email_delivery_available": email_delivery_available,
+        "email_delivery_status": email_delivery_status,
+    }
 
 
 @router.get("/shared-api/{token}", response_model=schemas.SharedFormAccessOut)

@@ -6,7 +6,7 @@
       </router-link>
 
       <nav aria-label="Public navigation">
-        <a href="https://venkateshhs.github.io/case-e-docs/" target="_blank" rel="noopener noreferrer">Docs</a>
+        <a href="https://case-e.readthedocs.io/en/latest/" target="_blank" rel="noopener noreferrer">Docs</a>
         <a href="https://github.com/Biomarker-Development-at-INM7/eCRF" target="_blank" rel="noopener noreferrer">GitHub</a>
         <router-link class="contact-link" to="/contact">Contact</router-link>
       </nav>

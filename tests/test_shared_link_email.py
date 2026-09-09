@@ -3,7 +3,6 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pytest
-from fastapi import HTTPException
 from pydantic import ValidationError
 from starlette.requests import Request
 
@@ -100,6 +99,7 @@ def test_share_link_sends_email_without_persisting_or_exporting_it(share_endpoin
     db = _Db(SimpleNamespace(id=1, study_name="Test study"))
     sent = {}
     saved = {}
+    monkeypatch.setattr(forms_hybrid, "shared_link_email_configured", lambda: True)
     monkeypatch.setattr(forms_hybrid, "send_shared_link_email", lambda **kwargs: sent.update(kwargs))
     monkeypatch.setattr(forms_hybrid.repo, "save_share_link", lambda **kwargs: saved.update(kwargs))
 
@@ -118,25 +118,54 @@ def test_share_link_sends_email_without_persisting_or_exporting_it(share_endpoin
     assert db.committed is True
 
 
-def test_failed_delivery_rolls_back_link_creation(share_endpoint, monkeypatch):
+def test_failed_delivery_keeps_link_available_for_manual_sharing(share_endpoint, monkeypatch):
     db = _Db(SimpleNamespace(id=1, study_name="Test study"))
     saved = {}
 
     def fail_delivery(**_kwargs):
         raise TimeoutError("SMTP timeout")
 
+    monkeypatch.setattr(forms_hybrid, "shared_link_email_configured", lambda: True)
     monkeypatch.setattr(forms_hybrid, "send_shared_link_email", fail_delivery)
     monkeypatch.setattr(forms_hybrid.repo, "save_share_link", lambda **kwargs: saved.update(kwargs))
 
-    with pytest.raises(HTTPException) as error:
-        forms_hybrid.create_share_link(
-            _payload(),
-            _request(),
-            db,
-            SimpleNamespace(id=9),
-        )
+    response = forms_hybrid.create_share_link(
+        _payload(),
+        _request(),
+        db,
+        SimpleNamespace(id=9),
+    )
 
-    assert error.value.status_code == 503
-    assert db.rolled_back is True
-    assert db.committed is False
-    assert saved == {}
+    assert response["email_sent"] is False
+    assert response["email_delivery_status"] == "failed"
+    assert response["link"]
+    assert db.rolled_back is False
+    assert db.committed is True
+    assert saved["token"] == response["token"]
+
+
+def test_missing_smtp_creates_link_without_attempting_delivery(share_endpoint, monkeypatch):
+    db = _Db(SimpleNamespace(id=1, study_name="Test study"))
+    saved = {}
+
+    monkeypatch.setattr(forms_hybrid, "shared_link_email_configured", lambda: False)
+    monkeypatch.setattr(
+        forms_hybrid,
+        "send_shared_link_email",
+        lambda **_kwargs: pytest.fail("SMTP delivery must not be attempted"),
+    )
+    monkeypatch.setattr(forms_hybrid.repo, "save_share_link", lambda **kwargs: saved.update(kwargs))
+
+    response = forms_hybrid.create_share_link(
+        _payload(),
+        _request(),
+        db,
+        SimpleNamespace(id=9),
+    )
+
+    assert response["email_sent"] is False
+    assert response["email_delivery_available"] is False
+    assert response["email_delivery_status"] == "unavailable"
+    assert response["link"]
+    assert db.committed is True
+    assert saved["token"] == response["token"]

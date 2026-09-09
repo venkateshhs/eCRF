@@ -20,7 +20,7 @@
         <aside class="contact-card" aria-label="Helpful links">
           <p class="card-label">Before you write</p>
           <h2>Useful starting points</h2>
-          <a href="https://venkateshhs.github.io/case-e-docs/" target="_blank" rel="noopener noreferrer">
+          <a href="https://case-e.readthedocs.io/en/latest/" target="_blank" rel="noopener noreferrer">
             <span class="link-icon" aria-hidden="true">01</span>
             <span><strong>Read the documentation</strong><small>Setup, workflows, and deployment guidance</small></span>
             <b aria-hidden="true">↗</b>

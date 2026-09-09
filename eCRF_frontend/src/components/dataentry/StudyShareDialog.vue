@@ -356,8 +356,11 @@
         <div v-if="generatedLink" class="generated-link-card">
           <label class="generated-label">Generated Link</label>
 
-          <div v-if="generatedRecipientEmail" class="delivery-summary">
+          <div v-if="generatedRecipientEmail && generatedEmailSent" class="delivery-summary">
             Email sent to <strong>{{ generatedRecipientEmail }}</strong>. The address has not been saved.
+          </div>
+          <div v-else-if="generatedRecipientEmail" class="delivery-summary delivery-warning">
+            {{ singleDeliveryFailureText }} Copy and send the generated link manually.
           </div>
 
           <div class="generated-link-row">
@@ -403,7 +406,7 @@
                 <strong>{{ link.subjectId }}</strong>
                 <span> — {{ link.visitName }}</span>
                 <div class="delivery-summary compact">
-                  {{ link.recipientEmail ? `Sent to ${link.recipientEmail}` : "Link only (no email sent)" }}
+                  {{ bulkDeliveryText(link) }}
                 </div>
               </div>
 
@@ -420,6 +423,10 @@
           <div v-if="copyStatus" class="copy-status">
             {{ copyStatus }}
           </div>
+        </div>
+
+        <div v-if="feedbackMessage" class="share-feedback" role="status" aria-live="polite">
+          {{ feedbackMessage }}
         </div>
 
         <div class="dialog-actions">
@@ -545,6 +552,9 @@
         </div>
 
         <div class="dialog-actions">
+          <div v-if="feedbackMessage" class="share-feedback manager-feedback" role="status" aria-live="polite">
+            {{ feedbackMessage }}
+          </div>
           <button type="button" class="btn-secondary" @click="handleClose">
             Close
           </button>
@@ -574,6 +584,7 @@ export default {
     generatedLinks: { type: Array, default: () => [] },
     sharedLinks: { type: Array, default: () => [] },
     sharedLinksLoading: { type: Boolean, default: false },
+    feedbackMessage: { type: String, default: "" },
 
     availableSections: {
       type: Array,
@@ -582,6 +593,8 @@ export default {
 
     generatedLink: { type: String, default: "" },
     generatedRecipientEmail: { type: String, default: "" },
+    generatedEmailSent: { type: Boolean, default: false },
+    generatedEmailDeliveryStatus: { type: String, default: "not_requested" },
     copyStatus: { type: String, default: "" },
     generating: { type: Boolean, default: false },
   },
@@ -738,6 +751,12 @@ export default {
       singleEmailValid() {
         return !this.localRecipientEmail || this.isValidEmail(this.localRecipientEmail);
       },
+
+      singleDeliveryFailureText() {
+        return this.generatedEmailDeliveryStatus === "failed"
+          ? "Email delivery failed."
+          : "Email was not sent because SMTP is not configured.";
+      },
     },
 
   watch: {
@@ -839,6 +858,15 @@ export default {
         ...(this.bulkRecipientEmails || {}),
         [subjectIndex]: value,
       };
+    },
+
+    bulkDeliveryText(link) {
+      if (!link?.recipientEmail) return "Link only (no email requested)";
+      if (link.emailSent) return `Sent to ${link.recipientEmail}`;
+      if (link.emailDeliveryStatus === "failed") {
+        return "Email delivery failed — copy the link manually";
+      }
+      return "Email not sent — SMTP is not configured; copy the link manually";
     },
 
     selectAllSameGroupSubjects() {
@@ -1222,6 +1250,28 @@ export default {
 
 .delivery-summary.compact {
   margin: 4px 0 0;
+}
+
+.delivery-warning {
+  color: #92400e;
+  font-weight: 600;
+}
+
+.share-feedback {
+  margin-top: 14px;
+  padding: 10px 12px;
+  border: 1px solid #f3d28b;
+  border-radius: 8px;
+  background: #fffbeb;
+  color: #78350f;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.manager-feedback {
+  flex: 1;
+  margin: 0 auto 0 0;
 }
 
 .generated-link-card {

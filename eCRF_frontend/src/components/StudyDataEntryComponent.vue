@@ -728,11 +728,14 @@
       :expires-in-days="shareConfig.expiresInDays"
       :generated-link="generatedLink"
       :generated-recipient-email="generatedRecipientEmail"
+      :generated-email-sent="generatedEmailSent"
+      :generated-email-delivery-status="generatedEmailDeliveryStatus"
       :generated-links="generatedLinks"
       :generating="shareLinkGenerating"
       :copy-status="copyStatus"
       :shared-links="sharedLinks"
       :shared-links-loading="sharedLinksLoading"
+      :feedback-message="shareDialogFeedback"
       @close="closeShareDialog"
       @copy="copyGeneratedLink"
       @copy-link="copyAnySharedLink"
@@ -1075,6 +1078,9 @@ export default {
       generatedLinks: [],
       generatedLink: "",
       generatedRecipientEmail: "",
+      generatedEmailSent: false,
+      generatedEmailDeliveryStatus: "not_requested",
+      shareDialogFeedback: "",
       sharedLinks: [],
       sharedLinksLoading: false,
       copyStatus: "",
@@ -3659,6 +3665,7 @@ applyImportedRowFromDialog(payload) {
     },
     async onShareDialogGenerate(cfg) {
       if (this.shareLinkGenerating) return;
+      this.shareDialogFeedback = "";
 
       this.shareConfig = {
         permission: cfg.permission,
@@ -3670,6 +3677,8 @@ applyImportedRowFromDialog(payload) {
 
       this.generatedLink = "";
       this.generatedRecipientEmail = "";
+      this.generatedEmailSent = false;
+      this.generatedEmailDeliveryStatus = "not_requested";
       this.generatedLinks = [];
       this.copyStatus = "";
       this.shareLinkGenerating = true;
@@ -7393,8 +7402,12 @@ applyImportedRowFromDialog(payload) {
 
       this.generatedLink = "";
       this.generatedRecipientEmail = "";
+      this.generatedEmailSent = false;
+      this.generatedEmailDeliveryStatus = "not_requested";
       this.generatedLinks = [];
       this.copyStatus = "";
+      this.shareDialogFeedback = "";
+      this.showDialog = false;
       this.showShareDialog = true;
 
       this.loadSharedLinks();
@@ -7402,7 +7415,10 @@ applyImportedRowFromDialog(payload) {
     closeShareDialog() {
       this.showShareDialog = false;
       this.generatedRecipientEmail = "";
+      this.generatedEmailSent = false;
+      this.generatedEmailDeliveryStatus = "not_requested";
       this.generatedLinks = [];
+      this.shareDialogFeedback = "";
       this.shareConfig = {
         ...this.shareConfig,
         recipientEmail: "",
@@ -7446,14 +7462,14 @@ applyImportedRowFromDialog(payload) {
         );
 
         await this.loadSharedLinks();
-        this.showDialogMessage("Shared link invalidated successfully.");
+        this.shareDialogFeedback = "Shared link invalidated successfully.";
       } catch (err) {
         console.error("Failed to revoke shared link", err);
 
         if (err.response?.status === 403) {
           this.permissionError = true;
         } else {
-          this.showDialogMessage("Failed to invalidate shared link.");
+          this.shareDialogFeedback = "Failed to invalidate shared link.";
         }
       }
     },
@@ -7478,7 +7494,7 @@ applyImportedRowFromDialog(payload) {
       const items = Array.isArray(rows) && rows.length ? rows : this.sharedLinks;
 
       if (!items.length) {
-        this.showDialogMessage("No shared links available to export.");
+        this.shareDialogFeedback = "No shared links available to export.";
         return;
       }
 
@@ -7542,12 +7558,13 @@ applyImportedRowFromDialog(payload) {
     },
     async onBulkShareDialogGenerate(cfg) {
       if (this.shareLinkGenerating) return;
+      this.shareDialogFeedback = "";
 
       const rows = Array.isArray(cfg?.rows) ? cfg.rows : [];
       const readyRows = rows.filter((row) => row.status === "Ready");
 
       if (!readyRows.length) {
-        this.showDialogMessage("No valid subject/visit combinations are available for link generation.");
+        this.shareDialogFeedback = "No valid subject/visit combinations are available for link generation.";
         return;
       }
 
@@ -7560,6 +7577,8 @@ applyImportedRowFromDialog(payload) {
 
       this.generatedLink = "";
       this.generatedRecipientEmail = "";
+      this.generatedEmailSent = false;
+      this.generatedEmailDeliveryStatus = "not_requested";
       this.generatedLinks = [];
       this.copyStatus = "";
       this.shareLinkGenerating = true;
@@ -7605,6 +7624,8 @@ applyImportedRowFromDialog(payload) {
               token: resp.data.token,
               recipientEmail: row.recipientEmail || "",
               emailSent: Boolean(resp.data.email_sent),
+              emailDeliveryAvailable: Boolean(resp.data.email_delivery_available),
+              emailDeliveryStatus: resp.data.email_delivery_status || "not_requested",
               createdAt: new Date().toISOString(),
             });
           } catch (err) {
@@ -7627,9 +7648,9 @@ applyImportedRowFromDialog(payload) {
         const successSummary = `${created.length} link(s) generated; ${sentCount} email(s) sent.`;
 
         if (failed) {
-          this.showDialogMessage(`${successSummary} ${failed} link(s) failed.`);
+          this.shareDialogFeedback = `${successSummary} ${failed} link(s) failed.`;
         } else {
-          this.showDialogMessage(successSummary);
+          this.shareDialogFeedback = successSummary;
         }
       } finally {
         this.shareLinkGenerating = false;
@@ -7643,7 +7664,7 @@ applyImportedRowFromDialog(payload) {
         visitIndex == null ||
         groupIndex == null
       ) {
-        this.showDialogMessage("Please select a subject and visit before creating a shared link.");
+        this.shareDialogFeedback = "Please select a subject and visit before creating a shared link.";
         return false;
       }
 
@@ -7666,9 +7687,9 @@ applyImportedRowFromDialog(payload) {
         });
 
         this.generatedLink = resp.data?.link || "";
-        this.generatedRecipientEmail = resp.data?.email_sent
-          ? (this.shareConfig.recipientEmail || "")
-          : "";
+        this.generatedRecipientEmail = this.shareConfig.recipientEmail || "";
+        this.generatedEmailSent = Boolean(resp.data?.email_sent);
+        this.generatedEmailDeliveryStatus = resp.data?.email_delivery_status || "not_requested";
         this.generatedLinks = [];
         this.copyStatus = "";
 
@@ -7688,7 +7709,7 @@ applyImportedRowFromDialog(payload) {
           err?.response?.data?.message ||
           "Failed to create shared link.";
 
-        this.showDialogMessage(message);
+        this.shareDialogFeedback = message;
         return false;
       }
     },

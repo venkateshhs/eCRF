@@ -12,6 +12,16 @@ from .settings import get_settings
 settings = get_settings()
 
 
+def shared_link_email_configured() -> bool:
+    """Return whether enough SMTP configuration exists to attempt delivery."""
+    return bool(
+        settings.smtp_host
+        and settings.mail_from
+        and not (settings.smtp_starttls and settings.smtp_ssl)
+        and (bool(settings.smtp_username) == bool(settings.smtp_password))
+    )
+
+
 def send_shared_link_email(
     *,
     recipient: str,
