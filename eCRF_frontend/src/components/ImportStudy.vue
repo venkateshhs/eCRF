@@ -57,75 +57,52 @@
     <!-- STEP 2: Map Study Metadata -->
     <section class="card">
       <h2>2) Map Study Metadata</h2>
-      <p class="muted">Map CSV columns or set fixed values to populate your study's metadata.</p>
+      <p class="muted">Enter the study-level details once. These values apply to the entire imported study.</p>
 
-      <div class="schema-grid" v-if="studySchema.length">
+      <div class="schema-grid metadata-grid" v-if="studyFields.length">
         <div
-          v-for="f in studySchema"
+          v-for="f in studyFields"
           :key="'study-' + f.field"
           class="schema-map-row"
-          v-show="f.display !== false"
         >
           <div class="schema-map-label">
             <div class="lbl">{{ f.label }}</div>
-            <div class="req" v-if="f.required">*</div>
+            <div class="req" v-if="f.required || isStudyTitleField(f.field)">*</div>
           </div>
 
-          <div class="schema-map-ctrls">
-            <div class="schema-map-ctrl">
-              <label class="small">From column</label>
-              <select v-model="mapping.study.cols[f.field]">
-                <option value="">— None —</option>
-                <option v-for="h in headers" :key="'scol-' + f.field + '-' + h" :value="h">{{ h }}</option>
-              </select>
-            </div>
-            <div class="schema-map-ctrl">
-              <label class="small">Fixed value</label>
-              <input
-                v-if="f.type !== 'select'"
-                v-model="mapping.study.fixed[f.field]"
-                :placeholder="f.placeholder || f.label"
-              />
-              <select v-else v-model="mapping.study.fixed[f.field]">
-                <option value="">— None —</option>
-                <option v-for="opt in f.options || []" :key="'sfx-' + f.field + '-' + opt" :value="opt">
-                  {{ opt }}
-                </option>
-              </select>
-            </div>
+          <div class="schema-map-ctrl">
+            <textarea
+              v-if="f.type === 'textarea'"
+              v-model="mapping.study.fixed[f.field]"
+              :placeholder="f.placeholder || f.label"
+              rows="3"
+            ></textarea>
+            <input
+              v-else-if="f.type !== 'select'"
+              v-model="mapping.study.fixed[f.field]"
+              :type="f.type === 'date' ? 'date' : (f.type === 'number' ? 'number' : 'text')"
+              :placeholder="f.placeholder || f.label"
+            />
+            <select v-else v-model="mapping.study.fixed[f.field]">
+              <option value="">— Select —</option>
+              <option v-for="opt in f.options || []" :key="'sfx-' + f.field + '-' + opt" :value="opt">
+                {{ opt }}
+              </option>
+            </select>
           </div>
         </div>
       </div>
-
-      <details v-if="studySchema.length">
-        <summary>Detected study schema fields</summary>
-        <ul class="muted">
-          <li v-for="f in studySchema" :key="'studypeek-' + f.field">
-            {{ f.field }} ({{ f.type }}){{ f.required ? ' *' : '' }}
-          </li>
-        </ul>
-      </details>
     </section>
 
     <!-- STEP 3: Subject (ID & optional date) -->
     <section v-if="headers.length" class="card">
       <h2>3) Subject</h2>
-      <div class="grid">
-        <div class="form-row">
-          <label>Subject ID column <span class="muted">(required)</span></label>
-          <select v-model="mapping.subject.idCol">
-            <option value="">— Select —</option>
-            <option v-for="h in headers" :key="'sid-' + h" :value="h">{{ h }}</option>
-          </select>
-        </div>
-
-        <div class="form-row">
-          <label>Date column (optional)</label>
-          <select v-model="mapping.subject.dateCol">
-            <option value="">— None —</option>
-            <option v-for="h in headers" :key="'dt-' + h" :value="h">{{ h }}</option>
-          </select>
-        </div>
+      <div class="form-row">
+        <label>Subject ID column <span class="muted">(required)</span></label>
+        <select v-model="mapping.subject.idCol">
+          <option value="">— Select —</option>
+          <option v-for="h in headers" :key="'sid-' + h" :value="h">{{ h }}</option>
+        </select>
       </div>
 
       <div class="muted smalltop">
@@ -136,147 +113,118 @@
     <!-- STEP 4: Map Group Metadata (and group name column) -->
     <section class="card">
       <h2>4) Map Group Metadata</h2>
-      <p class="muted">Choose the column that contains the group name for each row, then map optional metadata fields.</p>
+      <p class="muted">Choose one source for groups: values in the uploaded table, or one group entered manually.</p>
 
-      <div class="form-row" style="margin-bottom:10px;">
-        <label>Group name column</label>
-        <select v-model="mapping.group.nameCol">
-          <option value="">— None (single group: Group A) —</option>
-          <option v-for="h in headers" :key="'grpname-' + h" :value="h">{{ h }}</option>
-        </select>
+      <div class="source-choice" role="radiogroup" aria-label="Group source">
+        <label :class="{ active: mapping.group.mode === 'column' }">
+          <input type="radio" v-model="mapping.group.mode" value="column" /> Use table columns
+        </label>
+        <label :class="{ active: mapping.group.mode === 'manual' }">
+          <input type="radio" v-model="mapping.group.mode" value="manual" /> Enter one group manually
+        </label>
       </div>
 
-      <div class="schema-grid" v-if="groupSchema.length">
-        <div
-          v-for="f in groupSchema"
-          :key="'group-' + f.field"
-          class="schema-map-row"
-          v-show="f.display !== false"
-        >
-          <div class="schema-map-label">
-            <div class="lbl">{{ f.label }}</div>
-          </div>
+      <div v-if="mapping.group.mode === 'column'" class="mapping-panel">
+        <div class="form-row">
+          <label>Group name column <span class="req">*</span></label>
+          <select v-model="mapping.group.nameCol">
+            <option value="">— Select column —</option>
+            <option v-for="h in headers" :key="'grpname-' + h" :value="h">{{ h }}</option>
+          </select>
+        </div>
 
-          <div class="schema-map-ctrls">
+        <div class="schema-grid" v-if="groupMetadataFields.length">
+          <div v-for="f in groupMetadataFields" :key="'group-column-' + f.field" class="schema-map-row">
+            <div class="schema-map-label"><div class="lbl">{{ f.label }}</div></div>
             <div class="schema-map-ctrl">
-              <label class="small">From column</label>
+              <label class="small">Use values from column</label>
               <select v-model="mapping.group.cols[f.field]">
-                <option value="">— None —</option>
+                <option value="">— Not imported —</option>
                 <option v-for="h in headers" :key="'gcol-' + f.field + '-' + h" :value="h">{{ h }}</option>
-              </select>
-            </div>
-            <div class="schema-map-ctrl">
-              <label class="small">Fixed value</label>
-              <input
-                v-if="f.type !== 'select'"
-                v-model="mapping.group.fixed[f.field]"
-                :placeholder="f.placeholder || f.label"
-              />
-              <select v-else v-model="mapping.group.fixed[f.field]">
-                <option value="">— None —</option>
-                <option v-for="opt in f.options || []" :key="'gfx-' + f.field + '-' + opt" :value="opt">
-                  {{ opt }}
-                </option>
               </select>
             </div>
           </div>
         </div>
       </div>
 
-      <details v-if="groupSchema.length">
-        <summary>Detected group schema fields</summary>
-        <ul class="muted">
-          <li v-for="f in groupSchema" :key="'grouppeek-' + f.field">
-            {{ f.field }} ({{ f.type }})
-          </li>
-        </ul>
-      </details>
+      <div v-else class="mapping-panel schema-grid">
+        <div
+          v-for="f in groupFields"
+          :key="'group-manual-' + f.field"
+          class="schema-map-row"
+        >
+          <div class="schema-map-label">
+            <div class="lbl">{{ f.label }}</div>
+            <div class="req" v-if="f.field === 'name' || f.required">*</div>
+          </div>
+          <div class="schema-map-ctrl">
+            <textarea v-if="f.type === 'textarea'" v-model="mapping.group.fixed[f.field]" :placeholder="f.placeholder || f.label" rows="3"></textarea>
+            <input v-else v-model="mapping.group.fixed[f.field]" :placeholder="f.placeholder || f.label" />
+          </div>
+        </div>
+      </div>
     </section>
 
     <!-- STEP 5: Map Visit Metadata (and visit name column) -->
     <section class="card">
       <h2>5) Map Visit Metadata</h2>
-      <p class="muted">Choose the column that contains the visit name for each row, then map optional metadata fields.</p>
+      <p class="muted">Choose one source for visits: values in the uploaded table, or one visit entered manually.</p>
 
-      <div class="form-row" style="margin-bottom:10px;">
-        <label>Visit name column</label>
-        <select v-model="mapping.visit.nameCol">
-          <option value="">— None (single visit: Baseline) —</option>
-          <option v-for="h in headers" :key="'visname-' + h" :value="h">{{ h }}</option>
-        </select>
+      <div class="source-choice" role="radiogroup" aria-label="Visit source">
+        <label :class="{ active: mapping.visit.mode === 'column' }">
+          <input type="radio" v-model="mapping.visit.mode" value="column" /> Use table columns
+        </label>
+        <label :class="{ active: mapping.visit.mode === 'manual' }">
+          <input type="radio" v-model="mapping.visit.mode" value="manual" /> Enter one visit manually
+        </label>
       </div>
 
-      <div class="schema-grid" v-if="visitSchema.length">
-        <div
-          v-for="f in visitSchema"
-          :key="'visit-' + f.field"
-          class="schema-map-row"
-          v-show="f.display !== false"
-        >
-          <div class="schema-map-label">
-            <div class="lbl">{{ f.label }}</div>
-          </div>
+      <div v-if="mapping.visit.mode === 'column'" class="mapping-panel">
+        <div class="form-row">
+          <label>Visit name column <span class="req">*</span></label>
+          <select v-model="mapping.visit.nameCol">
+            <option value="">— Select column —</option>
+            <option v-for="h in headers" :key="'visname-' + h" :value="h">{{ h }}</option>
+          </select>
+        </div>
 
-          <div class="schema-map-ctrls">
+        <div class="schema-grid" v-if="visitMetadataFields.length">
+          <div v-for="f in visitMetadataFields" :key="'visit-column-' + f.field" class="schema-map-row">
+            <div class="schema-map-label"><div class="lbl">{{ f.label }}</div></div>
             <div class="schema-map-ctrl">
-              <label class="small">From column</label>
+              <label class="small">Use values from column</label>
               <select v-model="mapping.visit.cols[f.field]">
-                <option value="">— None —</option>
+                <option value="">— Not imported —</option>
                 <option v-for="h in headers" :key="'vcol-' + f.field + '-' + h" :value="h">{{ h }}</option>
-              </select>
-            </div>
-            <div class="schema-map-ctrl">
-              <label class="small">Fixed value</label>
-              <input
-                v-if="f.type !== 'select'"
-                v-model="mapping.visit.fixed[f.field]"
-                :placeholder="f.placeholder || f.label"
-              />
-              <select v-else v-model="mapping.visit.fixed[f.field]">
-                <option value="">— None —</option>
-                <option v-for="opt in f.options || []" :key="'vfx-' + f.field + '-' + opt" :value="opt">
-                  {{ opt }}
-                </option>
               </select>
             </div>
           </div>
         </div>
       </div>
 
-      <details v-if="visitSchema.length">
-        <summary>Detected visit schema fields</summary>
-        <ul class="muted">
-          <li v-for="f in visitSchema" :key="'visitpeek-' + f.field">
-            {{ f.field }} ({{ f.type }})
-          </li>
-        </ul>
-      </details>
+      <div v-else class="mapping-panel schema-grid">
+        <div
+          v-for="f in visitFields"
+          :key="'visit-manual-' + f.field"
+          class="schema-map-row"
+        >
+          <div class="schema-map-label">
+            <div class="lbl">{{ f.label }}</div>
+            <div class="req" v-if="f.field === 'name' || f.required">*</div>
+          </div>
+          <div class="schema-map-ctrl">
+            <textarea v-if="f.type === 'textarea'" v-model="mapping.visit.fixed[f.field]" :placeholder="f.placeholder || f.label" rows="3"></textarea>
+            <input v-else v-model="mapping.visit.fixed[f.field]" :placeholder="f.placeholder || f.label" />
+          </div>
+        </div>
+      </div>
     </section>
 
     <!-- STEP 6: eCRF Fields (Sections & Fields) -->
     <section v-if="headers.length" class="card">
       <h2>6) eCRF Fields (Sections & Fields)</h2>
-
-      <!-- Auto-filled study title/description (editable) -->
       <div class="form-row full">
-        <label>Study title <span class="muted">(auto-filled from metadata mapping when available)</span></label>
-        <input
-          v-model="studyMeta.name"
-          @input="studyMetaEdited.name = true"
-          placeholder="e.g., ADNI Baseline Import"
-        />
-      </div>
-      <div class="form-row full">
-        <label>Study description <span class="muted">(auto-filled from metadata mapping when available)</span></label>
-        <input
-          v-model="studyMeta.description"
-          @input="studyMetaEdited.description = true"
-          placeholder="Optional"
-        />
-      </div>
-
-      <div class="form-row full">
-        <label>Other fields to import as section fields</label>
+        <label>Select data columns to import as eCRF fields</label>
         <div class="pillbox">
           <label
             v-for="h in otherFieldCandidates"
@@ -335,11 +283,32 @@
           <div class="chip"><strong>Subjects:</strong> {{ subjects.length }}</div>
           <div class="chip"><strong>Visits:</strong> {{ visits.length }}</div>
           <div class="chip"><strong>Groups:</strong> {{ groups.length }}</div>
-          <div class="chip"><strong>Fields:</strong> {{ mapping.otherCols.length }}</div>
+          <div class="chip"><strong>Fields:</strong> {{ effectiveOtherCols.length }}</div>
         </div>
 
-        <details>
-          <summary>Preview lists</summary>
+        <div class="inferred-data-preview">
+          <h3>Imported data preview</h3>
+          <p class="muted">This is how the first {{ Math.min(10, normalizedRows.length) }} mapped row(s) will be structured.</p>
+          <div class="table-scroll">
+            <table class="preview">
+              <thead>
+                <tr>
+                  <th>Subject ID</th><th>Group</th><th>Visit</th>
+                  <th v-for="h in effectiveOtherCols" :key="'infer-head-' + h">{{ h }}</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="row in normalizedRows.slice(0, 10)" :key="'infer-row-' + row._ix">
+                  <td>{{ row.subject }}</td><td>{{ row.group }}</td><td>{{ row.visit }}</td>
+                  <td v-for="h in effectiveOtherCols" :key="'infer-cell-' + row._ix + '-' + h">{{ row.data[h] }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <details class="structure-lists">
+          <summary>View inferred subject, visit, and group lists</summary>
           <div class="cols">
             <div>
               <h4>Subjects (first 20)</h4>
@@ -369,7 +338,7 @@
         This will ① create the study template, then ② import {{ normalizedRows.length }} row(s) of data.
       </p>
 
-      <button class="btn primary" @click="performSave" :disabled="saving">
+      <button v-if="!successStudyId" class="btn primary" @click="performSave" :disabled="saving">
         {{ saving ? 'Importing…' : 'Save Study & Data' }}
       </button>
 
@@ -400,13 +369,26 @@
         </table>
       </div>
 
-      <div v-if="successStudyId && !saving" class="success">
-        Imported!
-        <button class="link" @click="$router.push({ name: 'StudyView', params: { id: successStudyId } })">
-          Open Study
+      <div v-if="successStudyId && !saving" class="import-complete-action">
+        <button class="btn primary" @click="openImportedStudy">
+          Continue to Study
         </button>
       </div>
     </section>
+
+    <div v-if="showSuccessDialog" class="schema-modal-overlay success-dialog-overlay">
+      <div class="schema-modal import-success-modal" role="dialog" aria-modal="true" aria-labelledby="import-success-title">
+        <h3 id="import-success-title">
+          {{ failures.length ? 'Study created with import warnings' : 'Study imported successfully' }}
+        </h3>
+        <p v-if="!failures.length">All {{ normalizedRows.length }} data row(s) were imported.</p>
+        <p v-else>The study was created, but some rows could not be imported. Review the failures shown on this page.</p>
+        <div class="schema-modal-actions success-dialog-actions">
+          <button type="button" class="btn" @click="showSuccessDialog = false">Stay on this page</button>
+          <button type="button" class="btn primary" @click="openImportedStudy">Continue to Study</button>
+        </div>
+      </div>
+    </div>
 
     <div v-if="showFieldSchemaInfo" class="schema-modal-overlay" @click.self="showFieldSchemaInfo = false">
       <div class="schema-modal" role="dialog" aria-modal="true" aria-labelledby="field-schema-title">
@@ -481,10 +463,10 @@ export default {
 
       // mapping (metadata + subject + eCRF)
       mapping: {
-        study: { cols: {}, fixed: {} },
-        group: { nameCol: "", cols: {}, fixed: {} },  // <-- name column here
-        visit: { nameCol: "", cols: {}, fixed: {} },  // <-- name column here
-        subject: { idCol: "", dateCol: "" },          // <-- removed visit/group here
+        study: { fixed: {} },
+        group: { mode: "manual", nameCol: "", cols: {}, fixed: { name: "Group A" } },
+        visit: { mode: "manual", nameCol: "", cols: {}, fixed: { name: "Baseline" } },
+        subject: { idCol: "" },
         otherCols: []
       },
       otherAllSelected: false,
@@ -494,9 +476,8 @@ export default {
       groupSchema: [],
       visitSchema: [],
 
-      // eCRF title/description (editable in step 6)
+      // Values mirrored from the schema-driven study metadata controls
       studyMeta: { name: "", description: "" },
-      studyMetaEdited: { name: false, description: false },
 
       // inferred structure
       subjects: [],
@@ -511,6 +492,7 @@ export default {
       failures: [],
       saveError: "",
       successStudyId: null,
+      showSuccessDialog: false,
 
       // known keys to mirror (robust to schema names)
       TITLE_KEYS: ["study_name", "title", "study_title", "name", "short_name"],
@@ -525,20 +507,35 @@ export default {
       return this.store.state.user?.id || null;
     },
     otherFieldCandidates() {
-      const explicitFieldColumns = new Set(
-        (this.fieldSchema?.fields || []).map(field => field.column)
-      );
       const exclude = new Set(
         [
           this.mapping.subject.idCol,
-          this.mapping.group.nameCol,
-          this.mapping.visit.nameCol,
-          explicitFieldColumns.has(this.mapping.subject.dateCol)
-            ? ""
-            : this.mapping.subject.dateCol,
+          this.mapping.group.mode === "column" ? this.mapping.group.nameCol : "",
+          this.mapping.visit.mode === "column" ? this.mapping.visit.nameCol : "",
+          ...(this.mapping.group.mode === "column" ? Object.values(this.mapping.group.cols || {}) : []),
+          ...(this.mapping.visit.mode === "column" ? Object.values(this.mapping.visit.cols || {}) : []),
         ].filter(Boolean)
       );
       return this.headers.filter(h => !exclude.has(h));
+    },
+    effectiveOtherCols() {
+      const candidates = new Set(this.otherFieldCandidates);
+      return this.mapping.otherCols.filter(column => candidates.has(column));
+    },
+    studyFields() {
+      return this.studySchema.filter(field => field.display !== false);
+    },
+    groupFields() {
+      return this.groupSchema.filter(field => field.display !== false);
+    },
+    groupMetadataFields() {
+      return this.groupFields.filter(field => field.field !== "name");
+    },
+    visitFields() {
+      return this.visitSchema.filter(field => field.display !== false);
+    },
+    visitMetadataFields() {
+      return this.visitFields.filter(field => field.field !== "name");
     },
     fieldSchemaExampleText() {
       return JSON.stringify(this.fieldSchemaExampleObject(), null, 2);
@@ -548,10 +545,14 @@ export default {
     // Mirror study metadata → eCRF fields whenever mapping changes
     "mapping.study": {
       handler() {
-        this.autofillStudyMetaFromMapping(false);
+        this.autofillStudyMetaFromMapping();
       },
       deep: true
-    }
+    },
+    "mapping.subject": { handler() { this.invalidateStructure(); }, deep: true },
+    "mapping.group": { handler() { this.invalidateStructure(); }, deep: true },
+    "mapping.visit": { handler() { this.invalidateStructure(); }, deep: true },
+    "mapping.otherCols": { handler() { this.invalidateStructure(); }, deep: true },
   },
   async mounted() {
     await Promise.all([
@@ -560,9 +561,30 @@ export default {
       this.loadYaml("/visit_schema.yaml", "visitSchema"),
     ]);
     // initial auto-fill if user sets fixed values before upload
-    this.autofillStudyMetaFromMapping(true);
+    this.autofillStudyMetaFromMapping();
   },
   methods: {
+    invalidateStructure() {
+      if (!this.saving) {
+        this.structureReady = false;
+        this.successStudyId = null;
+        this.showSuccessDialog = false;
+      }
+    },
+    isStudyTitleField(fieldName) {
+      return fieldName === this.findSchemaField(this.studySchema, this.TITLE_KEYS);
+    },
+    openImportedStudy() {
+      if (!this.successStudyId) return;
+      this.showSuccessDialog = false;
+      this.$router.push({ name: "StudyView", params: { id: this.successStudyId } });
+    },
+    setInitialStudyTitle(value) {
+      const titleField = this.findSchemaField(this.studySchema, this.TITLE_KEYS);
+      if (titleField && !this.safeStr(this.mapping.study.fixed?.[titleField])) {
+        this.mapping.study.fixed[titleField] = value;
+      }
+    },
     // ---------- YAML ----------
     async loadYaml(path, targetKey) {
       try {
@@ -771,15 +793,11 @@ export default {
     },
 
     clearFieldSchema() {
-      const mappedDateColumn = this.mapping.subject.dateCol;
       this.fieldSchema = null;
       this.fieldSchemaFileName = "";
       this.fieldSchemaError = "";
       this.fieldSchemaAppliedCount = 0;
       this.schemaCopyStatus = "";
-      if (mappedDateColumn) {
-        this.mapping.otherCols = this.mapping.otherCols.filter(column => column !== mappedDateColumn);
-      }
       this.otherAllSelected = false;
       this.structureReady = false;
     },
@@ -1083,10 +1101,12 @@ export default {
       this.suggestColumnHints();
 
       // copy metadata mapping → eCRF fields
-      this.autofillStudyMetaFromMapping(false);
+      this.autofillStudyMetaFromMapping();
 
       if (!this.studyMeta.name) {
-        this.studyMeta.name = (this.fileName || "Imported Study").replace(/\.(csv|tsv|xlsx|xls)$/i, "");
+        const defaultTitle = (this.fileName || "Imported Study").replace(/\.(csv|tsv|xlsx|xls)$/i, "");
+        this.studyMeta.name = defaultTitle;
+        this.setInitialStudyTitle(defaultTitle);
       }
 
       this.applyFieldSchemaToCurrentHeaders();
@@ -1113,7 +1133,8 @@ export default {
       this.mapping.subject.idCol    = findCol(["^subject$", "subject.?id", "^rid$", "^ptid$", "^participant", "^id$"]);
       this.mapping.group.nameCol    = findCol(["^group", "arm", "cohort", "treatment", "^site$", "center"]);
       this.mapping.visit.nameCol    = findCol(["^visit", "time.?point", "session", "wave", "phase", "viscode"]);
-      this.mapping.subject.dateCol  = findCol(["date", "exam.?date", "visit.?date", "acq.?date"]);
+      this.mapping.group.mode = this.mapping.group.nameCol ? "column" : "manual";
+      this.mapping.visit.mode = this.mapping.visit.nameCol ? "column" : "manual";
     },
 
     // ---------- Metadata → eCRF mirroring ----------
@@ -1174,17 +1195,10 @@ export default {
     },
 
     getMappedValueFromKeys(keys) {
-      // Prefer fixed values from mapping, else first non-empty value from mapped column
+      // Study metadata is entered once and never sourced from participant rows.
       for (const k of keys) {
         const fx = this.safeStr(this.mapping.study.fixed?.[k]);
         if (fx) return fx;
-      }
-      for (const k of keys) {
-        const col = this.mapping.study.cols?.[k];
-        if (col) {
-          const v = this.firstNonEmptyFromColumn(col);
-          if (v) return v;
-        }
       }
       return "";
     },
@@ -1197,40 +1211,25 @@ export default {
       return hit ? hit.field : null;
     },
     getStudyMappedValueBySchema(fieldName) {
-      const fx = this.safeStr(this.mapping.study.fixed?.[fieldName]);
-      if (fx) return fx;
-      const col = this.mapping.study.cols?.[fieldName];
-      if (col) return this.firstNonEmptyFromColumn(col);
-      return "";
+      return this.safeStr(this.mapping.study.fixed?.[fieldName]);
+    },
+    buildStudySchemaValues() {
+      return this.studyFields.reduce((values, field) => {
+        values[field.field] = this.safeStr(this.mapping.study.fixed?.[field.field]);
+        return values;
+      }, {});
     },
 
-    autofillStudyMetaFromMapping(force = false) {
-      // primary: look for common key aliases in mapping
-      const titleVal = this.getMappedValueFromKeys(this.TITLE_KEYS);
-      const descVal  = this.getMappedValueFromKeys(this.DESC_KEYS);
-
-      if (titleVal && (force || !this.studyMetaEdited.name)) {
-        this.studyMeta.name = titleVal;
-      }
-      if (descVal && (force || !this.studyMetaEdited.description)) {
-        this.studyMeta.description = descVal;
-      }
-
-      // secondary: if still empty, try schema-derived names
-      if (!this.studyMeta.name) {
-        const titleField = this.findSchemaField(this.studySchema, this.TITLE_KEYS);
-        if (titleField) {
-          const v = this.getStudyMappedValueBySchema(titleField);
-          if (v && (force || !this.studyMetaEdited.name)) this.studyMeta.name = v;
-        }
-      }
-      if (!this.studyMeta.description) {
-        const descField = this.findSchemaField(this.studySchema, this.DESC_KEYS);
-        if (descField) {
-          const v = this.getStudyMappedValueBySchema(descField);
-          if (v && (force || !this.studyMetaEdited.description)) this.studyMeta.description = v;
-        }
-      }
+    autofillStudyMetaFromMapping() {
+      // Step 2 is the single source of truth for study-level metadata.
+      const titleField = this.findSchemaField(this.studySchema, this.TITLE_KEYS);
+      const descriptionField = this.findSchemaField(this.studySchema, this.DESC_KEYS);
+      this.studyMeta.name = titleField
+        ? this.getStudyMappedValueBySchema(titleField)
+        : this.getMappedValueFromKeys(this.TITLE_KEYS);
+      this.studyMeta.description = descriptionField
+        ? this.getStudyMappedValueBySchema(descriptionField)
+        : this.getMappedValueFromKeys(this.DESC_KEYS);
     },
 
     // ---------- eCRF model building ----------
@@ -1282,14 +1281,15 @@ export default {
 
     buildSelectedModels() {
       this.resolvedImportFields = new Map();
+      const selectedColumns = this.effectiveOtherCols || this.mapping.otherCols;
       const samplesByLabel = {};
-      for (const k of this.mapping.otherCols) samplesByLabel[k] = [];
+      for (const k of selectedColumns) samplesByLabel[k] = [];
       for (const r of this.rows.slice(0, 200)) {
-        for (const k of this.mapping.otherCols) samplesByLabel[k].push(r[k]);
+        for (const k of selectedColumns) samplesByLabel[k].push(r[k]);
       }
 
       const bySection = new Map();
-      for (const label of this.mapping.otherCols) {
+      for (const label of selectedColumns) {
         const meta = this.columnMeta.get(label);
         if (!meta) continue;
         const definition = this.fieldSchemaDefinitionForColumn(label);
@@ -1394,6 +1394,7 @@ export default {
       this.saveError = "";
       this.failures = [];
       this.successStudyId = null;
+      this.showSuccessDialog = false;
       this.structureReady = false;
 
       if (this.fieldSchemaError) {
@@ -1403,6 +1404,23 @@ export default {
 
       if (!this.mapping.subject.idCol) {
         this.saveError = "Please map Subject ID column.";
+        return;
+      }
+
+      if (this.mapping.group.mode === "column" && !this.mapping.group.nameCol) {
+        this.saveError = "Please select the group name column, or choose manual group entry.";
+        return;
+      }
+      if (this.mapping.visit.mode === "column" && !this.mapping.visit.nameCol) {
+        this.saveError = "Please select the visit name column, or choose manual visit entry.";
+        return;
+      }
+      if (this.mapping.group.mode === "manual" && !this.safeStr(this.mapping.group.fixed?.name)) {
+        this.saveError = "Please enter a group name.";
+        return;
+      }
+      if (this.mapping.visit.mode === "manual" && !this.safeStr(this.mapping.visit.fixed?.name)) {
+        this.saveError = "Please enter a visit name.";
         return;
       }
 
@@ -1416,9 +1434,10 @@ export default {
       const normalized = [];
 
       const idCol     = this.mapping.subject.idCol;
-      const visitCol  = this.mapping.visit.nameCol;   // moved here
-      const groupCol  = this.mapping.group.nameCol;   // moved here
-      const dateCol   = this.mapping.subject.dateCol;
+      const visitCol  = this.mapping.visit.mode === "column" ? this.mapping.visit.nameCol : "";
+      const groupCol  = this.mapping.group.mode === "column" ? this.mapping.group.nameCol : "";
+      const manualVisit = this.safeStr(this.mapping.visit.fixed?.name) || DEFAULT_VISIT;
+      const manualGroup = this.safeStr(this.mapping.group.fixed?.name) || DEFAULT_GROUP;
 
       for (let i = 0; i < this.rows.length; i++) {
         const r = this.rows[i];
@@ -1426,12 +1445,11 @@ export default {
         const subjRaw = this.safeStr(r[idCol]);
         if (!subjRaw) continue;
 
-        const visit = visitCol ? (this.safeStr(r[visitCol]) || DEFAULT_VISIT) : DEFAULT_VISIT;
-        const group = groupCol ? (this.safeStr(r[groupCol]) || DEFAULT_GROUP) : DEFAULT_GROUP;
+        const visit = visitCol ? (this.safeStr(r[visitCol]) || manualVisit) : manualVisit;
+        const group = groupCol ? (this.safeStr(r[groupCol]) || manualGroup) : manualGroup;
 
         const extra = {};
-        for (const k of this.mapping.otherCols) extra[k] = r[k] ?? null;
-        if (dateCol) extra.__date__ = r[dateCol] ?? null;
+        for (const k of this.effectiveOtherCols) extra[k] = r[k] ?? null;
 
         normalized.push({ _ix: i, subject: subjRaw, visit, group, data: extra });
 
@@ -1443,18 +1461,22 @@ export default {
       const groupNames = Array.from(groupSet.keys());
       const visitNames = Array.from(visitSet.keys());
 
+      if (!normalized.length) {
+        this.saveError = "No data rows contain a subject ID. Check the selected subject column.";
+        return;
+      }
+
       // map group metadata
       const groupObjs = groupNames.map(name => {
         const obj = { name };
-        for (const f of this.groupSchema) {
+        for (const f of this.groupMetadataFields) {
           if (f.display === false) continue;
           const fx = this.safeStr(this.mapping.group.fixed?.[f.field]);
           const col = this.mapping.group.cols?.[f.field];
-          if (fx) obj[f.field] = fx;
-          else if (col && groupCol) obj[f.field] = this.rows
+          if (this.mapping.group.mode === "manual" && fx) obj[f.field] = fx;
+          else if (this.mapping.group.mode === "column" && col && groupCol) obj[f.field] = this.rows
             .map(r => ({ grp: this.safeStr(r[groupCol]), v: this.safeStr(r[col]) }))
             .find(x => x.grp === name && x.v)?.v || "";
-          else if (col) obj[f.field] = this.firstNonEmptyFromColumn(col);
         }
         return obj;
       });
@@ -1462,15 +1484,14 @@ export default {
       // map visit metadata
       const visitObjs = visitNames.map(name => {
         const obj = { name };
-        for (const f of this.visitSchema) {
+        for (const f of this.visitMetadataFields) {
           if (f.display === false) continue;
           const fx = this.safeStr(this.mapping.visit.fixed?.[f.field]);
           const col = this.mapping.visit.cols?.[f.field];
-          if (fx) obj[f.field] = fx;
-          else if (col && visitCol) obj[f.field] = this.rows
+          if (this.mapping.visit.mode === "manual" && fx) obj[f.field] = fx;
+          else if (this.mapping.visit.mode === "column" && col && visitCol) obj[f.field] = this.rows
             .map(r => ({ vis: this.safeStr(r[visitCol]), v: this.safeStr(r[col]) }))
             .find(x => x.vis === name && x.v)?.v || "";
-          else if (col) obj[f.field] = this.firstNonEmptyFromColumn(col);
         }
         return obj;
       });
@@ -1491,6 +1512,7 @@ export default {
       this.saveError = "";
       this.failures = [];
       this.successStudyId = null;
+      this.showSuccessDialog = false;
 
       // Final sync safety: if eCRF fields empty, fill from mapping once more
       if (!this.studyMeta.name) {
@@ -1521,7 +1543,6 @@ export default {
 
         const studyShell = {
           id: "",
-          title: this.studyMeta.name,
           short_name: "",
           description: this.studyMeta.description || "",
           type: "",
@@ -1530,7 +1551,9 @@ export default {
           publisher: "",
           "start time": "",
           "End time": "",
-          "Location": ""
+          "Location": "",
+          ...this.buildStudySchemaValues(),
+          title: this.studyMeta.name,
         };
 
         const study_data = {
@@ -1629,6 +1652,7 @@ export default {
         }
 
         this.successStudyId = studyId;
+        this.showSuccessDialog = true;
       } catch (e) {
         console.error("[Import] Import failed:", e);
         this.saveError = e?.message || "Import failed.";
@@ -1646,9 +1670,9 @@ export default {
       this.columns = [];
       this.columnMeta = new Map();
       this.resolvedImportFields = new Map();
-      this.mapping.subject = { idCol: "", dateCol: "" };
-      this.mapping.group = { nameCol: "", cols: {}, fixed: {} };
-      this.mapping.visit = { nameCol: "", cols: {}, fixed: {} };
+      this.mapping.subject = { idCol: "" };
+      this.mapping.group = { mode: "manual", nameCol: "", cols: {}, fixed: { name: "Group A" } };
+      this.mapping.visit = { mode: "manual", nameCol: "", cols: {}, fixed: { name: "Baseline" } };
       this.mapping.otherCols = [];
       this.otherAllSelected = false;
       this.subjects = [];
@@ -1661,6 +1685,7 @@ export default {
       this.failures = [];
       this.saveError = "";
       this.successStudyId = null;
+      this.showSuccessDialog = false;
       this.fieldSchemaError = "";
       this.fieldSchemaAppliedCount = 0;
 
@@ -1671,15 +1696,7 @@ export default {
 
     toggleSelectAllOther() {
       if (this.otherAllSelected) {
-        const exclude = new Set(
-          [
-            this.mapping.subject.idCol,
-            this.mapping.group.nameCol,
-            this.mapping.visit.nameCol,
-            this.mapping.subject.dateCol
-          ].filter(Boolean)
-        );
-        this.mapping.otherCols = this.headers.filter(h => !exclude.has(h));
+        this.mapping.otherCols = [...this.otherFieldCandidates];
       } else {
         this.mapping.otherCols = [];
       }
@@ -1695,19 +1712,23 @@ export default {
   min-width: 0;
   max-width: 1100px;
   margin: 0 auto;
+  padding-bottom: 28px;
 }
 
 .sub { color:#666; margin-bottom: 12px; }
 
 .card {
-  border:1px solid #e7e7e7;
-  border-radius:12px;
-  padding:16px 18px;
-  margin:14px 0;
-  background:#fafafa;
+  border:1px solid #e2e8f0;
+  border-radius:14px;
+  padding:20px;
+  margin:16px 0;
+  background:#f8fafc;
   min-width: 0;
   max-width: 100%;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, .04);
 }
+
+.card h2 { margin: 0 0 8px; color:#172033; font-size:19px; }
 
 .upload-inputs {
   display: grid;
@@ -1835,7 +1856,9 @@ export default {
 .form-row { display:flex; flex-direction:column; gap:6px; min-width:0; }
 .form-row.full { grid-column: 1 / -1; }
 label { font-size: 13px; color:#444; }
-input, select { padding:10px; border:1px solid #ddd; border-radius:8px; }
+input, select, textarea { padding:10px; border:1px solid #cfd8e3; border-radius:8px; background:#fff; font:inherit; }
+input:focus, select:focus, textarea:focus { outline:2px solid rgba(47,111,237,.18); border-color:#2f6fed; }
+textarea { resize:vertical; min-height:42px; }
 .muted { color:#777; font-size: 12px; }
 .smalltop { margin-top: 6px; }
 
@@ -1882,7 +1905,12 @@ input, select { padding:10px; border:1px solid #ddd; border-radius:8px; }
 .fill { height: 100%; background:#2f6fed; }
 
 .error { color:#b00020; margin-top: 10px; }
-.success { margin-top: 12px; }
+.import-complete-action { margin-top:16px; }
+.success-dialog-overlay { background:rgba(15, 23, 42, .68); }
+.import-success-modal { width:min(520px, 100%); padding:30px; text-align:center; }
+.import-success-modal h3 { margin:0 0 8px; color:#172033; font-size:22px; }
+.import-success-modal p { margin:0; color:#506176; line-height:1.55; }
+.success-dialog-actions { justify-content:center; margin-top:24px; }
 .link { background:none; border:none; color:#2f6fed; cursor:pointer; text-decoration: underline; }
 .hint { color:#555; margin-top:6px; }
 
@@ -1890,6 +1918,9 @@ input, select { padding:10px; border:1px solid #ddd; border-radius:8px; }
   .upload-inputs {
     grid-template-columns: 1fr;
   }
+  .metadata-grid { grid-template-columns:1fr; }
+  .schema-map-row, .metadata-grid .schema-map-row { grid-template-columns:1fr; }
+  .success { align-items:stretch; flex-direction:column; }
 }
 
 /* schema mapping grid */
@@ -1901,6 +1932,19 @@ input, select { padding:10px; border:1px solid #ddd; border-radius:8px; }
 .schema-map-ctrls { display: grid; grid-template-columns: repeat(2, minmax(180px, 1fr)); gap: 10px; min-width:0; }
 .schema-map-ctrl { display:flex; flex-direction:column; gap:6px; min-width:0; }
 .schema-map-ctrl .small { font-size: 11px; color:#777; }
+
+.metadata-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.metadata-grid .schema-map-row { grid-template-columns: minmax(130px, .7fr) minmax(180px, 1fr); }
+
+.source-choice { display:flex; flex-wrap:wrap; gap:8px; margin:14px 0 12px; }
+.source-choice label { display:flex; align-items:center; gap:7px; padding:9px 12px; border:1px solid #d7dee8; border-radius:9px; background:#fff; cursor:pointer; }
+.source-choice label.active { border-color:#2f6fed; background:#eff6ff; color:#1f57bd; box-shadow:0 0 0 1px #2f6fed; }
+.source-choice input { margin:0; padding:0; }
+.mapping-panel { padding:14px; border:1px solid #e2e8f0; border-radius:10px; background:#fff; }
+.mapping-panel .schema-map-row { background:#f8fafc; }
+.inferred-data-preview { margin-top:18px; }
+.inferred-data-preview h3 { margin:0 0 4px; font-size:15px; color:#27364b; }
+.structure-lists { margin-top:14px; }
 
 .pillbox { display:flex; flex-wrap:wrap; gap:8px; margin-top: 6px; min-width:0; }
 .pill { border:1px solid #ddd; padding:6px 8px; border-radius:999px; background:#fff; font-size:12px; }
@@ -1994,5 +2038,11 @@ input, select { padding:10px; border:1px solid #ddd; border-radius:8px; }
 
 .bids-warning i {
   font-size: 14px;
+}
+
+@media (max-width: 760px) {
+  .metadata-grid { grid-template-columns:1fr; }
+  .schema-map-row, .metadata-grid .schema-map-row { grid-template-columns:1fr; }
+  .success { align-items:stretch; flex-direction:column; }
 }
 </style>
