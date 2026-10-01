@@ -341,6 +341,7 @@ import {
   normalizeSubjectIdConfig,
   inferSubjectIdConfigFromExistingSubjects,
   buildUniqueSubjectId,
+  getNextSubjectSequenceNumber,
   subjectIdPatternValidationMessage,
 } from "@/utils/subjectIdUtils";
 
@@ -762,12 +763,18 @@ export default {
       visitData.value = Array.isArray(details.visits) ? [...details.visits] : [];
       skipSubjectCreationNow.value = !!details.skipSubjectCreationNow;
 
-      subjectIdConfig.value = inferSubjectIdConfigFromExistingSubjects(
-        subjectData.value,
-        studyData.value || {},
-        headerStudyName.value || "Study",
-        { useLast: false }
-      );
+      subjectIdConfig.value = details.subjectIdConfig
+        ? normalizeSubjectIdConfig(
+            details.subjectIdConfig,
+            studyData.value || {},
+            headerStudyName.value || "Study"
+          )
+        : inferSubjectIdConfigFromExistingSubjects(
+            subjectData.value,
+            studyData.value || {},
+            headerStudyName.value || "Study",
+            { useLast: false }
+          );
 
       subjectIdConfig.value.locked = !!isPublishedStudy.value;
 
@@ -803,6 +810,7 @@ export default {
             visits: _deepClone(visitData.value || []),
             subjectCount: Number(subjectCount.value || 0),
             assignmentMethod: assignmentMethod.value || "Random",
+            subjectIdConfig: _deepClone(subjectIdConfig.value || null),
             subjects: _deepClone(subjectData.value || []),
             assignments: _deepClone(assignments.value || []),
             skipSubjectCreationNow: !!skipSubjectCreationNow.value,
@@ -855,6 +863,7 @@ export default {
             visits: _deepClone(payload.study_content.study_data.visits || []),
             subjectCount: payload.study_content.study_data.subjectCount || 0,
             assignmentMethod: payload.study_content.study_data.assignmentMethod || "Random",
+            subjectIdConfig: _deepClone(payload.study_content.study_data.subjectIdConfig || null),
             subjects: _deepClone(payload.study_content.study_data.subjects || []),
             assignments: _deepClone(payload.study_content.study_data.assignments || []),
             skipSubjectCreationNow: !!payload.study_content.study_data.skipSubjectCreationNow,
@@ -899,6 +908,7 @@ export default {
           visits: payload.study_content.study_data.visits || [],
           subjectCount: payload.study_content.study_data.subjectCount || 0,
           assignmentMethod: payload.study_content.study_data.assignmentMethod || "Random",
+          subjectIdConfig: _deepClone(payload.study_content.study_data.subjectIdConfig || null),
           subjects: payload.study_content.study_data.subjects || [],
           assignments: payload.study_content.study_data.assignments || [],
           skipSubjectCreationNow: !!payload.study_content.study_data.skipSubjectCreationNow,
@@ -1099,6 +1109,7 @@ export default {
         visits: sd.visits || [],
         subjectCount: sd.subjectCount || 0,
         assignmentMethod: sd.assignmentMethod || "random",
+        subjectIdConfig: _deepClone(sd.subjectIdConfig || null),
         subjects: sd.subjects || [],
         assignments: assignmentsLocal,
         skipSubjectCreationNow: !!sd.skipSubjectCreationNow,
@@ -1303,6 +1314,7 @@ export default {
           groups: groupData.value,
           subjectCount: Number(subjectCount.value || 0),
           assignmentMethod: assignmentMethod.value || "Random",
+          subjectIdConfig: _deepClone(subjectIdConfig.value || null),
           subjects: subjectData.value,
           assignments: assignments.value,
           skipSubjectCreationNow: skipSubjectCreationNow.value,
@@ -1362,42 +1374,42 @@ export default {
         : [];
       const currentCount = existingSubjects.length;
 
-      if (isPublishedStudy.value) {
-        const nextSubjects = existingSubjects.slice(0, N).map((s) => ({
-          ...s,
-          id: String(s?.id || s?.subject_id || "").trim(),
-          group: s?.group || "",
-        }));
-
+      if (isEditing.value) {
+        // Subject identity becomes immutable as soon as a study (including a
+        // draft) has been persisted. Keep each existing ID at its original
+        // array position and generate IDs only for appended subjects.
+        const nextSubjects = existingSubjects.slice(0, N);
         const existingIds = new Set(
           nextSubjects
-            .map((s) => String(s?.id || s?.subject_id || "").trim())
+            .map((subject) => String(subject?.id || subject?.subject_id || "").trim())
             .filter(Boolean)
         );
+        let nextSequenceNumber = getNextSubjectSequenceNumber(
+          existingSubjects,
+          subjectIdConfig.value
+        );
 
-        if (N > currentCount) {
-          for (let idx = currentCount; idx < N; idx += 1) {
-            const sequenceNumber = getSubjectSequenceNumberForIndex(idx);
-            const nextId = buildUniqueSubjectIdForCurrentStudy(
-              subjectIdConfig.value,
-              sequenceNumber,
-              existingIds
-            );
-
-            existingIds.add(nextId);
-
-            nextSubjects.push({
-              id: nextId,
-              group:
-                assignmentMethod.value === "Random" && groupNames.length > 0
-                  ? groupNames[Math.floor(Math.random() * groupNames.length)]
-                  : "",
-            });
-          }
+        for (let idx = currentCount; idx < N; idx += 1) {
+          const nextId = buildUniqueSubjectIdForCurrentStudy(
+            subjectIdConfig.value,
+            nextSequenceNumber,
+            existingIds
+          );
+          nextSequenceNumber += 1;
+          existingIds.add(nextId);
+          nextSubjects.push({
+            id: nextId,
+            group:
+              assignmentMethod.value === "Random" && groupNames.length > 0
+                ? groupNames[Math.floor(Math.random() * groupNames.length)]
+                : "",
+          });
         }
 
         subjectData.value = nextSubjects;
       } else {
+        // Preserve the existing create-flow behavior: before the study has ever
+        // been saved, changing the ID configuration regenerates the full list.
         const regeneratedIds = new Set();
         const nextSubjects = [];
 
@@ -1411,7 +1423,6 @@ export default {
           );
 
           regeneratedIds.add(nextId);
-
           nextSubjects.push({
             ...existing,
             id: nextId,
@@ -1431,6 +1442,7 @@ export default {
         groups: groupData.value,
         subjectCount: N,
         assignmentMethod: assignmentMethod.value || "Random",
+        subjectIdConfig: _deepClone(subjectIdConfig.value || null),
         subjects: _deepClone(subjectData.value),
         assignments: assignments.value,
         skipSubjectCreationNow: skipSubjectCreationNow.value,

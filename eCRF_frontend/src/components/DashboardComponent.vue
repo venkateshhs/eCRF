@@ -717,6 +717,7 @@ export default {
           visits: sd.visits || [],
           subjectCount: sd.subjectCount || 0,
           assignmentMethod: sd.assignmentMethod || "random",
+          subjectIdConfig: sd.subjectIdConfig || null,
           subjects: sd.subjects || [],
           assignments: assignments,
           forms: Array.isArray(sd.selectedModels)

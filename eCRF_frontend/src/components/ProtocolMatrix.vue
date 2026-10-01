@@ -1288,6 +1288,7 @@ export default {
         assignments: props.assignments,
         subjectCount: studyDetails.subjectCount ?? 0,
         assignmentMethod: studyDetails.assignmentMethod ?? "random",
+        subjectIdConfig: studyDetails.subjectIdConfig || null,
         skipSubjectCreationNow: !!studyDetails.skipSubjectCreationNow,
       };
 
@@ -1366,6 +1367,7 @@ export default {
           visits: updatedStudyData.visits || [],
           subjectCount: updatedStudyData.subjectCount ?? 0,
           assignmentMethod: updatedStudyData.assignmentMethod ?? "random",
+          subjectIdConfig: updatedStudyData.subjectIdConfig || studyDetails.subjectIdConfig || null,
           subjects: updatedStudyData.subjects || [],
           assignments: updatedStudyData.assignments || [],
           selectedModels: updatedStudyData.selectedModels || [],
@@ -1390,7 +1392,13 @@ export default {
         return true;
       } catch (error) {
         console.error(`[ProtocolMatrix saveStudyImpl] Error ${studyId ? "updating" : "saving"} study:`, error);
-        showDialogMessage(`Failed to ${studyId ? "update" : "save"} study. Check console for details.`);
+        const detail =
+          error?.response?.data?.detail ||
+          error?.response?.data?.message ||
+          error?.message;
+        showDialogMessage(
+          detail || `Failed to ${studyId ? "update" : "save"} study. Check console for details.`
+        );
         return false;
       } finally {
         if (mode === "publish") {
