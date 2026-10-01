@@ -936,6 +936,7 @@
 
 <script>
 /* eslint-disable */
+import { markRaw } from "vue";
 import axios from "axios";
 import icons from "@/assets/styles/icons";
 import CustomDialog from "@/components/CustomDialog.vue";
@@ -1207,7 +1208,9 @@ export default {
       runtimeCalculationFormulaCache: new Map(),
       runtimePopupReminderIndex: null,
       runtimePopupReminderIndexModels: null,
-      runtimeCommitHandles: new Map(),
+      // Timer handles are implementation details, not UI state. Keeping this Map
+      // raw preserves handle identity for the stale-callback guard below.
+      runtimeCommitHandles: markRaw(new Map()),
       pendingNavigationAction: null,
       showUnsavedExitDialog: false,
       subjectIdConfigDraft: null,
