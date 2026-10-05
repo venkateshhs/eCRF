@@ -206,6 +206,8 @@
           :subjectIdFormatEditable="!isPublishedStudy"
           :hasExistingSubjects="hasExistingSubjects"
           :isPublished="isPublishedStudy"
+          :lockedSubjectIds="persistedSubjects.map(subject => subject.id || subject.subject_id)"
+          @skip-manual="skipManualEnrollment"
           @changed="onSubjectSetupChanged"
         />
       <div class="form-actions">
@@ -344,6 +346,7 @@ import {
   getNextSubjectSequenceNumber,
   subjectIdPatternValidationMessage,
 } from "@/utils/subjectIdUtils";
+import { reconcileManualSubjects } from "@/utils/manualSubjectIds";
 
 export default {
   name: "StudyCreationComponent",
@@ -371,6 +374,7 @@ export default {
     const studyData = ref({});
     const groupData = ref([]);
     const subjectData = ref([]);
+    const persistedSubjects = ref([]);
     const visitData = ref([]);
     const subjectCount = ref(1);
     const assignmentMethod = ref("Random");
@@ -484,7 +488,10 @@ export default {
     const globalDirty = computed(() => !!store.state.studyCreationDirty);
     const currentUserId = computed(() => store.state.user?.id || null);
 
-    function onSubjectSetupChanged() {
+    function onSubjectSetupChanged(event) {
+      if (event?.kind === "manualSubjectIds" && (subjectIdConfig.value.manualIds || []).length > persistedSubjects.value.length) {
+        skipSubjectCreationNow.value = false;
+      }
       // Mark Step 4 validation as stale whenever subject setup/assignment changes.
       // Next click to Step 5 will re-run checkSubjectsAssigned() and block if needed.
       const step4Applies = !skipSubjectCreationNow.value && assignmentMethod.value !== "Skip";
@@ -760,6 +767,7 @@ export default {
       subjectCount.value = details.subjectCount ?? subjectCount.value;
       assignmentMethod.value = details.assignmentMethod ?? assignmentMethod.value;
       subjectData.value = Array.isArray(details.subjects) ? [...details.subjects] : [];
+      persistedSubjects.value = isEditing.value ? _deepClone(subjectData.value) : [];
       visitData.value = Array.isArray(details.visits) ? [...details.visits] : [];
       skipSubjectCreationNow.value = !!details.skipSubjectCreationNow;
 
@@ -777,6 +785,9 @@ export default {
           );
 
       subjectIdConfig.value.locked = !!isPublishedStudy.value;
+      if (isEditing.value && subjectIdConfig.value.mode === "manual") {
+        subjectIdConfig.value.manualIds = subjectData.value.map(subject => subject.id || subject.subject_id);
+      }
 
       assignments.value = Array.isArray(details.assignments)
         ? JSON.parse(JSON.stringify(details.assignments))
@@ -829,6 +840,8 @@ export default {
         return false;
       }
 
+      if (subjectIdConfig.value.mode === "manual" && !skipSubjectCreationNow.value &&
+          (subjectIdConfig.value.manualIds || []).length && !checkSubjectsSetup({ advance: false })) return false;
       const payload = buildBackendPayload();
       const formsToPersist = getFormsForSavePayload();
 
@@ -845,6 +858,7 @@ export default {
             );
 
           // Keep local store consistent and preserve forms/template after save
+          persistedSubjects.value = _deepClone(payload.study_content.study_data.subjects || []);
           commitStudyDetailsPreservingForms({
             study_metadata: {
               ...(store.state.studyDetails?.study_metadata || {}),
@@ -1305,6 +1319,14 @@ export default {
     }
 
     // ============ STEP 3 ============
+    function skipManualEnrollment() {
+      subjectData.value = _deepClone(persistedSubjects.value);
+      subjectCount.value = subjectData.value.length;
+      subjectIdConfig.value.manualIds = subjectData.value.map(subject => subject.id || subject.subject_id);
+      skipSubjectCreationNow.value = true;
+      checkSubjectsSetup();
+    }
+
     function checkSubjectsSetup(opts = { advance: true, silent: false }) {
       if (skipSubjectCreationNow.value) {
         stepErrors.value[3] = false;
@@ -1322,6 +1344,32 @@ export default {
 
         if (opts.advance) step.value = 5;
         return true;
+      }
+
+      if (normalizeSubjectIdConfig(subjectIdConfig.value).mode === "manual") {
+        try {
+          subjectData.value = reconcileManualSubjects(
+            subjectIdConfig.value.manualIds || [], subjectData.value, persistedSubjects.value,
+            groupData.value.map(group => group.name || group.label || "Unnamed"), assignmentMethod.value === "Random"
+          );
+          subjectCount.value = subjectData.value.length;
+          commitStudyDetailsPreservingForms({
+            subjectCount: subjectCount.value, assignmentMethod: assignmentMethod.value,
+            subjectIdConfig: _deepClone(subjectIdConfig.value), subjects: _deepClone(subjectData.value),
+            skipSubjectCreationNow: false,
+          });
+          stepErrors.value[3] = false;
+          if (opts.advance) step.value = assignmentMethod.value === "Skip" ? 5 : 4;
+          return true;
+        } catch (error) {
+          stepErrors.value[3] = true;
+          if (!opts.silent) {
+            dialogMessage.value = error.message;
+            dialogMode.value = "default";
+            showDialog.value = true;
+          }
+          return false;
+        }
       }
 
       if (!subjectCount.value || !assignmentMethod.value) {
@@ -1809,6 +1857,8 @@ export default {
       visitData,
       subjectCount,
       subjectIdConfig,
+      persistedSubjects,
+      skipManualEnrollment,
       hasExistingSubjects,
       isPublishedStudy,
       assignmentMethod,

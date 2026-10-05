@@ -771,6 +771,7 @@
       :subjectCount="subjectCountDraft"
       :assignmentMethod="assignmentMethodDraft"
       :subjectIdConfig="subjectIdConfigDraft"
+      :existingSubjectIds="(sd.subjects || []).map(subject => subject.id || subject.subject_id)"
       :subjects="subjectDrafts"
       :groupData="groupList"
       :saving="savingSubjects"
@@ -983,6 +984,7 @@ import {
   buildUniqueSubjectId,
   getNextSubjectSequenceNumber,
 } from "@/utils/subjectIdUtils";
+import { validateManualSubjectIds } from "@/utils/manualSubjectIds";
 import {
   calculateDataEntryFieldProgress,
   calculateDataEntryProgress,
@@ -7737,7 +7739,9 @@ applyImportedRowFromDialog(payload) {
       );
 
       this.subjectIdConfigDraft = {
-        ...inferred,
+        ...(this.sd.subjectIdConfig?.mode === "manual" || this.sd.subjectIdConfig?.preset === "manual"
+          ? normalizeSubjectIdConfig({ ...this.sd.subjectIdConfig, manualIds: [""] })
+          : inferred),
         startNumber: getNextSubjectSequenceNumber(existingSubjects, inferred),
         locked: false,
       };
@@ -7814,9 +7818,24 @@ applyImportedRowFromDialog(payload) {
 
     onAssignmentMethodChange(val) {
       this.assignmentMethodDraft = val || "Random";
+      if (this.subjectIdConfigDraft?.mode === "manual") {
+        this.applyAssignmentMethod();
+        return;
+      }
       this.generateSubjectDrafts();
     },
     generateSubjectDrafts() {
+      if (this.subjectIdConfigDraft?.mode === "manual") {
+        const previous = new Map(this.subjectDrafts.map(subject => [subject.id, subject]));
+        this.subjectDrafts = (this.subjectIdConfigDraft.manualIds || []).map((id, index) => {
+          const group = previous.get(String(id).trim())?.group || this.subjectDrafts[index]?.group;
+          const fallbackIndex = this.assignmentMethodDraft === "Random"
+            ? Math.floor(Math.random() * this.groupList.length) : index;
+          return { id: String(id).trim(), group: group || this.defaultGroupForIndex(fallbackIndex) };
+        });
+        this.subjectCountDraft = this.subjectDrafts.length;
+        return;
+      }
       const count = Number(this.subjectCountDraft) || 0;
 
       if (count <= 0) {
@@ -7928,6 +7947,12 @@ applyImportedRowFromDialog(payload) {
         group: String(s.group || "").trim(),
       }));
 
+      if (this.subjectIdConfigDraft?.mode === "manual") {
+        const error = validateManualSubjectIds(cleanedDrafts.map(subject => subject.id),
+          (this.sd.subjects || []).map(subject => subject.id || subject.subject_id));
+        if (error) { this.subjectDialogError = error; return; }
+      }
+
       for (const s of cleanedDrafts) {
         if (!s.id) {
           this.subjectDialogError = "Each subject must have an ID.";
@@ -8030,7 +8055,7 @@ applyImportedRowFromDialog(payload) {
         this.showDialogMessage("Subjects added successfully.");
       } catch (e) {
         console.error("Failed to add subjects", e);
-        this.subjectDialogError = "Failed to save subjects. Please try again.";
+        this.subjectDialogError = this.getApiErrorDetail(e) || "Failed to save subjects. Please try again.";
       } finally {
         this.savingSubjects = false;
       }
