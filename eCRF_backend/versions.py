@@ -293,6 +293,7 @@ _STRUCTURAL_CONSTRAINT_KEYS = {
     "maxLength",
     "step",
     "allowMultiple",
+    "allowOther",
     "dominantOptions",
     "integerOnly",
     "dateFormat",
@@ -577,9 +578,12 @@ def _dominant_options(field_or_col: Dict[str, Any]) -> List[str]:
 
 
 def _choice_definition_changed(old_obj: Dict[str, Any], new_obj: Dict[str, Any]) -> bool:
+    old_constraints = old_obj.get("constraints") or {}
+    new_constraints = new_obj.get("constraints") or {}
     return (
         _choice_options_changed(old_obj, new_obj)
         or _dominant_options(old_obj) != _dominant_options(new_obj)
+        or bool(old_constraints.get("allowOther")) != bool(new_constraints.get("allowOther"))
     )
 
 
@@ -600,11 +604,21 @@ def _sanitize_choice_value_for_new_options(
         return value, False
 
     valid = set(_choice_options(new_field_or_col))
-    if not valid:
+    constraints = new_field_or_col.get("constraints") or {}
+    allow_other = bool(constraints.get("allowOther"))
+    if not valid and not allow_other:
         return _empty_choice_value(new_field_or_col, value), value not in (None, "", [])
 
     if isinstance(value, list):
-        kept = [v for v in value if _norm_str(v) in valid]
+        kept = []
+        custom_kept = False
+        for item in value:
+            normalized = _norm_str(item)
+            if normalized in valid:
+                kept.append(item)
+            elif allow_other and normalized and not custom_kept:
+                kept.append(item)
+                custom_kept = True
         dominant = set(_dominant_options(new_field_or_col))
         selected_dominant = next(
             (v for v in kept if _norm_str(v) in dominant),
@@ -615,7 +629,7 @@ def _sanitize_choice_value_for_new_options(
         changed = kept != value
         return kept, changed
 
-    if _norm_str(value) in valid:
+    if _norm_str(value) in valid or (allow_other and _norm_str(value)):
         return value, False
 
     return _empty_choice_value(new_field_or_col, value), True

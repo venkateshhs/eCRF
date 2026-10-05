@@ -575,13 +575,12 @@
                         />
 
                         <!-- SELECT -->
-                        <select
+                        <FieldSelect
                           v-else-if="field.type === 'select'"
                           v-model="field.value"
-                        >
-                          <option value="" disabled>Select…</option>
-                          <option v-for="opt in field.options" :key="opt">{{ opt }}</option>
-                        </select>
+                          :options="field.options || []"
+                          v-bind="field.constraints || {}"
+                        />
 
                         <!-- RADIO -->
                         <FieldRadioGroup
@@ -997,6 +996,7 @@ import FormPreview from "./FormPreview.vue";
 import DateFormatPicker from "./DateFormatPicker.vue";
 import FieldCheckbox from "@/components/fields/FieldCheckbox.vue";
 import FieldRadioGroup from "@/components/fields/FieldRadioGroup.vue";
+import FieldSelect from "@/components/fields/FieldSelect.vue";
 import { haveSameChoiceOptions } from "@/utils/dominantChoice";
 import FieldTime from "@/components/fields/FieldTime.vue";
 import FieldSlider from "@/components/fields/FieldSlider.vue";
@@ -1024,6 +1024,7 @@ export default {
     DateFormatPicker,
     FieldCheckbox,
     FieldRadioGroup,
+    FieldSelect,
     FieldTime,
     FieldSlider,
     FieldLinearScale,

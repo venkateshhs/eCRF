@@ -61,7 +61,7 @@ export function normalizeConstraints(fieldType = "text", raw = {}) {
   // Options belong to the field, not constraints.
   if (Array.isArray(c.options)) delete c.options;
 
-  ["required", "readonly", "allowMultiple","allowMultipleFiles", "integerOnly", "percent", "showTicks"].forEach((k) => {
+  ["required", "readonly", "allowMultiple", "allowOther", "allowMultipleFiles", "integerOnly", "percent", "showTicks"].forEach((k) => {
     if (k in c) c[k] = !!c[k];
   });
 
@@ -273,12 +273,12 @@ export function normalizeConstraints(fieldType = "text", raw = {}) {
       allowed = [...COMMON, ...TIME];
       break;
     case "select":
-      allowed = [...COMMON];
+      allowed = [...COMMON, "allowOther"];
       delete c.allowMultiple;
       delete c.dominantOptions;
       break;
     case "radio":
-      allowed = [...COMMON, "allowMultiple", "dominantOptions"];
+      allowed = [...COMMON, "allowMultiple", "allowOther", "dominantOptions"];
       if (!c.allowMultiple) delete c.dominantOptions;
       break;
     case "checkbox":

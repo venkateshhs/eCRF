@@ -368,13 +368,17 @@ function buildSchemaForField(fieldDef) {
     if (c.allowMultiple) {
       schema = {
         type: "array",
-        items: { type: "string", enum: opts },
+        items: c.allowOther
+          ? { type: "string", minLength: 1 }
+          : { type: "string", enum: opts },
+        minItems: c.allowOther && c.required ? 1 : undefined,
         uniqueItems: true,
       };
     } else {
       schema = {
         type: "string",
-        enum: opts,
+        enum: c.allowOther ? undefined : opts,
+        minLength: c.allowOther && c.required ? 1 : undefined,
       };
     }
   } else if (type === "date") {
@@ -536,6 +540,8 @@ export function validateFieldValue(ajv, fieldDef, value) {
         return { valid: false, message: `Must be ≤ ${schema.maximum}.` };
       case "minLength":
         return { valid: false, message: `Needs ≥ ${schema.minLength} characters.` };
+      case "minItems":
+        return { valid: false, message: "This field is required." };
       case "maxLength":
         return { valid: false, message: `Allows ≤ ${schema.maxLength} characters.` };
       case "pattern":

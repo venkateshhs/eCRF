@@ -19,6 +19,32 @@
         />
         {{ opt }}
       </label>
+      <div v-if="allowOther" class="other-choice">
+        <label class="radio-label">
+          <input
+            type="checkbox"
+            :name="name + '[]'"
+            :checked="isOtherSelected"
+            :disabled="isReadonly"
+            :aria-readonly="isReadonly ? 'true' : 'false'"
+            @mousedown.prevent="isReadonly && $event.preventDefault()"
+            @change="onToggleOther($event.target.checked)"
+          />
+          Other
+        </label>
+        <input
+          v-if="isOtherSelected"
+          ref="otherInput"
+          class="other-input"
+          type="text"
+          :value="otherText"
+          :disabled="isReadonly"
+          placeholder="Please specify"
+          aria-label="Other answer"
+          @input="onOtherInput($event.target.value)"
+          @blur="onOtherBlur"
+        />
+      </div>
     </template>
 
     <!-- SINGLE (radios) -->
@@ -32,7 +58,7 @@
           type="radio"
           :name="name"
           :value="opt"
-          :checked="proxySingle === opt"
+          :checked="!isOtherSelected && proxySingle === opt"
           :disabled="isReadonly"
           :aria-readonly="isReadonly ? 'true' : 'false'"
           @mousedown.prevent="isReadonly && $event.preventDefault()"
@@ -40,6 +66,32 @@
         />
         {{ opt }}
       </label>
+      <div v-if="allowOther" class="other-choice">
+        <label class="radio-label">
+          <input
+            type="radio"
+            :name="name"
+            :checked="isOtherSelected"
+            :disabled="isReadonly"
+            :aria-readonly="isReadonly ? 'true' : 'false'"
+            @mousedown.prevent="isReadonly && $event.preventDefault()"
+            @change="onSelectOther"
+          />
+          Other
+        </label>
+        <input
+          v-if="isOtherSelected"
+          ref="otherInput"
+          class="other-input"
+          type="text"
+          :value="otherText"
+          :disabled="isReadonly"
+          placeholder="Please specify"
+          aria-label="Other answer"
+          @input="onOtherInput($event.target.value)"
+          @blur="onOtherBlur"
+        />
+      </div>
     </template>
   </div>
 </template>
@@ -63,9 +115,17 @@ export default {
     disabled: { type: Boolean, default: false },
     defaultValue: { type: [String, Number, Array], default: "" },
     allowMultiple: { type: Boolean, default: false },
+    allowOther: { type: Boolean, default: false },
     dominantOptions: { type: Array, default: () => [] },
   },
   emits: ["update:modelValue", "change"],
+  data() {
+    return {
+      otherActive: false,
+      otherText: "",
+      otherBaseValues: [],
+    };
+  },
   computed: {
     isReadonly() {
       const attrReadonly =
@@ -75,7 +135,8 @@ export default {
       return this.readonly || attrReadonly || this.disabled;
     },
     stringOptions() {
-      return this.options.map((o) => (o == null ? "" : String(o)));
+      return this.options.map((o) => (o == null ? "" : String(o)))
+        .filter(o => !this.allowOther || o.trim().toLowerCase() !== 'other');
     },
     // single
     proxySingle() {
@@ -88,8 +149,20 @@ export default {
       // if parent gave scalar while we are in multi mode, coerce to []
       return [];
     },
+    customValue() {
+      const options = new Set(this.stringOptions);
+      if (this.allowMultiple) {
+        return this.proxyArray.find((value) => value && !options.has(value)) || "";
+      }
+      const value = this.proxySingle;
+      return value && !options.has(value) ? value : "";
+    },
+    isOtherSelected() {
+      return this.allowOther && (this.otherActive || !!this.customValue);
+    },
   },
   mounted() {
+    this.syncOtherFromValue();
     this.initFromDefaults();
   },
   watch: {
@@ -101,7 +174,7 @@ export default {
         this.emitInitializedSelection(this.normalizeMulti(this.proxyArray));
       } else {
         const cur = this.proxySingle;
-        if (!opts.includes(cur)) {
+        if (!opts.includes(cur) && !(this.allowOther && cur)) {
           const dv = this.pickSingleDefault();
           const next = dv && opts.includes(dv) ? dv : "";
           this.$emit("update:modelValue", next);
@@ -120,9 +193,23 @@ export default {
     modelValue: {
       deep: true,
       handler() {
+        this.syncOtherFromValue();
         if (!this.allowMultiple) return;
         this.emitInitializedSelection(this.normalizeMulti(this.proxyArray));
       },
+    },
+    allowOther(enabled) {
+      if (enabled) {
+        this.syncOtherFromValue();
+        return;
+      }
+      if (!this.otherActive && !this.customValue) return;
+      this.otherActive = false;
+      this.otherText = "";
+      const next = this.allowMultiple
+        ? this.proxyArray.filter((value) => this.stringOptions.includes(value))
+        : this.stringOptions.includes(this.proxySingle) ? this.proxySingle : "";
+      this.emitInitializedSelection(next, true);
     },
   },
   methods: {
@@ -156,8 +243,25 @@ export default {
       return normalizeMultiChoiceValue(
         value,
         this.stringOptions,
-        this.dominantOptions
+        this.dominantOptions,
+        this.allowOther
       );
+    },
+    syncOtherFromValue() {
+      const custom = this.customValue;
+      if (!custom) {
+        const values = this.allowMultiple ? this.proxyArray : [this.proxySingle];
+        if (this.otherText && !values.includes(this.otherText)) {
+          this.otherActive = false;
+          this.otherText = "";
+        }
+        return;
+      }
+      this.otherActive = true;
+      this.otherText = custom;
+      if (this.allowMultiple) {
+        this.otherBaseValues = this.proxyArray.filter(value => this.stringOptions.includes(value));
+      }
     },
     selectionEqualsCurrent(next) {
       if (this.allowMultiple) {
@@ -201,6 +305,8 @@ export default {
     // ----- interactions -----
     onSelectSingle(val) {
       if (this.isReadonly) return;
+      this.otherActive = false;
+      this.otherText = "";
       this.$emit("update:modelValue", val);
       this.$emit("change", val);
     },
@@ -212,9 +318,76 @@ export default {
         checked,
         options: this.stringOptions,
         dominantOptions: this.dominantOptions,
+        allowOther: this.allowOther,
       });
+      this.otherBaseValues = next.filter(value => this.stringOptions.includes(value));
+      if (!next.some((value) => !this.stringOptions.includes(value))) {
+        if (this.dominantOptions.includes(opt) && checked) {
+          this.otherActive = false;
+          this.otherText = "";
+        }
+      }
       this.$emit("update:modelValue", next);
       this.$emit("change", next); //
+    },
+    focusOtherInput() {
+      this.$nextTick(() => {
+        const input = this.$refs.otherInput;
+        if (input && typeof input.focus === "function") input.focus();
+      });
+    },
+    onSelectOther() {
+      if (this.isReadonly) return;
+      this.otherActive = true;
+      this.$emit("update:modelValue", this.otherText);
+      this.$emit("change", this.otherText);
+      this.focusOtherInput();
+    },
+    onToggleOther(checked) {
+      if (this.isReadonly) return;
+      this.otherActive = checked;
+      const regularValues = this.proxyArray.filter((value) =>
+        this.stringOptions.includes(value)
+      );
+      const dominant = new Set(this.dominantOptions);
+      const next = checked
+        ? [
+            ...regularValues.filter((value) => !dominant.has(value)),
+            ...(this.otherText ? [this.otherText] : []),
+          ]
+        : regularValues;
+      this.otherBaseValues = checked
+        ? regularValues.filter(value => !dominant.has(value))
+        : regularValues;
+      if (!checked) this.otherText = "";
+      this.$emit("update:modelValue", next);
+      this.$emit("change", next);
+      if (checked) this.focusOtherInput();
+    },
+    onOtherInput(value) {
+      if (this.isReadonly) return;
+      this.otherActive = true;
+      this.otherText = value;
+      const next = this.allowMultiple
+        ? Array.from(new Set([
+            ...this.otherBaseValues,
+            ...(value ? [value] : []),
+          ]))
+        : value;
+      this.$emit("update:modelValue", next);
+      this.$emit("change", next);
+    },
+    onOtherBlur() {
+      if (this.isReadonly) return;
+      const trimmed = this.otherText.trim();
+      if (this.stringOptions.includes(trimmed)) {
+        this.onOtherInput(trimmed);
+        this.otherActive = false;
+        this.otherText = "";
+        return;
+      }
+      if (trimmed === this.otherText) return;
+      this.onOtherInput(trimmed);
     },
   },
 };
@@ -231,6 +404,24 @@ export default {
   align-items: center;
   gap: 8px;
   line-height: 1.2;
+}
+.other-choice {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.other-input {
+  width: min(calc(100% - 28px), 28rem);
+  box-sizing: border-box;
+  margin-left: 28px;
+  padding: 7px 9px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  font: inherit;
+}
+.other-input:focus {
+  border-color: #2563eb;
+  outline: 2px solid rgba(37, 99, 235, 0.15);
 }
 
 /* Make radios & checkboxes look identical (circular dot) */

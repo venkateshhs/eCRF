@@ -577,6 +577,7 @@
                         v-model="entryData[currentSubjectIndex][currentVisitIndex][currentGroupIndex][mIdx][fIdx]"
                         :options="field.options || []"
                         :multiple="!!field.constraints?.allowMultiple"
+                        :allow-other="!!field.constraints?.allowOther"
                         :readonly="isReadonlyField(field, mIdx, fIdx)"
                         :default-value="field.constraints?.defaultValue"
                         :placeholder="'Select…'"
