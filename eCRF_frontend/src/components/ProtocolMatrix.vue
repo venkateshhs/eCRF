@@ -400,7 +400,7 @@
             Exit without saving
           </button>
           <button class="btn-primary" @click="onUnsavedSaveAndExit" :disabled="unsavedBusy">
-            {{ unsavedBusy ? "Saving…" : "Save as Draft & Exit" }}
+            {{ unsavedBusy ? "Saving…" : unsavedSaveLabel }}
           </button>
         </div>
       </div>
@@ -416,6 +416,7 @@ import axios from "axios";
 import FormPreview from "@/components/FormPreview.vue";
 import TemplateDiffView, { deepClone, computeTemplateDiff } from "@/components/TemplateDiffView.vue";
 import icons from "@/assets/styles/icons";
+import { STUDY_BEFORE_IDLE_EVENT } from "@/utils/studySaveWorkflow";
 
 export default {
   name: "ProtocolMatrix",
@@ -457,6 +458,8 @@ export default {
     const emptyVisitIndices = ref([]);
     const isSavingInProgress = ref(false);
     const isPublishingStudy = ref(false);
+    const lastSavedAt = ref(null);
+    const saveError = ref("");
 
     // Confirm changes
     const showConfirmChanges = ref(false);
@@ -482,6 +485,16 @@ export default {
     const lastSavedSnapshot = ref(null);
 
     const globalDirty = computed(() => !!store.state.studyCreationDirty);
+    const studyStatus = computed(() => {
+      const storedStatus = String(
+        store.state.studyDetails?.study_metadata?.status || ""
+      ).trim().toUpperCase();
+      return storedStatus || (isEditing.value ? "UNKNOWN" : "DRAFT");
+    });
+    const saveDirty = computed(() => !!isDirty.value || !!globalDirty.value);
+    const unsavedSaveLabel = computed(() =>
+      studyStatus.value === "PUBLISHED" ? "Review and save changes" : "Save as Draft & Exit"
+    );
     const dialogListItems = computed(() => {
       const text = String(dialogMessage.value || "").trim();
       if (!text) return [];
@@ -729,12 +742,21 @@ export default {
       });
     }
 
-    function markSavedSnapshot() {
+    function markSavedSnapshot(recordSaveTime = false) {
       lastSavedSnapshot.value = buildDirtySnapshot();
       isDirty.value = false;
       if (store?._mutations?.setStudyCreationDirty) {
         store.commit("setStudyCreationDirty", false);
       }
+      if (recordSaveTime) lastSavedAt.value = Date.now();
+      saveError.value = "";
+    }
+
+    function buildSaveFingerprint() {
+      const snapshot = buildDirtySnapshot();
+      delete snapshot.studyId;
+      delete snapshot.status;
+      return JSON.stringify(snapshot);
     }
 
     function computeDirty() {
@@ -1030,7 +1052,7 @@ export default {
         }
       }
 
-      await saveStudyImpl({ mode });
+      return await saveStudyImpl({ mode });
     }
 
     function showDialogMessage(message) {
@@ -1209,7 +1231,7 @@ export default {
 
     // --- Save impl ---
     // mode = "publish" | "draft"
-    async function saveStudyImpl({ mode = "publish" } = {}) {
+    async function saveStudyImpl({ mode = "publish", automatic = false } = {}) {
       const studyDetails = store.state.studyDetails || {};
       const userId = store.state.user?.id;
       const studyId = studyDetails.study_metadata?.id;
@@ -1293,6 +1315,7 @@ export default {
       };
 
       const payload = { study_metadata: metadata, study_content: { study_data: studyData } };
+      const saveFingerprint = buildSaveFingerprint();
 
       // Keep your backend's existing "draft create via query param" behavior for POST,
       // but use explicit metadata.status for PUT/transition logic.
@@ -1336,8 +1359,9 @@ export default {
 
         const axiosConfig = {
           headers: baseHeaders,
+          __skipActivityTracker: automatic,
           // audit_label is used by backend audit log as a human-readable action label
-          params: { audit_label: auditLabel }
+          params: { audit_label: automatic ? "Automatic Draft Recovery Save" : auditLabel }
         };
 
         const response = await axios[method](url, payload, axiosConfig);
@@ -1378,7 +1402,13 @@ export default {
         // Refresh baseline/data and clear dirty markers only after successful save
         await Promise.all([loadBaselineFromServer(), loadHasAnyData()]);
         await nextTick();
-        markSavedSnapshot();
+        lastSavedAt.value = Date.now();
+        if (buildSaveFingerprint() === saveFingerprint) {
+          markSavedSnapshot(true);
+        } else {
+          isDirty.value = true;
+          store.commit("setStudyCreationDirty", true);
+        }
 
         // Publish save => success dialog with CTA
         if (mode === "publish") {
@@ -1396,14 +1426,42 @@ export default {
           error?.response?.data?.detail ||
           error?.response?.data?.message ||
           error?.message;
-        showDialogMessage(
-          detail || `Failed to ${studyId ? "update" : "save"} study. Check console for details.`
-        );
+        saveError.value = detail || `Failed to ${studyId ? "update" : "save"} study.`;
+        if (!automatic) showDialogMessage(saveError.value);
         return false;
       } finally {
         if (mode === "publish") {
           isPublishingStudy.value = false;
         }
+      }
+    }
+
+    async function saveAndContinue() {
+      if (unsavedBusy.value || !saveDirty.value) return;
+      unsavedBusy.value = true;
+      saveError.value = "";
+      try {
+        await saveStudy(studyStatus.value === "PUBLISHED" ? "publish" : "draft");
+      } finally {
+        unsavedBusy.value = false;
+      }
+    }
+
+    async function saveDraftBeforeIdle() {
+      if (studyStatus.value !== "DRAFT" || unsavedBusy.value || !saveDirty.value) return;
+
+      const logicErrors = validateInterSectionLogicConsistency();
+      if (logicErrors.length) {
+        saveError.value = "Automatic draft save was skipped because the template contains logical inconsistencies.";
+        return;
+      }
+
+      unsavedBusy.value = true;
+      saveError.value = "";
+      try {
+        await saveStudyImpl({ mode: "draft", automatic: true });
+      } finally {
+        unsavedBusy.value = false;
       }
     }
 
@@ -1447,6 +1505,11 @@ export default {
     }
 
     async function onUnsavedSaveAndExit() {
+      if (studyStatus.value === "PUBLISHED") {
+        closeUnsavedDialog();
+        await saveAndContinue();
+        return;
+      }
       if (unsavedBusy.value) return;
       unsavedBusy.value = true;
 
@@ -1525,6 +1588,7 @@ export default {
     );
 
     onMounted(async () => {
+      window.addEventListener(STUDY_BEFORE_IDLE_EVENT, saveDraftBeforeIdle);
       await Promise.all([loadBaselineFromServer(), loadHasAnyData()]);
 
       // Baseline is current snapshot when entering screen, but keep global dirty alive.
@@ -1536,6 +1600,7 @@ export default {
     });
 
     onBeforeUnmount(() => {
+      window.removeEventListener(STUDY_BEFORE_IDLE_EVENT, saveDraftBeforeIdle);
       window.removeEventListener("beforeunload", beforeUnloadHandler);
     });
 
@@ -1603,6 +1668,11 @@ export default {
       emptyVisitIndices,
       isSavingInProgress,
       isPublishingStudy,
+      lastSavedAt,
+      saveError,
+      studyStatus,
+      saveDirty,
+      unsavedSaveLabel,
       closeEmptyVisitsModal,
       goToFirstEmptyVisit,
       saveAnyway,
@@ -1616,6 +1686,8 @@ export default {
 
       // save + route
       saveStudy,
+      saveAndContinue,
+      saveDraftBeforeIdle,
       goToSaved,
 
       showLogicalIssuesDialog,

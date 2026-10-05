@@ -129,6 +129,10 @@
       <div class="form-actions">
           <button type="button" @click="backFromStep1" class="btn-option">Back</button>
 
+          <button type="button" class="btn-option" @click="requestSaveAndContinue" :disabled="unsavedBusy || !saveDirty">
+            {{ unsavedBusy ? "Saving…" : (isPublishedStudy ? "Review and Save Changes" : "Save and Continue") }}
+          </button>
+
           <button
             v-if="!isEditing"
             type="button"
@@ -139,8 +143,8 @@
             {{ unsavedBusy ? "Saving…" : "Save Draft and Leave" }}
           </button>
 
-          <button v-if="isEditing" type="button" class="btn-option" @click="saveThisStepAndBackToStudy">
-            Save and Leave
+          <button v-if="isEditing && !isPublishedStudy" type="button" class="btn-option" @click="saveThisStepAndBackToStudy">
+            {{ isPublishedStudy ? "Review and save changes" : "Save and Leave" }}
           </button>
 
           <button type="button" @click="validateStudy()" class="btn-option">
@@ -158,6 +162,10 @@
       <div class="form-actions">
           <button @click="step = 1" class="btn-option">Back</button>
 
+          <button type="button" class="btn-option" @click="requestSaveAndContinue" :disabled="unsavedBusy || !saveDirty">
+            {{ unsavedBusy ? "Saving…" : (isPublishedStudy ? "Review and Save Changes" : "Save and Continue") }}
+          </button>
+
           <button
             v-if="!isEditing"
             type="button"
@@ -168,8 +176,8 @@
             {{ unsavedBusy ? "Saving…" : "Save Draft and Leave" }}
           </button>
 
-          <button v-if="isEditing" type="button" class="btn-option" @click="saveThisStepAndBackToStudy">
-            Save and Leave
+          <button v-if="isEditing && !isPublishedStudy" type="button" class="btn-option" @click="saveThisStepAndBackToStudy">
+            {{ isPublishedStudy ? "Review and save changes" : "Save and Leave" }}
           </button>
 
           <button @click="checkGroups()" class="btn-option">Next</button>
@@ -213,6 +221,10 @@
       <div class="form-actions">
           <button @click="step = 2" class="btn-option">Back</button>
 
+          <button type="button" class="btn-option" @click="requestSaveAndContinue" :disabled="unsavedBusy || !saveDirty">
+            {{ unsavedBusy ? "Saving…" : (isPublishedStudy ? "Review and Save Changes" : "Save and Continue") }}
+          </button>
+
           <button
             v-if="!isEditing"
             type="button"
@@ -223,8 +235,8 @@
             {{ unsavedBusy ? "Saving…" : "Save Draft and Leave" }}
           </button>
 
-          <button v-if="isEditing" type="button" class="btn-option" @click="saveThisStepAndBackToStudy">
-            Save and Leave
+          <button v-if="isEditing && !isPublishedStudy" type="button" class="btn-option" @click="saveThisStepAndBackToStudy">
+            {{ isPublishedStudy ? "Review and save changes" : "Save and Leave" }}
           </button>
 
           <button @click="checkSubjectsSetup()" class="btn-option">
@@ -242,6 +254,10 @@
       <div class="form-actions">
           <button @click="step = 3" class="btn-option">Back</button>
 
+          <button type="button" class="btn-option" @click="requestSaveAndContinue" :disabled="unsavedBusy || !saveDirty">
+            {{ unsavedBusy ? "Saving…" : (isPublishedStudy ? "Review and Save Changes" : "Save and Continue") }}
+          </button>
+
           <button
             v-if="!isEditing"
             type="button"
@@ -252,8 +268,8 @@
             {{ unsavedBusy ? "Saving…" : "Save Draft and Leave" }}
           </button>
 
-          <button v-if="isEditing" type="button" class="btn-option" @click="saveThisStepAndBackToStudy">
-            Save and Leave
+          <button v-if="isEditing && !isPublishedStudy" type="button" class="btn-option" @click="saveThisStepAndBackToStudy">
+            {{ isPublishedStudy ? "Review and save changes" : "Save and Leave" }}
           </button>
 
           <button @click="checkSubjectsAssigned()" class="btn-option">Next</button>
@@ -269,6 +285,10 @@
       <div class="form-actions">
           <button @click="goBackFromVisits" class="btn-option">Back</button>
 
+          <button type="button" class="btn-option" @click="requestSaveAndContinue" :disabled="unsavedBusy || !saveDirty">
+            {{ unsavedBusy ? "Saving…" : (isPublishedStudy ? "Review and Save Changes" : "Save and Continue") }}
+          </button>
+
           <button
             v-if="!isEditing"
             type="button"
@@ -279,8 +299,8 @@
             {{ unsavedBusy ? "Saving…" : "Save Draft and Leave" }}
           </button>
 
-          <button v-if="isEditing" type="button" class="btn-option" @click="saveThisStepAndBackToStudy">
-            Save and Leave
+          <button v-if="isEditing && !isPublishedStudy" type="button" class="btn-option" @click="saveThisStepAndBackToStudy">
+            {{ isPublishedStudy ? "Review and save changes" : "Save and Leave" }}
           </button>
 
           <button @click="goToFinish()" class="btn-option">Forms</button>
@@ -316,6 +336,13 @@
         <button class="btn-option" @click="closeDialog">Close</button>
       </div>
 
+      <div v-else-if="dialogMode === 'publishedSave'" class="dialog-actions">
+        <button class="btn-option" @click="closeDialog" :disabled="unsavedBusy">Cancel</button>
+        <button class="btn-option" @click="confirmPublishedSaveAndContinue" :disabled="unsavedBusy">
+          {{ unsavedBusy ? "Saving…" : "Review and save changes" }}
+        </button>
+      </div>
+
       <button v-else @click="closeDialog" class="btn-option">OK</button>
     </div>
   </div>
@@ -333,6 +360,7 @@ import BaseTextarea from "@/components/forms/BaseTextarea.vue";
 import BaseNumberField from "@/components/forms/BaseNumberField.vue";
 import BaseDateField from "@/components/forms/BaseDateField.vue";
 import BaseSelectField from "@/components/forms/BaseSelectField.vue";
+import { STUDY_BEFORE_IDLE_EVENT } from "@/utils/studySaveWorkflow";
 
 import GroupForm from "./GroupForm.vue";
 import VisitForm from "./VisitForm.vue";
@@ -389,6 +417,8 @@ export default {
     const dialogMessage = ref("");
     const dialogMode = ref("default"); // 'default' | 'importSuccess' | 'unsaved'
     const unsavedBusy = ref(false);
+    const lastSavedAt = ref(null);
+    const saveError = ref("");
 
     const skipSubjectCreationNow = ref(false);
 
@@ -417,14 +447,22 @@ export default {
 
     const editId = computed(() => props.id || route.params.id || null);
     const isEditing = computed(() => !!editId.value);
-    const isPublishedStudy = computed(() => {
-      const status =
+    const storedStudyStatus = computed(() =>
+      String(
         store.state.studyDetails?.study_metadata?.status ||
         store.state.studyDetails?.metadata?.status ||
         store.state.studyDetails?.status ||
-        "";
-
-      return String(status).trim().toUpperCase() === "PUBLISHED";
+        ""
+      ).trim().toUpperCase()
+    );
+    const isPublishedStudy = computed(() => storedStudyStatus.value === "PUBLISHED");
+    const currentStudyStatus = computed(() =>
+      storedStudyStatus.value || (isEditing.value ? "UNKNOWN" : "DRAFT")
+    );
+    const saveDirty = computed(() => !!isDirty.value || !!globalDirty.value);
+    const canAutoSaveDraft = computed(() => {
+      const s = studyData.value || {};
+      return currentStudyStatus.value === "DRAFT" && !!String(s.title || s.study_name || s.name || "").trim();
     });
 
     const hasExistingSubjects = computed(() => {
@@ -637,10 +675,28 @@ export default {
       });
     }
 
-    function markSavedSnapshot() {
+    function markSavedSnapshot(recordSaveTime = false) {
       lastSavedSnapshot.value = buildSnapshot();
       isDirty.value = false;
       store.commit("setStudyCreationDirty", false);
+      if (recordSaveTime) lastSavedAt.value = Date.now();
+      saveError.value = "";
+    }
+
+    function markSavedRequestSnapshot(serializedSnapshot, createdDraftId = null) {
+      let savedSnapshot;
+      try {
+        savedSnapshot = JSON.parse(serializedSnapshot);
+      } catch {
+        savedSnapshot = buildSnapshot();
+      }
+      if (createdDraftId != null) savedSnapshot.draftStudyId = Number(createdDraftId);
+
+      lastSavedSnapshot.value = savedSnapshot;
+      lastSavedAt.value = Date.now();
+      saveError.value = "";
+      computeDirty();
+      if (!isDirty.value) store.commit("setStudyCreationDirty", false);
     }
 
     function computeDirty() {
@@ -834,7 +890,7 @@ export default {
     // save logic used ONLY by:
     // - Save button in edit mode
     // - Unsaved dialog "Save & Exit"
-    async function saveNow() {
+    async function saveNow({ automatic = false, action = "continue" } = {}) {
       if (!token.value) {
         router.push("/login");
         return false;
@@ -844,16 +900,23 @@ export default {
           (subjectIdConfig.value.manualIds || []).length && !checkSubjectsSetup({ advance: false })) return false;
       const payload = buildBackendPayload();
       const formsToPersist = getFormsForSavePayload();
+      const existingStudyId = editId.value || draftStudyId.value;
+      const saveStartSnapshot = JSON.stringify(buildSnapshot());
 
       try {
-        if (isEditing.value) {
+        if (existingStudyId) {
           await axios.put(
-              `/forms/studies/${editId.value}`,
+              `/forms/studies/${existingStudyId}`,
               payload,
               {
                 headers: authHeader.value,
+                __skipActivityTracker: automatic,
                 // audit_label: user clicked "Save" / "Save & Exit" while editing an existing study
-                params: { audit_label: "Update Existing Study" },
+                params: {
+                  audit_label: automatic
+                    ? "Automatic Draft Recovery Save"
+                    : action === "exit" ? "Update Existing Study" : "Save and Continue",
+                },
               }
             );
 
@@ -862,7 +925,7 @@ export default {
           commitStudyDetailsPreservingForms({
             study_metadata: {
               ...(store.state.studyDetails?.study_metadata || {}),
-              id: Number(editId.value),
+              id: Number(existingStudyId),
               name: payload.study_metadata.study_name,
               study_name: payload.study_metadata.study_name,
               description: payload.study_metadata.study_description,
@@ -871,7 +934,7 @@ export default {
             study: {
               ...(store.state.studyDetails?.study || {}),
               ..._deepClone(payload.study_content.study_data.study || {}),
-              id: Number(editId.value),
+              id: Number(existingStudyId),
             },
             groups: _deepClone(payload.study_content.study_data.groups || []),
             visits: _deepClone(payload.study_content.study_data.visits || []),
@@ -884,7 +947,7 @@ export default {
             selectedModels: _deepClone(payload.study_content.study_data.selectedModels || deriveSelectedModelsFromForms(formsToPersist)),
           });
 
-          markSavedSnapshot();
+          markSavedRequestSnapshot(saveStartSnapshot);
           return true;
         }
 
@@ -894,8 +957,13 @@ export default {
           payload,
           {
             headers: authHeader.value,
+            __skipActivityTracker: automatic,
             // audit_label: user clicked "Save as Draft & Exit" (or "Save & Exit" in create flow)
-            params: { audit_label: "Save Draft of Study" },
+            params: {
+              audit_label: automatic
+                ? "Automatic Draft Recovery Save"
+                : action === "exit" ? "Save Draft of Study" : "Save and Continue - Create Draft",
+            },
           }
         );
 
@@ -929,7 +997,7 @@ export default {
           selectedModels: _deepClone(payload.study_content.study_data.selectedModels || deriveSelectedModelsFromForms(formsToPersist)),
         });
 
-        markSavedSnapshot();
+        markSavedRequestSnapshot(saveStartSnapshot, createdId);
         return true;
       } catch (e) {
         const msg =
@@ -937,11 +1005,46 @@ export default {
           e?.response?.data?.message ||
           e?.message ||
           "Failed to save.";
-        dialogMessage.value = String(msg);
-        dialogMode.value = "default";
-        showDialog.value = true;
+        saveError.value = String(msg);
+        if (!automatic) {
+          dialogMessage.value = String(msg);
+          dialogMode.value = "default";
+          showDialog.value = true;
+        }
         return false;
       }
+    }
+
+    async function performSaveAndContinue({ automatic = false } = {}) {
+      if (unsavedBusy.value || !saveDirty.value) return;
+      unsavedBusy.value = true;
+      saveError.value = "";
+      try {
+        await saveNow({ automatic });
+      } finally {
+        unsavedBusy.value = false;
+      }
+    }
+
+    function requestSaveAndContinue() {
+      if (isPublishedStudy.value) {
+        dialogMode.value = "publishedSave";
+        dialogMessage.value =
+          "This study is published. Saving structural changes may create a new template version. Review the changes before saving.";
+        showDialog.value = true;
+        return;
+      }
+      performSaveAndContinue();
+    }
+
+    async function confirmPublishedSaveAndContinue() {
+      closeDialog();
+      await performSaveAndContinue();
+    }
+
+    function saveDraftBeforeIdle() {
+      if (!canAutoSaveDraft.value || isPublishedStudy.value) return;
+      performSaveAndContinue({ automatic: true });
     }
     function isReturningFromScratch() {
       return route.name === "CreateStudy" && route.query.step != null;
@@ -976,7 +1079,12 @@ export default {
       const ok = validateStepOnly(step.value);
       if (!ok) return;
 
-      const saved = await saveNow();
+      if (isPublishedStudy.value) {
+        requestSaveAndContinue();
+        return;
+      }
+
+      const saved = await saveNow({ action: "exit" });
       if (!saved) return;
 
       router.push(resolveReturnRoute());
@@ -1751,10 +1859,15 @@ export default {
     });
 
     async function onUnsavedSaveAndExit() {
+      if (isPublishedStudy.value) {
+        closeDialog();
+        requestSaveAndContinue();
+        return;
+      }
       if (unsavedBusy.value) return;
       unsavedBusy.value = true;
       try {
-        const saved = await saveNow();
+        const saved = await saveNow({ action: "exit" });
         if (!saved) return;
 
         showDialog.value = false;
@@ -1803,6 +1916,7 @@ export default {
     );
 
     onMounted(async () => {
+      window.addEventListener(STUDY_BEFORE_IDLE_EVENT, saveDraftBeforeIdle);
       const returningFromScratch = isReturningFromScratch();
 
       if (!editId.value && !returningFromScratch) {
@@ -1846,6 +1960,7 @@ export default {
     });
 
     onBeforeUnmount(() => {
+      window.removeEventListener(STUDY_BEFORE_IDLE_EVENT, saveDraftBeforeIdle);
       window.removeEventListener("beforeunload", beforeUnloadHandler);
     });
 
@@ -1870,6 +1985,11 @@ export default {
       dialogMessage,
       dialogMode,
       unsavedBusy,
+      lastSavedAt,
+      saveError,
+      saveDirty,
+      currentStudyStatus,
+      canAutoSaveDraft,
       skipSubjectCreationNow,
 
       steps,
@@ -1918,6 +2038,9 @@ export default {
       onUnsavedKeepEditing,
       onUnsavedExitWithoutSaving,
       onUnsavedSaveAndExit,
+      requestSaveAndContinue,
+      confirmPublishedSaveAndContinue,
+      saveDraftBeforeIdle,
       onSubjectSetupChanged,
     };
   },

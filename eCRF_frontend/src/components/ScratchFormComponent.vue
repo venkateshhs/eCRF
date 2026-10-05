@@ -309,12 +309,36 @@
                   </button>
 
                   <button
+                    v-if="!isPublishedStudy"
                     @click.prevent="onUnsavedSaveAndExit"
                     class="btn-option"
                     :disabled="unsavedBusy"
                   >
-                    {{ unsavedBusy ? "Saving…" : "Save Draft and Leave" }}
+                    {{ unsavedBusy ? "Saving…" : saveAndLeaveLabel }}
                   </button>
+
+                  <button
+                    type="button"
+                    class="btn-option"
+                    :disabled="unsavedBusy || !saveDirty"
+                    @click.prevent="requestSaveAndContinue"
+                  >
+                    {{ unsavedBusy ? "Saving…" : (isPublishedStudy ? "Review and Save Changes" : "Save and Continue") }}
+                  </button>
+
+                  <StudySaveStatus
+                    :dirty="saveDirty"
+                    :saving="unsavedBusy"
+                    :status="studyStatus"
+                    :last-saved-at="lastSavedAt"
+                    :save-error="saveError"
+                    :can-auto-save="canAutoSaveDraft"
+                    :show-action="false"
+                    compact
+                    inline
+                    @save="requestSaveAndContinue"
+                    @idle-save="saveDraftBeforeIdle"
+                  />
 
                   <button
                     @click.prevent="handleProtocolClick"
@@ -966,7 +990,7 @@
           <button class="btn-option" @click="onUnsavedKeepEditing" :disabled="unsavedBusy">Keep editing</button>
           <button class="btn-option" @click="confirmScratchExitWithoutSaving" :disabled="unsavedBusy">Exit without saving</button>
           <button class="btn-primary" @click="onUnsavedSaveAndExit" :disabled="unsavedBusy">
-            {{ unsavedBusy ? "Saving…" : "Save & Exit" }}
+            {{ unsavedBusy ? "Saving…" : saveAndLeaveLabel }}
           </button>
         </div>
       </div>
@@ -1009,6 +1033,7 @@ import RearrangeStructureDialog from "@/components/RearrangeStructureDialog.vue"
 import FieldTable from "@/components/FieldTable.vue";
 import FieldOptionRemapDialog from "@/components/FieldOptionRemapDialog.vue";
 import SaveTemplateFormDialog from "@/components/SaveTemplateFormDialog.vue";
+import StudySaveStatus from "@/components/StudySaveStatus.vue";
 import { copyCompleteTableStructure } from "@/utils/tableFieldCopy";
 import { calculateContainedRevealScrollTop } from "@/utils/builderScrollFocus";
 export default {
@@ -1033,6 +1058,7 @@ export default {
     RearrangeStructureDialog,
     FieldOptionRemapDialog,
     SaveTemplateFormDialog,
+    StudySaveStatus,
   },
 
   beforeRouteLeave(to, from, next) {
@@ -1175,6 +1201,8 @@ export default {
       unsavedDialogMessage: "You are exiting study creation. Do you want to continue editing? If you leave now, your current progress will be saved as Draft in Dashboard.",
       unsavedPendingAction: null,
       unsavedBusy: false,
+      lastSavedAt: null,
+      saveError: "",
 
       showRearrangeDialog: false,
       rearrangeInitialFocus: null,
@@ -1321,6 +1349,34 @@ export default {
 
     currentStudyId() {
       return this.studyDetails?.study_metadata?.id ?? this.studyDetails?.study?.id ?? null;
+    },
+
+    studyStatus() {
+      const storedStatus = String(
+        this.studyDetails?.study_metadata?.status ||
+        this.studyDetails?.metadata?.status ||
+        ""
+      ).trim().toUpperCase();
+      return storedStatus || (this.currentStudyId ? "UNKNOWN" : "DRAFT");
+    },
+
+    isPublishedStudy() {
+      return this.studyStatus === "PUBLISHED";
+    },
+
+    saveDirty() {
+      return !!this.$store.state.studyCreationDirty;
+    },
+
+    canAutoSaveDraft() {
+      const study = this.studyDetails?.study || {};
+      const meta = this.studyDetails?.study_metadata || {};
+      const name = study.title || study.name || study.study_name || meta.study_name || meta.name || "";
+      return this.studyStatus === "DRAFT" && !!String(name).trim();
+    },
+
+    saveAndLeaveLabel() {
+      return this.isPublishedStudy ? "Review and save changes" : "Save Draft and Leave";
     }
   },
 
@@ -3021,7 +3077,7 @@ export default {
       };
     },
 
-    async persistScratchToBackend() {
+    async persistScratchToBackend({ automatic = false, action = "exit" } = {}) {
       this.ensurePersistentIdsForLogic();
       const token = this.$store.state.token;
       if (!token) {
@@ -3063,8 +3119,13 @@ export default {
             payload,
             {
               headers: this.authHeader,
+              __skipActivityTracker: automatic,
                 // audit_label: user clicked "Save & Exit" from ScratchForm (builder) while a study already exists (edit/update)
-              params: { audit_label: "Existing Study Updated" }
+              params: {
+                audit_label: automatic
+                  ? "Automatic Draft Recovery Save"
+                  : action === "continue" ? "Save and Continue" : "Existing Study Updated"
+              }
             }
           );
 
@@ -3096,8 +3157,13 @@ export default {
           payload,
           {
             headers: this.authHeader,
+            __skipActivityTracker: automatic,
             // audit_label: user clicked "Save & Exit" from ScratchForm (builder) and backend creates a DRAFT study
-            params: { audit_label: "Save & Exit - Create New Study Draft" }
+            params: {
+              audit_label: automatic
+                ? "Automatic Draft Recovery Save"
+                : action === "continue" ? "Save and Continue - Create Draft" : "Save & Exit - Create New Study Draft"
+            }
           }
         );
 
@@ -3143,8 +3209,62 @@ export default {
       }
     },
 
+    buildScratchSaveFingerprint() {
+      return JSON.stringify({
+        forms: this.forms || [],
+        visits: this.visits || [],
+        groups: this.groups || [],
+        assignments: this.assignments || [],
+      });
+    },
+
+    async performSaveAndContinue({ automatic = false } = {}) {
+      if (this.unsavedBusy || !this.saveDirty) return;
+
+      this.ensurePersistentIdsForLogic();
+      const saveFingerprint = this.buildScratchSaveFingerprint();
+      this.unsavedBusy = true;
+      this.saveError = "";
+
+      try {
+        const res = await this.persistScratchToBackend({ automatic, action: "continue" });
+        if (!res.ok) {
+          this.saveError = res.message || "Failed to save changes.";
+          if (!automatic) this.openGenericDialog(this.saveError);
+          return;
+        }
+
+        this.lastSavedAt = Date.now();
+        const changedDuringSave = this.buildScratchSaveFingerprint() !== saveFingerprint;
+        this.$store.commit("setStudyCreationDirty", changedDuringSave);
+      } finally {
+        this.unsavedBusy = false;
+      }
+    },
+
+    requestSaveAndContinue() {
+      if (this.isPublishedStudy) {
+        this.openConfirmDialog(
+          "This study is published. Saving structural changes may create a new template version. Continue only after reviewing your changes.",
+          () => this.performSaveAndContinue()
+        );
+        return;
+      }
+      this.performSaveAndContinue();
+    },
+
+    saveDraftBeforeIdle() {
+      if (!this.canAutoSaveDraft || this.isPublishedStudy) return;
+      this.performSaveAndContinue({ automatic: true });
+    },
+
     // Hook your "Save & Exit" button/dialog to this method
     async onUnsavedSaveAndExit() {
+      if (this.isPublishedStudy) {
+        this.onUnsavedKeepEditing();
+        this.requestSaveAndContinue();
+        return;
+      }
       if (this.unsavedBusy) return;
       this.unsavedBusy = true;
 
