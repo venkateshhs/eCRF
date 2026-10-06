@@ -2646,9 +2646,69 @@ export default {
     handleImportedCsvFields(importedFields) {
       this.ensureCurrentFormExists();
 
+      const importedSections = Array.isArray(importedFields?.sections)
+        ? importedFields.sections.filter(section => Array.isArray(section?.fields) && section.fields.length)
+        : [];
       const fields = Array.isArray(importedFields) ? importedFields : [];
-      if (!fields.length) {
+      if (!fields.length && !importedSections.length) {
         this.openGenericDialog("No fields were generated from the selected file.");
+        return;
+      }
+
+      const existingNames = new Set(
+        (this.currentForm.sections || [])
+          .flatMap(section => section?.fields || [])
+          .map(field => String(field?.name || ""))
+          .filter(Boolean)
+      );
+      const prepareField = (field, idx) => {
+        let candidateName = String(field?.name || `imported_field_${Date.now()}_${idx}`).trim();
+        if (!candidateName) candidateName = `imported_field_${Date.now()}_${idx}`;
+        let uniqueName = candidateName;
+        let counter = 2;
+        while (existingNames.has(uniqueName)) uniqueName = `${candidateName}_${counter++}`;
+        existingNames.add(uniqueName);
+        return {
+          ...JSON.parse(JSON.stringify(field)),
+          _id: field?._id || this.uuidForLogic(),
+          name: uniqueName,
+          constraints: {
+            visibilityLogic: { action: "show", match: "all", rules: [] },
+            ...JSON.parse(JSON.stringify(field?.constraints || {}))
+          }
+        };
+      };
+
+      if (importedSections.length) {
+        const sections = this.currentForm.sections || [];
+        if (
+          sections.length === 1 &&
+          (!Array.isArray(sections[0]?.fields) || sections[0].fields.length === 0) &&
+          ["manual", undefined, null].includes(sections[0]?.source)
+        ) {
+          sections.splice(0, 1);
+          this.activeSection = 0;
+        }
+        let insertAt = sections.length ? Math.min(this.activeSection + 1, sections.length) : 0;
+        let added = 0;
+        importedSections.forEach((section, sectionIndex) => {
+          const preparedFields = section.fields.map((field, fieldIndex) => {
+            added += 1;
+            return prepareField(field, `${sectionIndex}_${fieldIndex}`);
+          });
+          sections.splice(insertAt++, 0, {
+            _id: this.uuidForLogic(),
+            title: String(section.title || `Imported section ${sectionIndex + 1}`).trim(),
+            fields: preparedFields,
+            collapsed: false,
+            source: "spreadsheet_import"
+          });
+        });
+        this.activeSection = Math.max(0, insertAt - importedSections.length);
+        this.adjustAssignments();
+        this.showImportCsvDialog = false;
+        if (!this.hydratingScratch) this.$store.commit("setStudyCreationDirty", true);
+        this.openGenericDialog(`${added} field(s) imported into ${importedSections.length} section(s).`);
         return;
       }
 
@@ -2664,36 +2724,10 @@ export default {
 
       if (sec.collapsed) sec.collapsed = false;
 
-      const existingNames = new Set((sec.fields || []).map(f => String(f?.name || "")));
       let added = 0;
 
       fields.forEach((field, idx) => {
-        let candidateName = String(field?.name || `imported_field_${Date.now()}_${idx}`).trim();
-        if (!candidateName) {
-          candidateName = `imported_field_${Date.now()}_${idx}`;
-        }
-
-        let uniqueName = candidateName;
-        let counter = 2;
-        while (existingNames.has(uniqueName)) {
-          uniqueName = `${candidateName}_${counter}`;
-          counter += 1;
-        }
-        existingNames.add(uniqueName);
-
-        sec.fields.push({
-          ...JSON.parse(JSON.stringify(field)),
-          _id: field?._id || this.uuidForLogic(),
-          name: uniqueName,
-          constraints: {
-            visibilityLogic: {
-              action: "show",
-              match: "all",
-              rules: []
-            },
-            ...(JSON.parse(JSON.stringify(field?.constraints || {})))
-          }
-        });
+        sec.fields.push(prepareField(field, idx));
 
         added += 1;
       });

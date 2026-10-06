@@ -11,11 +11,17 @@
         <button type="button" class="icon-btn" @click="$emit('close')" title="Close">✕</button>
       </div>
 
+      <div class="wizard-steps" aria-label="Import progress">
+        <button v-for="item in wizardSteps" :key="item.step" type="button" :class="{ active: wizardStep === item.step, complete: wizardStep > item.step }" :disabled="item.step > furthestWizardStep" @click="goToWizardStep(item.step)">
+          <span>{{ item.step }}</span>{{ item.label }}
+        </button>
+      </div>
+
       <div class="import-body">
         <div class="import-main">
           <!-- STEP 1 -->
-          <section class="panel">
-            <h3>1. Choose import mode</h3>
+          <section v-show="wizardStep === 1" class="panel">
+            <h3>Choose who and where to import</h3>
 
             <div class="mode-grid">
               <label class="mode-card" :class="{ active: importMode === 'single' }">
@@ -33,8 +39,8 @@
           </section>
 
           <!-- STEP 2 -->
-          <section class="panel">
-            <h3>2. Target context</h3>
+          <section v-show="wizardStep === 1" class="panel">
+            <h3>Destination</h3>
 
             <div v-if="importMode === 'single'" class="target-grid">
               <div class="control">
@@ -45,10 +51,11 @@
                   </option>
                 </select>
               </div>
-
-              <div class="target-card">
-                <div class="target-label">Visit</div>
-                <div class="target-value">{{ visitLabel || "—" }}</div>
+              <div class="control">
+                <label for="singleVisit">Visit</label>
+                <select id="singleVisit" v-model.number="singleVisitIndex">
+                  <option v-for="visit in normalizedVisits" :key="`single-visit-${visit.index}`" :value="visit.index">{{ visit.name }}</option>
+                </select>
               </div>
 
               <div class="target-card">
@@ -57,25 +64,14 @@
               </div>
             </div>
 
-            <div v-else class="target-grid">
-              <div class="target-card">
-                <div class="target-label">Mode</div>
-                <div class="target-value">All subjects</div>
-              </div>
-              <div class="target-card">
-                <div class="target-label">Validation</div>
-                <div class="target-value">Uses Study Data Entry rules</div>
-              </div>
-              <div class="target-card">
-                <div class="target-label">Commit behavior</div>
-                <div class="target-value">Only valid rows are committed</div>
-              </div>
+            <div v-else class="info-box">
+              Each spreadsheet row is matched to a subject. Visit and group can come from columns or use one selection for every row.
             </div>
           </section>
 
           <!-- STEP 3 -->
-          <section class="panel">
-            <h3>3. Upload file</h3>
+          <section v-show="wizardStep === 2" class="panel">
+            <h3>Upload and identify the layout</h3>
 
             <div class="upload-row">
               <input
@@ -106,6 +102,14 @@
                   <option value="auto">Auto detect</option>
                   <option value="single">Single header row</option>
                   <option value="two-row">Two header rows (Section + Field)</option>
+                  <option value="three-row">Three header rows (Section + Field + Stable key)</option>
+                  <option value="legacy-sections">Header-only columns mark sections</option>
+                </select>
+              </div>
+              <div class="control">
+                <label for="headerRow">First header row</label>
+                <select id="headerRow" v-model.number="headerRowIndex" @change="buildColumnsAndRows">
+                  <option v-for="number in headerRowOptions" :key="`header-row-${number}`" :value="number - 1">Row {{ number }}</option>
                 </select>
               </div>
             </div>
@@ -113,14 +117,23 @@
             <div v-if="workbookError" class="error-box">
               {{ workbookError }}
             </div>
+            <div v-if="structureInfo" class="info-box">{{ structureInfo }}</div>
           </section>
 
           <!-- STEP 4 -->
-          <section v-if="columns.length && dataRows.length" class="panel">
-            <h3>4. Match metadata columns</h3>
+          <section v-show="wizardStep === 2" v-if="columns.length && dataRows.length" class="panel">
+            <h3>Subject, visit and group</h3>
 
             <div class="meta-grid">
-              <div class="control">
+              <div v-if="importMode === 'single'" class="control">
+                <label>Spreadsheet row</label>
+                <select v-model.number="singleDataRowIndex">
+                  <option v-for="row in importableRowOptions" :key="`single-row-${row.index}`" :value="row.index">
+                    Row {{ displayRowNumber(row.index) }}{{ row.example ? ` — ${row.example}` : "" }}
+                  </option>
+                </select>
+              </div>
+              <div v-if="importMode === 'all'" class="control">
                 <label>Subject column</label>
                 <select v-model="metadataMapping.subject">
                   <option value="">Not present</option>
@@ -130,35 +143,18 @@
                 </select>
               </div>
 
-              <div class="control">
-                <label>Visit column</label>
-                <select v-model="metadataMapping.visit">
-                  <option value="">Not present</option>
-                  <option v-for="col in columns" :key="`vis-col-${col.columnIndex}`" :value="String(col.columnIndex)">
-                    {{ col.displayName }}
-                  </option>
-                </select>
-              </div>
-
-              <div class="control">
-                <label>Group column</label>
-                <select v-model="metadataMapping.group">
-                  <option value="">Not present</option>
-                  <option v-for="col in columns" :key="`grp-col-${col.columnIndex}`" :value="String(col.columnIndex)">
-                    {{ col.displayName }}
-                  </option>
-                </select>
-              </div>
+              <div v-if="importMode === 'all'" class="control source-control"><label>Visit source</label><select v-model="visitSource"><option value="fixed">Use one visit for all rows</option><option value="column">Read visit from a column</option></select><select v-if="visitSource === 'column'" v-model="metadataMapping.visit"><option value="">Select visit column…</option><option v-for="col in columns" :key="`vis-col-${col.columnIndex}`" :value="String(col.columnIndex)">{{ col.displayName }}</option></select><select v-else v-model.number="bulkVisitIndex"><option v-for="visit in normalizedVisits" :key="`bulk-visit-${visit.index}`" :value="visit.index">{{ visit.name }}</option></select></div>
+              <div v-if="importMode === 'all'" class="control source-control"><label>Group source</label><select v-model="groupSource"><option value="subject">Use each subject's assigned group</option><option value="column">Validate against a file column</option><option value="fixed">Validate one group for all rows</option></select><select v-if="groupSource === 'column'" v-model="metadataMapping.group"><option value="">Select group column…</option><option v-for="col in columns" :key="`grp-col-${col.columnIndex}`" :value="String(col.columnIndex)">{{ col.displayName }}</option></select><select v-else-if="groupSource === 'fixed'" v-model.number="bulkGroupIndex"><option v-for="group in normalizedGroups" :key="`bulk-group-${group.index}`" :value="group.index">{{ group.name }}</option></select></div>
             </div>
 
             <div class="meta-hint">
-              These values are used to match spreadsheet rows to Case-e subjects, visits, and groups.
+              Missing visit or group columns are supported. Select one visit for all rows and use each subject's assigned group.
             </div>
           </section>
 
           <!-- STEP 5 -->
-          <section v-if="columns.length" class="panel">
-            <h3>5. Map spreadsheet columns to form fields</h3>
+          <section v-show="wizardStep === 3" v-if="columns.length" class="panel">
+            <h3>Match fields</h3>
 
             <div class="mapping-tools">
               <label class="check-inline">
@@ -184,6 +180,12 @@
 
             <div v-if="!mappableColumns.length" class="info-box">
               No non-metadata columns are available for field mapping.
+            </div>
+            <div v-if="autoMappingIssues.length" class="warning-box soft">
+              <div v-for="(issue, index) in autoMappingIssues" :key="`auto-map-issue-${index}`">{{ issue }}</div>
+            </div>
+            <div v-if="mappingCollisions.length" class="error-box">
+              <div v-for="issue in mappingCollisions" :key="issue">{{ issue }}</div>
             </div>
 
             <div v-else class="mapping-table-wrap">
@@ -219,8 +221,8 @@
           </section>
 
           <!-- STEP 6 -->
-          <section v-if="columns.length && dataRows.length" class="panel">
-            <h3>6. Spreadsheet preview</h3>
+          <section v-show="wizardStep === 3" v-if="columns.length && dataRows.length" class="panel">
+            <h3>Check sample rows</h3>
 
             <div class="mapping-tools">
               <label class="check-inline">
@@ -268,14 +270,14 @@
           </section>
 
           <!-- STEP 7 -->
-          <section v-if="columns.length && dataRows.length" class="panel">
-            <h3>7. Validate import rows</h3>
+          <section v-show="wizardStep === 4" v-if="columns.length && dataRows.length" class="panel">
+            <h3>Validate before importing</h3>
 
             <div class="analyze-actions">
               <button
                 type="button"
                 class="btn-primary"
-                :disabled="analyzing"
+                :disabled="analyzing || mappingCollisions.length > 0"
                 @click="emitAnalyze"
               >
                 {{ analyzing ? "Validating..." : "Build Import Preview" }}
@@ -288,8 +290,8 @@
           </section>
 
           <!-- STEP 8 -->
-          <section v-if="hasPreview" class="panel">
-            <h3>8. Import preview result</h3>
+          <section v-show="wizardStep === 4" v-if="hasPreview" class="panel">
+            <h3>Import preview</h3>
 
             <div class="all-summary-grid">
               <div class="summary-card">
@@ -376,8 +378,11 @@
         <button type="button" class="btn-secondary" @click="$emit('close')">
           Cancel
         </button>
+        <div class="footer-spacer"></div>
+        <button v-if="wizardStep > 1" type="button" class="btn-secondary" @click="wizardStep -= 1">Back</button>
+        <button v-if="wizardStep < 4" type="button" class="btn-primary" :disabled="!canContinueWizard" @click="advanceWizard">Continue</button>
         <button
-          v-if="hasPreview"
+          v-if="wizardStep === 4 && hasPreview"
           type="button"
           class="btn-primary"
           :disabled="committing || !previewSummary.readyRows"
@@ -393,6 +398,7 @@
 <script>
 /* eslint-disable */
 import * as XLSX from "xlsx";
+import { compositeImportKey, normalizeImportText, parseSpreadsheetStructure, stripLegacyColumnSuffix } from "@/utils/spreadsheetStructure";
 
 export default {
   name: "StudyDataImportDialog",
@@ -400,6 +406,9 @@ export default {
     visible: { type: Boolean, default: false },
     availableFields: { type: Array, default: () => [] },
     subjects: { type: Array, default: () => [] },
+    visits: { type: Array, default: () => [] },
+    groups: { type: Array, default: () => [] },
+    initialVisitIndex: { type: Number, default: 0 },
     visitLabel: { type: String, default: "" },
 
     previewRows: { type: Array, default: () => [] },
@@ -420,6 +429,14 @@ export default {
     return {
       importMode: "single",
       selectedSubjectIndex: 0,
+      wizardStep: 1,
+      furthestWizardStep: 1,
+      singleVisitIndex: 0,
+      singleDataRowIndex: 0,
+      visitSource: "fixed",
+      bulkVisitIndex: 0,
+      groupSource: "subject",
+      bulkGroupIndex: 0,
 
       workbook: null,
       workbookError: "",
@@ -427,10 +444,17 @@ export default {
       sheetNames: [],
       selectedSheetName: "",
       headerMode: "auto",
+      headerRowIndex: 0,
 
       rawAoA: [],
+      rawValueAoA: [],
       columns: [],
       dataRows: [],
+      rawDataRows: [],
+      dataStartIndex: 1,
+      detectedLayout: "single",
+      structureInfo: "",
+      autoMappingIssues: [],
 
       mappings: {},
       metadataMapping: {
@@ -448,6 +472,60 @@ export default {
     };
   },
   computed: {
+    wizardSteps() {
+      return [
+        { step: 1, label: "Destination" },
+        { step: 2, label: "File & context" },
+        { step: 3, label: "Field mapping" },
+        { step: 4, label: "Review & import" },
+      ];
+    },
+    normalizedVisits() {
+      return (this.visits || []).map((visit, index) => ({
+        index,
+        name: String(visit?.name || `Visit ${index + 1}`),
+      }));
+    },
+    normalizedGroups() {
+      return (this.groups || []).map((group, index) => ({
+        index,
+        name: String(group?.name || `Group ${index + 1}`),
+      }));
+    },
+    headerRowOptions() {
+      return Array.from({ length: Math.min(this.rawAoA.length, 25) }, (_, index) => index + 1);
+    },
+    importableRowOptions() {
+      return this.dataRows
+        .map((row, index) => ({
+          index,
+          example: (row || []).map((value) => String(value ?? "").trim()).find(Boolean) || "",
+          hasData: (row || []).some((value) => String(value ?? "").trim()),
+        }))
+        .filter((row) => row.hasData);
+    },
+    canContinueWizard() {
+      if (this.wizardStep === 1) {
+        if (this.importMode === "single") {
+          return !!this.selectedSubject && this.normalizedVisits.some((visit) => visit.index === Number(this.singleVisitIndex));
+        }
+        return this.subjects.length > 0 && this.normalizedVisits.length > 0;
+      }
+      if (this.wizardStep === 2) {
+        if (!this.columns.length || !this.dataRows.length) return false;
+        if (this.importMode === "single" && !this.importableRowOptions.some((row) => row.index === Number(this.singleDataRowIndex))) return false;
+        if (this.importMode === "all" && this.metadataMapping.subject === "") return false;
+        if (this.importMode === "all" && this.visitSource === "column" && this.metadataMapping.visit === "") return false;
+        if (this.importMode === "all" && this.visitSource === "fixed" && !this.normalizedVisits.some((visit) => visit.index === Number(this.bulkVisitIndex))) return false;
+        if (this.importMode === "all" && this.groupSource === "column" && this.metadataMapping.group === "") return false;
+        if (this.importMode === "all" && this.groupSource === "fixed" && !this.normalizedGroups.some((group) => group.index === Number(this.bulkGroupIndex))) return false;
+        return true;
+      }
+      if (this.wizardStep === 3) {
+        return Object.values(this.effectiveMappings).some(Boolean) && this.mappingCollisions.length === 0;
+      }
+      return true;
+    },
     selectedSubject() {
       return this.subjects.find((s) => Number(s.index) === Number(this.selectedSubjectIndex)) || null;
     },
@@ -461,7 +539,10 @@ export default {
 
     metadataColumnIndexSet() {
       const out = new Set();
-      [this.metadataMapping.subject, this.metadataMapping.visit, this.metadataMapping.group]
+      const metadataColumns = [this.metadataMapping.subject];
+      if (this.importMode === "all" && this.visitSource === "column") metadataColumns.push(this.metadataMapping.visit);
+      if (this.importMode === "all" && this.groupSource === "column") metadataColumns.push(this.metadataMapping.group);
+      metadataColumns
         .filter((x) => x !== "" && x != null)
         .forEach((x) => {
           const n = Number(x);
@@ -472,6 +553,12 @@ export default {
 
     mappableColumns() {
       return this.columns.filter((col) => !this.metadataColumnIndexSet.has(col.columnIndex));
+    },
+    effectiveMappings() {
+      const allowed = new Set(this.mappableColumns.map((column) => String(column.columnIndex)));
+      return Object.fromEntries(
+        Object.entries(this.mappings || {}).filter(([columnIndex, targetKey]) => allowed.has(String(columnIndex)) && targetKey)
+      );
     },
 
     filteredColumnsForMapping() {
@@ -543,6 +630,19 @@ export default {
         return hay.includes(q);
       });
     },
+    mappingCollisions() {
+      const targets = new Map();
+      Object.entries(this.effectiveMappings).forEach(([columnIndex, targetKey]) => {
+        if (!targetKey) return;
+        if (!targets.has(targetKey)) targets.set(targetKey, []);
+        targets.get(targetKey).push(Number(columnIndex));
+      });
+      return [...targets.entries()].filter(([, indexes]) => indexes.length > 1).map(([targetKey, indexes]) => {
+        const field = this.availableFields.find(item => item.key === targetKey);
+        const sourceNames = indexes.map(index => this.columns.find(column => column.columnIndex === index)?.displayName || `Column ${index + 1}`);
+        return `${sourceNames.join(", ")} all map to ${field?.sectionTitle || "section"} → ${field?.fieldLabel || targetKey}. Each target field can be mapped only once.`;
+      });
+    },
   },
   watch: {
     visible(v) {
@@ -553,6 +653,24 @@ export default {
       handler(list) {
         if (Array.isArray(list) && list.length) {
           this.selectedSubjectIndex = list[0].index;
+        }
+      },
+    },
+    visits: {
+      immediate: true,
+      handler() {
+        const preferred = Number.isInteger(this.initialVisitIndex) && this.initialVisitIndex >= 0
+          ? this.initialVisitIndex
+          : 0;
+        this.singleVisitIndex = this.normalizedVisits.some((visit) => visit.index === preferred) ? preferred : 0;
+        this.bulkVisitIndex = this.singleVisitIndex;
+      },
+    },
+    groups: {
+      immediate: true,
+      handler() {
+        if (!this.normalizedGroups.some((group) => group.index === Number(this.bulkGroupIndex))) {
+          this.bulkGroupIndex = this.normalizedGroups[0]?.index ?? 0;
         }
       },
     },
@@ -567,15 +685,30 @@ export default {
     resetState() {
       this.importMode = "single";
       this.selectedSubjectIndex = Array.isArray(this.subjects) && this.subjects.length ? this.subjects[0].index : 0;
+      this.wizardStep = 1;
+      this.furthestWizardStep = 1;
+      this.singleVisitIndex = this.normalizedVisits.some((visit) => visit.index === this.initialVisitIndex) ? this.initialVisitIndex : 0;
+      this.singleDataRowIndex = 0;
+      this.bulkVisitIndex = this.singleVisitIndex;
+      this.visitSource = "fixed";
+      this.groupSource = "subject";
+      this.bulkGroupIndex = this.normalizedGroups[0]?.index ?? 0;
       this.workbook = null;
       this.workbookError = "";
       this.fileName = "";
       this.sheetNames = [];
       this.selectedSheetName = "";
       this.headerMode = "auto";
+      this.headerRowIndex = 0;
       this.rawAoA = [];
+      this.rawValueAoA = [];
       this.columns = [];
       this.dataRows = [];
+      this.rawDataRows = [];
+      this.dataStartIndex = 1;
+      this.detectedLayout = "single";
+      this.structureInfo = "";
+      this.autoMappingIssues = [];
       this.mappings = {};
       this.metadataMapping = { subject: "", visit: "", group: "" };
       this.mappingSearch = "";
@@ -599,7 +732,7 @@ export default {
 
       try {
         const buffer = await file.arrayBuffer();
-        const wb = XLSX.read(buffer, { type: "array" });
+        const wb = XLSX.read(buffer, { type: "array", cellDates: true, cellNF: true });
 
         this.workbook = wb;
         this.sheetNames = wb.SheetNames || [];
@@ -627,14 +760,23 @@ export default {
         raw: false,
         blankrows: false,
       });
+      const rawValueAoA = XLSX.utils.sheet_to_json(sheet, {
+        header: 1,
+        defval: "",
+        raw: true,
+        blankrows: false,
+      });
 
       this.rawAoA = Array.isArray(aoa) ? aoa : [];
+      this.rawValueAoA = Array.isArray(rawValueAoA) ? rawValueAoA : [];
+      if (this.headerRowIndex >= this.rawAoA.length) this.headerRowIndex = 0;
       this.buildColumnsAndRows();
     },
 
     buildColumnsAndRows() {
       this.columns = [];
       this.dataRows = [];
+      this.rawDataRows = [];
       this.mappings = {};
       this.metadataMapping = { subject: "", visit: "", group: "" };
 
@@ -643,97 +785,27 @@ export default {
         return;
       }
 
-      const mode = this.detectHeaderMode();
       const rows = this.rawAoA.map((r) => (Array.isArray(r) ? r : []));
-
-      let columns = [];
-      let dataStartIndex = 1;
-
-      if (mode === "two-row" && rows.length >= 2) {
-        const row1 = rows[0];
-        const row2 = rows[1];
-        const width = Math.max(row1.length, row2.length);
-
-        columns = Array.from({ length: width }, (_, i) => {
-          const sectionName = this.cellText(row1[i]);
-          const fieldName = this.cellText(row2[i]);
-          const displayName = [sectionName, fieldName].filter(Boolean).join(" / ") || `Column ${i + 1}`;
-
-          return {
-            columnIndex: i,
-            sectionName,
-            fieldName,
-            rawHeader: displayName,
-            displayName,
-          };
-        });
-
-        dataStartIndex = 2;
-      } else {
-        const headerRow = rows[0];
-        const width = headerRow.length;
-
-        columns = Array.from({ length: width }, (_, i) => {
-          const rawHeader = this.cellText(headerRow[i]);
-          const split = this.splitSingleHeader(rawHeader);
-
-          return {
-            columnIndex: i,
-            sectionName: split.sectionName,
-            fieldName: split.fieldName,
-            rawHeader,
-            displayName: rawHeader || `Column ${i + 1}`,
-          };
-        });
-
-        dataStartIndex = 1;
-      }
-
-      this.columns = columns;
-      this.dataRows = rows.slice(dataStartIndex);
+      const parsed = parseSpreadsheetStructure(rows, {
+        layout: this.headerMode,
+        headerRowIndex: this.headerRowIndex,
+      });
+      this.detectedLayout = parsed.layout;
+      this.columns = parsed.columns;
+      this.dataRows = parsed.dataRows;
+      this.rawDataRows = this.rawValueAoA.slice(parsed.dataStartIndex);
+      this.singleDataRowIndex = this.importableRowOptions[0]?.index ?? 0;
+      this.dataStartIndex = parsed.dataStartIndex;
+      this.structureInfo = parsed.layout === "legacy-sections"
+        ? `${parsed.markerIndexes.length} header-only section column(s) were recognized and excluded from participant data. Confirm the Header mode; choose Single header row if any of these are unanswered fields instead.`
+        : `Using ${parsed.layout === "three-row" ? "three" : parsed.layout === "two-row" ? "two" : "one"} header row(s).`;
 
       this.prefillMetadataMappings();
       this.applyAutoMapping();
     },
 
     detectHeaderMode() {
-      if (this.headerMode !== "auto") return this.headerMode;
-
-      const row1 = this.rawAoA?.[0] || [];
-      const row2 = this.rawAoA?.[1] || [];
-
-      if (!row1.length || !row2.length) return "single";
-
-      let compoundCount = 0;
-      for (let i = 0; i < row1.length; i++) {
-        const a = this.cellText(row1[i]);
-        if (a.includes(".") || a.includes("/") || a.includes("|") || a.includes("->")) {
-          compoundCount += 1;
-        }
-      }
-
-      if (compoundCount > 0) return "single";
-      return "two-row";
-    },
-
-    splitSingleHeader(header) {
-      const h = String(header || "").trim();
-      if (!h) return { sectionName: "", fieldName: "" };
-
-      const separators = [".", "/", "->", "::", "|", " - "];
-      for (const sep of separators) {
-        if (h.includes(sep)) {
-          const parts = h.split(sep).map((x) => String(x || "").trim()).filter(Boolean);
-          if (parts.length >= 2) {
-            return {
-              sectionName: parts[0],
-              fieldName: parts.slice(1).join(" "),
-            };
-          }
-        }
-      }
-
-      return { sectionName: "", fieldName: h };
+      return this.detectedLayout || "single";
     },
 
     cellText(v) {
@@ -741,73 +813,37 @@ export default {
     },
 
     normalizeText(v) {
-      return String(v || "")
-        .trim()
-        .toLowerCase()
-        .replace(/\s+/g, " ")
-        .replace(/[._/\\|:-]+/g, " ")
-        .replace(/[()]/g, "")
-        .trim();
-    },
-
-    buildSourceCandidates(col) {
-      const candidates = new Set();
-
-      const raw = this.normalizeText(col.rawHeader);
-      const section = this.normalizeText(col.sectionName);
-      const field = this.normalizeText(col.fieldName);
-      const display = this.normalizeText(col.displayName);
-
-      if (raw) candidates.add(raw);
-      if (display) candidates.add(display);
-      if (field) candidates.add(field);
-      if (section && field) {
-        candidates.add(`${section} ${field}`);
-        candidates.add(`${section}.${field}`);
-      }
-
-      return [...candidates].filter(Boolean);
-    },
-
-    buildFieldCandidates(field) {
-      const candidates = new Set();
-
-      [
-        field.sectionTitle,
-        field.fieldLabel,
-        field.fieldName,
-        `${field.sectionTitle} ${field.fieldLabel}`,
-        `${field.sectionTitle}.${field.fieldLabel}`,
-      ]
-        .filter(Boolean)
-        .forEach((x) => candidates.add(this.normalizeText(x)));
-
-      return [...candidates].filter(Boolean);
+      return normalizeImportText(v);
     },
 
     applyAutoMapping() {
       const next = {};
-
+      const usedTargets = new Set();
+      const issues = [];
       for (const col of this.mappableColumns) {
-        const sourceCandidates = this.buildSourceCandidates(col);
-
-        let exact = this.availableFields.find((field) => {
-          const fieldCandidates = this.buildFieldCandidates(field);
-          return sourceCandidates.some((src) => fieldCandidates.includes(src));
-        });
-
-        if (!exact) {
-          exact = this.availableFields.find((field) => {
-            const fieldCandidates = this.buildFieldCandidates(field);
-            return sourceCandidates.some((src) =>
-              fieldCandidates.some((fc) => fc.includes(src) || src.includes(fc))
-            );
-          });
+        const stableKey = this.normalizeText(col.stableKey);
+        const compositeKey = compositeImportKey(col.sectionName, col.fieldName);
+        const sourceAliases = [col.sourceAlias, col.rawHeader].map(this.normalizeText).filter(Boolean);
+        let matches = this.availableFields.filter(field => stableKey && [field.stableFieldKey, field.fieldName].map(this.normalizeText).includes(stableKey));
+        if (!matches.length && col.sectionName) matches = this.availableFields.filter(field => compositeImportKey(field.sectionTitle, field.fieldLabel) === compositeKey);
+        if (!matches.length) matches = this.availableFields.filter(field => (field.importAliases || []).map(this.normalizeText).some(alias => sourceAliases.includes(alias)));
+        if (!matches.length) {
+          const cleanLabel = this.normalizeText(stripLegacyColumnSuffix(col.fieldName));
+          const labelMatches = this.availableFields.filter(field => this.normalizeText(field.fieldLabel) === cleanLabel);
+          if (labelMatches.length === 1) matches = labelMatches;
         }
-
-        next[col.columnIndex] = exact?.key || "";
+        if (matches.length > 1) {
+          issues.push(`${col.displayName} matches more than one Case-e field and must be mapped manually.`);
+          next[col.columnIndex] = "";
+        } else if (matches.length === 1 && usedTargets.has(matches[0].key)) {
+          issues.push(`${col.displayName} resolves to a field already used by another column and was left unmapped.`);
+          next[col.columnIndex] = "";
+        } else {
+          next[col.columnIndex] = matches[0]?.key || "";
+          if (matches[0]) usedTargets.add(matches[0].key);
+        }
       }
-
+      this.autoMappingIssues = issues;
       this.mappings = next;
     },
 
@@ -821,18 +857,20 @@ export default {
 
     prefillMetadataMappings() {
       const findFirst = (patterns) => {
-        const found = this.columns.find((col) => {
-          const txt = this.normalizeText(col.displayName);
-          return patterns.some((p) => txt.includes(p));
-        });
-        return found ? String(found.columnIndex) : "";
+        for (const pattern of patterns) {
+          const found = this.columns.find(col => this.normalizeText(col.displayName).includes(pattern));
+          if (found) return String(found.columnIndex);
+        }
+        return "";
       };
 
       this.metadataMapping.subject = findFirst([
         "subject id",
+        "probanden code",
+        "participant id",
         "subject",
         "participant",
-        "participant id",
+        "teilnehmer",
       ]);
 
       this.metadataMapping.visit = findFirst([
@@ -847,6 +885,9 @@ export default {
         "arm",
         "cohort",
       ]);
+
+      this.visitSource = this.metadataMapping.visit ? "column" : "fixed";
+      this.groupSource = this.metadataMapping.group ? "column" : "subject";
     },
 
     firstNonEmptyValueForColumn(columnIndex) {
@@ -858,23 +899,41 @@ export default {
     },
 
     displayRowNumber(dataRowIndex) {
-      const mode = this.detectHeaderMode();
-      const headerRows = mode === "two-row" ? 2 : 1;
-      return dataRowIndex + headerRows + 1;
+      return dataRowIndex + this.dataStartIndex + 1;
     },
 
     emitAnalyze() {
+      if (this.mappingCollisions.length) return;
       this.$emit("analyze", {
         mode: this.importMode,
         selectedSubjectIndex: Number(this.selectedSubjectIndex),
+        singleDataRowIndex: Number(this.singleDataRowIndex),
         selectedSubjectLabel: this.selectedSubject?.label || "",
-        visitLabel: this.visitLabel || "",
+        singleVisitIndex: Number(this.singleVisitIndex),
+        visitSource: this.visitSource,
+        bulkVisitIndex: Number(this.bulkVisitIndex),
+        groupSource: this.groupSource,
+        bulkGroupIndex: Number(this.bulkGroupIndex),
+        visitLabel: this.normalizedVisits.find((visit) => visit.index === Number(this.singleVisitIndex))?.name || this.visitLabel || "",
         selectedSubjectGroupLabel: this.selectedSubjectGroupLabel || "",
         metadataMapping: { ...this.metadataMapping },
-        mappings: { ...this.mappings },
+        mappings: { ...this.effectiveMappings },
         columns: this.columns,
         dataRows: this.dataRows,
+        rawDataRows: this.rawDataRows,
       });
+    },
+    advanceWizard() {
+      if (!this.canContinueWizard || this.wizardStep >= 4) return;
+      this.wizardStep += 1;
+      this.furthestWizardStep = Math.max(this.furthestWizardStep, this.wizardStep);
+      if (this.wizardStep === 4) this.emitAnalyze();
+    },
+    goToWizardStep(step) {
+      const nextStep = Number(step);
+      if (!Number.isInteger(nextStep) || nextStep < 1 || nextStep > this.furthestWizardStep) return;
+      this.wizardStep = nextStep;
+      if (nextStep === 4) this.emitAnalyze();
     },
   },
 };
@@ -916,6 +975,51 @@ export default {
   margin: 0;
   font-size: 22px;
   color: #111827;
+}
+
+.wizard-steps {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1px;
+  background: #e5e7eb;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.wizard-steps button {
+  border: 0;
+  background: #fff;
+  color: #6b7280;
+  padding: 12px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.wizard-steps button span {
+  display: inline-grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  margin-right: 8px;
+  border-radius: 50%;
+  background: #e5e7eb;
+  color: #374151;
+}
+
+.wizard-steps button.active {
+  color: #1d4ed8;
+  background: #eff6ff;
+}
+
+.wizard-steps button.active span,
+.wizard-steps button.complete span {
+  background: #2563eb;
+  color: #fff;
+}
+
+.wizard-steps button:disabled {
+  cursor: default;
+  color: #9ca3af;
 }
 
 .subtitle {
@@ -1020,6 +1124,10 @@ export default {
   font-size: 13px;
   font-weight: 600;
   color: #374151;
+}
+
+.source-control {
+  flex: 1 1 280px;
 }
 
 .target-card,
@@ -1227,6 +1335,10 @@ select,
   background: #fff;
 }
 
+.footer-spacer {
+  flex: 1;
+}
+
 .btn-primary,
 .btn-secondary {
   border: none;
@@ -1252,6 +1364,10 @@ select,
 }
 
 @media (max-width: 980px) {
+  .wizard-steps {
+    grid-template-columns: 1fr 1fr;
+  }
+
   .all-summary-grid {
     grid-template-columns: 1fr 1fr;
   }
