@@ -37,7 +37,7 @@
           </button>
 
           <button
-            v-if="showSelection && !isShared && !isMergeMode"
+            v-if="showCrossDeviceImportButton && showSelection && !isShared && !isMergeMode"
             type="button"
             class="btn-merge-study"
             @click="openMergeStudy"
@@ -83,13 +83,6 @@
 
     <!-- Selection -->
     <template v-if="showSelection && !isShared">
-      <div v-if="!isMergeMode" class="selection-import-bar">
-        <button type="button" class="import-btn" @click="openImportDialogFromSelection">
-          <i :class="icons.upload || 'fas fa-file-import'"></i>
-          Import Data
-        </button>
-      </div>
-
       <SelectionMatrixView
           v-if="!isMergeMode && matrixReady"
           :key="selectionMatrixKey"
@@ -110,6 +103,7 @@
           :canManageSubjectDropout="canManageSubjectDropout"
           @update:selectedVisitIndex="selectedVisitIndex = $event"
           @add-subjects="openSubjectDialog"
+          @import-data="openImportDialogFromSelection"
           @dropout-subject="openSubjectDropoutDialog"
           @select-cell="selectCell"
           @open-status-legend="openStatusLegend"
@@ -1147,6 +1141,7 @@ export default {
 
       // Merge mode (selection panel toggles to merge UI in same container)
       isMergeMode: false,
+      showCrossDeviceImportButton: false,
       showGroupAssignDialog: false,
       groupAssignScope: "one", // "one" | "all"
       groupAssignSelectedGroup: "",
