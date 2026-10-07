@@ -361,6 +361,7 @@ import BaseNumberField from "@/components/forms/BaseNumberField.vue";
 import BaseDateField from "@/components/forms/BaseDateField.vue";
 import BaseSelectField from "@/components/forms/BaseSelectField.vue";
 import { STUDY_BEFORE_IDLE_EVENT } from "@/utils/studySaveWorkflow";
+import { normalizeStudySettings } from "@/utils/studySettings";
 
 import GroupForm from "./GroupForm.vue";
 import VisitForm from "./VisitForm.vue";
@@ -873,6 +874,7 @@ export default {
         study_content: {
           study_data: {
             study: _deepClone(studyData.value || {}),
+            studySettings: normalizeStudySettings(store.state.studyDetails?.studySettings),
             groups: _deepClone(groupData.value || []),
             visits: _deepClone(visitData.value || []),
             subjectCount: Number(subjectCount.value || 0),
@@ -1237,6 +1239,7 @@ export default {
         skipSubjectCreationNow: !!sd.skipSubjectCreationNow,
         selectedModels: _deepClone(normalizedSelectedModels),
         forms: _deepClone(normalizedForms),
+        studySettings: normalizeStudySettings(sd.studySettings || sd.study_settings),
       });
 
       setScratchForms(normalizedForms, normalizedSelectedModels);

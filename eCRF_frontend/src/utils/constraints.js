@@ -87,6 +87,19 @@ export function normalizeConstraints(fieldType = "text", raw = {}) {
     }
   });
 
+  if (c.measurement && typeof c.measurement === "object") {
+    const concept = String(c.measurement.concept || "").trim();
+    if (concept) {
+      c.measurement = {
+        concept,
+        unitSource: c.measurement.unitSource === "field" ? "field" : "study_default",
+        ...(c.measurement.unit ? { unit: String(c.measurement.unit) } : {}),
+      };
+    } else {
+      delete c.measurement;
+    }
+  }
+
   // Migrate legacy maxLengthDigits -> maxDigits (if present)
   if ("maxLengthDigits" in c && c.maxLengthDigits != null) {
     if (!("maxDigits" in c)) c.maxDigits = c.maxLengthDigits;
@@ -252,7 +265,7 @@ export function normalizeConstraints(fieldType = "text", raw = {}) {
 
   const COMMON = ["required", "readonly", "helpText", "placeholder", "defaultValue"];
   const TEXTLIKE = ["minLength", "maxLength", "pattern", "transform"];
-  const NUMBER = ["min", "max", "step", "integerOnly", "minDigits", "maxDigits"];
+  const NUMBER = ["min", "max", "step", "integerOnly", "minDigits", "maxDigits", "measurement"];
   const DATE = ["minDate", "maxDate", "dateFormat", "defaultValue"];
   const TIME = ["minTime", "maxTime", "step"];
 
