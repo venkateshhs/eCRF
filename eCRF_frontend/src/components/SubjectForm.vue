@@ -1,6 +1,7 @@
 <template>
   <div class="subject-form">
     <BaseNumberField
+      v-if="!isManual"
       :modelValue="subjectCount"
       @update:modelValue="updateCount"
       id="subject-count"
@@ -26,7 +27,7 @@
         <div>
           <h3>Subject ID Format</h3>
           <p>
-            Choose a format for generating subject IDs. Existing saved subject IDs are never regenerated.
+            Choose generated IDs or import your own using Manual. Existing saved subject IDs never change.
           </p>
         </div>
 
@@ -68,7 +69,7 @@
           />
         </label>
 
-        <label class="field-block">
+        <label v-if="!isManual" class="field-block">
           <span>Prefix</span>
           <input
             :value="localConfig.prefix"
@@ -78,7 +79,7 @@
           />
         </label>
 
-        <label class="field-block">
+        <label v-if="!isManual" class="field-block">
           <span>Start Number</span>
           <input
             type="number"
@@ -89,7 +90,7 @@
           />
         </label>
 
-        <label class="field-block">
+        <label v-if="!isManual" class="field-block">
           <span>Number Padding</span>
           <input
             type="number"
@@ -101,7 +102,7 @@
           />
         </label>
 
-        <label class="field-block full-width">
+        <label v-if="!isManual" class="field-block full-width">
           <span>Example</span>
           <input
             :value="exampleId"
@@ -111,7 +112,30 @@
         </label>
       </div>
 
-      <div class="helper-row">
+      <template v-if="isManual">
+        <ManualSubjectIdsInput
+          :modelValue="localConfig.manualIds || []"
+          :existingIds="existingSubjectIds"
+          :lockedCount="lockedSubjectIds.length"
+          :disabled="!subjectSetupEditable"
+          :csvOnly="manualCsvOnly"
+          @update:modelValue="updateManualIds"
+        />
+        <div v-if="allowManualSkip" class="skip-enrollment-card">
+          <div>
+            <strong>Add subjects later</strong>
+            <p>Continue without importing IDs. Subjects can be added individually or imported during data entry.</p>
+          </div>
+          <button
+            type="button"
+            class="btn-option skip-manual-btn"
+            :disabled="!subjectSetupEditable"
+            @click="$emit('skip-manual')"
+          >Skip for now</button>
+        </div>
+      </template>
+
+      <div v-if="!isManual" class="helper-row">
         <strong>Available tokens:</strong>
         <code>{PREFIX}</code>
         <code>{NUMBER}</code>
@@ -124,7 +148,7 @@
         {{ validationError }}
       </div>
 
-      <div class="preview-box">
+      <div v-if="!isManual" class="preview-box">
         <div class="preview-title">Preview</div>
         <div class="preview-list">
           <span v-for="id in previewIds" :key="id" class="preview-id">
@@ -133,7 +157,7 @@
         </div>
       </div>
 
-      <div v-if="hasExistingSubjects && !isFormatLocked" class="existing-note">
+      <div v-if="hasExistingSubjects && !isFormatLocked && !isManual" class="existing-note">
         Existing saved IDs are preserved. If you continue from Step 3, draft subject IDs are regenerated using the selected pattern.
       </div>
     </div>
@@ -144,6 +168,7 @@
 import { computed, reactive, watch } from "vue";
 import BaseNumberField from "@/components/forms/BaseNumberField.vue";
 import BaseSelectField from "@/components/forms/BaseSelectField.vue";
+import ManualSubjectIdsInput from "@/components/ManualSubjectIdsInput.vue";
 import {
   DEFAULT_SUBJECT_ID_CONFIG,
   SUBJECT_ID_PRESET_DEFINITIONS,
@@ -157,9 +182,13 @@ import {
 
 export default {
   name: "SubjectForm",
-  components: { BaseNumberField, BaseSelectField },
+  components: { BaseNumberField, BaseSelectField, ManualSubjectIdsInput },
   props: {
     subjectCount: Number,
+    manualCsvOnly: { type: Boolean, default: true },
+    allowManualSkip: { type: Boolean, default: true },
+    existingSubjectIds: { type: Array, default: () => [] },
+    lockedSubjectIds: { type: Array, default: () => [] },
     assignmentMethod: String,
 
     subjectIdConfig: {
@@ -197,9 +226,18 @@ export default {
     "update:assignmentMethod",
     "update:subjectIdConfig",
     "changed",
+    "skip-manual",
   ],
   setup(props, { emit }) {
     const localConfig = reactive(normalizeSubjectIdConfig(props.subjectIdConfig));
+    const isManual = computed(() => localConfig.mode === "manual");
+
+    function updateManualIds(ids) {
+      if (!props.subjectSetupEditable) return;
+      localConfig.manualIds = ids;
+      emitConfig("manualSubjectIds");
+      emit("update:subjectCount", ids.length);
+    }
 
     const selectedPreset = computed(() => {
       return presetFromSubjectIdConfig(localConfig);
@@ -364,6 +402,10 @@ export default {
         SUBJECT_ID_PRESET_DEFINITIONS.find((p) => p.key === key) ||
         SUBJECT_ID_PRESET_DEFINITIONS[0];
 
+      if (selected.key === "manual" && localConfig.preset !== "manual") {
+        localConfig.manualIds = [...props.lockedSubjectIds];
+      }
+
       localConfig.preset = selected.key;
       localConfig.mode = selected.mode;
 
@@ -374,10 +416,13 @@ export default {
       }
 
       emitConfig("subjectIdPreset");
+      if (selected.key === "manual") emit("update:subjectCount", (localConfig.manualIds || []).length);
     }
 
     return {
       localConfig,
+      isManual,
+      updateManualIds,
       presetOptions,
       isFormatLocked,
       isCustomPattern,
@@ -459,6 +504,35 @@ export default {
   border-radius: 8px;
   font-size: 13px;
   line-height: 1.4;
+}
+
+.skip-enrollment-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 14px;
+  padding: 14px;
+  border: 1px solid #dbe3ef;
+  border-radius: 10px;
+  background: #f8fafc;
+}
+
+.skip-enrollment-card strong {
+  color: #1f2937;
+  font-size: 14px;
+}
+
+.skip-enrollment-card p {
+  margin: 4px 0 0;
+  color: #64748b;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.skip-manual-btn {
+  flex: 0 0 auto;
+  white-space: nowrap;
 }
 
 .locked-note {
@@ -577,6 +651,11 @@ export default {
   }
 
   .subject-id-header {
+    flex-direction: column;
+  }
+
+  .skip-enrollment-card {
+    align-items: stretch;
     flex-direction: column;
   }
 }

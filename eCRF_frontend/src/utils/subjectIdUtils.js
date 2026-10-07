@@ -63,6 +63,7 @@ export const SUBJECT_ID_PRESET_DEFINITIONS = [
     pattern: "",
     label: () => "Custom pattern",
   },
+  { key: "manual", mode: "manual", pattern: "", label: () => "Manual" },
 ];
 
 export function deepClone(value) {
@@ -127,6 +128,10 @@ export function presetFromSubjectIdConfig(config) {
   const preset = String(src.preset || "");
   const pattern = String(src.pattern || "").trim();
 
+  if (preset === "manual" || src.mode === "manual") {
+    return SUBJECT_ID_PRESET_DEFINITIONS.find((p) => p.key === "manual");
+  }
+
   if (preset === "custom") {
     return (
       SUBJECT_ID_PRESET_DEFINITIONS.find((p) => p.key === "custom") ||
@@ -135,7 +140,7 @@ export function presetFromSubjectIdConfig(config) {
   }
 
   const byPattern = SUBJECT_ID_PRESET_DEFINITIONS.find(
-    (p) => p.key !== "custom" && p.pattern === pattern
+    (p) => p.key !== "custom" && p.key !== "manual" && p.pattern === pattern
   );
 
   if (byPattern) return byPattern;
@@ -208,6 +213,7 @@ export function makeSubjectRandomToken(length = 6) {
 
 export function buildSubjectIdFromConfig(config, sequenceNumber, studyNode = {}, fallbackName = "Study") {
   const cfg = normalizeSubjectIdConfig(config, studyNode, fallbackName);
+  if (cfg.mode === "manual") throw new Error("Enter a Subject ID for manual enrollment.");
   const number = Number(sequenceNumber || cfg.startNumber || 1);
   const padded = String(number).padStart(cfg.padding, "0");
   const uuid = makeSubjectUuid();
@@ -252,6 +258,7 @@ export function buildUniqueSubjectId(
 
 export function buildPreviewSubjectId(config, sequenceNumber, previewIndex = 0) {
   const cfg = normalizeSubjectIdConfig(config);
+  if (cfg.mode === "manual") return "";
   const padded = String(sequenceNumber || cfg.startNumber || 1).padStart(cfg.padding, "0");
 
   const fakeUuids = [
@@ -476,6 +483,7 @@ export function getNextSubjectSequenceNumber(subjects, config = null) {
 
 export function subjectIdPatternValidationMessage(config) {
   const cfg = normalizeSubjectIdConfig(config);
+  if (cfg.mode === "manual") return "";
   const pattern = String(cfg.pattern || "");
 
   const hasAnyValidToken =

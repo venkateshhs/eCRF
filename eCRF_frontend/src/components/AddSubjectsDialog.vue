@@ -3,8 +3,8 @@
     <div class="dialog dialog-subjects">
       <h3>Add subjects</h3>
       <p class="dialog-subtitle">
-        Enter how many new subjects to create, choose the ID pattern for these new subjects,
-        then assign each subject to a group. Existing subjects are not changed.
+        Add one or more subjects, choose how their IDs are assigned, then select their groups.
+        Existing subjects and IDs are not changed.
       </p>
 
       <!-- Subject count + assignment method -->
@@ -18,6 +18,9 @@
         :subjectIdFormatEditable="true"
         :hasExistingSubjects="true"
         :isPublished="false"
+        :manualCsvOnly="false"
+        :allowManualSkip="false"
+        :existingSubjectIds="existingSubjectIds"
         @update:subjectCount="$emit('update:subjectCount', $event)"
         @update:assignmentMethod="$emit('update:assignmentMethod', $event)"
         @update:subjectIdConfig="$emit('update:subjectIdConfig', $event)"
@@ -68,6 +71,7 @@ export default {
   },
   props: {
     subjectCount: { type: Number, required: true },
+    existingSubjectIds: { type: Array, default: () => [] },
     assignmentMethod: { type: String, required: true },
     subjects: { type: Array, default: () => [] },
     groupData: { type: Array, default: () => [] },

@@ -24,6 +24,7 @@ from .settings import get_settings
 from .entry_progress import calculate_overall_entry_progress
 from .compliance import build_compliance_summary
 from .study_export import ExportOptions, build_analysis_export
+from .subject_ids import validate_new_subject_ids
 from .shared_link_email import send_shared_link_email, shared_link_email_configured
 from .logger import logger
 
@@ -165,6 +166,7 @@ def _validate_subject_identity_and_status_update(old_sd: Dict[str, Any], new_sd:
         for field in SUBJECT_STATUS_FIELDS:
             if (old_subject or {}).get(field) != (new_subject or {}).get(field):
                 raise HTTPException(status_code=400, detail="Subject dropout status can only be changed with the dropout workflow")
+    validate_new_subject_ids(new_sd, old_subjects)
 
 
 def _effective_study_permissions(db: Session, meta: models.StudyMetadata, user) -> Dict[str, bool]:
@@ -509,6 +511,7 @@ def create_study(
         raise HTTPException(status_code=403, detail="Not authorized to create study for this user")
 
     desired_status = _norm_status(status) or "PUBLISHED"
+    validate_new_subject_ids(study_content.study_data or {})
 
     meta = models.StudyMetadata(
         created_by=study_metadata.created_by,

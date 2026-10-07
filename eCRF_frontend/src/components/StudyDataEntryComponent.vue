@@ -37,7 +37,7 @@
           </button>
 
           <button
-            v-if="showSelection && !isShared && !isMergeMode"
+            v-if="showCrossDeviceImportButton && showSelection && !isShared && !isMergeMode"
             type="button"
             class="btn-merge-study"
             @click="openMergeStudy"
@@ -83,13 +83,6 @@
 
     <!-- Selection -->
     <template v-if="showSelection && !isShared">
-      <div v-if="!isMergeMode" class="selection-import-bar">
-        <button type="button" class="import-btn" @click="openImportDialogFromSelection">
-          <i :class="icons.upload || 'fas fa-file-import'"></i>
-          Import Data
-        </button>
-      </div>
-
       <SelectionMatrixView
           v-if="!isMergeMode && matrixReady"
           :key="selectionMatrixKey"
@@ -110,6 +103,7 @@
           :canManageSubjectDropout="canManageSubjectDropout"
           @update:selectedVisitIndex="selectedVisitIndex = $event"
           @add-subjects="openSubjectDialog"
+          @import-data="openImportDialogFromSelection"
           @dropout-subject="openSubjectDropoutDialog"
           @select-cell="selectCell"
           @open-status-legend="openStatusLegend"
@@ -577,6 +571,7 @@
                         v-model="entryData[currentSubjectIndex][currentVisitIndex][currentGroupIndex][mIdx][fIdx]"
                         :options="field.options || []"
                         :multiple="!!field.constraints?.allowMultiple"
+                        :allow-other="!!field.constraints?.allowOther"
                         :readonly="isReadonlyField(field, mIdx, fIdx)"
                         :default-value="field.constraints?.defaultValue"
                         :placeholder="'Select…'"
@@ -770,6 +765,7 @@
       :subjectCount="subjectCountDraft"
       :assignmentMethod="assignmentMethodDraft"
       :subjectIdConfig="subjectIdConfigDraft"
+      :existingSubjectIds="(sd.subjects || []).map(subject => subject.id || subject.subject_id)"
       :subjects="subjectDrafts"
       :groupData="groupList"
       :saving="savingSubjects"
@@ -837,6 +833,9 @@
       :visible="showImportDialog"
       :available-fields="importableFields"
       :subjects="importDialogSubjects"
+      :visits="visitList"
+      :groups="groupList"
+      :initial-visit-index="selectedVisitIndex === -1 ? 0 : selectedVisitIndex"
       :visit-label="visitList[selectedVisitIndex === -1 ? 0 : selectedVisitIndex]?.name || ''"
       :preview-rows="importPreviewRows"
       :preview-summary="importPreviewSummary"
@@ -936,6 +935,7 @@
 
 <script>
 /* eslint-disable */
+import { markRaw } from "vue";
 import axios from "axios";
 import icons from "@/assets/styles/icons";
 import CustomDialog from "@/components/CustomDialog.vue";
@@ -981,6 +981,8 @@ import {
   buildUniqueSubjectId,
   getNextSubjectSequenceNumber,
 } from "@/utils/subjectIdUtils";
+import { validateManualSubjectIds } from "@/utils/manualSubjectIds";
+import { resolveImportVisit, validateImportGroup } from "@/utils/studyDataImportTarget";
 import {
   calculateDataEntryFieldProgress,
   calculateDataEntryProgress,
@@ -989,7 +991,7 @@ import {
   buildValueAssignmentFieldLookup,
   evaluateValueAssignments,
 } from "@/utils/formValueAssignmentRuntime";
-import { parseDateByConfiguredFormat } from "@/utils/dateFormatParsing";
+import { normalizeImportedDateForFormat, parseDateByConfiguredFormat } from "@/utils/dateFormatParsing";
 import {
   inferUploadedFileFieldContext,
   uploadedFileId,
@@ -1139,6 +1141,7 @@ export default {
 
       // Merge mode (selection panel toggles to merge UI in same container)
       isMergeMode: false,
+      showCrossDeviceImportButton: false,
       showGroupAssignDialog: false,
       groupAssignScope: "one", // "one" | "all"
       groupAssignSelectedGroup: "",
@@ -1207,7 +1210,9 @@ export default {
       runtimeCalculationFormulaCache: new Map(),
       runtimePopupReminderIndex: null,
       runtimePopupReminderIndexModels: null,
-      runtimeCommitHandles: new Map(),
+      // Timer handles are implementation details, not UI state. Keeping this Map
+      // raw preserves handle identity for the stale-callback guard below.
+      runtimeCommitHandles: markRaw(new Map()),
       pendingNavigationAction: null,
       showUnsavedExitDialog: false,
       subjectIdConfigDraft: null,
@@ -1318,12 +1323,10 @@ export default {
     },
     importableFields() {
       const models = Array.isArray(this.selectedModels) ? this.selectedModels : [];
-      const assigned = Array.isArray(this.assignedModelIndices) ? this.assignedModelIndices : [];
 
       const out = [];
 
-      assigned.forEach((mIdx) => {
-        const section = models[mIdx] || {};
+      models.forEach((section, mIdx) => {
         const fields = Array.isArray(section.fields) ? section.fields : [];
 
         fields.forEach((field, fIdx) => {
@@ -1334,6 +1337,10 @@ export default {
             sectionTitle: section.title || `Section ${mIdx + 1}`,
             fieldLabel: field.label || field.name || field.title || `Field ${fIdx + 1}`,
             fieldName: field.name || field.label || field.title || `Field ${fIdx + 1}`,
+            stableFieldKey: field.name || field._id || field.id || "",
+            importAliases: Array.isArray(field?.constraints?.importAliases)
+              ? field.constraints.importAliases
+              : [],
             fieldType: field.type || "text",
           });
         });
@@ -3231,14 +3238,20 @@ async buildImportPreview(payload) {
     this.importPreviewPayload = payload || null;
 
     const rows = Array.isArray(payload?.dataRows) ? payload.dataRows : [];
+    const rawDataRows = Array.isArray(payload?.rawDataRows) ? payload.rawDataRows : [];
     const columns = Array.isArray(payload?.columns) ? payload.columns : [];
     const mappings = payload?.mappings || {};
     const metadataMapping = payload?.metadataMapping || {};
     const mode = String(payload?.mode || "single");
+    const visitSource = String(payload?.visitSource || "column");
+    const groupSource = String(payload?.groupSource || "column");
+    const requestedSingleRowIndex = Number(payload?.singleDataRowIndex);
+    const selectedSingleRowIndex = Number.isInteger(requestedSingleRowIndex) ? requestedSingleRowIndex : 0;
 
     const previewRows = [];
 
     for (let rowIndex = 0; rowIndex < rows.length; rowIndex++) {
+      if (mode === "single" && rowIndex !== selectedSingleRowIndex) continue;
       const row = rows[rowIndex] || [];
       const issues = [];
       let targetSubjectIndex = null;
@@ -3271,27 +3284,16 @@ async buildImportPreview(payload) {
         }
       }
 
-      // visit
-      if (mode === "single") {
-        targetVisitIndex =
-          this.selectedVisitIndex === -1
-            ? 0
-            : Number.isInteger(this.selectedVisitIndex)
-            ? this.selectedVisitIndex
-            : 0;
-      } else {
-        const normalizedVisit = String(visitValue || "").trim().toLowerCase();
-        const matchedVisitIndex = this.visitList.findIndex((v) => {
-          return String(v?.name || "").trim().toLowerCase() === normalizedVisit;
-        });
-
-        if (matchedVisitIndex < 0) {
-          issues.push(`Visit "${visitValue || "blank"}" was not found in this study.`);
-          targetVisitIndex = null;
-        } else {
-          targetVisitIndex = matchedVisitIndex;
-        }
-      }
+      const visitResolution = resolveImportVisit({
+        mode,
+        visitSource,
+        singleVisitIndex: payload?.singleVisitIndex ?? (this.selectedVisitIndex === -1 ? 0 : this.selectedVisitIndex),
+        bulkVisitIndex: payload?.bulkVisitIndex,
+        visitValue,
+        visits: this.visitList,
+      });
+      targetVisitIndex = visitResolution.index;
+      if (visitResolution.issue) issues.push(visitResolution.issue);
 
       // group
       if (targetSubjectIndex != null && targetSubjectIndex >= 0) {
@@ -3302,16 +3304,15 @@ async buildImportPreview(payload) {
         }
       }
 
-      if (mode === "all" && targetGroupIndex != null && targetGroupIndex >= 0) {
-        const expectedGroup = String(this.groupList?.[targetGroupIndex]?.name || "").trim().toLowerCase();
-        const actualGroup = String(groupValue || "").trim().toLowerCase();
-
-        if (!actualGroup) {
-          issues.push(`Group value is missing in the spreadsheet row.`);
-        } else if (expectedGroup && actualGroup !== expectedGroup) {
-          issues.push(`Group "${groupValue}" does not match the subject group "${this.groupList?.[targetGroupIndex]?.name || ""}".`);
-        }
-      }
+      const groupIssue = validateImportGroup({
+        mode,
+        groupSource,
+        bulkGroupIndex: payload?.bulkGroupIndex,
+        groupValue,
+        targetGroupIndex,
+        groups: this.groupList,
+      });
+      if (groupIssue) issues.push(groupIssue);
 
       // mapped values
       let mappedValueCount = 0;
@@ -3322,12 +3323,16 @@ async buildImportPreview(payload) {
         if (!targetKey) return;
 
         const colIndex = Number(colIndexStr);
-        const rawValue = row[colIndex];
+        const displayedValue = row[colIndex];
 
-        if (rawValue == null || String(rawValue).trim() === "") return;
+        if (displayedValue == null || String(displayedValue).trim() === "") return;
 
         const targetField = this.importableFields.find((f) => f.key === targetKey);
         if (!targetField) return;
+        const sourceRawValue = rawDataRows?.[rowIndex]?.[colIndex];
+        const rawValue = String(targetField.fieldType || "").toLowerCase() === "date" && sourceRawValue instanceof Date
+          ? sourceRawValue
+          : displayedValue;
 
         importedFields.push({
           columnIndex: colIndex,
@@ -3366,7 +3371,7 @@ async buildImportPreview(payload) {
       let status = "Ready";
       if (issues.length) {
         const hasHardError = issues.some((x) =>
-          /not found|does not match|required|invalid|must be|readonly|not assigned/i.test(String(x))
+          /not found|not available|does not match|required|invalid|must be|readonly|not assigned|is missing/i.test(String(x))
         );
         status = hasHardError ? "Error" : "Warning";
       }
@@ -3490,7 +3495,11 @@ normalizeImportedValueForField(field, rawValue) {
     return text;
   }
 
-  if (type === "radio" || type === "date" || type === "time") {
+  if (type === "date") {
+    return normalizeImportedDateForFormat(rawValue, c.dateFormat || "dd.MM.yyyy");
+  }
+
+  if (type === "radio" || type === "time") {
     return text;
   }
 
@@ -7733,7 +7742,9 @@ applyImportedRowFromDialog(payload) {
       );
 
       this.subjectIdConfigDraft = {
-        ...inferred,
+        ...(this.sd.subjectIdConfig?.mode === "manual" || this.sd.subjectIdConfig?.preset === "manual"
+          ? normalizeSubjectIdConfig({ ...this.sd.subjectIdConfig, manualIds: [""] })
+          : inferred),
         startNumber: getNextSubjectSequenceNumber(existingSubjects, inferred),
         locked: false,
       };
@@ -7810,9 +7821,24 @@ applyImportedRowFromDialog(payload) {
 
     onAssignmentMethodChange(val) {
       this.assignmentMethodDraft = val || "Random";
+      if (this.subjectIdConfigDraft?.mode === "manual") {
+        this.applyAssignmentMethod();
+        return;
+      }
       this.generateSubjectDrafts();
     },
     generateSubjectDrafts() {
+      if (this.subjectIdConfigDraft?.mode === "manual") {
+        const previous = new Map(this.subjectDrafts.map(subject => [subject.id, subject]));
+        this.subjectDrafts = (this.subjectIdConfigDraft.manualIds || []).map((id, index) => {
+          const group = previous.get(String(id).trim())?.group || this.subjectDrafts[index]?.group;
+          const fallbackIndex = this.assignmentMethodDraft === "Random"
+            ? Math.floor(Math.random() * this.groupList.length) : index;
+          return { id: String(id).trim(), group: group || this.defaultGroupForIndex(fallbackIndex) };
+        });
+        this.subjectCountDraft = this.subjectDrafts.length;
+        return;
+      }
       const count = Number(this.subjectCountDraft) || 0;
 
       if (count <= 0) {
@@ -7924,6 +7950,12 @@ applyImportedRowFromDialog(payload) {
         group: String(s.group || "").trim(),
       }));
 
+      if (this.subjectIdConfigDraft?.mode === "manual") {
+        const error = validateManualSubjectIds(cleanedDrafts.map(subject => subject.id),
+          (this.sd.subjects || []).map(subject => subject.id || subject.subject_id));
+        if (error) { this.subjectDialogError = error; return; }
+      }
+
       for (const s of cleanedDrafts) {
         if (!s.id) {
           this.subjectDialogError = "Each subject must have an ID.";
@@ -8026,7 +8058,7 @@ applyImportedRowFromDialog(payload) {
         this.showDialogMessage("Subjects added successfully.");
       } catch (e) {
         console.error("Failed to add subjects", e);
-        this.subjectDialogError = "Failed to save subjects. Please try again.";
+        this.subjectDialogError = this.getApiErrorDetail(e) || "Failed to save subjects. Please try again.";
       } finally {
         this.savingSubjects = false;
       }

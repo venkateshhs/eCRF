@@ -238,6 +238,7 @@
                         :modelValue="row[getPreviewColKey(item.col, item.colIdx)]"
                         :options="item.col.options || []"
                         :multiple="!!item.col.constraints?.allowMultiple"
+                        :allow-other="!!item.col.constraints?.allowOther"
                         :readonly="true"
                         :default-value="item.col.constraints?.defaultValue"
                         :placeholder="'Select…'"
@@ -409,6 +410,7 @@
                       v-model="internalRows[rowIndex][getRuntimeColKey(item.col, item.colIdx)]"
                       :options="item.col.options || []"
                       :multiple="!!item.col.constraints?.allowMultiple"
+                      :allow-other="!!item.col.constraints?.allowOther"
                       :readonly="readonly || !!item.col.constraints?.readonly"
                       :default-value="item.col.constraints?.defaultValue"
                       :placeholder="'Select…'"
@@ -1413,7 +1415,7 @@ export default {
         }
       }
 
-      if ((col.type === "select" || col.type === "radio") && value != null && value !== "") {
+      if ((col.type === "select" || col.type === "radio") && !constraints.allowOther && value != null && value !== "") {
         const opts = Array.isArray(col.options) ? col.options.map(String) : [];
         if (Array.isArray(value)) {
           const allValid = value.every((v) => opts.includes(String(v)));

@@ -423,6 +423,7 @@ import icons from "@/assets/styles/icons";
 import ImportStudy from "@/components/ImportStudy.vue";
 import BuildInfoFooter from "@/components/BuildInfoFooter.vue";
 import activityTracker from "@/utils/activityTracker";
+import { STUDY_BEFORE_IDLE_EVENT } from "@/utils/studySaveWorkflow";
 
 export default {
   name: "DashboardComponent",
@@ -717,6 +718,7 @@ export default {
           visits: sd.visits || [],
           subjectCount: sd.subjectCount || 0,
           assignmentMethod: sd.assignmentMethod || "random",
+          subjectIdConfig: sd.subjectIdConfig || null,
           subjects: sd.subjects || [],
           assignments: assignments,
           forms: Array.isArray(sd.selectedModels)
@@ -1081,6 +1083,9 @@ export default {
     activityTracker.start({
       getToken: () => this.$store.state.token || localStorage.getItem("access_token"),
       onLogout: (msg) => this.logout(msg || "Session expired. Please log in again."),
+      onBeforeIdle: (detail) => {
+        window.dispatchEvent(new CustomEvent(STUDY_BEFORE_IDLE_EVENT, { detail }));
+      },
 
       // only called every 5 min if there was activity in that window
       pingFn: (token) => {
@@ -1097,6 +1102,7 @@ export default {
         // server policy
         pingIntervalMs: 5 * 60 * 1000,
         inactivityMs: 30 * 60 * 1000,
+        beforeIdleMs: 2 * 60 * 1000,
         idleCheckMs: 30 * 1000,
         eventCooldownMs: 5 * 60 * 1000,
         detachListenersDuringCooldown: true,

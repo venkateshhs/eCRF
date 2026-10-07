@@ -67,6 +67,51 @@ export function formatDateByConfiguredFormat(dateObj, format) {
   return dayjs(dateObj).format(toDayjsFormat(format));
 }
 
+export function normalizeImportedDateForFormat(value, format) {
+  const targetFormat = format || "dd.MM.yyyy";
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    return formatDateByConfiguredFormat(value, targetFormat);
+  }
+
+  const raw = String(value ?? "").trim();
+  if (!raw) return "";
+
+  const exact = parseDateByConfiguredFormat(raw, targetFormat);
+  if (exact) return formatDateByConfiguredFormat(exact, targetFormat);
+
+  // A date-only target may receive a timestamp from CSV exports. Keep the
+  // calendar date and intentionally discard the time component.
+  const targetLength = toDayjsFormat(targetFormat).length;
+  const configuredPrefix = raw.slice(0, targetLength);
+  const prefixDate = parseDateByConfiguredFormat(configuredPrefix, targetFormat);
+  if (prefixDate && /^\s|T/.test(raw.slice(targetLength, targetLength + 1))) {
+    return formatDateByConfiguredFormat(prefixDate, targetFormat);
+  }
+
+  for (const sourceFormat of [
+    "YYYY-MM-DDTHH:mm:ss.SSSZ",
+    "YYYY-MM-DDTHH:mm:ssZ",
+    "YYYY-MM-DD HH:mm:ss",
+    "YYYY-MM-DD HH:mm",
+    "YYYY-MM-DD",
+  ]) {
+    const parsed = dayjs(raw, sourceFormat, true);
+    if (parsed.isValid()) return formatDateByConfiguredFormat(parsed.toDate(), targetFormat);
+  }
+
+  const slashFormats = toDayjsFormat(targetFormat).startsWith("DD")
+    ? ["D/M/YYYY H:mm:ss", "D/M/YYYY H:mm", "D/M/YYYY", "DD/MM/YYYY HH:mm:ss", "DD/MM/YYYY HH:mm", "DD/MM/YYYY", "M/D/YYYY H:mm:ss", "M/D/YYYY H:mm", "M/D/YYYY", "MM/DD/YYYY HH:mm:ss", "MM/DD/YYYY HH:mm", "MM/DD/YYYY"]
+    : ["M/D/YYYY H:mm:ss", "M/D/YYYY H:mm", "M/D/YYYY", "MM/DD/YYYY HH:mm:ss", "MM/DD/YYYY HH:mm", "MM/DD/YYYY", "D/M/YYYY H:mm:ss", "D/M/YYYY H:mm", "D/M/YYYY", "DD/MM/YYYY HH:mm:ss", "DD/MM/YYYY HH:mm", "DD/MM/YYYY"];
+  // Excel's common short-date export uses a two-digit year in month/day order.
+  slashFormats.unshift("M/D/YY H:mm:ss", "M/D/YY H:mm", "M/D/YY h:mm A", "M/D/YY");
+  for (const sourceFormat of slashFormats) {
+    const parsed = dayjs(raw, sourceFormat, true);
+    if (parsed.isValid()) return formatDateByConfiguredFormat(parsed.toDate(), targetFormat);
+  }
+
+  return raw;
+}
+
 export function isCompleteDateForFormat(value, format) {
   return !!parseDateByConfiguredFormat(value, format);
 }

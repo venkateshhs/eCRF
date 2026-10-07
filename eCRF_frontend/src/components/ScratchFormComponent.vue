@@ -309,12 +309,36 @@
                   </button>
 
                   <button
+                    v-if="!isPublishedStudy"
                     @click.prevent="onUnsavedSaveAndExit"
                     class="btn-option"
                     :disabled="unsavedBusy"
                   >
-                    {{ unsavedBusy ? "Saving…" : "Save Draft and Leave" }}
+                    {{ unsavedBusy ? "Saving…" : saveAndLeaveLabel }}
                   </button>
+
+                  <button
+                    type="button"
+                    class="btn-option"
+                    :disabled="unsavedBusy || !saveDirty"
+                    @click.prevent="requestSaveAndContinue"
+                  >
+                    {{ unsavedBusy ? "Saving…" : (isPublishedStudy ? "Review and Save Changes" : "Save and Continue") }}
+                  </button>
+
+                  <StudySaveStatus
+                    :dirty="saveDirty"
+                    :saving="unsavedBusy"
+                    :status="studyStatus"
+                    :last-saved-at="lastSavedAt"
+                    :save-error="saveError"
+                    :can-auto-save="canAutoSaveDraft"
+                    :show-action="false"
+                    compact
+                    inline
+                    @save="requestSaveAndContinue"
+                    @idle-save="saveDraftBeforeIdle"
+                  />
 
                   <button
                     @click.prevent="handleProtocolClick"
@@ -575,13 +599,12 @@
                         />
 
                         <!-- SELECT -->
-                        <select
+                        <FieldSelect
                           v-else-if="field.type === 'select'"
                           v-model="field.value"
-                        >
-                          <option value="" disabled>Select…</option>
-                          <option v-for="opt in field.options" :key="opt">{{ opt }}</option>
-                        </select>
+                          :options="field.options || []"
+                          v-bind="field.constraints || {}"
+                        />
 
                         <!-- RADIO -->
                         <FieldRadioGroup
@@ -967,7 +990,7 @@
           <button class="btn-option" @click="onUnsavedKeepEditing" :disabled="unsavedBusy">Keep editing</button>
           <button class="btn-option" @click="confirmScratchExitWithoutSaving" :disabled="unsavedBusy">Exit without saving</button>
           <button class="btn-primary" @click="onUnsavedSaveAndExit" :disabled="unsavedBusy">
-            {{ unsavedBusy ? "Saving…" : "Save & Exit" }}
+            {{ unsavedBusy ? "Saving…" : saveAndLeaveLabel }}
           </button>
         </div>
       </div>
@@ -997,6 +1020,7 @@ import FormPreview from "./FormPreview.vue";
 import DateFormatPicker from "./DateFormatPicker.vue";
 import FieldCheckbox from "@/components/fields/FieldCheckbox.vue";
 import FieldRadioGroup from "@/components/fields/FieldRadioGroup.vue";
+import FieldSelect from "@/components/fields/FieldSelect.vue";
 import { haveSameChoiceOptions } from "@/utils/dominantChoice";
 import FieldTime from "@/components/fields/FieldTime.vue";
 import FieldSlider from "@/components/fields/FieldSlider.vue";
@@ -1009,6 +1033,7 @@ import RearrangeStructureDialog from "@/components/RearrangeStructureDialog.vue"
 import FieldTable from "@/components/FieldTable.vue";
 import FieldOptionRemapDialog from "@/components/FieldOptionRemapDialog.vue";
 import SaveTemplateFormDialog from "@/components/SaveTemplateFormDialog.vue";
+import StudySaveStatus from "@/components/StudySaveStatus.vue";
 import { copyCompleteTableStructure } from "@/utils/tableFieldCopy";
 import { calculateContainedRevealScrollTop } from "@/utils/builderScrollFocus";
 export default {
@@ -1024,6 +1049,7 @@ export default {
     DateFormatPicker,
     FieldCheckbox,
     FieldRadioGroup,
+    FieldSelect,
     FieldTime,
     FieldSlider,
     FieldLinearScale,
@@ -1032,6 +1058,7 @@ export default {
     RearrangeStructureDialog,
     FieldOptionRemapDialog,
     SaveTemplateFormDialog,
+    StudySaveStatus,
   },
 
   beforeRouteLeave(to, from, next) {
@@ -1174,6 +1201,8 @@ export default {
       unsavedDialogMessage: "You are exiting study creation. Do you want to continue editing? If you leave now, your current progress will be saved as Draft in Dashboard.",
       unsavedPendingAction: null,
       unsavedBusy: false,
+      lastSavedAt: null,
+      saveError: "",
 
       showRearrangeDialog: false,
       rearrangeInitialFocus: null,
@@ -1320,6 +1349,34 @@ export default {
 
     currentStudyId() {
       return this.studyDetails?.study_metadata?.id ?? this.studyDetails?.study?.id ?? null;
+    },
+
+    studyStatus() {
+      const storedStatus = String(
+        this.studyDetails?.study_metadata?.status ||
+        this.studyDetails?.metadata?.status ||
+        ""
+      ).trim().toUpperCase();
+      return storedStatus || (this.currentStudyId ? "UNKNOWN" : "DRAFT");
+    },
+
+    isPublishedStudy() {
+      return this.studyStatus === "PUBLISHED";
+    },
+
+    saveDirty() {
+      return !!this.$store.state.studyCreationDirty;
+    },
+
+    canAutoSaveDraft() {
+      const study = this.studyDetails?.study || {};
+      const meta = this.studyDetails?.study_metadata || {};
+      const name = study.title || study.name || study.study_name || meta.study_name || meta.name || "";
+      return this.studyStatus === "DRAFT" && !!String(name).trim();
+    },
+
+    saveAndLeaveLabel() {
+      return this.isPublishedStudy ? "Review and save changes" : "Save Draft and Leave";
     }
   },
 
@@ -2589,9 +2646,69 @@ export default {
     handleImportedCsvFields(importedFields) {
       this.ensureCurrentFormExists();
 
+      const importedSections = Array.isArray(importedFields?.sections)
+        ? importedFields.sections.filter(section => Array.isArray(section?.fields) && section.fields.length)
+        : [];
       const fields = Array.isArray(importedFields) ? importedFields : [];
-      if (!fields.length) {
+      if (!fields.length && !importedSections.length) {
         this.openGenericDialog("No fields were generated from the selected file.");
+        return;
+      }
+
+      const existingNames = new Set(
+        (this.currentForm.sections || [])
+          .flatMap(section => section?.fields || [])
+          .map(field => String(field?.name || ""))
+          .filter(Boolean)
+      );
+      const prepareField = (field, idx) => {
+        let candidateName = String(field?.name || `imported_field_${Date.now()}_${idx}`).trim();
+        if (!candidateName) candidateName = `imported_field_${Date.now()}_${idx}`;
+        let uniqueName = candidateName;
+        let counter = 2;
+        while (existingNames.has(uniqueName)) uniqueName = `${candidateName}_${counter++}`;
+        existingNames.add(uniqueName);
+        return {
+          ...JSON.parse(JSON.stringify(field)),
+          _id: field?._id || this.uuidForLogic(),
+          name: uniqueName,
+          constraints: {
+            visibilityLogic: { action: "show", match: "all", rules: [] },
+            ...JSON.parse(JSON.stringify(field?.constraints || {}))
+          }
+        };
+      };
+
+      if (importedSections.length) {
+        const sections = this.currentForm.sections || [];
+        if (
+          sections.length === 1 &&
+          (!Array.isArray(sections[0]?.fields) || sections[0].fields.length === 0) &&
+          ["manual", undefined, null].includes(sections[0]?.source)
+        ) {
+          sections.splice(0, 1);
+          this.activeSection = 0;
+        }
+        let insertAt = sections.length ? Math.min(this.activeSection + 1, sections.length) : 0;
+        let added = 0;
+        importedSections.forEach((section, sectionIndex) => {
+          const preparedFields = section.fields.map((field, fieldIndex) => {
+            added += 1;
+            return prepareField(field, `${sectionIndex}_${fieldIndex}`);
+          });
+          sections.splice(insertAt++, 0, {
+            _id: this.uuidForLogic(),
+            title: String(section.title || `Imported section ${sectionIndex + 1}`).trim(),
+            fields: preparedFields,
+            collapsed: false,
+            source: "spreadsheet_import"
+          });
+        });
+        this.activeSection = Math.max(0, insertAt - importedSections.length);
+        this.adjustAssignments();
+        this.showImportCsvDialog = false;
+        if (!this.hydratingScratch) this.$store.commit("setStudyCreationDirty", true);
+        this.openGenericDialog(`${added} field(s) imported into ${importedSections.length} section(s).`);
         return;
       }
 
@@ -2607,36 +2724,10 @@ export default {
 
       if (sec.collapsed) sec.collapsed = false;
 
-      const existingNames = new Set((sec.fields || []).map(f => String(f?.name || "")));
       let added = 0;
 
       fields.forEach((field, idx) => {
-        let candidateName = String(field?.name || `imported_field_${Date.now()}_${idx}`).trim();
-        if (!candidateName) {
-          candidateName = `imported_field_${Date.now()}_${idx}`;
-        }
-
-        let uniqueName = candidateName;
-        let counter = 2;
-        while (existingNames.has(uniqueName)) {
-          uniqueName = `${candidateName}_${counter}`;
-          counter += 1;
-        }
-        existingNames.add(uniqueName);
-
-        sec.fields.push({
-          ...JSON.parse(JSON.stringify(field)),
-          _id: field?._id || this.uuidForLogic(),
-          name: uniqueName,
-          constraints: {
-            visibilityLogic: {
-              action: "show",
-              match: "all",
-              rules: []
-            },
-            ...(JSON.parse(JSON.stringify(field?.constraints || {})))
-          }
-        });
+        sec.fields.push(prepareField(field, idx));
 
         added += 1;
       });
@@ -3020,7 +3111,7 @@ export default {
       };
     },
 
-    async persistScratchToBackend() {
+    async persistScratchToBackend({ automatic = false, action = "exit" } = {}) {
       this.ensurePersistentIdsForLogic();
       const token = this.$store.state.token;
       if (!token) {
@@ -3062,8 +3153,13 @@ export default {
             payload,
             {
               headers: this.authHeader,
+              __skipActivityTracker: automatic,
                 // audit_label: user clicked "Save & Exit" from ScratchForm (builder) while a study already exists (edit/update)
-              params: { audit_label: "Existing Study Updated" }
+              params: {
+                audit_label: automatic
+                  ? "Automatic Draft Recovery Save"
+                  : action === "continue" ? "Save and Continue" : "Existing Study Updated"
+              }
             }
           );
 
@@ -3095,8 +3191,13 @@ export default {
           payload,
           {
             headers: this.authHeader,
+            __skipActivityTracker: automatic,
             // audit_label: user clicked "Save & Exit" from ScratchForm (builder) and backend creates a DRAFT study
-            params: { audit_label: "Save & Exit - Create New Study Draft" }
+            params: {
+              audit_label: automatic
+                ? "Automatic Draft Recovery Save"
+                : action === "continue" ? "Save and Continue - Create Draft" : "Save & Exit - Create New Study Draft"
+            }
           }
         );
 
@@ -3142,8 +3243,62 @@ export default {
       }
     },
 
+    buildScratchSaveFingerprint() {
+      return JSON.stringify({
+        forms: this.forms || [],
+        visits: this.visits || [],
+        groups: this.groups || [],
+        assignments: this.assignments || [],
+      });
+    },
+
+    async performSaveAndContinue({ automatic = false } = {}) {
+      if (this.unsavedBusy || !this.saveDirty) return;
+
+      this.ensurePersistentIdsForLogic();
+      const saveFingerprint = this.buildScratchSaveFingerprint();
+      this.unsavedBusy = true;
+      this.saveError = "";
+
+      try {
+        const res = await this.persistScratchToBackend({ automatic, action: "continue" });
+        if (!res.ok) {
+          this.saveError = res.message || "Failed to save changes.";
+          if (!automatic) this.openGenericDialog(this.saveError);
+          return;
+        }
+
+        this.lastSavedAt = Date.now();
+        const changedDuringSave = this.buildScratchSaveFingerprint() !== saveFingerprint;
+        this.$store.commit("setStudyCreationDirty", changedDuringSave);
+      } finally {
+        this.unsavedBusy = false;
+      }
+    },
+
+    requestSaveAndContinue() {
+      if (this.isPublishedStudy) {
+        this.openConfirmDialog(
+          "This study is published. Saving structural changes may create a new template version. Continue only after reviewing your changes.",
+          () => this.performSaveAndContinue()
+        );
+        return;
+      }
+      this.performSaveAndContinue();
+    },
+
+    saveDraftBeforeIdle() {
+      if (!this.canAutoSaveDraft || this.isPublishedStudy) return;
+      this.performSaveAndContinue({ automatic: true });
+    },
+
     // Hook your "Save & Exit" button/dialog to this method
     async onUnsavedSaveAndExit() {
+      if (this.isPublishedStudy) {
+        this.onUnsavedKeepEditing();
+        this.requestSaveAndContinue();
+        return;
+      }
       if (this.unsavedBusy) return;
       this.unsavedBusy = true;
 
