@@ -568,14 +568,27 @@ export default {
       await this.$store.dispatch("fetchUserData");
       this.user = this.$store.getters.getUser;
     }
-    if (this.mustChangePassword) {
-      this.currentTab = "password";
-    }
+    this.syncTabFromRoute();
     if (this.isAdmin && !this.mustChangePassword) {
       await Promise.all([this.fetchUsers(), this.fetchAllUsers(), this.fetchStudies()]);
     }
   },
+  watch: {
+    "$route.query.tab"() {
+      this.syncTabFromRoute();
+    },
+  },
   methods: {
+    syncTabFromRoute() {
+      if (this.mustChangePassword) {
+        this.currentTab = "password";
+        return;
+      }
+      const requested = String(this.$route?.query?.tab || "");
+      this.currentTab = this.visibleTabs.some((tab) => tab.key === requested)
+        ? requested
+        : "profile";
+    },
     authHeader() {
       return { Authorization: `Bearer ${this.$store.state.token}` };
     },

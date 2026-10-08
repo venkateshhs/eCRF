@@ -27,5 +27,11 @@ assert.doesNotMatch(source, /toggleStudyOptions/);
 assert.doesNotMatch(source, /showStudyOptions/);
 assert.doesNotMatch(source, /query\.openStudies/);
 assert.match(source, /this\.loadStudies\(\);/);
+assert.doesNotMatch(source, /class="dashboard-sidebar"/);
+assert.doesNotMatch(source, /sidebar-hidden/);
+assert.match(source, /class="account-menu-toggle"/);
+assert.match(source, />User management<\/span>/);
+assert.match(source, />Logout<\/span>/);
+assert.match(source, /query: \{ tab: this\.isAdmin \? "management" : "profile" \}/);
 
 console.log("Dashboard default studies tests passed");
