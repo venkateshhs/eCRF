@@ -53,10 +53,24 @@
           </button>
 
           <div v-if="showAccountMenu" class="account-menu-popover" role="menu" aria-label="User menu">
-            <button type="button" class="account-menu-item" role="menuitem" @click="openUserManagement">
-              <i :class="icons.user || 'fas fa-user-cog'" aria-hidden="true"></i>
+            <button v-if="!mustChangePassword" type="button" class="account-menu-item" role="menuitem" @click="openUserSection('profile')">
+              <i :class="icons.user || 'fas fa-user'" aria-hidden="true"></i>
+              <span>My profile</span>
+            </button>
+            <button type="button" class="account-menu-item" role="menuitem" @click="openUserSection('password')">
+              <i class="fas fa-key" aria-hidden="true"></i>
+              <span>Change password</span>
+            </button>
+            <div v-if="isAdmin && !mustChangePassword" class="account-menu-separator" role="separator"></div>
+            <button v-if="isAdmin && !mustChangePassword" type="button" class="account-menu-item" role="menuitem" @click="openUserSection('management')">
+              <i class="fas fa-users-cog" aria-hidden="true"></i>
               <span>User management</span>
             </button>
+            <button v-if="isAdmin && !mustChangePassword" type="button" class="account-menu-item" role="menuitem" @click="openUserSection('studyAccess')">
+              <i class="fas fa-user-shield" aria-hidden="true"></i>
+              <span>Study access</span>
+            </button>
+            <div class="account-menu-separator" role="separator"></div>
             <button type="button" class="account-menu-item account-menu-item--logout" role="menuitem" @click="logout('Logged out.')">
               <i :class="icons.signOut || 'fas fa-sign-out-alt'" aria-hidden="true"></i>
               <span>Logout</span>
@@ -514,11 +528,11 @@ export default {
       const menu = this.$refs.accountMenu;
       if (!menu || !menu.contains(event.target)) this.closeAccountMenu();
     },
-    openUserManagement() {
+    openUserSection(tab) {
       this.closeAccountMenu();
       this.navigate({
         name: "UserInfo",
-        query: { tab: this.isAdmin ? "management" : "profile" },
+        query: { tab },
       });
     },
     redirectToPasswordChange() {
@@ -1228,10 +1242,12 @@ export default {
   color: #111827;
   outline: none;
 }
+.account-menu-separator {
+  height: 1px;
+  margin: 5px 4px;
+  background: #e5e7eb;
+}
 .account-menu-item--logout {
-  margin-top: 4px;
-  border-top: 1px solid #e5e7eb;
-  border-radius: 0 0 7px 7px;
   color: #b91c1c;
 }
 

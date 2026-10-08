@@ -7,6 +7,9 @@ const { parse } = require("@vue/compiler-sfc");
 const componentPath = path.resolve(__dirname, "../src/components/DashboardComponent.vue");
 const source = fs.readFileSync(componentPath, "utf8");
 const { descriptor, errors } = parse(source, { filename: componentPath });
+const userInfoPath = path.resolve(__dirname, "../src/components/UserInfoComponent.vue");
+const userInfoSource = fs.readFileSync(userInfoPath, "utf8");
+const userInfoParseResult = parse(userInfoSource, { filename: userInfoPath });
 
 assert.deepEqual(errors, []);
 assert.ok(descriptor.template);
@@ -30,8 +33,20 @@ assert.match(source, /this\.loadStudies\(\);/);
 assert.doesNotMatch(source, /class="dashboard-sidebar"/);
 assert.doesNotMatch(source, /sidebar-hidden/);
 assert.match(source, /class="account-menu-toggle"/);
+assert.match(source, />My profile<\/span>/);
+assert.match(source, />Change password<\/span>/);
 assert.match(source, />User management<\/span>/);
+assert.match(source, />Study access<\/span>/);
 assert.match(source, />Logout<\/span>/);
-assert.match(source, /query: \{ tab: this\.isAdmin \? "management" : "profile" \}/);
+assert.match(source, /openUserSection\(tab\)/);
+assert.match(source, /query: \{ tab \}/);
+
+assert.deepEqual(userInfoParseResult.errors, []);
+assert.ok(userInfoParseResult.descriptor.template);
+assert.doesNotMatch(userInfoSource, /class="sidebar"/);
+assert.doesNotMatch(userInfoSource, /tab-btn/);
+assert.doesNotMatch(userInfoSource, /StudySettings/);
+assert.doesNotMatch(userInfoSource, /currentTab === 'settings'/);
+assert.match(userInfoSource, /const requested = String\(this\.\$route\?\.query\?\.tab \|\| ""\)/);
 
 console.log("Dashboard default studies tests passed");
