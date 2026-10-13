@@ -38,6 +38,9 @@ assert.match(source, /isUserManagementRoute\(\)/);
 const userInfoPath = path.resolve(__dirname, "../src/components/UserInfoComponent.vue");
 const userInfoSource = fs.readFileSync(userInfoPath, "utf8");
 const userInfoParseResult = parse(userInfoSource, { filename: userInfoPath });
+const studyViewPath = path.resolve(__dirname, "../src/components/StudyView.vue");
+const studyViewSource = fs.readFileSync(studyViewPath, "utf8");
+const studyViewParseResult = parse(studyViewSource, { filename: studyViewPath });
 
 assert.deepEqual(userInfoParseResult.errors, []);
 assert.match(userInfoSource, /const requested = String\(this\.\$route\?\.query\?\.tab \|\| ""\)/);
@@ -50,5 +53,26 @@ assert.match(userInfoSource, /key: "password", label: "Change Password"/);
 assert.match(userInfoSource, /key: "management", label: "User Management"/);
 assert.match(userInfoSource, /key: "studyAccess", label: "Study Access"/);
 assert.match(userInfoSource, /accountTabs\.some\(\(tab\) => tab\.key === requested\)/);
+
+assert.deepEqual(studyViewParseResult.errors, []);
+assert.match(source, /Show only archived studies/);
+assert.match(source, /Show active studies/);
+assert.match(source, /class="studies-title-row"/);
+assert.match(source, /'archive-filter-toggle'/);
+assert.match(source, /type="checkbox"/);
+assert.doesNotMatch(source, /archived-studies-toggle/);
+assert.match(source, /status: "ARCHIVED"/);
+assert.match(source, /\/unarchive`/);
+assert.match(studyViewSource, /\/archive`/);
+assert.match(studyViewSource, /\/unarchive`/);
+assert.match(studyViewSource, /const archivedTabs = new Set\(\["meta", "compliance", "viewdata", "bids"\]\)/);
+assert.match(studyViewSource, /Archived studies are read-only/);
+assert.match(studyViewSource, /id="archive-study-dialog-title"/);
+assert.match(studyViewSource, /Archive this study\?/);
+assert.match(studyViewSource, /It will become read-only until it is unarchived/);
+assert.match(studyViewSource, /@click="openArchiveStudyDialog"/);
+assert.doesNotMatch(studyViewSource, /window\.confirm/);
+assert.doesNotMatch(studyViewSource, /archivedTabs\.add\("docs"\)/);
+assert.doesNotMatch(studyViewSource, /archivedTabs\.add\("team"\)/);
 
 console.log("Dashboard default studies tests passed");

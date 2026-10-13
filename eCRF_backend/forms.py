@@ -231,8 +231,9 @@ def _effective_study_permissions(db: Session, meta: models.StudyMetadata, user: 
     - Study owner (created_by): full access.
     - Otherwise: use StudyAccessGrant.permissions (merged with defaults).
     """
+    is_archived = (getattr(meta, "status", None) or "PUBLISHED").strip().upper() == "ARCHIVED"
     if _is_admin(user) or meta.created_by == user.id:
-        return {"view": True, "add_data": True, "edit_study": True}
+        return {"view": True, "add_data": not is_archived, "edit_study": not is_archived}
 
     grant = (
         db.query(models.StudyAccessGrant)
@@ -248,11 +249,15 @@ def _effective_study_permissions(db: Session, meta: models.StudyMetadata, user: 
     perms = grant.permissions or {}
 
     # merge with defaults
-    return {
+    effective = {
         "view": bool(perms.get("view", _DEFAULT_GRANT_PERMS["view"])),
         "add_data": bool(perms.get("add_data", _DEFAULT_GRANT_PERMS["add_data"])),
         "edit_study": bool(perms.get("edit_study", _DEFAULT_GRANT_PERMS["edit_study"])),
     }
+    if is_archived:
+        effective["add_data"] = False
+        effective["edit_study"] = False
+    return effective
 
 
 def _get_grant(db: Session, study_id: int, user_id: int):
@@ -263,18 +268,10 @@ def _get_grant(db: Session, study_id: int, user_id: int):
     )
 
 def _assert_has_study_permission(db: Session, meta: models.StudyMetadata, user: models.User, required: str = "view"):
-    role = (getattr(user.profile, "role", "") or "").strip()
-    is_admin = role == "Administrator"
-    is_owner = (meta.created_by == user.id)
-
-    if is_admin or is_owner:
-        return {"view": True, "add_data": True, "edit_study": True}
-
-    grant = _get_grant(db, meta.id, user.id)
-    perms = (grant.permissions or {}) if grant else {}
-
-    # default to False if missing
+    perms = _effective_study_permissions(db, meta, user)
     if not perms.get(required, False):
+        if _get_meta_status(meta) == "ARCHIVED" and required != "view":
+            raise HTTPException(status_code=409, detail="Archived studies are read-only")
         raise HTTPException(status_code=403, detail="Not authorized")
 
     return perms
@@ -366,6 +363,10 @@ def _coerce_snapshot_schema(raw):
 def _assert_owner_or_admin(meta: models.StudyMetadata, user) -> None:
     if meta.created_by != user.id and getattr(user.profile, "role", None) != "Administrator":
         raise HTTPException(status_code=403, detail="Not authorized")
+
+def _assert_study_writable(meta: models.StudyMetadata) -> None:
+    if _get_meta_status(meta) == "ARCHIVED":
+        raise HTTPException(status_code=409, detail="Archived studies are read-only")
 
 def _display_name(u: models.User) -> str:
     if not u:
@@ -563,9 +564,11 @@ def list_studies(
             )
         )
 
-    # Optional status filter
+    # Archived studies stay out of the normal dashboard unless explicitly requested.
     if status_norm:
         q = q.filter(models.StudyMetadata.status == status_norm)
+    else:
+        q = q.filter(models.StudyMetadata.status != "ARCHIVED")
 
     studies = q.all()
 
@@ -621,6 +624,59 @@ def read_study(
     }
 
     return {"metadata": meta_out, "content": content}
+
+
+def _study_metadata_response(db: Session, meta: models.StudyMetadata, user: models.User) -> Dict[str, Any]:
+    payload = schemas.StudyMetadataOut.model_validate(meta).model_dump()
+    payload["permissions"] = _effective_study_permissions(db, meta, user)
+    return payload
+
+
+@router.post("/studies/{study_id}/archive", response_model=schemas.StudyMetadataOut)
+def archive_study(
+    study_id: int,
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+):
+    meta = db.query(models.StudyMetadata).filter(models.StudyMetadata.id == study_id).first()
+    if not meta:
+        raise HTTPException(status_code=404, detail="Study not found")
+    _assert_owner_or_admin(meta, user)
+
+    current_status = _get_meta_status(meta)
+    if current_status != "ARCHIVED":
+        meta.archived_from_status = current_status if current_status in {"DRAFT", "PUBLISHED"} else "PUBLISHED"
+        meta.status = "ARCHIVED"
+        meta.is_locked = False
+        meta.locked_by = None
+        meta.locked_at = None
+        db.commit()
+        db.refresh(meta)
+        snapshot_study_after_change(db=db, study_id=study_id, action="archive_study")
+
+    return _study_metadata_response(db, meta, user)
+
+
+@router.post("/studies/{study_id}/unarchive", response_model=schemas.StudyMetadataOut)
+def unarchive_study(
+    study_id: int,
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+):
+    meta = db.query(models.StudyMetadata).filter(models.StudyMetadata.id == study_id).first()
+    if not meta:
+        raise HTTPException(status_code=404, detail="Study not found")
+    _assert_owner_or_admin(meta, user)
+
+    if _get_meta_status(meta) == "ARCHIVED":
+        restore_status = _norm_status(getattr(meta, "archived_from_status", None))
+        meta.status = restore_status if restore_status in {"DRAFT", "PUBLISHED"} else "PUBLISHED"
+        meta.archived_from_status = None
+        db.commit()
+        db.refresh(meta)
+        snapshot_study_after_change(db=db, study_id=study_id, action="unarchive_study")
+
+    return _study_metadata_response(db, meta, user)
 
 @router.get("/studies/{study_id}/versions")
 def list_study_versions(
@@ -716,6 +772,7 @@ def update_study(
     metadata, content = existing
     if metadata.created_by != user.id and user.profile.role != "Administrator":
         raise HTTPException(status_code=403, detail="Not authorized to update this study")
+    _assert_study_writable(metadata)
 
     # normalize payload
     if not study_content.study_data:
@@ -730,6 +787,8 @@ def update_study(
     incoming_status = _norm_status(getattr(study_metadata, "status", None))
     if not incoming_status:
         incoming_status = old_status  # no change
+    if incoming_status == "ARCHIVED":
+        raise HTTPException(status_code=400, detail="Use the archive endpoint to archive a study")
 
     # Track last_completed_step if provided in schema; ignore if schema doesn't include it
     if hasattr(study_metadata, "last_completed_step") and getattr(study_metadata, "last_completed_step", None) is not None:
@@ -1074,6 +1133,7 @@ def upload_file(
     study = db.query(models.StudyMetadata).filter(models.StudyMetadata.id == study_id).first()
     if not study or study.created_by != user.id:
         raise HTTPException(status_code=403, detail="Not authorized to upload file for this study")
+    _assert_study_writable(study)
 
     try:
         modalities = json.loads(modalities_json or "[]")
@@ -1182,6 +1242,7 @@ def create_url_file(
     study = db.query(models.StudyMetadata).filter(models.StudyMetadata.id == study_id).first()
     if not study or study.created_by != user.id:
         raise HTTPException(status_code=403, detail="Not authorized to create file for this study")
+    _assert_study_writable(study)
 
     try:
         modalities = json.loads(modalities_json or "[]")
@@ -1505,13 +1566,7 @@ def save_study_data(
     study = db.query(models.StudyMetadata).filter(models.StudyMetadata.id == study_id).first()
     if not study:
         raise HTTPException(status_code=404, detail="Study not found")
-
-    is_admin = getattr(getattr(current_user, "profile", None), "role", "") == "Administrator"
-    is_owner = study.created_by == current_user.id
-    if not (is_admin or is_owner):
-        grant = db.query(models.StudyAccessGrant).filter_by(study_id=study_id, user_id=current_user.id).first()
-        if not grant or not (grant.permissions or {}).get("add_data", False):
-            raise HTTPException(status_code=403, detail="Not allowed to add data for this study")
+    _assert_has_study_permission(db, study, current_user, required="add_data")
 
     try:
         form_version = VersionManager.assert_latest_is_used(db, study_id, version)
@@ -1628,6 +1683,11 @@ def update_study_data_entry(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user)
 ):
+    study = db.query(models.StudyMetadata).filter(models.StudyMetadata.id == study_id).first()
+    if not study:
+        raise HTTPException(status_code=404, detail="Study not found")
+    _assert_has_study_permission(db, study, user, required="add_data")
+
     entry = (
         db.query(models.StudyEntryData)
           .filter_by(id=entry_id, study_id=study_id)
@@ -1795,6 +1855,7 @@ def shared_upload_file(
     study = db.query(models.StudyMetadata).filter(models.StudyMetadata.id == access.study_id).first()
     if not study:
         raise HTTPException(status_code=404, detail="Study not found")
+    _assert_study_writable(study)
 
     try:
         modalities = json.loads(modalities_json or "[]")
@@ -1907,6 +1968,7 @@ def shared_create_url_file(
     study = db.query(models.StudyMetadata).filter(models.StudyMetadata.id == access.study_id).first()
     if not study:
         raise HTTPException(status_code=404, detail="Study not found")
+    _assert_study_writable(study)
 
     try:
         modalities = json.loads(modalities_json or "[]")
@@ -2003,6 +2065,11 @@ def shared_upsert_data(
 
     study_id = access.study_id
     s, v, g = access.subject_index, access.visit_index, access.group_index
+
+    study = db.query(models.StudyMetadata).filter(models.StudyMetadata.id == study_id).first()
+    if not study:
+        raise HTTPException(status_code=404, detail="Study not found")
+    _assert_study_writable(study)
 
     try:
         form_version = VersionManager.assert_latest_is_used(db, study_id, version)
@@ -2122,6 +2189,7 @@ def list_study_access(
     if not meta:
         raise HTTPException(status_code=404, detail="Study not found")
     _assert_owner_or_admin(meta, current_user)
+    _assert_study_writable(meta)
 
     grants = db.query(models.StudyAccessGrant).filter(models.StudyAccessGrant.study_id == study_id).all()
 
@@ -2157,6 +2225,7 @@ def grant_study_access(
     if not meta:
         raise HTTPException(status_code=404, detail="Study not found")
     _assert_owner_or_admin(meta, current_user)
+    _assert_study_writable(meta)
 
     if payload.user_id == meta.created_by:
         raise HTTPException(status_code=400, detail="Owner already has full access")
@@ -2224,6 +2293,7 @@ def revoke_study_access(
     if not meta:
         raise HTTPException(status_code=404, detail="Study not found")
     _assert_owner_or_admin(meta, current_user)
+    _assert_study_writable(meta)
 
     if user_id == meta.created_by:
         raise HTTPException(status_code=400, detail="Cannot revoke owner access")
@@ -2261,8 +2331,14 @@ def bulk_insert_data(
     version: Optional[int] = Query(None, description="Ignored; bulk inserts always use the latest template version"),
     create_bids: bool = Query(True, description="If false, skip BIDS folder creation/mirroring for this request"),
     audit_label: Optional[str] = Query(None),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
+    meta = db.query(models.StudyMetadata).filter(models.StudyMetadata.id == study_id).first()
+    if not meta:
+        raise HTTPException(status_code=404, detail="Study not found")
+    _assert_has_study_permission(db, meta, current_user, required="add_data")
+
     if not payload.entries:
         return {"inserted": 0, "failed": 0, "errors": []}
 
@@ -2482,6 +2558,7 @@ def delete_study(
         raise HTTPException(status_code=404, detail="Study not found")
 
     _assert_owner_or_admin(meta, current_user)
+    _assert_study_writable(meta)
 
     ids_to_delete = [int(study_id)]
 

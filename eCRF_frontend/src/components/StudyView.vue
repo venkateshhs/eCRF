@@ -29,7 +29,10 @@
     <header class="sv-header" v-if="!maintenanceMessage && !(activeTab === 'viewdata' && dashboardFullscreen)">
       <button class="btn-minimal back-btn" @click="goBackToDashboard" aria-label="Back to Dashboard">Back</button>
       <div class="title-wrap">
-        <h1 class="sv-title">{{ studyMeta.study_name || 'Study' }}</h1>
+        <div class="sv-title-row">
+          <h1 class="sv-title">{{ studyMeta.study_name || 'Study' }}</h1>
+          <span v-if="isArchivedStudy" class="archived-badge">Archived</span>
+        </div>
         <p class="sv-subtitle" v-if="hasValue(studyMeta.study_description)">{{ studyMeta.study_description }}</p>
       </div>
       <div class="header-spacer" aria-hidden="true"></div>
@@ -336,36 +339,60 @@
         <div v-else-if="activeTab === 'edit'">
           <h2 class="panel-title center">Edit Study</h2>
 
-          <p class="muted center" style="margin-top:-6px;">
-            Choose exactly what you want to edit. Each step can be saved independently.
-          </p>
-
-          <div class="edit-steps-grid">
+          <div v-if="isArchivedStudy" class="archive-state-card">
+            <h3>This study is archived</h3>
+            <p>Archived studies are read-only. Restore this study before changing its design, access, documents, or collected data.</p>
             <button
-              v-for="s in editSteps"
-              :key="s.displayStep"
-              class="edit-step-card"
-              @click="openEditStep(s.routeStep)"
-              :disabled="!canEditStudy"
-            >
-              <div class="esc-title">{{ s.label }}</div>
-              <div class="esc-desc">{{ s.desc }}</div>
-            </button>
-          </div>
-
-          <div class="edit-hint muted">
-            Tip: This will open the individual steps in edit mode with a dedicated Save button.
-          </div>
-          <div v-if="canManageAccess" class="edit-danger-zone">
-            <button
-              class="btn-danger"
+              v-if="canManageAccess"
+              class="btn-primary"
               type="button"
-              @click="openDeleteStudyDialog"
-              :disabled="deleteConfirm.busy"
+              :disabled="archiveBusy"
+              @click="unarchiveStudy"
             >
-              Delete Study
+              {{ archiveBusy ? 'Restoring…' : 'Unarchive study' }}
             </button>
           </div>
+
+          <template v-else>
+            <p class="muted center" style="margin-top:-6px;">
+              Choose exactly what you want to edit. Each step can be saved independently.
+            </p>
+
+            <div class="edit-steps-grid">
+              <button
+                v-for="s in editSteps"
+                :key="s.displayStep"
+                class="edit-step-card"
+                @click="openEditStep(s.routeStep)"
+                :disabled="!canEditStudy"
+              >
+                <div class="esc-title">{{ s.label }}</div>
+                <div class="esc-desc">{{ s.desc }}</div>
+              </button>
+            </div>
+
+            <div class="edit-hint muted">
+              Tip: This will open the individual steps in edit mode with a dedicated Save button.
+            </div>
+            <div v-if="canManageAccess" class="edit-danger-zone">
+              <button
+                class="btn-minimal archive-study-btn"
+                type="button"
+                :disabled="archiveBusy"
+                @click="openArchiveStudyDialog"
+              >
+                {{ archiveBusy ? 'Archiving…' : 'Archive Study' }}
+              </button>
+              <button
+                class="btn-danger"
+                type="button"
+                @click="openDeleteStudyDialog"
+                :disabled="deleteConfirm.busy"
+              >
+                Delete Study
+              </button>
+            </div>
+          </template>
         </div>
 
         <!-- DOCUMENTS -->
@@ -735,6 +762,38 @@
         </div>
       </section>
     </div>
+    <!-- Archive study confirm dialog -->
+    <div
+      v-if="archiveConfirm.visible"
+      class="modal-backdrop"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="archive-study-dialog-title"
+      @click.self="cancelArchiveStudy"
+    >
+      <div class="modal" tabindex="-1" @keydown.esc.prevent="cancelArchiveStudy">
+        <h3 id="archive-study-dialog-title" class="modal-title">Archive this study?</h3>
+        <p class="modal-text">It will become read-only until it is unarchived.</p>
+        <div class="modal-actions">
+          <button
+            class="btn-minimal"
+            type="button"
+            :disabled="archiveBusy"
+            @click="cancelArchiveStudy"
+          >
+            Cancel
+          </button>
+          <button
+            class="btn-primary"
+            type="button"
+            :disabled="archiveBusy"
+            @click="archiveStudy"
+          >
+            {{ archiveBusy ? "Archiving…" : "Archive Study" }}
+          </button>
+        </div>
+      </div>
+    </div>
     <!-- Delete study document confirm dialog -->
     <div
       v-if="documentDeleteConfirm.visible"
@@ -858,10 +917,14 @@ export default {
         created_at: "",
         updated_at: "",
         permissions: null,
+        status: "",
+        archived_from_status: null,
       },
       studyData: {},
       me: null,
       confirm: { visible: false, target: null },
+      archiveConfirm: { visible: false },
+      archiveBusy: false,
 
       icons,
 
@@ -958,6 +1021,11 @@ export default {
     },
 
     visibleTabs() {
+      if (this.isArchivedStudy) {
+        const archivedTabs = new Set(["meta", "compliance", "viewdata", "bids"]);
+        if (this.canManageAccess) archivedTabs.add("edit");
+        return (this.tabs || []).filter(t => archivedTabs.has(t.key));
+      }
       return (this.tabs || []).filter(t => !t.requiresEdit || this.canEditStudy);
     },
 
@@ -997,12 +1065,17 @@ export default {
       return meId != null && this.studyMeta.created_by_id != null && Number(meId) === Number(this.studyMeta.created_by_id);
     },
 
+    isArchivedStudy() {
+      return String(this.studyMeta?.status || "").trim().toUpperCase() === "ARCHIVED";
+    },
+
     // FIX: Edit Study tab visibility/control = Admin OR Owner OR edit_study permission
-    canEditStudy() { return this.isAdmin || this.isOwner || this.hasEditStudyPermission; },
+    canEditStudy() { return !this.isArchivedStudy && (this.isAdmin || this.isOwner || this.hasEditStudyPermission); },
 
     canManageAccess() { return this.isAdmin || this.isOwner; },
     canSeeBidsButton() { return this.isAdmin || this.isOwner; },
     canManageStudyAttachments() {
+      if (this.isArchivedStudy) return false;
       if (this.isAdmin || this.isOwner) return true;
       return this.studyPerms?.add_data === true;
     },
@@ -1038,8 +1111,12 @@ export default {
   },
   watch: {
     activeTab(val) {
+      if (this.studyMeta?.id && !this.visibleTabs.some((tab) => tab.key === val)) {
+        this.activeTab = "meta";
+        return;
+      }
       // Guard: if someone deep-links to ?tab=edit but can't edit, bounce to meta
-      if (val === "edit" && !this.canEditStudy) {
+      if (val === "edit" && !this.canEditStudy && !(this.isArchivedStudy && this.canManageAccess)) {
         this.activeTab = "meta";
         return;
       }
@@ -1064,6 +1141,52 @@ export default {
     },
   },
   methods: {
+    openArchiveStudyDialog() {
+      if (!this.canManageAccess || this.isArchivedStudy || this.archiveBusy) return;
+      this.archiveConfirm.visible = true;
+    },
+
+    cancelArchiveStudy() {
+      if (this.archiveBusy) return;
+      this.archiveConfirm.visible = false;
+    },
+
+    async archiveStudy() {
+      if (!this.archiveConfirm.visible || !this.canManageAccess || this.isArchivedStudy || this.archiveBusy) return;
+
+      this.archiveBusy = true;
+      try {
+        await axios.post(
+          `/forms/studies/${this.studyId}/archive`,
+          {},
+          { headers: { Authorization: `Bearer ${this.token}` } }
+        );
+        this.archiveConfirm.visible = false;
+        await this.fetchStudy();
+      } catch (e) {
+        alert(e?.response?.data?.detail || "Failed to archive the study.");
+      } finally {
+        this.archiveBusy = false;
+      }
+    },
+
+    async unarchiveStudy() {
+      if (!this.canManageAccess || !this.isArchivedStudy || this.archiveBusy) return;
+      this.archiveBusy = true;
+      try {
+        await axios.post(
+          `/forms/studies/${this.studyId}/unarchive`,
+          {},
+          { headers: { Authorization: `Bearer ${this.token}` } }
+        );
+        await this.fetchStudy();
+      } catch (e) {
+        alert(e?.response?.data?.detail || "Failed to unarchive the study.");
+      } finally {
+        this.archiveBusy = false;
+      }
+    },
+
     openDeleteStudyDialog() {
       this.deleteConfirm.visible = true;
     },
@@ -1500,11 +1623,13 @@ export default {
           created_at: meta.created_at,
           updated_at: meta.updated_at,
           permissions: meta.permissions || null,
+          status: meta.status || "PUBLISHED",
+          archived_from_status: meta.archived_from_status || null,
         };
         this.studyData = sd || {};
 
         // If user doesn't have edit permission, prevent landing on edit tab after refresh
-        if (this.activeTab === "edit" && !this.canEditStudy) {
+        if (!this.visibleTabs.some((tab) => tab.key === this.activeTab)) {
           this.activeTab = "meta";
         }
       } catch (e) {
@@ -1951,7 +2076,7 @@ export default {
       if (this.maintenanceMessage) return;
 
       // After we know perms, ensure we don't stay on edit without rights
-      if (this.activeTab === "edit" && !this.canEditStudy) this.activeTab = "meta";
+      if (!this.visibleTabs.some((tab) => tab.key === this.activeTab)) this.activeTab = "meta";
 
       if (this.canSeeBidsButton) await this.fetchBidsPath();
       await Promise.all([this.fetchStudyFiles(), this.fetchVersionsAndDiffs()]);
@@ -1986,7 +2111,7 @@ export default {
       .then(() => {
         if (this.maintenanceMessage) return;
         // If the route query wants edit but user can't, force meta
-        if (this.activeTab === "edit" && !this.canEditStudy) this.activeTab = "meta";
+        if (!this.visibleTabs.some((tab) => tab.key === this.activeTab)) this.activeTab = "meta";
       })
       .then(() => {
         if (this.maintenanceMessage) return;
@@ -2097,6 +2222,8 @@ export default {
 .back-btn { position: absolute; left: 0; top: 50%; transform: translateY(-50%); }
 .title-wrap { grid-column: 2 / 3; min-width: 0; text-align: center; }
 .sv-title { margin: 0; font-size: 22px; font-weight: 800; color: #111827; }
+.sv-title-row { display: flex; align-items: center; justify-content: center; gap: 10px; }
+.archived-badge { padding: 4px 9px; border: 1px solid #94a3b8; border-radius: 999px; background: #f1f5f9; color: #334155; font-size: 11px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; }
 .sv-subtitle { margin: 6px 0 0; color: #6b7280; }
 .header-spacer { width: 56px; height: 1px; }
 
@@ -2453,7 +2580,14 @@ export default {
   display: flex;
   justify-content: flex-start;
   padding-left: 2px;
+  gap: 10px;
+  flex-wrap: wrap;
 }
+
+.archive-study-btn { border-color: #94a3b8; color: #334155; }
+.archive-state-card { max-width: 680px; margin: 16px auto 0; padding: 24px; border: 1px solid #cbd5e1; border-radius: 12px; background: #f8fafc; text-align: center; }
+.archive-state-card h3 { margin: 0 0 8px; color: #0f172a; }
+.archive-state-card p { margin: 0 auto 18px; max-width: 560px; color: #475569; line-height: 1.55; }
 
 .btn-danger {
   border-radius: 10px;

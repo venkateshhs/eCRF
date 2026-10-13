@@ -101,6 +101,15 @@ def _assert_owner_or_admin(meta: models.StudyMetadata, user) -> None:
         raise HTTPException(status_code=403, detail="Not authorized")
 
 
+def _is_archived(meta: models.StudyMetadata) -> bool:
+    return (getattr(meta, "status", None) or "PUBLISHED").strip().upper() == "ARCHIVED"
+
+
+def _assert_study_writable(meta: models.StudyMetadata) -> None:
+    if _is_archived(meta):
+        raise HTTPException(status_code=409, detail="Archived studies are read-only")
+
+
 def _subject_status(subject: Dict[str, Any]) -> str:
     return str((subject or {}).get("status") or ACTIVE_SUBJECT_STATUS).strip().upper()
 
@@ -170,8 +179,9 @@ def _validate_subject_identity_and_status_update(old_sd: Dict[str, Any], new_sd:
 
 
 def _effective_study_permissions(db: Session, meta: models.StudyMetadata, user) -> Dict[str, bool]:
+    is_archived = _is_archived(meta)
     if _is_admin(user) or int(meta.created_by) == int(user.id):
-        return {"view": True, "add_data": True, "edit_study": True}
+        return {"view": True, "add_data": not is_archived, "edit_study": not is_archived}
 
     grant = (
         db.query(models.StudyAccessGrant)
@@ -185,16 +195,22 @@ def _effective_study_permissions(db: Session, meta: models.StudyMetadata, user) 
         return {"view": False, "add_data": False, "edit_study": False}
 
     perms = grant.permissions or {}
-    return {
+    effective = {
         "view": bool(perms.get("view", True)),
         "add_data": bool(perms.get("add_data", True)),
         "edit_study": bool(perms.get("edit_study", False)),
     }
+    if is_archived:
+        effective["add_data"] = False
+        effective["edit_study"] = False
+    return effective
 
 
 def _assert_has_study_permission(db: Session, meta: models.StudyMetadata, user, required: str = "view") -> Dict[str, bool]:
     perms = _effective_study_permissions(db, meta, user)
     if not perms.get(required, False):
+        if _is_archived(meta) and required != "view":
+            raise HTTPException(status_code=409, detail="Archived studies are read-only")
         raise HTTPException(status_code=403, detail="Not authorized")
     return perms
 
@@ -582,6 +598,8 @@ def list_studies(
 
     if status_norm:
         q = q.filter(models.StudyMetadata.status == status_norm)
+    else:
+        q = q.filter(models.StudyMetadata.status != "ARCHIVED")
 
     rows = q.order_by(models.StudyMetadata.updated_at.desc()).all()
     out = []
@@ -618,6 +636,57 @@ def read_study(
     }
 
 
+def _study_metadata_response(db: Session, meta: models.StudyMetadata, user) -> Dict[str, Any]:
+    payload = schemas.StudyMetadataOut.model_validate(meta).model_dump()
+    payload["permissions"] = _effective_study_permissions(db, meta, user)
+    return payload
+
+
+@router.post("/studies/{study_id}/archive", response_model=schemas.StudyMetadataOut)
+def archive_study(
+    study_id: int,
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    meta = db.query(models.StudyMetadata).filter(models.StudyMetadata.id == study_id).first()
+    if not meta:
+        raise HTTPException(status_code=404, detail="Study not found")
+    _assert_owner_or_admin(meta, user)
+
+    if not _is_archived(meta):
+        current_status = _norm_status(meta.status) or "PUBLISHED"
+        meta.archived_from_status = current_status if current_status in {"DRAFT", "PUBLISHED"} else "PUBLISHED"
+        meta.status = "ARCHIVED"
+        meta.is_locked = False
+        meta.locked_by = None
+        meta.locked_at = None
+        db.commit()
+        db.refresh(meta)
+
+    return _study_metadata_response(db, meta, user)
+
+
+@router.post("/studies/{study_id}/unarchive", response_model=schemas.StudyMetadataOut)
+def unarchive_study(
+    study_id: int,
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    meta = db.query(models.StudyMetadata).filter(models.StudyMetadata.id == study_id).first()
+    if not meta:
+        raise HTTPException(status_code=404, detail="Study not found")
+    _assert_owner_or_admin(meta, user)
+
+    if _is_archived(meta):
+        restore_status = _norm_status(getattr(meta, "archived_from_status", None))
+        meta.status = restore_status if restore_status in {"DRAFT", "PUBLISHED"} else "PUBLISHED"
+        meta.archived_from_status = None
+        db.commit()
+        db.refresh(meta)
+
+    return _study_metadata_response(db, meta, user)
+
+
 @router.get("/studies/{study_id}/lock-status")
 def get_study_lock_status(
     study_id: int,
@@ -648,6 +717,7 @@ def lock_study_for_edit(
         raise HTTPException(status_code=404, detail="Study not found")
 
     _assert_has_study_permission(db, meta, user, required="edit_study")
+    _assert_study_writable(meta)
 
     # Locking disabled for now.
     # Do not write any lock state to the DB.
@@ -818,6 +888,8 @@ def update_study(
     _validate_subject_identity_and_status_update(old_sd, new_sd)
 
     incoming_status = _norm_status(getattr(study_metadata, "status", None)) or (meta.status or "PUBLISHED")
+    if incoming_status == "ARCHIVED":
+        raise HTTPException(status_code=400, detail="Use the archive endpoint to archive a study")
 
     if getattr(study_metadata, "study_name", None) is not None:
         meta.study_name = study_metadata.study_name
@@ -888,6 +960,7 @@ def publish_study(
         raise HTTPException(status_code=404, detail="Study not found")
 
     _assert_has_study_permission(db, meta, user, required="edit_study")
+    _assert_study_writable(meta)
 
     # Locking disabled for now.
     # _require_lock_holder(meta, user)
@@ -998,6 +1071,7 @@ def drop_out_subject(
     if not meta:
         raise HTTPException(status_code=404, detail="Study not found")
     _assert_owner_or_admin(meta, current_user)
+    _assert_study_writable(meta)
     try:
         datetime.strptime(payload.dropout_date, "%Y-%m-%d")
     except ValueError:
@@ -1451,6 +1525,7 @@ def shared_upload_file(
     meta = db.query(models.StudyMetadata).filter(models.StudyMetadata.id == access.study_id).first()
     if not meta:
         raise HTTPException(status_code=404, detail="Study not found")
+    _assert_study_writable(meta)
     _assert_subject_active_for_study(db, access.study_id, access.subject_index)
 
     # Locking disabled for now.
@@ -1517,6 +1592,7 @@ def shared_delete_file(
     meta = db.query(models.StudyMetadata).filter(models.StudyMetadata.id == access.study_id).first()
     if not meta:
         raise HTTPException(status_code=404, detail="Study not found")
+    _assert_study_writable(meta)
     _assert_subject_active_for_study(db, access.study_id, access.subject_index)
 
     try:
@@ -1918,6 +1994,7 @@ def grant_study_access(
         raise HTTPException(status_code=404, detail="Study not found")
 
     _assert_owner_or_admin(meta, user)
+    _assert_study_writable(meta)
     _assert_not_locked_by_other(meta, user)
 
     if payload.user_id == meta.created_by:
@@ -2011,6 +2088,7 @@ def revoke_study_access(
         raise HTTPException(status_code=404, detail="Study not found")
 
     _assert_owner_or_admin(meta, current_user)
+    _assert_study_writable(meta)
     _assert_not_locked_by_other(meta, current_user)
 
     if user_id == meta.created_by:
@@ -2144,6 +2222,7 @@ def revoke_share_link(
         raise HTTPException(status_code=404, detail="Study not found")
 
     _assert_owner_or_admin(meta, current_user)
+    _assert_study_writable(meta)
     _assert_not_locked_by_other(meta, current_user)
 
     access = (
@@ -2593,6 +2672,7 @@ def delete_study(
         raise HTTPException(status_code=404, detail="Study not found")
 
     _assert_owner_or_admin(meta, current_user)
+    _assert_study_writable(meta)
 
     try:
         repo.delete_study(study_id, meta.study_name)

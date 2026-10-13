@@ -191,19 +191,39 @@
           <!-- Existing Studies Table -->
           <div class="study-dashboard">
             <div class="studies-header-row">
-              <div>
-                <h2 class="existing-studies-title">Available studies</h2>
-                <p class="existing-studies-subtitle">Studies you own or can access.</p>
+              <div class="studies-header-copy">
+                <div class="studies-title-row">
+                  <h2 class="existing-studies-title">{{ showArchivedStudies ? 'Archived studies' : 'Available studies' }}</h2>
+                  <label :class="['archive-filter-toggle', { disabled: studiesLoading }]">
+                    <input
+                      type="checkbox"
+                      :checked="showArchivedStudies"
+                      :disabled="studiesLoading"
+                      @change="toggleArchivedStudies"
+                    />
+                    <span class="archive-filter-track" aria-hidden="true">
+                      <span class="archive-filter-thumb"></span>
+                    </span>
+                    <span class="archive-filter-label">
+                      {{ showArchivedStudies ? 'Show active studies' : 'Show only archived studies' }}
+                    </span>
+                  </label>
+                </div>
+                <p class="existing-studies-subtitle">
+                  {{ showArchivedStudies ? 'Read-only studies you own or can access.' : 'Studies you own or can access.' }}
+                </p>
               </div>
-              <div v-if="isAdmin || isPI" class="create-study-action">
-                <button
-                  type="button"
-                  class="btn-primary-solid create-study-btn"
-                  @click="navigate({ name: 'CreateStudy' })"
-                >
-                  Create study
-                </button>
-                <small>Set up or import a new study</small>
+              <div class="study-header-actions">
+                <div v-if="(isAdmin || isPI) && !showArchivedStudies" class="create-study-action">
+                  <button
+                    type="button"
+                    class="btn-primary-solid create-study-btn"
+                    @click="navigate({ name: 'CreateStudy' })"
+                  >
+                    Create study
+                  </button>
+                  <small>Set up or import a new study</small>
+                </div>
               </div>
             </div>
 
@@ -219,7 +239,12 @@
             </div>
 
             <div v-else-if="!studies.length" class="studies-state studies-state--empty">
-              <template v-if="isAdmin || isPI">
+              <template v-if="showArchivedStudies">
+                <strong>No archived studies</strong>
+                <span>Archived studies will appear here and remain read-only until restored.</span>
+                <button type="button" class="btn-minimal" @click="toggleArchivedStudies">Show active studies</button>
+              </template>
+              <template v-else-if="isAdmin || isPI">
                 <strong>No studies yet</strong>
                 <span>Create your first study to define visits, forms, and participant data collection.</span>
                 <button type="button" class="btn-primary-solid" @click="navigate({ name: 'CreateStudy' })">
@@ -284,6 +309,7 @@
                       <span class="study-name-cell">
                         <span v-html="highlightStudyMatch(study.study_name)"></span>
                         <span v-if="isDraftStudy(study)" class="status-tag status-tag--draft">DRAFT</span>
+                        <span v-if="isArchivedStudy(study)" class="status-tag status-tag--archived">ARCHIVED</span>
                       </span>
                     </td>
                     <td v-html="highlightStudyMatch(study.study_description)"></td>
@@ -293,7 +319,7 @@
                   <td class="actions-cell">
                     <div class="action-buttons">
                       <button
-                          v-if="canAddData(study)"
+                          v-if="!isArchivedStudy(study) && canAddData(study)"
                           type="button"
                           @click="handleAddDataClick(study)"
                           class="btn-minimal btn-equal"
@@ -307,6 +333,15 @@
                           class="btn-minimal btn-equal"
                         >
                           View Study
+                        </button>
+                        <button
+                          v-if="isArchivedStudy(study) && canArchiveStudy(study)"
+                          type="button"
+                          class="btn-minimal btn-equal"
+                          :disabled="unarchiveBusy[study.id]"
+                          @click="unarchiveStudy(study)"
+                        >
+                          {{ unarchiveBusy[study.id] ? 'Restoring…' : 'Unarchive' }}
                         </button>
                     </div>
                   </td>
@@ -476,6 +511,8 @@ export default {
       studySearchQuery: "",
       icons,
       showAccountMenu: false,
+      showArchivedStudies: false,
+      unarchiveBusy: {},
 
       showImportData: false,
       importMaximized: false,
@@ -634,6 +671,7 @@ export default {
     },
 
     canAddData(study) {
+      if (this.isArchivedStudy(study)) return false;
       // Owner/Admin: always show
       if (this.isAdmin || this.isStudyOwner(study)) return true;
 
@@ -900,6 +938,7 @@ export default {
     },
 
     handleAddDataClick(study) {
+      if (this.isArchivedStudy(study)) return;
       if (this.isDraftStudy(study)) {
         this.openDraftDialog("add-data", study);
         return;
@@ -1018,6 +1057,7 @@ export default {
       try {
         const { data } = await axios.get("/forms/studies", {
           headers: { Authorization: `Bearer ${token}` },
+          params: this.showArchivedStudies ? { status: "ARCHIVED" } : {},
         });
         this.studies = Array.isArray(data) ? data : [];
       } catch (e) {
@@ -1032,6 +1072,38 @@ export default {
         }
       } finally {
         this.studiesLoading = false;
+      }
+    },
+
+    async toggleArchivedStudies() {
+      if (this.studiesLoading) return;
+      this.showArchivedStudies = !this.showArchivedStudies;
+      this.studySearchQuery = "";
+      await this.loadStudies();
+    },
+
+    isArchivedStudy(study) {
+      return String(study?.status || "").trim().toUpperCase() === "ARCHIVED";
+    },
+
+    canArchiveStudy(study) {
+      return this.isAdmin || this.isStudyOwner(study);
+    },
+
+    async unarchiveStudy(study) {
+      if (!study?.id || !this.canArchiveStudy(study) || this.unarchiveBusy[study.id]) return;
+      this.unarchiveBusy = { ...this.unarchiveBusy, [study.id]: true };
+      try {
+        await axios.post(
+          `/forms/studies/${study.id}/unarchive`,
+          {},
+          { headers: { Authorization: `Bearer ${this.$store.state.token}` } }
+        );
+        await this.loadStudies();
+      } catch (e) {
+        alert(e?.response?.data?.detail || "Failed to unarchive the study.");
+      } finally {
+        this.unarchiveBusy = { ...this.unarchiveBusy, [study.id]: false };
       }
     },
 
@@ -1444,16 +1516,77 @@ export default {
   gap: 20px;
   margin-bottom: 18px;
 }
+.studies-header-copy {
+  min-width: 0;
+}
+.studies-title-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
 .existing-studies-title {
-  margin: 0 0 4px;
+  margin: 0;
   font-size: 20px;
   color: #111827;
   text-align: left;
 }
 .existing-studies-subtitle {
-  margin: 0;
+  margin: 4px 0 0;
   color: #64748b;
   font-size: 13px;
+}
+.archive-filter-toggle {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: #475569;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  user-select: none;
+}
+.archive-filter-toggle input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+.archive-filter-track {
+  position: relative;
+  width: 34px;
+  height: 20px;
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: #cbd5e1;
+  transition: background-color 0.2s ease;
+}
+.archive-filter-thumb {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #ffffff;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.25);
+  transition: transform 0.2s ease;
+}
+.archive-filter-toggle input:checked + .archive-filter-track {
+  background: #4f46e5;
+}
+.archive-filter-toggle input:checked + .archive-filter-track .archive-filter-thumb {
+  transform: translateX(14px);
+}
+.archive-filter-toggle input:focus-visible + .archive-filter-track {
+  outline: 3px solid rgba(79, 70, 229, 0.25);
+  outline-offset: 2px;
+}
+.archive-filter-toggle.disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
 }
 .create-study-action {
   flex: 0 0 auto;
@@ -1461,6 +1594,13 @@ export default {
   flex-direction: column;
   align-items: flex-end;
   gap: 5px;
+}
+.study-header-actions {
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-end;
+  gap: 12px;
+  flex-wrap: wrap;
 }
 .create-study-action small {
   color: #64748b;
@@ -1664,6 +1804,11 @@ export default {
   background: #fff7ed;
   border-color: #fdba74;
   color: #9a3412;
+}
+.status-tag--archived {
+  background: #f1f5f9;
+  border-color: #94a3b8;
+  color: #334155;
 }
 .study-name-cell {
   display: inline-flex;

@@ -61,6 +61,11 @@ class StudyMetadata(Base):
     # NOTE: server_default keeps old rows working (treated as PUBLISHED)
     status = Column(String(20), nullable=False, server_default="PUBLISHED", index=True)
 
+    # Remember the workflow state that should be restored when an archived
+    # study is brought back. Existing databases receive this column through
+    # db_bootstrap.ensure_study_archive_schema().
+    archived_from_status = Column(String(20), nullable=True)
+
     # If this row is a draft created to edit an already-published study,
     # this points to the published study id. NULL means "new study draft".
     draft_of_study_id = Column(
