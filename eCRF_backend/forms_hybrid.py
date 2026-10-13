@@ -1055,8 +1055,73 @@ def study_compliance_summary(
         study_data,
         repo.list_entries(study_id, meta.study_name),
     )
+    summary["can_edit_enrollment_plan"] = _effective_study_permissions(db, meta, current_user).get("edit_study", False)
     summary["generated_at"] = local_now().isoformat()
     return summary
+
+
+@router.put("/studies/{study_id}/enrollment-plan")
+def update_enrollment_plan(
+    study_id: int,
+    payload: schemas.EnrollmentPlanUpdate,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    meta = db.query(models.StudyMetadata).filter(models.StudyMetadata.id == study_id).first()
+    if not meta:
+        raise HTTPException(status_code=404, detail="Study not found")
+    _assert_has_study_permission(db, meta, current_user, required="edit_study")
+    _assert_study_writable(meta)
+
+    if payload.mode == "linear" and (payload.target_subjects is None or payload.duration_months is None):
+        raise HTTPException(status_code=422, detail="Target subjects and duration are required for a linear plan")
+    if payload.mode == "monthly":
+        if not payload.monthly_enrollments or not any(value > 0 for value in payload.monthly_enrollments):
+            raise HTTPException(status_code=422, detail="Enter at least one positive monthly enrollment value")
+        if any(value < 0 for value in payload.monthly_enrollments):
+            raise HTTPException(status_code=422, detail="Monthly enrollment values cannot be negative")
+
+    content_row = _get_content_row_or_404(db, study_id)
+    old_study_data = _deepcopy_json(content_row.study_data or {})
+    study_data = _deepcopy_json(old_study_data)
+    study_settings = _deepcopy_json(study_data.get("studySettings") or study_data.get("study_settings") or {})
+    if payload.mode == "none":
+        study_settings.pop("enrollmentMonitoring", None)
+    else:
+        study_settings["enrollmentMonitoring"] = {
+            "mode": payload.mode,
+            "target_subjects": payload.target_subjects,
+            "duration_months": payload.duration_months,
+            "monthly_enrollments": list(payload.monthly_enrollments or []),
+        }
+    study_data["studySettings"] = study_settings
+    study_data.pop("study_settings", None)
+    content_row.study_data = study_data
+    db.commit()
+    db.refresh(content_row)
+
+    VersionManager.ensure_initial_version(db, study_id, old_study_data)
+    VersionManager.apply_on_update(
+        db=db,
+        study_id=study_id,
+        old_sd=old_study_data,
+        new_sd=study_data,
+        audit_callback=None,
+    )
+    if _norm_status(meta.status) == "PUBLISHED":
+        latest_template = _latest_template_or_500(db, study_id)
+        _write_published_snapshot_to_datalad(
+            meta=meta,
+            study_data=study_data,
+            template_version=latest_template.version,
+            template_schema=latest_template.schema or {},
+            actor=_actor_identifier(current_user),
+            actor_name=_display_name(current_user),
+            user_id=current_user.id,
+            audit_label="Update enrollment plan",
+        )
+
+    return {"enrollment_plan": study_settings.get("enrollmentMonitoring") or {"mode": "none"}}
 
 
 @router.post("/studies/{study_id}/subjects/{subject_index}/dropout")

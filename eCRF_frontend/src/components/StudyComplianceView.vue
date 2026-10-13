@@ -74,6 +74,183 @@
         </small>
       </aside>
 
+      <section class="chart-card enrollment-card">
+        <div class="chart-heading enrollment-heading">
+          <div>
+            <span class="insight-label">Enrollment monitoring</span>
+            <h3>Actual enrollment over time</h3>
+            <p>Based on each subject’s first qualifying data-entry date. Retained dropouts remain included.</p>
+          </div>
+          <span class="actual-only-badge" :class="{ planned: enrollmentPlan.configured }">{{ enrollmentPlanBadge }}</span>
+        </div>
+
+        <div class="enrollment-kpis">
+          <article>
+            <span>Enrolled with data</span>
+            <strong>{{ enrollment.enrolled_subjects || 0 }}</strong>
+            <small>of {{ enrollment.configured_subjects || 0 }} subjects in the current roster</small>
+          </article>
+          <article>
+            <span>30-day pace</span>
+            <strong>{{ enrollmentPace.subjects_per_30_days || 0 }}</strong>
+            <small>subjects first entered in the last 30 days</small>
+          </article>
+          <article>
+            <span>90-day pace</span>
+            <strong>{{ enrollmentPace.subjects_per_30_days_from_90_day_window || 0 }}</strong>
+            <small>subjects per 30 days · rolling 90-day average</small>
+          </article>
+          <article>
+            <span>{{ enrollmentPlan.configured ? 'Target forecast' : 'Current-roster forecast' }}</span>
+            <strong class="forecast-value">{{ enrollmentForecastLabel }}</strong>
+            <small>{{ enrollmentForecastNote }}</small>
+          </article>
+        </div>
+
+        <template v-if="enrollmentTimeline.length">
+          <div class="enrollment-chart-block">
+            <div class="enrollment-chart-header">
+              <div>
+                <strong>Cumulative enrollment</strong>
+                <span>Total and group counts from first data entry</span>
+              </div>
+              <div class="enrollment-legend" aria-label="Enrollment chart legend">
+                <span class="total-series"><i></i>Total</span>
+                <span v-if="enrollmentPlan.enabled" class="planned-series"><i></i>Planned</span>
+                <span v-for="group in enrollmentGroups" :key="`enrollment-legend-${group.group_index}`">
+                  <i :style="{ backgroundColor: enrollmentColor(group.group_index) }"></i>{{ group.group_name }}
+                </span>
+              </div>
+            </div>
+            <div class="enrollment-chart-scroll">
+              <svg
+                class="enrollment-chart"
+                viewBox="0 0 860 300"
+                role="img"
+                :aria-label="`Cumulative enrollment for ${enrollment.enrolled_subjects || 0} subjects`"
+              >
+                <g class="chart-grid">
+                  <line v-for="tick in enrollmentYTicks" :key="`enrollment-y-grid-${tick.value}`" x1="62" x2="828" :y1="tick.y" :y2="tick.y" />
+                </g>
+                <g class="chart-axes">
+                  <line x1="62" x2="828" y1="245" y2="245" />
+                  <line x1="62" x2="62" y1="20" y2="245" />
+                </g>
+                <g class="axis-labels">
+                  <text v-for="tick in enrollmentYTicks" :key="`enrollment-y-label-${tick.value}`" x="52" :y="tick.y + 4" text-anchor="end">{{ tick.value }}</text>
+                  <text v-for="tick in enrollmentXTicks" :key="`enrollment-x-label-${tick.timestamp}`" :x="tick.x" y="266" :text-anchor="tick.anchor">{{ tick.label }}</text>
+                  <text x="445" y="291" text-anchor="middle">First qualifying data-entry date</text>
+                  <text transform="translate(16 134) rotate(-90)" text-anchor="middle">Subjects</text>
+                </g>
+                <polyline
+                  v-for="series in enrollmentGroupSeries"
+                  :key="`enrollment-series-${series.group_index}`"
+                  class="enrollment-group-line"
+                  :stroke="enrollmentColor(series.group_index)"
+                  :points="series.points"
+                />
+                <polyline v-if="enrollmentPlan.enabled" class="enrollment-planned-line" :points="enrollmentPlannedPoints" />
+                <polyline class="enrollment-total-line" :points="enrollmentTotalPoints" />
+                <circle
+                  v-for="point in enrollmentTotalChartPoints"
+                  :key="`enrollment-point-${point.date}`"
+                  class="enrollment-total-point"
+                  :cx="point.x"
+                  :cy="point.y"
+                  r="4"
+                >
+                  <title>{{ formatDateOnly(point.date) }}: {{ point.total }} enrolled</title>
+                </circle>
+              </svg>
+            </div>
+            <div v-if="enrollmentPlan.enabled" class="plan-comparison-note" :class="enrollmentPlanVarianceClass">
+              <strong>{{ enrollmentPlanVarianceLabel }}</strong>
+              <span>{{ enrollment.planned_to_date }} planned by {{ formatDateOnly(enrollment.as_of) }} · target {{ enrollmentPlan.target_subjects }} subjects</span>
+            </div>
+          </div>
+
+          <div class="enrollment-chart-block proportion-block">
+            <div class="enrollment-chart-header">
+              <div>
+                <strong>Group proportions over time</strong>
+                <span>Share of enrolled subjects in each group</span>
+              </div>
+            </div>
+            <div class="enrollment-chart-scroll">
+              <svg class="enrollment-proportion-chart" viewBox="0 0 860 220" role="img" aria-label="Enrollment group proportions over time">
+                <g class="proportion-grid">
+                  <line x1="62" x2="828" y1="20" y2="20" />
+                  <line x1="62" x2="828" y1="95" y2="95" />
+                  <line x1="62" x2="828" y1="170" y2="170" />
+                </g>
+                <polygon
+                  v-for="area in enrollmentProportionAreas"
+                  :key="`enrollment-area-${area.group_index}`"
+                  :points="area.points"
+                  :fill="enrollmentColor(area.group_index)"
+                />
+                <g class="chart-axes"><line x1="62" x2="828" y1="170" y2="170" /><line x1="62" x2="62" y1="20" y2="170" /></g>
+                <g class="axis-labels">
+                  <text x="52" y="174" text-anchor="end">0%</text><text x="52" y="99" text-anchor="end">50%</text><text x="52" y="24" text-anchor="end">100%</text>
+                  <text v-for="tick in enrollmentProportionXTicks" :key="`proportion-x-${tick.timestamp}`" :x="tick.x" y="194" :text-anchor="tick.anchor">{{ tick.label }}</text>
+                </g>
+              </svg>
+            </div>
+            <div class="group-proportion-list">
+              <div v-for="group in enrollmentGroups" :key="`enrollment-share-${group.group_index}`">
+                <i :style="{ backgroundColor: enrollmentColor(group.group_index) }"></i>
+                <span>{{ group.group_name }}</span>
+                <strong>{{ group.count }} · {{ group.proportion_percent }}%</strong>
+              </div>
+            </div>
+          </div>
+        </template>
+        <div v-else class="empty-state">Enrollment history will appear after a subject has qualifying data and a recorded entry date.</div>
+        <p v-if="enrollment.subjects_missing_entry_date" class="enrollment-warning">
+          {{ enrollment.subjects_missing_entry_date }} enrolled subject{{ enrollment.subjects_missing_entry_date === 1 ? '' : 's' }} could not be placed on the timeline because an entry date was unavailable.
+        </p>
+
+        <form v-if="summary.can_edit_enrollment_plan" class="enrollment-plan-editor" @submit.prevent="saveEnrollmentPlan">
+          <div class="plan-editor-heading">
+            <div>
+              <strong>Optional planned enrollment</strong>
+              <p>Add a comparison line as a total target over a number of months, or enter a target for each month. Leave this off to show actual pace and a forecast against the current study roster.</p>
+            </div>
+            <button type="submit" class="save-plan-btn" :disabled="savingEnrollmentPlan">
+              {{ savingEnrollmentPlan ? 'Saving…' : 'Save plan' }}
+            </button>
+          </div>
+          <div class="plan-fields">
+            <label>
+              <span>Comparison</span>
+              <select v-model="enrollmentPlanDraft.mode" @change="clearEnrollmentPlanMessage">
+                <option value="none">No planned comparison</option>
+                <option value="linear">Total subjects over a period</option>
+                <option value="monthly">Monthly recruitment numbers</option>
+              </select>
+            </label>
+            <template v-if="enrollmentPlanDraft.mode === 'linear'">
+              <label>
+                <span>Planned subjects</span>
+                <input v-model.number="enrollmentPlanDraft.target_subjects" type="number" min="1" step="1" required />
+              </label>
+              <label>
+                <span>Recruitment period (months)</span>
+                <input v-model.number="enrollmentPlanDraft.duration_months" type="number" min="1" max="240" step="1" required />
+              </label>
+            </template>
+            <label v-else-if="enrollmentPlanDraft.mode === 'monthly'" class="monthly-plan-field">
+              <span>New subjects planned per month</span>
+              <textarea v-model="enrollmentPlanDraft.monthlyText" rows="2" required placeholder="For example: 10, 15, 20, 20"></textarea>
+              <small>Enter one number per month, separated by commas or new lines. These are monthly additions, not cumulative totals.</small>
+            </label>
+          </div>
+          <p v-if="enrollmentPlan.configured && enrollmentPlan.waiting_for_actual" class="plan-message neutral">Plan saved. Its timeline will begin on the first qualifying data-entry date.</p>
+          <p v-if="enrollmentPlanError" class="plan-message error">{{ enrollmentPlanError }}</p>
+          <p v-else-if="enrollmentPlanSaved" class="plan-message success">Enrollment plan saved.</p>
+        </form>
+      </section>
+
       <section class="chart-card histogram-card">
         <div class="chart-heading">
           <div>
@@ -302,7 +479,7 @@
 
       <footer class="method-note">
         <strong>How compliance is calculated:</strong>
-        A subject is counted as enrolled/recruited only after data is entered or a required field is skipped in at least one assigned visit. The dropout percentage is the share of this enrolled-with-data cohort whose status is dropped out. A visit enters the calculation after at least one included subject starts it. Subjects with no started visits and future visits with no entered data are excluded. Within the remaining subject × visit scope, every expected subject-visit contributes equally: complete is 100%, partial uses its saved progress, and an expected visit not yet started by that subject is 0%. This prevents untouched subjects and future visits from lowering today’s compliance while still showing genuine gaps inside the active study scope. Dropped subjects whose data was deleted are excluded; retained dropouts remain included after they have started data entry.
+        A subject is counted as enrolled/recruited only after data is entered or a required field is skipped in at least one assigned visit. Enrollment timing uses that subject’s first qualifying entry date, while group totals use the subject’s configured study group. An optional plan begins on the first actual enrollment date. The dropout percentage is the share of this enrolled-with-data cohort whose status is dropped out. A visit enters the calculation after at least one included subject starts it. Subjects with no started visits and future visits with no entered data are excluded. Within the remaining subject × visit scope, every expected subject-visit contributes equally: complete is 100%, partial uses its saved progress, and an expected visit not yet started by that subject is 0%. This prevents untouched subjects and future visits from lowering today’s compliance while still showing genuine gaps inside the active study scope. Dropped subjects whose data was deleted are excluded; retained dropouts remain included after they have started data entry.
         <span v-if="summary.generated_at">Updated {{ formatDateTime(summary.generated_at) }}.</span>
       </footer>
     </template>
@@ -319,7 +496,16 @@ export default {
     active: { type: Boolean, default: false },
   },
   data() {
-    return { summary: null, loading: false, error: "", loadedStudyId: null };
+    return {
+      summary: null,
+      loading: false,
+      error: "",
+      loadedStudyId: null,
+      savingEnrollmentPlan: false,
+      enrollmentPlanError: "",
+      enrollmentPlanSaved: false,
+      enrollmentPlanDraft: { mode: "none", target_subjects: null, duration_months: null, monthlyText: "" },
+    };
   },
   computed: {
     recruitment() {
@@ -327,6 +513,135 @@ export default {
     },
     compliance() {
       return this.summary?.compliance || {};
+    },
+    enrollment() {
+      return this.summary?.enrollment_monitoring || {};
+    },
+    enrollmentPace() {
+      return this.enrollment?.pace || {};
+    },
+    enrollmentForecast() {
+      return this.enrollment?.forecast || {};
+    },
+    enrollmentPlan() {
+      return this.enrollment?.plan || { configured: false, enabled: false, mode: "none", planned_timeline: [] };
+    },
+    enrollmentTimeline() {
+      return Array.isArray(this.enrollment?.timeline) ? this.enrollment.timeline : [];
+    },
+    enrollmentPlannedTimeline() {
+      return Array.isArray(this.enrollmentPlan?.planned_timeline) ? this.enrollmentPlan.planned_timeline : [];
+    },
+    enrollmentGroups() {
+      return Array.isArray(this.enrollment?.actual_by_group) ? this.enrollment.actual_by_group : [];
+    },
+    enrollmentMinTimestamp() {
+      const dates = [...this.enrollmentTimeline, ...this.enrollmentPlannedTimeline]
+        .map((point) => Date.parse(`${point.date}T00:00:00Z`))
+        .filter(Number.isFinite);
+      return dates.length ? Math.min(...dates) : 0;
+    },
+    enrollmentMaxTimestamp() {
+      const dates = [...this.enrollmentTimeline, ...this.enrollmentPlannedTimeline]
+        .map((point) => Date.parse(`${point.date}T00:00:00Z`))
+        .filter(Number.isFinite);
+      return dates.length ? Math.max(...dates) : 0;
+    },
+    enrollmentActualMinTimestamp() {
+      if (!this.enrollmentTimeline.length) return 0;
+      return Date.parse(`${this.enrollmentTimeline[0].date}T00:00:00Z`);
+    },
+    enrollmentActualMaxTimestamp() {
+      if (!this.enrollmentTimeline.length) return 0;
+      return Date.parse(`${this.enrollmentTimeline[this.enrollmentTimeline.length - 1].date}T00:00:00Z`);
+    },
+    enrollmentTopValue() {
+      const maximum = Math.max(
+        1,
+        ...this.enrollmentTimeline.map((point) => Number(point.total || 0)),
+        ...this.enrollmentPlannedTimeline.map((point) => Number(point.cumulative || 0))
+      );
+      return Math.max(4, Math.ceil(maximum / 4) * 4);
+    },
+    enrollmentTotalChartPoints() {
+      return this.enrollmentTimeline.map((point) => ({
+        ...point,
+        x: this.enrollmentChartX(point.date),
+        y: this.enrollmentChartY(point.total),
+      }));
+    },
+    enrollmentTotalPoints() {
+      return this.enrollmentTotalChartPoints.map((point) => `${point.x},${point.y}`).join(" ");
+    },
+    enrollmentPlannedPoints() {
+      return this.enrollmentPlannedTimeline
+        .map((point) => `${this.enrollmentChartX(point.date)},${this.enrollmentChartY(point.cumulative)}`)
+        .join(" ");
+    },
+    enrollmentGroupSeries() {
+      return this.enrollmentGroups.map((group) => ({
+        ...group,
+        points: this.enrollmentTimeline.map((point) => {
+          const current = (point.groups || []).find((item) => Number(item.group_index) === Number(group.group_index));
+          return `${this.enrollmentChartX(point.date)},${this.enrollmentChartY(current?.count || 0)}`;
+        }).join(" "),
+      }));
+    },
+    enrollmentYTicks() {
+      return [0, 0.25, 0.5, 0.75, 1].map((ratio) => {
+        const value = Math.round(this.enrollmentTopValue * ratio);
+        return { value, y: this.enrollmentChartY(value) };
+      });
+    },
+    enrollmentXTicks() {
+      return this.buildEnrollmentDateTicks(62, 828);
+    },
+    enrollmentProportionXTicks() {
+      return this.buildEnrollmentDateTicks(62, 828, this.enrollmentActualMinTimestamp, this.enrollmentActualMaxTimestamp);
+    },
+    enrollmentProportionAreas() {
+      const accumulated = this.enrollmentTimeline.map(() => 0);
+      return this.enrollmentGroups.map((group) => {
+        const lower = [...accumulated];
+        const upper = this.enrollmentTimeline.map((point, index) => {
+          const current = (point.groups || []).find((item) => Number(item.group_index) === Number(group.group_index));
+          const share = Number(current?.proportion_percent || 0);
+          accumulated[index] += share;
+          return accumulated[index];
+        });
+        const upperPoints = this.enrollmentTimeline.map((point, index) => `${this.enrollmentProportionX(point.date)},${this.enrollmentProportionY(upper[index])}`);
+        const lowerPoints = this.enrollmentTimeline.slice().reverse().map((point, reverseIndex) => {
+          const index = this.enrollmentTimeline.length - 1 - reverseIndex;
+          return `${this.enrollmentProportionX(point.date)},${this.enrollmentProportionY(lower[index])}`;
+        });
+        return { ...group, points: [...upperPoints, ...lowerPoints].join(" ") };
+      });
+    },
+    enrollmentForecastLabel() {
+      if (this.enrollmentForecast.available) return this.formatDateOnly(this.enrollmentForecast.projected_completion_date);
+      if (this.enrollmentForecast.reason === "current_roster_complete") return "Roster complete";
+      return "Not available";
+    },
+    enrollmentForecastNote() {
+      if (this.enrollmentForecast.available) return `At ${this.enrollmentForecast.monthly_pace_used} subjects per 30 days`;
+      if (this.enrollmentForecast.reason === "current_roster_complete") {
+        return this.enrollmentPlan.configured ? "The planned target has been reached" : "All currently configured subjects have data";
+      }
+      return "Requires at least 30 days and 3 recent enrollments";
+    },
+    enrollmentPlanBadge() {
+      if (this.enrollmentPlan.enabled) return "Actual + planned comparison";
+      if (this.enrollmentPlan.configured) return "Plan saved · awaiting enrollment data";
+      return "Actual only · no plan configured";
+    },
+    enrollmentPlanVarianceLabel() {
+      const variance = Number(this.enrollment?.variance_to_plan || 0);
+      if (variance === 0) return "On plan";
+      return variance > 0 ? `${variance} ahead of plan` : `${Math.abs(variance)} behind plan`;
+    },
+    enrollmentPlanVarianceClass() {
+      const variance = Number(this.enrollment?.variance_to_plan || 0);
+      return variance < 0 ? "behind" : (variance > 0 ? "ahead" : "on-plan");
     },
     visitStats() {
       return this.summary?.visit_stats || [];
@@ -423,8 +738,110 @@ export default {
     },
   },
   methods: {
-    async loadSummary() {
-      if (!this.studyId || this.loading) return;
+    enrollmentChartX(value) {
+      const timestamp = Date.parse(`${value}T00:00:00Z`);
+      const span = this.enrollmentMaxTimestamp - this.enrollmentMinTimestamp;
+      if (!Number.isFinite(timestamp) || span <= 0) return 445;
+      return 62 + ((timestamp - this.enrollmentMinTimestamp) / span) * 766;
+    },
+    enrollmentProportionX(value) {
+      const timestamp = Date.parse(`${value}T00:00:00Z`);
+      const span = this.enrollmentActualMaxTimestamp - this.enrollmentActualMinTimestamp;
+      if (!Number.isFinite(timestamp) || span <= 0) return 445;
+      return 62 + ((timestamp - this.enrollmentActualMinTimestamp) / span) * 766;
+    },
+    enrollmentChartY(value) {
+      return 245 - (Math.max(0, Number(value || 0)) / this.enrollmentTopValue) * 225;
+    },
+    enrollmentProportionY(value) {
+      return 170 - (Math.max(0, Math.min(100, Number(value || 0))) / 100) * 150;
+    },
+    enrollmentColor(index) {
+      const colors = ["#2563eb", "#0f766e", "#7c3aed", "#ea580c", "#db2777", "#0891b2", "#65a30d", "#64748b"];
+      return colors[Math.abs(Number(index || 0)) % colors.length];
+    },
+    buildEnrollmentDateTicks(left, right, minimum = this.enrollmentMinTimestamp, maximum = this.enrollmentMaxTimestamp) {
+      if (!this.enrollmentTimeline.length) return [];
+      if (minimum === maximum) {
+        return [{ timestamp: minimum, x: (left + right) / 2, label: this.formatDateOnly(this.enrollmentTimeline[0].date), anchor: "middle" }];
+      }
+      return [0, 0.25, 0.5, 0.75, 1].map((ratio, index) => {
+        const timestamp = minimum + (maximum - minimum) * ratio;
+        return {
+          timestamp,
+          x: left + (right - left) * ratio,
+          label: this.formatDateOnly(new Date(timestamp).toISOString().slice(0, 10)),
+          anchor: index === 0 ? "start" : (index === 4 ? "end" : "middle"),
+        };
+      });
+    },
+    formatDateOnly(value) {
+      if (!value) return "—";
+      const date = new Date(`${String(value).slice(0, 10)}T00:00:00Z`);
+      return Number.isNaN(date.getTime())
+        ? String(value)
+        : date.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric", timeZone: "UTC" });
+    },
+    clearEnrollmentPlanMessage() {
+      this.enrollmentPlanError = "";
+      this.enrollmentPlanSaved = false;
+    },
+    hydrateEnrollmentPlan() {
+      const plan = this.enrollmentPlan || {};
+      this.enrollmentPlanDraft = {
+        mode: plan.configured ? plan.mode : "none",
+        target_subjects: plan.target_subjects || null,
+        duration_months: plan.duration_months || null,
+        monthlyText: Array.isArray(plan.monthly_enrollments) ? plan.monthly_enrollments.join(", ") : "",
+      };
+    },
+    parseMonthlyEnrollmentPlan() {
+      const values = String(this.enrollmentPlanDraft.monthlyText || "")
+        .split(/[\s,;]+/)
+        .map((value) => value.trim())
+        .filter(Boolean);
+      if (!values.length || values.some((value) => !/^\d+$/.test(value))) {
+        throw new Error("Enter whole, non-negative subject numbers for each month.");
+      }
+      const parsed = values.map(Number);
+      if (!parsed.some((value) => value > 0)) throw new Error("At least one month must recruit a subject.");
+      return parsed;
+    },
+    async saveEnrollmentPlan() {
+      this.clearEnrollmentPlanMessage();
+      const mode = this.enrollmentPlanDraft.mode;
+      const payload = { mode, target_subjects: null, duration_months: null, monthly_enrollments: [] };
+      if (mode === "linear") {
+        payload.target_subjects = Number(this.enrollmentPlanDraft.target_subjects);
+        payload.duration_months = Number(this.enrollmentPlanDraft.duration_months);
+        if (!Number.isInteger(payload.target_subjects) || payload.target_subjects < 1 || !Number.isInteger(payload.duration_months) || payload.duration_months < 1) {
+          this.enrollmentPlanError = "Enter a valid subject target and recruitment period.";
+          return;
+        }
+      } else if (mode === "monthly") {
+        try {
+          payload.monthly_enrollments = this.parseMonthlyEnrollmentPlan();
+        } catch (error) {
+          this.enrollmentPlanError = error.message;
+          return;
+        }
+      }
+
+      this.savingEnrollmentPlan = true;
+      try {
+        await axios.put(`/forms/studies/${this.studyId}/enrollment-plan`, payload, {
+          headers: { Authorization: `Bearer ${this.$store.state.token}` },
+        });
+        this.enrollmentPlanSaved = true;
+        await this.loadSummary(true);
+      } catch (error) {
+        this.enrollmentPlanError = error?.response?.data?.detail || error?.message || "Could not save the enrollment plan.";
+      } finally {
+        this.savingEnrollmentPlan = false;
+      }
+    },
+    async loadSummary(force = false) {
+      if (!this.studyId || (this.loading && !force)) return;
       this.loading = true;
       this.error = "";
       try {
@@ -433,6 +850,7 @@ export default {
         });
         this.summary = data;
         this.loadedStudyId = this.studyId;
+        this.hydrateEnrollmentPlan();
       } catch (error) {
         this.error = error?.response?.data?.detail || error?.message || "Unknown error";
       } finally {
@@ -508,6 +926,56 @@ export default {
 .legend-list li, .status-breakdown li { display: grid; grid-template-columns: 9px 1fr auto; align-items: center; gap: 8px; padding: 5px 0; color: #374151; font-size: 12px; }
 .dot { width: 8px; height: 8px; border-radius: 50%; }.dot.active { background: #2563eb; }.dot.retained { background: #818cf8; }.dot.deleted { background: #64748b; }
 .chart-card { padding: 16px; }
+.enrollment-card { margin-bottom: 12px; }
+.enrollment-heading { align-items: center; }
+.actual-only-badge { flex: 0 0 auto; padding: 5px 9px; border: 1px solid #cbd5e1; border-radius: 999px; background: #f8fafc; color: #475569; font-size: 11px; font-weight: 600; }
+.actual-only-badge.planned { border-color: #bfdbfe; background: #eff6ff; color: #1d4ed8; }
+.enrollment-kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 9px; margin-top: 14px; }
+.enrollment-kpis article { min-height: 84px; padding: 11px 12px; border: 1px solid #e5e7eb; border-radius: 9px; background: #f9fafb; }
+.enrollment-kpis span, .enrollment-kpis small { display: block; color: #6b7280; font-size: 11px; line-height: 1.4; }
+.enrollment-kpis strong { display: block; margin: 5px 0 3px; color: #111827; font-size: 21px; line-height: 1.15; }
+.enrollment-kpis .forecast-value { font-size: 16px; }
+.enrollment-chart-block { margin-top: 14px; padding: 12px; border: 1px solid #e5e7eb; border-radius: 10px; }
+.enrollment-chart-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; }
+.enrollment-chart-header > div:first-child { display: grid; gap: 3px; }
+.enrollment-chart-header strong { font-size: 12px; }
+.enrollment-chart-header span { color: #6b7280; font-size: 11px; }
+.enrollment-legend { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 7px 11px; }
+.enrollment-legend span { display: inline-flex; align-items: center; gap: 5px; color: #475569; white-space: nowrap; }
+.enrollment-legend i, .group-proportion-list i { display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: #111827; }
+.enrollment-legend .planned-series i { width: 14px; height: 0; border-top: 2px dashed #f97316; border-radius: 0; background: transparent; }
+.enrollment-chart-scroll { margin-top: 8px; overflow-x: auto; }
+.enrollment-chart, .enrollment-proportion-chart { display: block; width: 100%; min-width: 700px; height: auto; }
+.enrollment-total-line, .enrollment-group-line, .enrollment-planned-line { fill: none; stroke-linecap: round; stroke-linejoin: round; }
+.enrollment-total-line { stroke: #111827; stroke-width: 3; }
+.enrollment-group-line { stroke-width: 1.75; opacity: .72; }
+.enrollment-planned-line { stroke: #f97316; stroke-width: 2.5; stroke-dasharray: 8 6; }
+.enrollment-total-point { fill: #fff; stroke: #111827; stroke-width: 2; }
+.proportion-grid line { stroke: #e5e7eb; stroke-width: 1; }
+.enrollment-proportion-chart polygon { opacity: .72; }
+.group-proportion-list { display: flex; flex-wrap: wrap; gap: 8px 16px; margin-top: 8px; }
+.group-proportion-list div { display: grid; grid-template-columns: 9px auto auto; align-items: center; gap: 6px; color: #475569; font-size: 11px; }
+.group-proportion-list strong { color: #111827; }
+.plan-comparison-note { display: flex; align-items: center; gap: 8px; margin-top: 7px; padding: 7px 9px; border-radius: 7px; background: #f0fdf4; color: #166534; font-size: 11px; }
+.plan-comparison-note.behind { background: #fff7ed; color: #9a3412; }
+.plan-comparison-note.on-plan { background: #eff6ff; color: #1d4ed8; }
+.plan-comparison-note span { color: inherit; opacity: .85; }
+.enrollment-warning { margin: 10px 0 0; color: #9a3412; font-size: 11px; }
+.enrollment-plan-editor { margin-top: 14px; padding: 13px; border: 1px solid #dbeafe; border-radius: 10px; background: #f8fbff; }
+.plan-editor-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.plan-editor-heading strong { color: #111827; font-size: 13px; }
+.plan-editor-heading p { max-width: 680px; margin: 4px 0 0; color: #64748b; font-size: 11px; line-height: 1.45; }
+.save-plan-btn { flex: 0 0 auto; padding: 7px 12px; border: 1px solid #2563eb; border-radius: 7px; background: #2563eb; color: #fff; font-size: 12px; font-weight: 600; cursor: pointer; }
+.save-plan-btn:disabled { opacity: .6; cursor: wait; }
+.plan-fields { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-top: 12px; }
+.plan-fields label { display: grid; align-content: start; gap: 5px; }
+.plan-fields label > span { color: #374151; font-size: 11px; font-weight: 600; }
+.plan-fields input, .plan-fields select, .plan-fields textarea { box-sizing: border-box; width: 100%; padding: 8px 9px; border: 1px solid #d1d5db; border-radius: 7px; background: #fff; color: #111827; font: inherit; font-size: 12px; }
+.plan-fields textarea { resize: vertical; }
+.plan-fields small { color: #64748b; font-size: 10px; line-height: 1.4; }
+.monthly-plan-field { grid-column: span 2; }
+.plan-message { margin: 9px 0 0; font-size: 11px; }
+.plan-message.error { color: #b91c1c; }.plan-message.success { color: #166534; }.plan-message.neutral { color: #475569; }
 .histogram-card { margin-bottom: 12px; }
 .histogram-scroll { margin-top: 16px; overflow-x: auto; }
 .histogram-plot { min-width: 620px; height: 210px; display: grid; grid-template-columns: repeat(10, minmax(48px, 1fr)); align-items: end; gap: clamp(6px, 1.4vw, 16px); padding: 12px 8px 0; border-bottom: 1px solid #9ca3af; background: repeating-linear-gradient(to top, transparent 0, transparent 49px, #eef2f7 50px); }
@@ -555,7 +1023,7 @@ export default {
 .percent-pill { display: inline-block; min-width: 46px; padding: 3px 7px; border-radius: 999px; font-weight: 700; text-align: center; }.percent-pill.good { color: #166534; background: #dcfce7; }.percent-pill.moderate { color: #92400e; background: #fef3c7; }.percent-pill.low, .percent-pill.skipped { color: #991b1b; background: #fee2e2; }.percent-pill.skipped { outline: 1px solid #fca5a5; }
 .empty-state, .empty-cell { padding: 24px; color: #6b7280; text-align: center; }
 .method-note { padding: 11px 12px; border: 1px solid #e5e7eb; border-radius: 8px; background: #f9fafb; color: #6b7280; font-size: 11px; line-height: 1.55; }.method-note span { display: block; margin-top: 4px; }.method-note::after { content: ""; display: block; height: 1px; }
-@media (max-width: 1050px) { .kpi-grid { grid-template-columns: repeat(2, 1fr); }.insight-grid, .dashboard-grid { grid-template-columns: 1fr; } }
-@media (max-width: 760px) { .operational-grid, .threshold-summary { grid-template-columns: 1fr; }.threshold-summary { margin-left: 0; }.chart-heading, .scope-note { align-items: flex-start; flex-direction: column; }.scope-note small { text-align: left; }.metric-note { align-self: flex-start; } }
-@media (max-width: 640px) { .compliance-header, .primary-insight { align-items: stretch; flex-direction: column; }.kpi-grid { grid-template-columns: 1fr; }.radial { align-self: center; }.recruitment-chart-wrap { flex-direction: column; }.bar-row { grid-template-columns: 1fr 44px; }.bar-meta { grid-column: 1 / -1; } }
+@media (max-width: 1050px) { .kpi-grid, .enrollment-kpis { grid-template-columns: repeat(2, 1fr); }.insight-grid, .dashboard-grid { grid-template-columns: 1fr; } }
+@media (max-width: 760px) { .operational-grid, .threshold-summary, .plan-fields { grid-template-columns: 1fr; }.monthly-plan-field { grid-column: auto; }.threshold-summary { margin-left: 0; }.chart-heading, .scope-note, .enrollment-chart-header, .plan-editor-heading { align-items: flex-start; flex-direction: column; }.scope-note small { text-align: left; }.metric-note { align-self: flex-start; }.enrollment-legend { justify-content: flex-start; } }
+@media (max-width: 640px) { .compliance-header, .primary-insight { align-items: stretch; flex-direction: column; }.kpi-grid, .enrollment-kpis { grid-template-columns: 1fr; }.radial { align-self: center; }.recruitment-chart-wrap { flex-direction: column; }.bar-row { grid-template-columns: 1fr 44px; }.bar-meta { grid-column: 1 / -1; }.plan-comparison-note { align-items: flex-start; flex-direction: column; } }
 </style>

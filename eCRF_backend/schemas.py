@@ -121,6 +121,13 @@ class StudyFull(BaseModel):
         from_attributes = True
 
 
+class EnrollmentPlanUpdate(BaseModel):
+    mode: Literal["none", "linear", "monthly"] = "none"
+    target_subjects: Optional[int] = Field(default=None, ge=1)
+    duration_months: Optional[int] = Field(default=None, ge=1, le=240)
+    monthly_enrollments: List[int] = Field(default_factory=list)
+
+
 # File Schemas
 class FileBase(BaseModel):
     file_name: str

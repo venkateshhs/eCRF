@@ -1,3 +1,5 @@
+from datetime import datetime, timezone
+
 from eCRF_backend.compliance import build_compliance_summary
 
 
@@ -19,8 +21,8 @@ def _study_data():
     }
 
 
-def _entry(entry_id, subject, visit, version, data):
-    return {
+def _entry(entry_id, subject, visit, version, data, created_at=None):
+    entry = {
         "id": entry_id,
         "subject_index": subject,
         "visit_index": visit,
@@ -29,6 +31,9 @@ def _entry(entry_id, subject, visit, version, data):
         "data": {"Clinical": data},
         "skipped_required_flags": [],
     }
+    if created_at is not None:
+        entry["created_at"] = created_at
+    return entry
 
 
 def test_compliance_summary_covers_recruitment_visits_groups_and_latest_version():
@@ -107,6 +112,162 @@ def test_compliance_summary_handles_empty_study():
     assert summary["visit_stats"] == []
     assert len(summary["completeness_histogram"]) == 10
     assert summary["completeness_threshold_curve"][80]["subject_count"] == 0
+
+
+def test_enrollment_monitoring_uses_first_qualifying_entry_and_includes_retained_dropouts():
+    study_data = {
+        "subjects": [
+            {"id": "SUB-001", "group": "A", "status": "ACTIVE"},
+            {"id": "SUB-002", "group": "A", "status": "ACTIVE"},
+            {"id": "SUB-003", "group": "B", "status": "DROPPED_DATA_RETAINED"},
+            {"id": "SUB-004", "group": "B", "status": "ACTIVE"},
+            {"id": "SUB-005", "group": "B", "status": "ACTIVE"},
+            {"id": "SUB-006", "group": "B", "status": "DROPPED_DATA_DELETED"},
+        ],
+        "groups": [{"name": "A"}, {"name": "B"}],
+        "visits": [{"name": "Visit 1"}, {"name": "Visit 2"}],
+        "selectedModels": [{"title": "Clinical", "fields": [{"id": "field"}]}],
+        "assignments": [[[True, True], [True, True]]],
+    }
+    entries = [
+        _entry(1, 0, 0, 1, {"field": "first"}, "2026-06-01T09:00:00Z"),
+        _entry(2, 0, 1, 2, {"field": "later"}, "2026-06-15T09:00:00Z"),
+        _entry(3, 1, 0, 1, {"field": "value"}, "2026-07-15T09:00:00Z"),
+        _entry(4, 2, 0, 1, {"field": "retained"}, "2026-08-15T09:00:00Z"),
+        _entry(5, 3, 0, 1, {"field": "value"}, "2026-09-15T09:00:00Z"),
+        _entry(6, 5, 0, 1, {"field": "deleted"}, "2026-09-20T09:00:00Z"),
+    ]
+    entries[3]["group_index"] = 0
+    entries[2]["created_at"] = "not-a-date"
+    entries[2]["updated_at"] = "2026-08-15T09:00:00Z"
+
+    summary = build_compliance_summary(
+        study_data,
+        entries,
+        as_of=datetime(2026, 10, 1, tzinfo=timezone.utc),
+    )
+    monitoring = summary["enrollment_monitoring"]
+
+    assert monitoring["definition"] == "first_qualifying_data_entry"
+    assert monitoring["enrolled_subjects"] == 4
+    assert monitoring["configured_subjects"] == 5
+    assert monitoring["first_enrollment_date"] == "2026-06-01"
+    assert monitoring["last_enrollment_date"] == "2026-09-15"
+    assert monitoring["timeline"][0]["total"] == 1
+    assert monitoring["timeline"][-1]["total"] == 4
+    assert monitoring["actual_by_group"] == [
+        {"group_index": 0, "group_name": "A", "count": 2, "proportion_percent": 50},
+        {"group_index": 1, "group_name": "B", "count": 2, "proportion_percent": 50},
+    ]
+    assert monitoring["pace"]["enrolled_last_30_days"] == 1
+    assert monitoring["pace"]["enrolled_last_90_days"] == 3
+    assert monitoring["pace"]["subjects_per_30_days_from_90_day_window"] == 1.0
+    assert monitoring["forecast"] == {
+        "available": True,
+        "target_subjects": 5,
+        "remaining_subjects": 1,
+        "projected_completion_date": "2026-10-31",
+        "monthly_pace_used": 1.0,
+        "reason": None,
+    }
+
+
+def test_enrollment_forecast_uses_unrounded_rolling_rate():
+    study_data = {
+        "subjects": [{"id": f"SUB-{index:03d}", "group": "A", "status": "ACTIVE"} for index in range(1, 11)],
+        "groups": [{"name": "A"}],
+        "visits": [{"name": "Visit 1"}],
+        "selectedModels": [{"title": "Clinical", "fields": [{"id": "field"}]}],
+        "assignments": [[[True]]],
+    }
+    enrollment_dates = ["2026-06-01", "2026-07-15", "2026-08-01", "2026-09-01", "2026-09-15"]
+    entries = [
+        _entry(index, index - 1, 0, 1, {"field": "value"}, f"{entry_date}T09:00:00Z")
+        for index, entry_date in enumerate(enrollment_dates, start=1)
+    ]
+
+    monitoring = build_compliance_summary(
+        study_data, entries, as_of=datetime(2026, 10, 1, tzinfo=timezone.utc)
+    )["enrollment_monitoring"]
+
+    assert monitoring["pace"]["enrolled_last_90_days"] == 4
+    assert monitoring["pace"]["subjects_per_30_days_from_90_day_window"] == 1.3
+    assert monitoring["forecast"]["projected_completion_date"] == "2027-01-22"
+
+
+def test_linear_enrollment_plan_compares_actuals_and_forecasts_to_plan_target():
+    study_data = {
+        "subjects": [{"id": f"SUB-{index:03d}", "group": "A", "status": "ACTIVE"} for index in range(1, 11)],
+        "groups": [{"name": "A"}],
+        "visits": [{"name": "Visit 1"}],
+        "selectedModels": [{"title": "Clinical", "fields": [{"id": "field"}]}],
+        "assignments": [[[True]]],
+        "studySettings": {
+            "enrollmentMonitoring": {"mode": "linear", "target_subjects": 12, "duration_months": 6}
+        },
+    }
+    entries = [
+        _entry(index, index - 1, 0, 1, {"field": "value"}, f"2026-0{index}-01T09:00:00Z")
+        for index in range(1, 5)
+    ]
+
+    monitoring = build_compliance_summary(
+        study_data, entries, as_of=datetime(2026, 4, 1, tzinfo=timezone.utc)
+    )["enrollment_monitoring"]
+
+    assert monitoring["plan"]["configured"] is True
+    assert monitoring["plan"]["enabled"] is True
+    assert monitoring["plan"]["start_date"] == "2026-01-01"
+    assert monitoring["plan"]["planned_timeline"][-1] == {"date": "2026-07-01", "cumulative": 12}
+    assert monitoring["planned_to_date"] == 6
+    assert monitoring["variance_to_plan"] == -2
+    assert monitoring["forecast"]["target_subjects"] == 12
+
+
+def test_monthly_enrollment_plan_uses_incremental_targets():
+    study_data = _study_data()
+    study_data["studySettings"] = {
+        "enrollmentMonitoring": {"mode": "monthly", "monthly_enrollments": [2, 3, 1]}
+    }
+    entries = [_entry(1, 0, 0, 1, {"age": 70}, "2026-01-15T09:00:00Z")]
+
+    monitoring = build_compliance_summary(
+        study_data, entries, as_of=datetime(2026, 3, 20, tzinfo=timezone.utc)
+    )["enrollment_monitoring"]
+
+    assert monitoring["plan"]["target_subjects"] == 6
+    assert monitoring["plan"]["duration_months"] == 3
+    assert monitoring["plan"]["planned_timeline"] == [
+        {"date": "2026-01-15", "cumulative": 0},
+        {"date": "2026-02-15", "cumulative": 2},
+        {"date": "2026-03-15", "cumulative": 5},
+        {"date": "2026-04-15", "cumulative": 6},
+    ]
+    assert monitoring["planned_to_date"] == 5
+    assert monitoring["variance_to_plan"] == -4
+
+
+def test_enrollment_plan_is_preserved_while_waiting_for_first_actual_entry():
+    study_data = _study_data()
+    study_data["studySettings"] = {
+        "enrollmentMonitoring": {"mode": "linear", "target_subjects": 20, "duration_months": 8}
+    }
+
+    monitoring = build_compliance_summary(
+        study_data, [], as_of=datetime(2026, 3, 20, tzinfo=timezone.utc)
+    )["enrollment_monitoring"]
+
+    assert monitoring["plan"] == {
+        "configured": True,
+        "enabled": False,
+        "waiting_for_actual": True,
+        "mode": "linear",
+        "target_subjects": 20,
+        "duration_months": 8,
+        "monthly_enrollments": [],
+        "start_date": None,
+        "planned_timeline": [],
+    }
 
 
 def test_untouched_subjects_and_future_visits_are_excluded_from_scope():

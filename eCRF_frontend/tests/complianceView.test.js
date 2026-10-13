@@ -44,6 +44,16 @@ assert.match(source, /Current compliance scope/);
 assert.match(source, /Subjects with no started visits and future visits with no entered data are excluded/);
 assert.match(source, /dropout percentage is the share of this enrolled-with-data cohort/);
 assert.match(source, /expected visit not yet started by that subject is 0%/);
+assert.match(source, /Actual enrollment over time/);
+assert.match(source, /rolling 90-day average/);
+assert.match(source, /Group proportions over time/);
+assert.match(source, /Optional planned enrollment/);
+assert.match(source, /Total subjects over a period/);
+assert.match(source, /Monthly recruitment numbers/);
+assert.match(source, /\/enrollment-plan/);
+assert.match(source, /summary\.can_edit_enrollment_plan/);
+assert.match(source, /enrollmentPlan\.enabled/);
+assert.match(source, /enrollment-planned-line/);
 
 const context = {
   summary: {

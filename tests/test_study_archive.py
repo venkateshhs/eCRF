@@ -3,7 +3,7 @@ from fastapi import HTTPException
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from eCRF_backend import forms_hybrid, models
+from eCRF_backend import forms_hybrid, models, schemas
 from eCRF_backend.database import Base
 
 
@@ -112,3 +112,54 @@ def test_admin_can_archive_another_users_study(db):
 
     restored = forms_hybrid.unarchive_study(study.id, db=db, user=admin)
     assert restored["status"] == "PUBLISHED"
+
+
+def test_owner_can_save_enrollment_plan_and_remove_it(db):
+    owner = add_user(db, "owner", "Principal Investigator")
+    study = add_study(db, owner.id, status="DRAFT")
+    content = models.StudyContent(study_id=study.id, study_data={"subjects": []})
+    db.add(content)
+    db.commit()
+
+    result = forms_hybrid.update_enrollment_plan(
+        study.id,
+        schemas.EnrollmentPlanUpdate(mode="linear", target_subjects=120, duration_months=12),
+        db=db,
+        current_user=owner,
+    )
+    assert result["enrollment_plan"] == {
+        "mode": "linear",
+        "target_subjects": 120,
+        "duration_months": 12,
+        "monthly_enrollments": [],
+    }
+    db.refresh(content)
+    assert content.study_data["studySettings"]["enrollmentMonitoring"]["target_subjects"] == 120
+
+    forms_hybrid.update_enrollment_plan(
+        study.id,
+        schemas.EnrollmentPlanUpdate(mode="none"),
+        db=db,
+        current_user=owner,
+    )
+    db.refresh(content)
+    assert "enrollmentMonitoring" not in content.study_data["studySettings"]
+
+
+def test_enrollment_plan_requires_edit_permission_and_writable_study(db):
+    owner = add_user(db, "owner", "Principal Investigator")
+    outsider = add_user(db, "outsider", "Investigator")
+    study = add_study(db, owner.id, status="DRAFT")
+    db.add(models.StudyContent(study_id=study.id, study_data={"subjects": []}))
+    db.commit()
+    payload = schemas.EnrollmentPlanUpdate(mode="monthly", monthly_enrollments=[2, 3, 4])
+
+    with pytest.raises(HTTPException) as unauthorized:
+        forms_hybrid.update_enrollment_plan(study.id, payload, db=db, current_user=outsider)
+    assert unauthorized.value.status_code == 403
+
+    study.status = "ARCHIVED"
+    db.commit()
+    with pytest.raises(HTTPException) as archived:
+        forms_hybrid.update_enrollment_plan(study.id, payload, db=db, current_user=owner)
+    assert archived.value.status_code == 409
