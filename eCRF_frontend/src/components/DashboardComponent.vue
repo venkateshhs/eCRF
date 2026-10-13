@@ -3,7 +3,8 @@
     :class="[
       'dashboard-layout',
       {
-        'import-open': showImportData
+        'import-open': showImportData,
+        'sidebar-hidden': hideSidebar
       }
     ]"
   >
@@ -33,50 +34,19 @@
           Docs <span aria-hidden="true">↗</span>
         </a>
 
-        <div v-if="isLoggedIn" ref="accountMenu" class="account-menu" @click.stop>
-          <div class="user-identity">
-            <div class="user-name" :title="userName">{{ userName }}</div>
-            <div class="user-role" :title="role || '—'">{{ role || '—' }}</div>
-          </div>
-
-          <button
-            type="button"
-            class="account-menu-toggle"
-            :aria-expanded="showAccountMenu ? 'true' : 'false'"
-            aria-haspopup="menu"
-            aria-label="Open user menu"
-            title="User menu"
-            @click="toggleAccountMenu"
-            @keydown.esc.prevent="closeAccountMenu"
-          >
-            <i :class="icons.bars || 'fas fa-bars'" aria-hidden="true"></i>
-          </button>
-
-          <div v-if="showAccountMenu" class="account-menu-popover" role="menu" aria-label="User menu">
-            <button v-if="!mustChangePassword" type="button" class="account-menu-item" role="menuitem" @click="openUserSection('profile')">
-              <i :class="icons.user || 'fas fa-user'" aria-hidden="true"></i>
-              <span>My profile</span>
-            </button>
-            <button type="button" class="account-menu-item" role="menuitem" @click="openUserSection('password')">
-              <i class="fas fa-key" aria-hidden="true"></i>
-              <span>Change password</span>
-            </button>
-            <div v-if="isAdmin && !mustChangePassword" class="account-menu-separator" role="separator"></div>
-            <button v-if="isAdmin && !mustChangePassword" type="button" class="account-menu-item" role="menuitem" @click="openUserSection('management')">
-              <i class="fas fa-users-cog" aria-hidden="true"></i>
-              <span>User management</span>
-            </button>
-            <button v-if="isAdmin && !mustChangePassword" type="button" class="account-menu-item" role="menuitem" @click="openUserSection('studyAccess')">
-              <i class="fas fa-user-shield" aria-hidden="true"></i>
-              <span>Study access</span>
-            </button>
-            <div class="account-menu-separator" role="separator"></div>
-            <button type="button" class="account-menu-item account-menu-item--logout" role="menuitem" @click="logout('Logged out.')">
-              <i :class="icons.signOut || 'fas fa-sign-out-alt'" aria-hidden="true"></i>
-              <span>Logout</span>
-            </button>
-          </div>
+        <div class="user-identity">
+          <div class="user-name" :title="userName">{{ userName }}</div>
+          <div class="user-role" :title="role || '—'">{{ role || '—' }}</div>
         </div>
+
+        <button
+          v-if="isLoggedIn"
+          type="button"
+          @click="logout('Logged out.')"
+          class="btn-minimal"
+        >
+          Logout
+        </button>
 
         <button
           v-else
@@ -88,6 +58,36 @@
         </button>
       </div>
     </header>
+
+    <!-- Sidebar (HIDDEN for View Study + Add Data + Scratch Form) -->
+    <aside v-if="!hideSidebar" class="dashboard-sidebar">
+      <nav>
+        <ul>
+          <!-- Study Management: only Admin, PI or Investigator -->
+          <li
+            v-if="isAdmin || isPI || isInvestigator"
+            @click="setActiveSection('study-management')"
+            :class="['nav-item', { active: activeSection === 'study-management' && $route.name === 'Dashboard' }]"
+            tabindex="0"
+            @keydown.enter="setActiveSection('study-management')"
+            @keydown.space.prevent="setActiveSection('study-management')"
+          >
+            <span>Study Management</span>
+          </li>
+
+          <!-- User Management: visible to all roles -->
+          <li
+            @click="() => { setActiveSection(''); navigate({ name: 'UserInfo' }) }"
+            :class="['nav-item', { active: $route.name === 'UserInfo' }]"
+            tabindex="0"
+            @keydown.enter="() => { setActiveSection(''); navigate({ name: 'UserInfo' }) }"
+            @keydown.space.prevent="() => { setActiveSection(''); navigate({ name: 'UserInfo' }) }"
+          >
+            <span>User Management</span>
+          </li>
+        </ul>
+      </nav>
+    </aside>
 
     <!-- Main Content -->
     <main
@@ -141,7 +141,7 @@
         </div>
 
         <!-- Dashboard home: Study Management -->
-        <div v-else>
+        <div v-else-if="activeSection === 'study-management'">
           <div class="study-management-header">
             <h1 class="study-management-title">Studies</h1>
             <p class="study-management-subtitle">
@@ -430,12 +430,12 @@ export default {
   components: { ImportStudy, BuildInfoFooter },
   data() {
     return {
+      activeSection: "study-management",
       studies: [],
       studiesLoading: false,
       studiesError: "",
       studySearchQuery: "",
       icons,
-      showAccountMenu: false,
 
       showImportData: false,
       importMaximized: false,
@@ -455,7 +455,6 @@ export default {
   },
   watch: {
     "$route.name"() {
-      this.closeAccountMenu();
       if (!this.authReady) return;
       this.syncFromRoute();
     },
@@ -482,6 +481,15 @@ export default {
 
         return searchable.includes(q);
       });
+    },
+
+    // Hide dashboard sidebar on View Study + Add Data + Scratch Form
+    hideSidebar() {
+      return (
+        this.$route.name === "StudyView" ||
+        this.$route.name === "DashboardAddData" ||
+        this.$route.name === "CreateFormScratch"
+      );
     },
 
     isLoggedIn() {
@@ -512,29 +520,14 @@ export default {
     isPI() {
       return this.role === "Principal Investigator";
     },
+    isInvestigator() {
+      return this.role === "Investigator";
+    },
     mustChangePassword() {
       return this.currentUser.must_change_password === true;
     },
   },
   methods: {
-    toggleAccountMenu() {
-      this.showAccountMenu = !this.showAccountMenu;
-    },
-    closeAccountMenu() {
-      this.showAccountMenu = false;
-    },
-    onDocumentClick(event) {
-      if (!this.showAccountMenu) return;
-      const menu = this.$refs.accountMenu;
-      if (!menu || !menu.contains(event.target)) this.closeAccountMenu();
-    },
-    openUserSection(tab) {
-      this.closeAccountMenu();
-      this.navigate({
-        name: "UserInfo",
-        query: { tab },
-      });
-    },
     redirectToPasswordChange() {
       if (this.$route.name !== "UserInfo") {
         this.$router.replace({ name: "UserInfo" }).catch(() => null);
@@ -829,6 +822,7 @@ export default {
         // Keep user in Existing Studies list
         await this.$router.push({ name: "Dashboard" }).catch(() => null);
 
+        this.activeSection = "study-management";
         this.showImportData = false;
         this.importMaximized = false;
         await this.loadStudies();
@@ -890,12 +884,31 @@ export default {
       const view = String(this.$route.query.view || "");
       if (view === "import-data") {
         this.showImportData = true;
+        this.activeSection = "study-management";
         return;
       }
 
       this.showImportData = false;
       this.importMaximized = false;
+      this.activeSection = "study-management";
+
       this.loadStudies();
+    },
+
+    async setActiveSection(section) {
+      if (!this.isLoggedIn) {
+        this.$router.push("/login").catch(() => null);
+        return;
+      }
+      if (this.mustChangePassword) {
+        this.redirectToPasswordChange();
+        return;
+      }
+
+      await this.$router.push({ name: "Dashboard" });
+      this.activeSection = section;
+      this.showImportData = false;
+      this.importMaximized = false;
     },
 
     openImportData() {
@@ -1007,13 +1020,13 @@ export default {
         return;
       }
 
+      this.activeSection = "";
       this.showImportData = false;
       this.importMaximized = false;
       this.$router.push(to);
     },
 
     async logout(message = "Logged out.") {
-      this.closeAccountMenu();
       // ignore DOM events accidentally passed by @click
       if (message && typeof message !== "string") {
         message = "Logged out.";
@@ -1055,12 +1068,15 @@ export default {
   },
 
   async mounted() {
-    document.addEventListener("click", this.onDocumentClick);
     const ok = await this.ensureAuth();
     if (!ok) return;
 
     this.syncFromRoute();
     this.setPageNoXScroll(!!this.showImportData);
+
+    if (this.$route.path === "/dashboard" && this.$route.name === "Dashboard") {
+      this.activeSection = "study-management";
+    }
 
     console.log("[Dashboard] starting ActivityTracker (DOM sampled + API activity)");
 
@@ -1095,7 +1111,6 @@ export default {
   },
 
   beforeUnmount() {
-    document.removeEventListener("click", this.onDocumentClick);
     this.setPageNoXScroll(false);
     console.log("[Dashboard] stopping ActivityTracker (unmount)");
     activityTracker.stop();
@@ -1113,12 +1128,20 @@ export default {
 .dashboard-layout {
   display: grid;
   grid-template-areas:
-    "header"
-    "main";
+    "header header"
+    "sidebar main";
   grid-template-rows: 70px 1fr;
-  grid-template-columns: minmax(0, 1fr);
+  grid-template-columns: 220px 1fr;
   height: 100vh;
-  overflow-x: hidden;
+  transition: grid-template-columns 0.3s ease;
+}
+
+/* When sidebar should be hidden entirely (View Study / Add Data / Scratch Form) */
+.dashboard-layout.sidebar-hidden {
+  grid-template-areas:
+    "header header"
+    "main main";
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .dashboard-header {
@@ -1181,74 +1204,39 @@ export default {
   color: #6b7280;
 }
 
-.account-menu {
-  position: relative;
-  display: flex;
-  align-items: center;
-  gap: 9px;
+/* Sidebar */
+.dashboard-sidebar {
+  grid-area: sidebar;
+  background: #f8fafc;
+  padding: 20px;
+  border-right: 1px solid #dbe4ee;
+  transition: width 0.3s ease, padding 0.3s ease;
 }
-.account-menu-toggle {
-  width: 38px;
-  height: 38px;
+/* Sidebar Navigation */
+.dashboard-sidebar nav ul {
+  list-style: none;
   padding: 0;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border: 1px solid #d1d5db;
-  border-radius: 8px;
-  background: #ffffff;
-  color: #374151;
+}
+.nav-item {
+  padding: 10px;
+  font-size: 15px;
+  color: #4b5563;
   cursor: pointer;
-  transition: background 0.2s ease, border-color 0.2s ease, color 0.2s ease;
-}
-.account-menu-toggle:hover,
-.account-menu-toggle:focus-visible,
-.account-menu-toggle[aria-expanded="true"] {
-  background: #f3f4f6;
-  border-color: #9ca3af;
-  color: #111827;
-  outline: none;
-}
-.account-menu-popover {
-  position: absolute;
-  top: calc(100% + 9px);
-  right: 0;
-  z-index: 1200;
-  width: 210px;
-  padding: 6px;
-  border: 1px solid #d1d5db;
-  border-radius: 10px;
-  background: #ffffff;
-  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.16);
-}
-.account-menu-item {
-  width: 100%;
+  border-radius: 6px;
+  transition: background 0.3s ease;
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 10px 11px;
-  border: 0;
-  border-radius: 7px;
-  background: transparent;
-  color: #374151;
-  font: inherit;
-  font-size: 14px;
-  text-align: left;
-  cursor: pointer;
 }
-.account-menu-item:hover,
-.account-menu-item:focus-visible {
-  background: #f3f4f6;
-  color: #111827;
-  outline: none;
+.nav-item:hover {
+  background: #eef2ff;
+  color: #1d4ed8;
 }
-.account-menu-separator {
-  height: 1px;
-  margin: 5px 4px;
-  background: #e5e7eb;
-}
-.account-menu-item--logout {
-  color: #b91c1c;
+.nav-item.active {
+  background: #eff6ff;
+  color: #1d4ed8;
+  font-weight: 700;
+  box-shadow: inset 3px 0 0 #2563eb;
 }
 
 /* Main Content */
@@ -1274,6 +1262,11 @@ export default {
 
 .dashboard-build-footer {
   margin-top: auto;
+}
+
+/* If sidebar hidden, ensure no funky shift */
+.dashboard-layout.sidebar-hidden .dashboard-main {
+  margin-left: 0 !important;
 }
 
 /*  constrain ONLY dashboard home content (not router-view routes) */
@@ -1810,10 +1803,15 @@ export default {
 @media (min-width: 1700px) {
   /* Typography scale up */
 .dashboard-layout {
+  display: grid;
   grid-template-areas:
-    "header"
-    "main";
-  grid-template-columns: minmax(0, 1fr);
+    "header header"
+    "sidebar main";
+  grid-template-rows: 70px 1fr;
+  grid-template-columns: 220px minmax(0, 1fr);
+  height: 100vh;
+  transition: grid-template-columns 0.3s ease;
+  overflow-x: hidden;
 }
 
   .user-role {

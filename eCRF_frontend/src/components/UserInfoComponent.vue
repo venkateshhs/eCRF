@@ -1,6 +1,18 @@
 <template>
   <div class="user-info-container">
     <div class="layout">
+      <!-- Sidebar (vertical tabs) -->
+      <aside class="sidebar">
+        <button
+          v-for="tab in visibleTabs"
+          :key="tab.key"
+          :class="['tab-btn', { active: currentTab === tab.key }]"
+          @click="currentTab = tab.key"
+        >
+          {{ tab.label }}
+        </button>
+      </aside>
+
       <!-- Main content -->
       <main class="content">
         <!-- PROFILE -->
@@ -29,6 +41,17 @@
                 <span class="v role-pill" :data-role="user.profile.role">{{ user.profile.role }}</span>
               </div>
             </div>
+          </div>
+        </section>
+
+        <!-- STUDY SETTINGS -->
+        <section v-else-if="currentTab === 'settings' && (isAdmin || isPI)" class="section">
+          <h2 class="section-title">Study Settings</h2>
+          <p class="disclaimer">
+            Note: Study Settings are not fully implemented yet. This section is a work in progress.
+          </p>
+          <div class="section-box scrollable">
+            <StudySettings />
           </div>
         </section>
 
@@ -427,9 +450,11 @@
 <script>
 import axios from "axios";
 import icons from "@/assets/styles/icons";
+import StudySettings from "@/components/StudySettings.vue";
 
 export default {
   name: "UserInfoComponent",
+  components: { StudySettings },
   data() {
     return {
       currentTab: "profile",
@@ -495,6 +520,9 @@ export default {
     isAdmin() {
       return this.user?.profile?.role === "Administrator";
     },
+    isPI() {
+      return this.user?.profile?.role === "Principal Investigator";
+    },
     mustChangePassword() {
       return this.user?.must_change_password === true;
     },
@@ -503,6 +531,7 @@ export default {
         return [{ key: "password", label: "Change Password" }];
       }
       const tabs = [{ key: "profile", label: "Profile" }];
+      if (this.isAdmin || this.isPI) tabs.push({ key: "settings", label: "Study Settings" });
       tabs.push({ key: "password", label: "Change Password" });
       if (this.isAdmin) {
         tabs.push({ key: "management", label: "User Management" });
@@ -539,27 +568,14 @@ export default {
       await this.$store.dispatch("fetchUserData");
       this.user = this.$store.getters.getUser;
     }
-    this.syncTabFromRoute();
+    if (this.mustChangePassword) {
+      this.currentTab = "password";
+    }
     if (this.isAdmin && !this.mustChangePassword) {
       await Promise.all([this.fetchUsers(), this.fetchAllUsers(), this.fetchStudies()]);
     }
   },
-  watch: {
-    "$route.query.tab"() {
-      this.syncTabFromRoute();
-    },
-  },
   methods: {
-    syncTabFromRoute() {
-      if (this.mustChangePassword) {
-        this.currentTab = "password";
-        return;
-      }
-      const requested = String(this.$route?.query?.tab || "");
-      this.currentTab = this.visibleTabs.some((tab) => tab.key === requested)
-        ? requested
-        : "profile";
-    },
     authHeader() {
       return { Authorization: `Bearer ${this.$store.state.token}` };
     },
@@ -872,16 +888,62 @@ export default {
 }
 
 .layout {
+  display: grid;
+  grid-template-columns: 1fr;         /* single column */
+  grid-template-rows: auto 1fr;       /* tabbar row + content row */
+  gap: 16px;
+}
+
+/* Sidebar becomes a horizontal tabbar */
+.sidebar {
+  grid-column: 1 / -1;
+  grid-row: 1;
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  padding: 8px;
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 6px;
+  position: sticky;
+  top: 16px;
+  z-index: 5;
+  overflow-x: auto;           /* allow horizontal scroll if many tabs */
+  scrollbar-width: thin;
   width: 100%;
-  min-width: 0;
+}
+
+/* Tab button: horizontal pill */
+.tab-btn {
+  padding: 10px 14px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  background: #f9fafb;
+  cursor: pointer;
+  font-weight: 600;
+  text-align: center;
+  white-space: nowrap;
+  transition: background 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+  flex: 1 1 0;
+  max-width: none;
+  text-align: center;
+}
+.tab-btn:hover {
+  background: #f3f4f6;
+}
+.tab-btn.active {
+  background: #eef2ff;
+  border-color: #c7d2fe;
+  box-shadow: 0 0 0 3px rgba(99,102,241,0.15);
 }
 
 /* Content area */
 .content {
+  grid-column: 1 / -1;
+  grid-row: 2;
   display: grid;
   gap: 14px;
-  width: 100%;
-  min-width: 0;
 }
 .section { display: grid; gap: 14px; }
 
@@ -1160,9 +1222,18 @@ export default {
   user-select: all;
 }
 
-/* Responsive */
+/* Responsive (tabs already horizontal; just ensure spacing) */
 @media (max-width: 980px) {
+  .sidebar {
+    border-radius: 10px;
+    gap: 6px;
+    top: 8px;
+  }
+  .tab-btn { padding: 8px 12px; font-size: 0.95rem; }
   .kv { grid-template-columns: 140px 1fr; }
   .table-wrap { max-height: 50vh; }
+  @media (max-width: 520px) {
+  .tab-btn { flex: 1 0 160px; } /* equal-ish width, allow scroll */
+}
 }
 </style>
