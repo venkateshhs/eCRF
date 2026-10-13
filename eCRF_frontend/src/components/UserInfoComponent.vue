@@ -2,7 +2,7 @@
   <div class="user-info-container">
     <div class="layout">
       <!-- Sidebar (vertical tabs) -->
-      <aside class="sidebar">
+      <aside v-if="visibleTabs.length" class="sidebar">
         <button
           v-for="tab in visibleTabs"
           :key="tab.key"
@@ -14,7 +14,7 @@
       </aside>
 
       <!-- Main content -->
-      <main class="content">
+      <main :class="['content', { 'content--standalone': !visibleTabs.length }]">
         <!-- PROFILE -->
         <section v-if="currentTab === 'profile'" class="section">
           <h2 class="section-title">Profile</h2>
@@ -41,17 +41,6 @@
                 <span class="v role-pill" :data-role="user.profile.role">{{ user.profile.role }}</span>
               </div>
             </div>
-          </div>
-        </section>
-
-        <!-- STUDY SETTINGS -->
-        <section v-else-if="currentTab === 'settings' && (isAdmin || isPI)" class="section">
-          <h2 class="section-title">Study Settings</h2>
-          <p class="disclaimer">
-            Note: Study Settings are not fully implemented yet. This section is a work in progress.
-          </p>
-          <div class="section-box scrollable">
-            <StudySettings />
           </div>
         </section>
 
@@ -450,11 +439,9 @@
 <script>
 import axios from "axios";
 import icons from "@/assets/styles/icons";
-import StudySettings from "@/components/StudySettings.vue";
 
 export default {
   name: "UserInfoComponent",
-  components: { StudySettings },
   data() {
     return {
       currentTab: "profile",
@@ -520,9 +507,6 @@ export default {
     isAdmin() {
       return this.user?.profile?.role === "Administrator";
     },
-    isPI() {
-      return this.user?.profile?.role === "Principal Investigator";
-    },
     mustChangePassword() {
       return this.user?.must_change_password === true;
     },
@@ -530,14 +514,18 @@ export default {
       if (this.mustChangePassword) {
         return [{ key: "password", label: "Change Password" }];
       }
-      const tabs = [{ key: "profile", label: "Profile" }];
-      if (this.isAdmin || this.isPI) tabs.push({ key: "settings", label: "Study Settings" });
-      tabs.push({ key: "password", label: "Change Password" });
-      if (this.isAdmin) {
-        tabs.push({ key: "management", label: "User Management" });
-        tabs.push({ key: "studyAccess", label: "Study Access" });
+      const accountTabs = [
+        { key: "profile", label: "Profile" },
+        { key: "password", label: "Change Password" },
+      ];
+      const requested = String(this.$route?.query?.tab || "");
+      if (!this.isAdmin || accountTabs.some((tab) => tab.key === requested)) {
+        return accountTabs;
       }
-      return tabs;
+      return [
+        { key: "management", label: "User Management" },
+        { key: "studyAccess", label: "Study Access" },
+      ];
     },
     selectedStudy() {
       const id = Number(this.selectedStudyId || 0);
@@ -568,14 +556,29 @@ export default {
       await this.$store.dispatch("fetchUserData");
       this.user = this.$store.getters.getUser;
     }
-    if (this.mustChangePassword) {
-      this.currentTab = "password";
-    }
+    this.syncTabFromRoute();
     if (this.isAdmin && !this.mustChangePassword) {
       await Promise.all([this.fetchUsers(), this.fetchAllUsers(), this.fetchStudies()]);
     }
   },
+  watch: {
+    "$route.query.tab"() {
+      this.syncTabFromRoute();
+    },
+  },
   methods: {
+    syncTabFromRoute() {
+      if (this.mustChangePassword) {
+        this.currentTab = "password";
+        return;
+      }
+      const requested = String(this.$route?.query?.tab || "");
+      const allowedTabs = ["profile", "password"];
+      if (this.isAdmin) allowedTabs.push("management", "studyAccess");
+      this.currentTab = allowedTabs.includes(requested)
+        ? requested
+        : (this.isAdmin ? "management" : "profile");
+    },
     authHeader() {
       return { Authorization: `Bearer ${this.$store.state.token}` };
     },
@@ -944,6 +947,9 @@ export default {
   grid-row: 2;
   display: grid;
   gap: 14px;
+}
+.content--standalone {
+  grid-row: 1;
 }
 .section { display: grid; gap: 14px; }
 

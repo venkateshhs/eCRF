@@ -34,19 +34,57 @@
           Docs <span aria-hidden="true">↗</span>
         </a>
 
-        <div class="user-identity">
-          <div class="user-name" :title="userName">{{ userName }}</div>
-          <div class="user-role" :title="role || '—'">{{ role || '—' }}</div>
-        </div>
+        <div v-if="isLoggedIn" ref="accountMenu" class="account-menu" @click.stop>
+          <div class="user-identity">
+            <div class="user-name" :title="userName">{{ userName }}</div>
+            <div class="user-role" :title="role || '—'">{{ role || '—' }}</div>
+          </div>
 
-        <button
-          v-if="isLoggedIn"
-          type="button"
-          @click="logout('Logged out.')"
-          class="btn-minimal"
-        >
-          Logout
-        </button>
+          <button
+            type="button"
+            class="account-menu-toggle"
+            :aria-expanded="showAccountMenu ? 'true' : 'false'"
+            aria-haspopup="menu"
+            aria-label="Open user menu"
+            title="User menu"
+            @click="toggleAccountMenu"
+            @keydown.esc.prevent="closeAccountMenu"
+          >
+            <i :class="icons.bars || 'fas fa-bars'" aria-hidden="true"></i>
+          </button>
+
+          <div v-if="showAccountMenu" class="account-menu-popover" role="menu" aria-label="User menu">
+            <button
+              v-if="!mustChangePassword"
+              type="button"
+              class="account-menu-item"
+              role="menuitem"
+              @click="openUserSection('profile')"
+            >
+              <i :class="icons.user || 'fas fa-user'" aria-hidden="true"></i>
+              <span>Profile</span>
+            </button>
+            <button
+              type="button"
+              class="account-menu-item"
+              role="menuitem"
+              @click="openUserSection('password')"
+            >
+              <i class="fas fa-key" aria-hidden="true"></i>
+              <span>Change password</span>
+            </button>
+            <div class="account-menu-separator" role="separator"></div>
+            <button
+              type="button"
+              class="account-menu-item account-menu-item--logout"
+              role="menuitem"
+              @click="logout('Logged out.')"
+            >
+              <i :class="icons.signOut || 'fas fa-sign-out-alt'" aria-hidden="true"></i>
+              <span>Logout</span>
+            </button>
+          </div>
+        </div>
 
         <button
           v-else
@@ -75,13 +113,14 @@
             <span>Study Management</span>
           </li>
 
-          <!-- User Management: visible to all roles -->
+          <!-- User Management: administrators only -->
           <li
-            @click="() => { setActiveSection(''); navigate({ name: 'UserInfo' }) }"
-            :class="['nav-item', { active: $route.name === 'UserInfo' }]"
+            v-if="isAdmin"
+            @click="openUserSection('management')"
+            :class="['nav-item', { active: isUserManagementRoute }]"
             tabindex="0"
-            @keydown.enter="() => { setActiveSection(''); navigate({ name: 'UserInfo' }) }"
-            @keydown.space.prevent="() => { setActiveSection(''); navigate({ name: 'UserInfo' }) }"
+            @keydown.enter="openUserSection('management')"
+            @keydown.space.prevent="openUserSection('management')"
           >
             <span>User Management</span>
           </li>
@@ -436,6 +475,7 @@ export default {
       studiesError: "",
       studySearchQuery: "",
       icons,
+      showAccountMenu: false,
 
       showImportData: false,
       importMaximized: false,
@@ -455,6 +495,7 @@ export default {
   },
   watch: {
     "$route.name"() {
+      this.closeAccountMenu();
       if (!this.authReady) return;
       this.syncFromRoute();
     },
@@ -526,8 +567,31 @@ export default {
     mustChangePassword() {
       return this.currentUser.must_change_password === true;
     },
+    isUserManagementRoute() {
+      if (this.$route.name !== "UserInfo") return false;
+      const tab = String(this.$route.query?.tab || "");
+      return !tab || tab === "management" || tab === "studyAccess";
+    },
   },
   methods: {
+    toggleAccountMenu() {
+      this.showAccountMenu = !this.showAccountMenu;
+    },
+    closeAccountMenu() {
+      this.showAccountMenu = false;
+    },
+    onDocumentClick(event) {
+      if (!this.showAccountMenu) return;
+      const menu = this.$refs.accountMenu;
+      if (!menu || !menu.contains(event.target)) this.closeAccountMenu();
+    },
+    openUserSection(tab) {
+      this.closeAccountMenu();
+      this.navigate({
+        name: "UserInfo",
+        query: { tab },
+      });
+    },
     redirectToPasswordChange() {
       if (this.$route.name !== "UserInfo") {
         this.$router.replace({ name: "UserInfo" }).catch(() => null);
@@ -1068,6 +1132,7 @@ export default {
   },
 
   async mounted() {
+    document.addEventListener("click", this.onDocumentClick);
     const ok = await this.ensureAuth();
     if (!ok) return;
 
@@ -1111,6 +1176,7 @@ export default {
   },
 
   beforeUnmount() {
+    document.removeEventListener("click", this.onDocumentClick);
     this.setPageNoXScroll(false);
     console.log("[Dashboard] stopping ActivityTracker (unmount)");
     activityTracker.stop();
@@ -1202,6 +1268,76 @@ export default {
 .user-role {
   font-size: 12px;
   color: #6b7280;
+}
+
+.account-menu {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+.account-menu-toggle {
+  width: 38px;
+  height: 38px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #374151;
+  cursor: pointer;
+  transition: background 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+}
+.account-menu-toggle:hover,
+.account-menu-toggle:focus-visible,
+.account-menu-toggle[aria-expanded="true"] {
+  background: #f3f4f6;
+  border-color: #9ca3af;
+  color: #111827;
+  outline: none;
+}
+.account-menu-popover {
+  position: absolute;
+  top: calc(100% + 9px);
+  right: 0;
+  z-index: 1200;
+  width: 210px;
+  padding: 6px;
+  border: 1px solid #d1d5db;
+  border-radius: 10px;
+  background: #ffffff;
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.16);
+}
+.account-menu-item {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 11px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: #374151;
+  font: inherit;
+  font-size: 14px;
+  text-align: left;
+  cursor: pointer;
+}
+.account-menu-item:hover,
+.account-menu-item:focus-visible {
+  background: #f3f4f6;
+  color: #111827;
+  outline: none;
+}
+.account-menu-separator {
+  height: 1px;
+  margin: 5px 4px;
+  background: #e5e7eb;
+}
+.account-menu-item--logout {
+  color: #b91c1c;
 }
 
 /* Sidebar */

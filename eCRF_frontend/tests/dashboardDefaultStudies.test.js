@@ -27,5 +27,28 @@ assert.doesNotMatch(source, /toggleStudyOptions/);
 assert.doesNotMatch(source, /showStudyOptions/);
 assert.doesNotMatch(source, /query\.openStudies/);
 assert.match(source, /this\.loadStudies\(\);/);
+assert.match(source, /class="account-menu-toggle"/);
+assert.match(source, />Profile<\/span>/);
+assert.match(source, />Change password<\/span>/);
+assert.match(source, />Logout<\/span>/);
+assert.match(source, /openUserSection\(tab\)/);
+assert.match(source, /query: \{ tab \}/);
+assert.match(source, /isUserManagementRoute\(\)/);
+
+const userInfoPath = path.resolve(__dirname, "../src/components/UserInfoComponent.vue");
+const userInfoSource = fs.readFileSync(userInfoPath, "utf8");
+const userInfoParseResult = parse(userInfoSource, { filename: userInfoPath });
+
+assert.deepEqual(userInfoParseResult.errors, []);
+assert.match(userInfoSource, /const requested = String\(this\.\$route\?\.query\?\.tab \|\| ""\)/);
+assert.match(userInfoSource, /const allowedTabs = \["profile", "password"\]/);
+assert.doesNotMatch(userInfoSource, /StudySettings/);
+assert.doesNotMatch(userInfoSource, /currentTab === 'settings'/);
+assert.match(userInfoSource, /const accountTabs = \[/);
+assert.match(userInfoSource, /key: "profile", label: "Profile"/);
+assert.match(userInfoSource, /key: "password", label: "Change Password"/);
+assert.match(userInfoSource, /key: "management", label: "User Management"/);
+assert.match(userInfoSource, /key: "studyAccess", label: "Study Access"/);
+assert.match(userInfoSource, /accountTabs\.some\(\(tab\) => tab\.key === requested\)/);
 
 console.log("Dashboard default studies tests passed");
