@@ -14,7 +14,7 @@ const code = babel.transformSync(source, {
 }).code;
 const moduleUnderTest = { exports: {} };
 new Function("module", "exports", code)(moduleUnderTest, moduleUnderTest.exports);
-const { resolveImportVisit, validateImportGroup } = moduleUnderTest.exports;
+const { isBlockingImportIssue, resolveImportVisit, validateImportGroup } = moduleUnderTest.exports;
 
 const visits = [{ name: "Baseline" }, { name: "Week 6" }];
 const groups = [{ name: "Control" }, { name: "Treatment" }];
@@ -49,5 +49,7 @@ assert.match(
   /missing/,
   "a selected group column must reject blank values"
 );
+assert.equal(isBlockingImportIssue("Choose a valid option."), true);
+assert.equal(isBlockingImportIssue("A non-blocking informational message"), false);
 
 console.log("Study data import target tests passed");

@@ -1,4 +1,5 @@
 import { inferFieldType, distinctValues, slugifyFieldName } from "@/utils/templateFieldImport";
+import { analyzeDelimitedChoices } from "@/utils/spreadsheetValueImport";
 
 export function cellText(value) {
   return String(value == null ? "" : value).trim();
@@ -89,6 +90,10 @@ function enrichColumns(columns, dataRows) {
   return uniqueStableKeys(columns).map(column => {
     const values = dataRows.map(row => row?.[column.columnIndex]).filter(value => cellText(value));
     const distinct = distinctValues(values);
+    const inferredType = inferFieldType(values, column.fieldName);
+    const choiceAnalysis = inferredType === "select"
+      ? analyzeDelimitedChoices(values)
+      : { allowMultiple: false, options: distinct };
     return {
       ...column,
       id: `column_${column.columnIndex}`,
@@ -97,7 +102,9 @@ function enrichColumns(columns, dataRows) {
       samples: distinct.slice(0, 3),
       distinct,
       nonBlankCount: values.length,
-      inferredType: inferFieldType(values, column.fieldName),
+      inferredType,
+      inferredAllowMultiple: choiceAnalysis.allowMultiple,
+      choiceOptions: choiceAnalysis.options,
       selected: true,
     };
   });

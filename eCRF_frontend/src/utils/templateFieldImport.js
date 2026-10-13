@@ -1,3 +1,5 @@
+import { analyzeDelimitedChoices } from "@/utils/spreadsheetValueImport";
+
 const TYPE_ALIASES = {
   text: "text",
   string: "text",
@@ -166,6 +168,9 @@ export function analyzeColumnFields(rows = [], headerRowIndex = 0) {
   return columns.map(column => {
     const values = body.map(row => row[column.index]).filter(value => !isBlank(value));
     const inferredType = inferFieldType(values, column.label);
+    const choiceAnalysis = inferredType === "select"
+      ? analyzeDelimitedChoices(values)
+      : { allowMultiple: false, options: distinctValues(values) };
     return {
       ...column,
       selected: true,
@@ -173,6 +178,8 @@ export function analyzeColumnFields(rows = [], headerRowIndex = 0) {
       samples: distinctValues(values, 3),
       distinct: distinctValues(values),
       inferredType,
+      inferredAllowMultiple: choiceAnalysis.allowMultiple,
+      choiceOptions: choiceAnalysis.options,
     };
   });
 }
