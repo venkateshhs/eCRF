@@ -142,7 +142,7 @@ def _stable_id(obj: Dict[str, Any]) -> str:
 
 _VERSIONED_CONSTRAINT_KEYS = {
     "required", "pattern", "min", "max", "minLength", "maxLength", "step",
-    "allowMultiple", "dominantOptions", "integerOnly", "dateFormat", "minDate",
+    "allowMultiple", "allowOther", "dominantOptions", "integerOnly", "dateFormat", "minDate",
     "maxDate", "minTime", "maxTime", "hourCycle", "minDigits", "maxDigits",
 }
 

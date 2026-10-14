@@ -1,11 +1,31 @@
 from eCRF_backend.versions import (
     _sanitize_entry_data_for_new_options,
     _snapshot_structural_core,
+    _sanitize_choice_value_for_new_options,
+    _choice_definition_changed,
 )
 import unittest
 
 
 class VersionChoiceSanitizeTests(unittest.TestCase):
+    def test_other_answers_survive_option_edits_and_clear_when_disabled(self):
+        for field_type in ("radio", "select"):
+            field = {"type": field_type, "options": ["A"], "constraints": {"allowOther": True}}
+            self.assertEqual(_sanitize_choice_value_for_new_options("Custom", field), ("Custom", False))
+            self.assertEqual(_sanitize_choice_value_for_new_options(["A", "Custom"], field), (["A", "Custom"], False))
+            disabled = {**field, "constraints": {"allowOther": False}}
+            self.assertTrue(_choice_definition_changed(field, disabled))
+            self.assertEqual(_sanitize_choice_value_for_new_options("Custom", disabled), ("", True))
+
+    def test_other_toggle_changes_template_structure(self):
+        import copy
+        before = {"selectedModels": [{"title": "Section", "fields": [
+            {"_id": "choice", "type": "select", "options": ["A"], "constraints": {}}
+        ]}]}
+        after = copy.deepcopy(before)
+        after["selectedModels"][0]["fields"][0]["constraints"]["allowOther"] = True
+        self.assertNotEqual(_snapshot_structural_core(before), _snapshot_structural_core(after))
+
     def test_reordering_choices_is_not_structural(self):
         old_schema = {
             "selectedModels": [

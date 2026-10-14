@@ -7,7 +7,6 @@ classes:
         required: true
       description:
         range: string
-        description: Cohort description
+        description: Visit description
         required: false
         widget: textarea
-

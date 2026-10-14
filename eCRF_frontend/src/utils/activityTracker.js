@@ -9,6 +9,7 @@
 const DEFAULTS = {
   // Server policy
   inactivityMs: 30 * 60 * 1000, // 30 minutes
+  beforeIdleMs: 2 * 60 * 1000, // warn/save drafts two minutes before logout
   pingIntervalMs: 5 * 60 * 1000, // 5 minutes
   idleCheckMs: 30 * 1000, // check idle every 30s
 
@@ -48,6 +49,8 @@ const state = {
   getToken: null,
   pingFn: null,
   onLogout: null,
+  onBeforeIdle: null,
+  beforeIdleTriggered: false,
 
   // listener refs
   handlers: null,
@@ -78,6 +81,7 @@ function setUserActivity(kind = "event") {
   const t = nowMs();
   state.lastUserAt = t;
   state.activitySinceLastPing = true;
+  state.beforeIdleTriggered = false;
 
   if (state.cfg.debug && t - state.lastActivityLogAt > 5000) {
     state.lastActivityLogAt = t;
@@ -89,6 +93,7 @@ function setApiActivity(kind = "api") {
   const t = nowMs();
   state.lastApiAt = t;
   state.activitySinceLastPing = true;
+  state.beforeIdleTriggered = false;
 
   if (state.cfg.debug && t - state.lastActivityLogAt > 5000) {
     state.lastActivityLogAt = t;
@@ -177,6 +182,22 @@ function checkIdleAndLogout() {
 
   const t = nowMs();
   const idleFor = t - maxActivityAt();
+
+  const beforeIdleAt = Math.max(0, state.cfg.inactivityMs - state.cfg.beforeIdleMs);
+  if (
+    !state.beforeIdleTriggered &&
+    state.cfg.beforeIdleMs > 0 &&
+    idleFor >= beforeIdleAt &&
+    idleFor < state.cfg.inactivityMs
+  ) {
+    state.beforeIdleTriggered = true;
+    if (typeof state.onBeforeIdle === "function") {
+      state.onBeforeIdle({
+        idleForMs: idleFor,
+        logoutInMs: Math.max(0, state.cfg.inactivityMs - idleFor),
+      });
+    }
+  }
 
   if (idleFor >= state.cfg.inactivityMs) {
     dbg(`idle timeout reached (${Math.round(idleFor / 1000)}s) → logout`);
@@ -322,7 +343,7 @@ function stopTimer() {
  * @param {Object} [options.config]    -> overrides DEFAULTS
  */
 function start(options = {}) {
-  const { getToken, pingFn, onLogout, config } = options;
+  const { getToken, pingFn, onLogout, onBeforeIdle, config } = options;
 
   if (state.started) {
     dbg("start called but already started");
@@ -333,12 +354,14 @@ function start(options = {}) {
   state.getToken = getToken;
   state.pingFn = pingFn;
   state.onLogout = onLogout;
+  state.onBeforeIdle = onBeforeIdle;
 
   const t = nowMs();
   state.lastUserAt = t;
   state.lastApiAt = 0;
   state.lastPingAt = 0;
   state.activitySinceLastPing = false;
+  state.beforeIdleTriggered = false;
 
   state.userCooldownUntil = 0;
   if (state.cooldownReattachId) {

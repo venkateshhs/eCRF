@@ -129,6 +129,10 @@
       <div class="form-actions">
           <button type="button" @click="backFromStep1" class="btn-option">Back</button>
 
+          <button type="button" class="btn-option" @click="requestSaveAndContinue" :disabled="unsavedBusy || !saveDirty">
+            {{ unsavedBusy ? "Saving…" : (isPublishedStudy ? "Review and Save Changes" : "Save and Continue") }}
+          </button>
+
           <button
             v-if="!isEditing"
             type="button"
@@ -139,8 +143,8 @@
             {{ unsavedBusy ? "Saving…" : "Save Draft and Leave" }}
           </button>
 
-          <button v-if="isEditing" type="button" class="btn-option" @click="saveThisStepAndBackToStudy">
-            Save and Leave
+          <button v-if="isEditing && !isPublishedStudy" type="button" class="btn-option" @click="saveThisStepAndBackToStudy">
+            {{ isPublishedStudy ? "Review and save changes" : "Save and Leave" }}
           </button>
 
           <button type="button" @click="validateStudy()" class="btn-option">
@@ -158,6 +162,10 @@
       <div class="form-actions">
           <button @click="step = 1" class="btn-option">Back</button>
 
+          <button type="button" class="btn-option" @click="requestSaveAndContinue" :disabled="unsavedBusy || !saveDirty">
+            {{ unsavedBusy ? "Saving…" : (isPublishedStudy ? "Review and Save Changes" : "Save and Continue") }}
+          </button>
+
           <button
             v-if="!isEditing"
             type="button"
@@ -168,8 +176,8 @@
             {{ unsavedBusy ? "Saving…" : "Save Draft and Leave" }}
           </button>
 
-          <button v-if="isEditing" type="button" class="btn-option" @click="saveThisStepAndBackToStudy">
-            Save and Leave
+          <button v-if="isEditing && !isPublishedStudy" type="button" class="btn-option" @click="saveThisStepAndBackToStudy">
+            {{ isPublishedStudy ? "Review and save changes" : "Save and Leave" }}
           </button>
 
           <button @click="checkGroups()" class="btn-option">Next</button>
@@ -206,10 +214,16 @@
           :subjectIdFormatEditable="!isPublishedStudy"
           :hasExistingSubjects="hasExistingSubjects"
           :isPublished="isPublishedStudy"
+          :lockedSubjectIds="persistedSubjects.map(subject => subject.id || subject.subject_id)"
+          @skip-manual="skipManualEnrollment"
           @changed="onSubjectSetupChanged"
         />
       <div class="form-actions">
           <button @click="step = 2" class="btn-option">Back</button>
+
+          <button type="button" class="btn-option" @click="requestSaveAndContinue" :disabled="unsavedBusy || !saveDirty">
+            {{ unsavedBusy ? "Saving…" : (isPublishedStudy ? "Review and Save Changes" : "Save and Continue") }}
+          </button>
 
           <button
             v-if="!isEditing"
@@ -221,8 +235,8 @@
             {{ unsavedBusy ? "Saving…" : "Save Draft and Leave" }}
           </button>
 
-          <button v-if="isEditing" type="button" class="btn-option" @click="saveThisStepAndBackToStudy">
-            Save and Leave
+          <button v-if="isEditing && !isPublishedStudy" type="button" class="btn-option" @click="saveThisStepAndBackToStudy">
+            {{ isPublishedStudy ? "Review and save changes" : "Save and Leave" }}
           </button>
 
           <button @click="checkSubjectsSetup()" class="btn-option">
@@ -240,6 +254,10 @@
       <div class="form-actions">
           <button @click="step = 3" class="btn-option">Back</button>
 
+          <button type="button" class="btn-option" @click="requestSaveAndContinue" :disabled="unsavedBusy || !saveDirty">
+            {{ unsavedBusy ? "Saving…" : (isPublishedStudy ? "Review and Save Changes" : "Save and Continue") }}
+          </button>
+
           <button
             v-if="!isEditing"
             type="button"
@@ -250,8 +268,8 @@
             {{ unsavedBusy ? "Saving…" : "Save Draft and Leave" }}
           </button>
 
-          <button v-if="isEditing" type="button" class="btn-option" @click="saveThisStepAndBackToStudy">
-            Save and Leave
+          <button v-if="isEditing && !isPublishedStudy" type="button" class="btn-option" @click="saveThisStepAndBackToStudy">
+            {{ isPublishedStudy ? "Review and save changes" : "Save and Leave" }}
           </button>
 
           <button @click="checkSubjectsAssigned()" class="btn-option">Next</button>
@@ -267,6 +285,10 @@
       <div class="form-actions">
           <button @click="goBackFromVisits" class="btn-option">Back</button>
 
+          <button type="button" class="btn-option" @click="requestSaveAndContinue" :disabled="unsavedBusy || !saveDirty">
+            {{ unsavedBusy ? "Saving…" : (isPublishedStudy ? "Review and Save Changes" : "Save and Continue") }}
+          </button>
+
           <button
             v-if="!isEditing"
             type="button"
@@ -277,8 +299,8 @@
             {{ unsavedBusy ? "Saving…" : "Save Draft and Leave" }}
           </button>
 
-          <button v-if="isEditing" type="button" class="btn-option" @click="saveThisStepAndBackToStudy">
-            Save and Leave
+          <button v-if="isEditing && !isPublishedStudy" type="button" class="btn-option" @click="saveThisStepAndBackToStudy">
+            {{ isPublishedStudy ? "Review and save changes" : "Save and Leave" }}
           </button>
 
           <button @click="goToFinish()" class="btn-option">Forms</button>
@@ -314,6 +336,13 @@
         <button class="btn-option" @click="closeDialog">Close</button>
       </div>
 
+      <div v-else-if="dialogMode === 'publishedSave'" class="dialog-actions">
+        <button class="btn-option" @click="closeDialog" :disabled="unsavedBusy">Cancel</button>
+        <button class="btn-option" @click="confirmPublishedSaveAndContinue" :disabled="unsavedBusy">
+          {{ unsavedBusy ? "Saving…" : "Review and save changes" }}
+        </button>
+      </div>
+
       <button v-else @click="closeDialog" class="btn-option">OK</button>
     </div>
   </div>
@@ -331,6 +360,7 @@ import BaseTextarea from "@/components/forms/BaseTextarea.vue";
 import BaseNumberField from "@/components/forms/BaseNumberField.vue";
 import BaseDateField from "@/components/forms/BaseDateField.vue";
 import BaseSelectField from "@/components/forms/BaseSelectField.vue";
+import { STUDY_BEFORE_IDLE_EVENT } from "@/utils/studySaveWorkflow";
 
 import GroupForm from "./GroupForm.vue";
 import VisitForm from "./VisitForm.vue";
@@ -341,8 +371,10 @@ import {
   normalizeSubjectIdConfig,
   inferSubjectIdConfigFromExistingSubjects,
   buildUniqueSubjectId,
+  getNextSubjectSequenceNumber,
   subjectIdPatternValidationMessage,
 } from "@/utils/subjectIdUtils";
+import { reconcileManualSubjects } from "@/utils/manualSubjectIds";
 
 export default {
   name: "StudyCreationComponent",
@@ -370,6 +402,7 @@ export default {
     const studyData = ref({});
     const groupData = ref([]);
     const subjectData = ref([]);
+    const persistedSubjects = ref([]);
     const visitData = ref([]);
     const subjectCount = ref(1);
     const assignmentMethod = ref("Random");
@@ -384,6 +417,8 @@ export default {
     const dialogMessage = ref("");
     const dialogMode = ref("default"); // 'default' | 'importSuccess' | 'unsaved'
     const unsavedBusy = ref(false);
+    const lastSavedAt = ref(null);
+    const saveError = ref("");
 
     const skipSubjectCreationNow = ref(false);
 
@@ -412,14 +447,22 @@ export default {
 
     const editId = computed(() => props.id || route.params.id || null);
     const isEditing = computed(() => !!editId.value);
-    const isPublishedStudy = computed(() => {
-      const status =
+    const storedStudyStatus = computed(() =>
+      String(
         store.state.studyDetails?.study_metadata?.status ||
         store.state.studyDetails?.metadata?.status ||
         store.state.studyDetails?.status ||
-        "";
-
-      return String(status).trim().toUpperCase() === "PUBLISHED";
+        ""
+      ).trim().toUpperCase()
+    );
+    const isPublishedStudy = computed(() => storedStudyStatus.value === "PUBLISHED");
+    const currentStudyStatus = computed(() =>
+      storedStudyStatus.value || (isEditing.value ? "UNKNOWN" : "DRAFT")
+    );
+    const saveDirty = computed(() => !!isDirty.value || !!globalDirty.value);
+    const canAutoSaveDraft = computed(() => {
+      const s = studyData.value || {};
+      return currentStudyStatus.value === "DRAFT" && !!String(s.title || s.study_name || s.name || "").trim();
     });
 
     const hasExistingSubjects = computed(() => {
@@ -483,7 +526,10 @@ export default {
     const globalDirty = computed(() => !!store.state.studyCreationDirty);
     const currentUserId = computed(() => store.state.user?.id || null);
 
-    function onSubjectSetupChanged() {
+    function onSubjectSetupChanged(event) {
+      if (event?.kind === "manualSubjectIds" && (subjectIdConfig.value.manualIds || []).length > persistedSubjects.value.length) {
+        skipSubjectCreationNow.value = false;
+      }
       // Mark Step 4 validation as stale whenever subject setup/assignment changes.
       // Next click to Step 5 will re-run checkSubjectsAssigned() and block if needed.
       const step4Applies = !skipSubjectCreationNow.value && assignmentMethod.value !== "Skip";
@@ -629,10 +675,28 @@ export default {
       });
     }
 
-    function markSavedSnapshot() {
+    function markSavedSnapshot(recordSaveTime = false) {
       lastSavedSnapshot.value = buildSnapshot();
       isDirty.value = false;
       store.commit("setStudyCreationDirty", false);
+      if (recordSaveTime) lastSavedAt.value = Date.now();
+      saveError.value = "";
+    }
+
+    function markSavedRequestSnapshot(serializedSnapshot, createdDraftId = null) {
+      let savedSnapshot;
+      try {
+        savedSnapshot = JSON.parse(serializedSnapshot);
+      } catch {
+        savedSnapshot = buildSnapshot();
+      }
+      if (createdDraftId != null) savedSnapshot.draftStudyId = Number(createdDraftId);
+
+      lastSavedSnapshot.value = savedSnapshot;
+      lastSavedAt.value = Date.now();
+      saveError.value = "";
+      computeDirty();
+      if (!isDirty.value) store.commit("setStudyCreationDirty", false);
     }
 
     function computeDirty() {
@@ -759,17 +823,27 @@ export default {
       subjectCount.value = details.subjectCount ?? subjectCount.value;
       assignmentMethod.value = details.assignmentMethod ?? assignmentMethod.value;
       subjectData.value = Array.isArray(details.subjects) ? [...details.subjects] : [];
+      persistedSubjects.value = isEditing.value ? _deepClone(subjectData.value) : [];
       visitData.value = Array.isArray(details.visits) ? [...details.visits] : [];
       skipSubjectCreationNow.value = !!details.skipSubjectCreationNow;
 
-      subjectIdConfig.value = inferSubjectIdConfigFromExistingSubjects(
-        subjectData.value,
-        studyData.value || {},
-        headerStudyName.value || "Study",
-        { useLast: false }
-      );
+      subjectIdConfig.value = details.subjectIdConfig
+        ? normalizeSubjectIdConfig(
+            details.subjectIdConfig,
+            studyData.value || {},
+            headerStudyName.value || "Study"
+          )
+        : inferSubjectIdConfigFromExistingSubjects(
+            subjectData.value,
+            studyData.value || {},
+            headerStudyName.value || "Study",
+            { useLast: false }
+          );
 
       subjectIdConfig.value.locked = !!isPublishedStudy.value;
+      if (isEditing.value && subjectIdConfig.value.mode === "manual") {
+        subjectIdConfig.value.manualIds = subjectData.value.map(subject => subject.id || subject.subject_id);
+      }
 
       assignments.value = Array.isArray(details.assignments)
         ? JSON.parse(JSON.stringify(details.assignments))
@@ -803,6 +877,7 @@ export default {
             visits: _deepClone(visitData.value || []),
             subjectCount: Number(subjectCount.value || 0),
             assignmentMethod: assignmentMethod.value || "Random",
+            subjectIdConfig: _deepClone(subjectIdConfig.value || null),
             subjects: _deepClone(subjectData.value || []),
             assignments: _deepClone(assignments.value || []),
             skipSubjectCreationNow: !!skipSubjectCreationNow.value,
@@ -815,32 +890,42 @@ export default {
     // save logic used ONLY by:
     // - Save button in edit mode
     // - Unsaved dialog "Save & Exit"
-    async function saveNow() {
+    async function saveNow({ automatic = false, action = "continue" } = {}) {
       if (!token.value) {
         router.push("/login");
         return false;
       }
 
+      if (subjectIdConfig.value.mode === "manual" && !skipSubjectCreationNow.value &&
+          (subjectIdConfig.value.manualIds || []).length && !checkSubjectsSetup({ advance: false })) return false;
       const payload = buildBackendPayload();
       const formsToPersist = getFormsForSavePayload();
+      const existingStudyId = editId.value || draftStudyId.value;
+      const saveStartSnapshot = JSON.stringify(buildSnapshot());
 
       try {
-        if (isEditing.value) {
+        if (existingStudyId) {
           await axios.put(
-              `/forms/studies/${editId.value}`,
+              `/forms/studies/${existingStudyId}`,
               payload,
               {
                 headers: authHeader.value,
+                __skipActivityTracker: automatic,
                 // audit_label: user clicked "Save" / "Save & Exit" while editing an existing study
-                params: { audit_label: "Update Existing Study" },
+                params: {
+                  audit_label: automatic
+                    ? "Automatic Draft Recovery Save"
+                    : action === "exit" ? "Update Existing Study" : "Save and Continue",
+                },
               }
             );
 
           // Keep local store consistent and preserve forms/template after save
+          persistedSubjects.value = _deepClone(payload.study_content.study_data.subjects || []);
           commitStudyDetailsPreservingForms({
             study_metadata: {
               ...(store.state.studyDetails?.study_metadata || {}),
-              id: Number(editId.value),
+              id: Number(existingStudyId),
               name: payload.study_metadata.study_name,
               study_name: payload.study_metadata.study_name,
               description: payload.study_metadata.study_description,
@@ -849,19 +934,20 @@ export default {
             study: {
               ...(store.state.studyDetails?.study || {}),
               ..._deepClone(payload.study_content.study_data.study || {}),
-              id: Number(editId.value),
+              id: Number(existingStudyId),
             },
             groups: _deepClone(payload.study_content.study_data.groups || []),
             visits: _deepClone(payload.study_content.study_data.visits || []),
             subjectCount: payload.study_content.study_data.subjectCount || 0,
             assignmentMethod: payload.study_content.study_data.assignmentMethod || "Random",
+            subjectIdConfig: _deepClone(payload.study_content.study_data.subjectIdConfig || null),
             subjects: _deepClone(payload.study_content.study_data.subjects || []),
             assignments: _deepClone(payload.study_content.study_data.assignments || []),
             skipSubjectCreationNow: !!payload.study_content.study_data.skipSubjectCreationNow,
             selectedModels: _deepClone(payload.study_content.study_data.selectedModels || deriveSelectedModelsFromForms(formsToPersist)),
           });
 
-          markSavedSnapshot();
+          markSavedRequestSnapshot(saveStartSnapshot);
           return true;
         }
 
@@ -871,8 +957,13 @@ export default {
           payload,
           {
             headers: authHeader.value,
+            __skipActivityTracker: automatic,
             // audit_label: user clicked "Save as Draft & Exit" (or "Save & Exit" in create flow)
-            params: { audit_label: "Save Draft of Study" },
+            params: {
+              audit_label: automatic
+                ? "Automatic Draft Recovery Save"
+                : action === "exit" ? "Save Draft of Study" : "Save and Continue - Create Draft",
+            },
           }
         );
 
@@ -899,13 +990,14 @@ export default {
           visits: payload.study_content.study_data.visits || [],
           subjectCount: payload.study_content.study_data.subjectCount || 0,
           assignmentMethod: payload.study_content.study_data.assignmentMethod || "Random",
+          subjectIdConfig: _deepClone(payload.study_content.study_data.subjectIdConfig || null),
           subjects: payload.study_content.study_data.subjects || [],
           assignments: payload.study_content.study_data.assignments || [],
           skipSubjectCreationNow: !!payload.study_content.study_data.skipSubjectCreationNow,
           selectedModels: _deepClone(payload.study_content.study_data.selectedModels || deriveSelectedModelsFromForms(formsToPersist)),
         });
 
-        markSavedSnapshot();
+        markSavedRequestSnapshot(saveStartSnapshot, createdId);
         return true;
       } catch (e) {
         const msg =
@@ -913,11 +1005,46 @@ export default {
           e?.response?.data?.message ||
           e?.message ||
           "Failed to save.";
-        dialogMessage.value = String(msg);
-        dialogMode.value = "default";
-        showDialog.value = true;
+        saveError.value = String(msg);
+        if (!automatic) {
+          dialogMessage.value = String(msg);
+          dialogMode.value = "default";
+          showDialog.value = true;
+        }
         return false;
       }
+    }
+
+    async function performSaveAndContinue({ automatic = false } = {}) {
+      if (unsavedBusy.value || !saveDirty.value) return;
+      unsavedBusy.value = true;
+      saveError.value = "";
+      try {
+        await saveNow({ automatic });
+      } finally {
+        unsavedBusy.value = false;
+      }
+    }
+
+    function requestSaveAndContinue() {
+      if (isPublishedStudy.value) {
+        dialogMode.value = "publishedSave";
+        dialogMessage.value =
+          "This study is published. Saving structural changes may create a new template version. Review the changes before saving.";
+        showDialog.value = true;
+        return;
+      }
+      performSaveAndContinue();
+    }
+
+    async function confirmPublishedSaveAndContinue() {
+      closeDialog();
+      await performSaveAndContinue();
+    }
+
+    function saveDraftBeforeIdle() {
+      if (!canAutoSaveDraft.value || isPublishedStudy.value) return;
+      performSaveAndContinue({ automatic: true });
     }
     function isReturningFromScratch() {
       return route.name === "CreateStudy" && route.query.step != null;
@@ -952,7 +1079,12 @@ export default {
       const ok = validateStepOnly(step.value);
       if (!ok) return;
 
-      const saved = await saveNow();
+      if (isPublishedStudy.value) {
+        requestSaveAndContinue();
+        return;
+      }
+
+      const saved = await saveNow({ action: "exit" });
       if (!saved) return;
 
       router.push(resolveReturnRoute());
@@ -1099,6 +1231,7 @@ export default {
         visits: sd.visits || [],
         subjectCount: sd.subjectCount || 0,
         assignmentMethod: sd.assignmentMethod || "random",
+        subjectIdConfig: _deepClone(sd.subjectIdConfig || null),
         subjects: sd.subjects || [],
         assignments: assignmentsLocal,
         skipSubjectCreationNow: !!sd.skipSubjectCreationNow,
@@ -1294,6 +1427,14 @@ export default {
     }
 
     // ============ STEP 3 ============
+    function skipManualEnrollment() {
+      subjectData.value = _deepClone(persistedSubjects.value);
+      subjectCount.value = subjectData.value.length;
+      subjectIdConfig.value.manualIds = subjectData.value.map(subject => subject.id || subject.subject_id);
+      skipSubjectCreationNow.value = true;
+      checkSubjectsSetup();
+    }
+
     function checkSubjectsSetup(opts = { advance: true, silent: false }) {
       if (skipSubjectCreationNow.value) {
         stepErrors.value[3] = false;
@@ -1303,6 +1444,7 @@ export default {
           groups: groupData.value,
           subjectCount: Number(subjectCount.value || 0),
           assignmentMethod: assignmentMethod.value || "Random",
+          subjectIdConfig: _deepClone(subjectIdConfig.value || null),
           subjects: subjectData.value,
           assignments: assignments.value,
           skipSubjectCreationNow: skipSubjectCreationNow.value,
@@ -1310,6 +1452,32 @@ export default {
 
         if (opts.advance) step.value = 5;
         return true;
+      }
+
+      if (normalizeSubjectIdConfig(subjectIdConfig.value).mode === "manual") {
+        try {
+          subjectData.value = reconcileManualSubjects(
+            subjectIdConfig.value.manualIds || [], subjectData.value, persistedSubjects.value,
+            groupData.value.map(group => group.name || group.label || "Unnamed"), assignmentMethod.value === "Random"
+          );
+          subjectCount.value = subjectData.value.length;
+          commitStudyDetailsPreservingForms({
+            subjectCount: subjectCount.value, assignmentMethod: assignmentMethod.value,
+            subjectIdConfig: _deepClone(subjectIdConfig.value), subjects: _deepClone(subjectData.value),
+            skipSubjectCreationNow: false,
+          });
+          stepErrors.value[3] = false;
+          if (opts.advance) step.value = assignmentMethod.value === "Skip" ? 5 : 4;
+          return true;
+        } catch (error) {
+          stepErrors.value[3] = true;
+          if (!opts.silent) {
+            dialogMessage.value = error.message;
+            dialogMode.value = "default";
+            showDialog.value = true;
+          }
+          return false;
+        }
       }
 
       if (!subjectCount.value || !assignmentMethod.value) {
@@ -1362,42 +1530,42 @@ export default {
         : [];
       const currentCount = existingSubjects.length;
 
-      if (isPublishedStudy.value) {
-        const nextSubjects = existingSubjects.slice(0, N).map((s) => ({
-          ...s,
-          id: String(s?.id || s?.subject_id || "").trim(),
-          group: s?.group || "",
-        }));
-
+      if (isEditing.value) {
+        // Subject identity becomes immutable as soon as a study (including a
+        // draft) has been persisted. Keep each existing ID at its original
+        // array position and generate IDs only for appended subjects.
+        const nextSubjects = existingSubjects.slice(0, N);
         const existingIds = new Set(
           nextSubjects
-            .map((s) => String(s?.id || s?.subject_id || "").trim())
+            .map((subject) => String(subject?.id || subject?.subject_id || "").trim())
             .filter(Boolean)
         );
+        let nextSequenceNumber = getNextSubjectSequenceNumber(
+          existingSubjects,
+          subjectIdConfig.value
+        );
 
-        if (N > currentCount) {
-          for (let idx = currentCount; idx < N; idx += 1) {
-            const sequenceNumber = getSubjectSequenceNumberForIndex(idx);
-            const nextId = buildUniqueSubjectIdForCurrentStudy(
-              subjectIdConfig.value,
-              sequenceNumber,
-              existingIds
-            );
-
-            existingIds.add(nextId);
-
-            nextSubjects.push({
-              id: nextId,
-              group:
-                assignmentMethod.value === "Random" && groupNames.length > 0
-                  ? groupNames[Math.floor(Math.random() * groupNames.length)]
-                  : "",
-            });
-          }
+        for (let idx = currentCount; idx < N; idx += 1) {
+          const nextId = buildUniqueSubjectIdForCurrentStudy(
+            subjectIdConfig.value,
+            nextSequenceNumber,
+            existingIds
+          );
+          nextSequenceNumber += 1;
+          existingIds.add(nextId);
+          nextSubjects.push({
+            id: nextId,
+            group:
+              assignmentMethod.value === "Random" && groupNames.length > 0
+                ? groupNames[Math.floor(Math.random() * groupNames.length)]
+                : "",
+          });
         }
 
         subjectData.value = nextSubjects;
       } else {
+        // Preserve the existing create-flow behavior: before the study has ever
+        // been saved, changing the ID configuration regenerates the full list.
         const regeneratedIds = new Set();
         const nextSubjects = [];
 
@@ -1411,7 +1579,6 @@ export default {
           );
 
           regeneratedIds.add(nextId);
-
           nextSubjects.push({
             ...existing,
             id: nextId,
@@ -1431,6 +1598,7 @@ export default {
         groups: groupData.value,
         subjectCount: N,
         assignmentMethod: assignmentMethod.value || "Random",
+        subjectIdConfig: _deepClone(subjectIdConfig.value || null),
         subjects: _deepClone(subjectData.value),
         assignments: assignments.value,
         skipSubjectCreationNow: skipSubjectCreationNow.value,
@@ -1691,10 +1859,15 @@ export default {
     });
 
     async function onUnsavedSaveAndExit() {
+      if (isPublishedStudy.value) {
+        closeDialog();
+        requestSaveAndContinue();
+        return;
+      }
       if (unsavedBusy.value) return;
       unsavedBusy.value = true;
       try {
-        const saved = await saveNow();
+        const saved = await saveNow({ action: "exit" });
         if (!saved) return;
 
         showDialog.value = false;
@@ -1743,6 +1916,7 @@ export default {
     );
 
     onMounted(async () => {
+      window.addEventListener(STUDY_BEFORE_IDLE_EVENT, saveDraftBeforeIdle);
       const returningFromScratch = isReturningFromScratch();
 
       if (!editId.value && !returningFromScratch) {
@@ -1786,6 +1960,7 @@ export default {
     });
 
     onBeforeUnmount(() => {
+      window.removeEventListener(STUDY_BEFORE_IDLE_EVENT, saveDraftBeforeIdle);
       window.removeEventListener("beforeunload", beforeUnloadHandler);
     });
 
@@ -1797,6 +1972,8 @@ export default {
       visitData,
       subjectCount,
       subjectIdConfig,
+      persistedSubjects,
+      skipManualEnrollment,
       hasExistingSubjects,
       isPublishedStudy,
       assignmentMethod,
@@ -1808,6 +1985,11 @@ export default {
       dialogMessage,
       dialogMode,
       unsavedBusy,
+      lastSavedAt,
+      saveError,
+      saveDirty,
+      currentStudyStatus,
+      canAutoSaveDraft,
       skipSubjectCreationNow,
 
       steps,
@@ -1856,6 +2038,9 @@ export default {
       onUnsavedKeepEditing,
       onUnsavedExitWithoutSaving,
       onUnsavedSaveAndExit,
+      requestSaveAndContinue,
+      confirmPublishedSaveAndContinue,
+      saveDraftBeforeIdle,
       onSubjectSetupChanged,
     };
   },

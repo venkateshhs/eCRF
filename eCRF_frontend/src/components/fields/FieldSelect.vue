@@ -11,7 +11,20 @@
     >
       <option v-if="!multiple && placeholder" disabled value="">{{ placeholder }}</option>
       <option v-for="(opt, i) in stringOptions" :key="i" :value="opt">{{ opt }}</option>
+      <option v-if="allowOther" :value="otherToken">Other</option>
     </select>
+    <input
+      v-if="allowOther && otherActive"
+      ref="otherInput"
+      class="fsel-input other-input"
+      type="text"
+      :value="otherText"
+      :disabled="isReadonly"
+      placeholder="Please specify"
+      aria-label="Other answer"
+      @input="updateOther($event.target.value)"
+      @blur="finishOther"
+    />
 
     <button
       v-if="multiple && allowClear && !isReadonly && hasAnySelection"
@@ -38,17 +51,27 @@ export default {
     placeholder: { type: String, default: "Select…" },
     id: { type: String, default: null },
     defaultValue: { type: [String, Array], default: "" },
-    allowClear: { type: Boolean, default: true }
+    allowClear: { type: Boolean, default: true },
+    allowOther: { type: Boolean, default: false }
   },
   emits: ["update:modelValue"],
+  data() {
+    return { otherActive: false, otherText: "" };
+  },
   computed: {
+    otherToken() {
+      let token = "__other__";
+      while (this.stringOptions.includes(token)) token += "_";
+      return token;
+    },
     isReadonly() {
       const attrReadonly =
         this.$attrs.readonly === "" || this.$attrs.readonly === true || this.$attrs.readonly === "true";
       return this.readonly || attrReadonly || this.disabled;
     },
     stringOptions() {
-      return this.options.map(o => (o == null ? "" : String(o)));
+      return this.options.map(o => (o == null ? "" : String(o)))
+        .filter(o => !this.allowOther || o.trim().toLowerCase() !== 'other');
     },
     optionSet() {
       return new Set(this.stringOptions);
@@ -58,6 +81,11 @@ export default {
     },
     proxy: {
       get() {
+        if (this.allowOther && this.otherActive) {
+          return this.multiple
+            ? [...this.asArray(this.modelValue).filter(v => this.optionSet.has(v)), this.otherToken]
+            : this.otherToken;
+        }
         if (this.multiple) {
           return this.asArray(this.modelValue).map(String).filter(v => this.optionSet.has(v));
         }
@@ -66,6 +94,14 @@ export default {
       },
       set(v) {
         if (this.isReadonly) return;
+        const selected = this.multiple ? this.asArray(v) : [v];
+        this.otherActive = this.allowOther && selected.includes(this.otherToken);
+        if (this.otherActive) {
+          this.updateOther(this.otherText);
+          this.$nextTick(() => this.$refs.otherInput?.focus());
+          return;
+        }
+        this.otherText = "";
         if (this.multiple) {
           const arr = this.asArray(v).map(String).filter(x => this.optionSet.has(x));
           this.$emit("update:modelValue", arr);
@@ -77,6 +113,8 @@ export default {
     }
   },
   mounted() {
+    this.syncOther();
+    if (this.allowOther && this.otherActive) return;
     const opts = this.stringOptions;
     if (this.multiple) {
       const cur = this.asArray(this.modelValue).map(String).filter(v => opts.includes(v));
@@ -93,7 +131,21 @@ export default {
     }
   },
   watch: {
+    allowOther(enabled) {
+      if (enabled) { this.syncOther(); return; }
+      this.otherActive = false;
+      this.otherText = "";
+      const next = this.multiple
+        ? this.asArray(this.modelValue).filter(v => this.optionSet.has(v))
+        : this.optionSet.has(this.modelValue) ? this.modelValue : "";
+      this.$emit("update:modelValue", next);
+    },
+    modelValue: {
+      deep: true,
+      handler() { this.syncOther(); },
+    },
     options() {
+      if (this.allowOther) { this.syncOther(); return; }
       const opts = this.stringOptions;
       if (this.multiple) {
         const cur = this.asArray(this.modelValue).map(String).filter(v => opts.includes(v));
@@ -108,8 +160,41 @@ export default {
     }
   },
   methods: {
+    syncOther() {
+      if (!this.allowOther) return;
+      const values = this.asArray(this.modelValue).map(String);
+      const custom = values.find(v => v && !this.optionSet.has(v));
+      if (custom) {
+        this.otherActive = true;
+        this.otherText = custom;
+      } else if (this.otherText && !values.includes(this.otherText)) {
+        this.otherActive = false;
+        this.otherText = "";
+      }
+    },
+    updateOther(value) {
+      if (this.isReadonly) return;
+      this.otherText = value;
+      const next = this.multiple
+        ? [...this.asArray(this.modelValue).filter(v => this.optionSet.has(v)), ...(value ? [value] : [])]
+        : value;
+      this.$emit("update:modelValue", next);
+    },
+    finishOther() {
+      if (this.isReadonly) return;
+      const value = this.otherText.trim();
+      this.updateOther(value);
+      if (this.optionSet.has(value)) {
+        this.otherActive = false;
+        this.otherText = "";
+      }
+    },
     asArray(v) { return Array.isArray(v) ? v : (v ? [v] : []); },
-    clearSelection() { this.$emit("update:modelValue", []); }
+    clearSelection() {
+      this.otherActive = false;
+      this.otherText = "";
+      this.$emit("update:modelValue", []);
+    }
   }
 };
 </script>
@@ -118,6 +203,8 @@ export default {
 .fsel {
   position: relative;
   display: inline-flex;
+  flex-direction: column;
+  gap: 6px;
   width: 100%;
 }
 .fsel-input {

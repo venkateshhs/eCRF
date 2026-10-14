@@ -505,11 +505,15 @@
             <input type="checkbox" v-model="local.allowMultiple" />
             Allow multiple selections
           </label>
+          <label class="chk">
+            <input type="checkbox" v-model="local.allowOther" />
+            Include “Other” with a free-text answer
+          </label>
         </div>
 
         <div class="row two">
           <div>
-            <label>Number of options</label>
+            <label>{{ local.allowOther ? 'Number of standard options' : 'Number of options' }}</label>
             <input type="number" min="1" v-model.number="optionsCount" @input="syncOptionsCount" />
           </div>
           <div>
@@ -530,10 +534,10 @@
           <div
             class="opt-row"
             :class="{ 'has-exclusive-control': isRadio && local.allowMultiple }"
-            v-for="(opt, idx) in localOptions"
+            v-for="({ opt, idx }, displayIndex) in standardOptionRows"
             :key="idx"
           >
-            <span class="opt-index">{{ idx + 1 }}.</span>
+            <span class="opt-index">{{ displayIndex + 1 }}.</span>
             <input
               type="text"
               :value="localOptions[idx]"
@@ -578,6 +582,11 @@
                 @click.prevent="deleteOption(idx)"
               >✕</button>
             </div>
+          </div>
+          <div v-if="local.allowOther" class="opt-row">
+            <span class="opt-index">{{ standardOptionRows.length + 1 }}.</span>
+            <input type="text" value="Other" readonly aria-label="Other option (automatic)" />
+            <span>Free text · added automatically</span>
           </div>
         </div>
         <div class="row note" v-if="isRadio && local.allowMultiple">
@@ -1284,6 +1293,7 @@ function buildInitialLocal(vm, constraintsForm, currentFieldType) {
     dateFormat: base.dateFormat || "dd.MM.yyyy",
 
     allowMultiple: !!base.allowMultiple,
+    allowOther: !!base.allowOther,
     dominantOptions: Array.isArray(base.dominantOptions)
       ? base.dominantOptions.map(String)
       : [],
@@ -1383,6 +1393,10 @@ export default {
   },
 
   computed: {
+    standardOptionRows() {
+      return this.localOptions.map((opt, idx) => ({ opt, idx }))
+        .filter(({ opt }) => !this.local.allowOther || String(opt).trim().toLowerCase() !== 'other');
+    },
     currentEditingFieldTitle() {
       return (
         this.currentFieldLabel ||

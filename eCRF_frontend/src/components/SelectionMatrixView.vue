@@ -6,111 +6,120 @@
     </div>
 
     <template v-else>
-      <!-- Matrix toolbar: visit filter + helper + add subjects (left) … info button (far right) -->
+      <!-- Matrix toolbar: filters first, actions below -->
       <div class="matrix-toolbar">
-        <div class="matrix-toolbar-left">
-          <div class="visit-filter">
-            <label>Visit filter</label>
-            <select
-              class="visit-select"
-              :value="selectedVisitIndex"
-              @change="onVisitChange"
-            >
-              <option :value="-1">All visits</option>
-              <option v-for="(v, i) in visitList" :key="'vopt-'+i" :value="i">
-                {{ v.name }}
-              </option>
-            </select>
-          </div>
-
-          <!-- Subject search: scrolls to the matching subject, does NOT filter rows -->
-          <div class="subject-search">
-            <label>Search subject</label>
-
-            <div class="subject-search-box">
-              <input
-                type="search"
-                class="subject-search-input"
-                v-model.trim="subjectSearch"
-                placeholder="Search subject ID…"
-                @input="onSubjectSearchInput"
-                @keydown.enter.prevent="goToNextSubjectMatch"
-                @keydown.esc.prevent="clearSubjectSearch"
-              />
-
-              <button
-                v-if="subjectSearch"
-                type="button"
-                class="subject-search-clear"
-                title="Clear search"
-                @click="clearSubjectSearch"
+        <div class="matrix-toolbar-content">
+          <div class="matrix-filter-row">
+            <div class="visit-filter">
+              <label>Visit filter</label>
+              <select
+                class="visit-select"
+                :value="selectedVisitIndex"
+                @change="onVisitChange"
               >
-                ×
-              </button>
+                <option :value="-1">All visits</option>
+                <option v-for="(v, i) in visitList" :key="'vopt-'+i" :value="i">
+                  {{ v.name }}
+                </option>
+              </select>
             </div>
 
-            <div v-if="subjectSearch" class="subject-search-result">
-              <template v-if="matchedSubjectIndices.length">
-                {{ activeMatchPosition + 1 }} / {{ matchedSubjectIndices.length }}
-              </template>
-              <template v-else>
-                No match
-              </template>
+            <!-- Subject search: scrolls to the matching subject, does NOT filter rows -->
+            <div class="subject-search">
+              <label>Search subject</label>
+
+              <div class="subject-search-box">
+                <input
+                  type="search"
+                  class="subject-search-input"
+                  v-model.trim="subjectSearch"
+                  placeholder="Search subject ID…"
+                  @input="onSubjectSearchInput"
+                  @keydown.enter.prevent="goToNextSubjectMatch"
+                  @keydown.esc.prevent="clearSubjectSearch"
+                />
+
+                <button
+                  v-if="subjectSearch"
+                  type="button"
+                  class="subject-search-clear"
+                  title="Clear search"
+                  @click="clearSubjectSearch"
+                >
+                  ×
+                </button>
+              </div>
+
+              <div v-if="subjectSearch" class="subject-search-result">
+                <template v-if="matchedSubjectIndices.length">
+                  {{ activeMatchPosition + 1 }} / {{ matchedSubjectIndices.length }}
+                </template>
+                <template v-else>
+                  No match
+                </template>
+              </div>
             </div>
+
+            <label class="subject-status-filter">
+              Subject status
+              <select v-model="subjectStatusFilter">
+                <option value="active_and_retained">Active + retained dropouts</option>
+                <option value="active">Active subjects</option>
+                <option value="retained">Dropped — data retained</option>
+                <option value="deleted">Dropped — data deleted</option>
+                <option value="all">All subjects</option>
+              </select>
+            </label>
+
+            <span class="dropout-summary" title="Subjects ever enrolled / active / dropped out">
+              Enrolled {{ subjectCounts.total }} · Active {{ subjectCounts.active }} · Dropped {{ subjectCounts.dropped }}
+            </span>
           </div>
 
-          <!-- Helper message: to which version we add data -->
-          <div
-            v-if="selectedVersion"
-            class="version-helper"
-            :title="'All new data will be saved on the latest template version'"
-          >
-            Saving to Version {{ selectedVersion }}
+          <div class="matrix-action-row">
+            <button
+              type="button"
+              class="btn-add-subject"
+              @click="$emit('add-subjects')"
+            >
+              + Add subjects
+            </button>
+
+            <button
+              type="button"
+              class="btn-import-data"
+              @click="$emit('import-data')"
+            >
+              <i class="fas fa-file-import"></i> Import Data
+            </button>
+
+            <button
+              v-if="canManageSubjectDropout"
+              type="button"
+              class="btn-dropout-subject"
+              @click="$emit('dropout-subject')"
+            >
+              <i class="fas fa-user-slash"></i> Drop out subject
+            </button>
+
+            <div
+              v-if="selectedVersion"
+              class="version-helper"
+              :title="'All new data will be saved on the latest template version'"
+            >
+              Saving to Version {{ selectedVersion }}
+            </div>
+
+            <button
+              type="button"
+              class="legend-icon-btn"
+              @click="$emit('open-status-legend')"
+              title="Legend / Color meaning"
+            >
+              <i :class="infoIcon"></i>
+            </button>
           </div>
-
-          <!-- Add subjects button: always visible in selection view -->
-          <button
-            type="button"
-            class="btn-add-subject"
-            @click="$emit('add-subjects')"
-          >
-            + Add subjects
-          </button>
-
-          <button
-            v-if="canManageSubjectDropout"
-            type="button"
-            class="btn-dropout-subject"
-            @click="$emit('dropout-subject')"
-          >
-            <i class="fas fa-user-slash"></i> Drop out subject
-          </button>
-
-          <label class="subject-status-filter">
-            Subject status
-            <select v-model="subjectStatusFilter">
-              <option value="active_and_retained">Active + retained dropouts</option>
-              <option value="active">Active subjects</option>
-              <option value="retained">Dropped — data retained</option>
-              <option value="deleted">Dropped — data deleted</option>
-              <option value="all">All subjects</option>
-            </select>
-          </label>
-
-          <span class="dropout-summary" title="Subjects ever enrolled / active / dropped out">
-            Enrolled {{ subjectCounts.total }} · Active {{ subjectCounts.active }} · Dropped {{ subjectCounts.dropped }}
-          </span>
         </div>
-
-        <!-- Info icon MUST be extreme right -->
-        <button
-          type="button"
-          class="legend-icon-btn"
-          @click="$emit('open-status-legend')"
-          title="Legend / Color meaning"
-        >
-          <i :class="infoIcon"></i>
-        </button>
       </div>
 
       <div ref="matrixWrap" class="matrix-wrap">
@@ -241,6 +250,7 @@ export default {
   emits: [
     "update:selectedVisitIndex",
     "add-subjects",
+    "import-data",
     "dropout-subject",
     "select-cell",
     "open-status-legend",
@@ -509,10 +519,6 @@ export default {
 
 /* ========= Matrix toolbar ========= */
 .matrix-toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 14px;
   margin-bottom: 16px;
   padding: 14px 16px;
   background: #f9fafb;
@@ -521,12 +527,24 @@ export default {
   box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
 }
 
-.matrix-toolbar-left {
+.matrix-toolbar-content {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+.matrix-filter-row,
+.matrix-action-row {
   display: flex;
   align-items: flex-end;
   gap: 12px;
   flex-wrap: wrap;
   min-width: 0;
+}
+
+.matrix-action-row {
+  align-items: center;
 }
 
 .visit-filter {
@@ -665,8 +683,9 @@ export default {
   align-self: flex-end;
 }
 
-/* Add subjects button */
-.btn-add-subject {
+/* Matrix action buttons */
+.btn-add-subject,
+.btn-import-data {
   min-height: 40px;
   display: inline-flex;
   align-items: center;
@@ -688,14 +707,16 @@ export default {
     box-shadow 0.18s ease;
 }
 
-.btn-add-subject:hover {
+.btn-add-subject:hover,
+.btn-import-data:hover {
   background: #1d4ed8;
   border-color: #1d4ed8;
   transform: translateY(-1px);
   box-shadow: 0 6px 14px rgba(37, 99, 235, 0.18);
 }
 
-.btn-add-subject:active {
+.btn-add-subject:active,
+.btn-import-data:active {
   transform: translateY(0);
 }
 
@@ -1177,14 +1198,6 @@ export default {
 
 /* ========= Responsive ========= */
 @media (max-width: 900px) {
-  .matrix-toolbar {
-    align-items: stretch;
-  }
-
-  .matrix-toolbar-left {
-    flex: 1;
-  }
-
   .visit-col {
     min-width: 112px;
   }
@@ -1206,7 +1219,8 @@ export default {
     padding: 12px;
   }
 
-  .matrix-toolbar-left {
+  .matrix-filter-row,
+  .matrix-action-row {
     flex-direction: column;
     align-items: stretch;
     gap: 10px;
@@ -1214,6 +1228,7 @@ export default {
 
   .visit-select,
   .btn-add-subject,
+  .btn-import-data,
   .btn-dropout-subject,
   .version-helper {
     width: 100%;

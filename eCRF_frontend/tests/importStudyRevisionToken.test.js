@@ -54,6 +54,22 @@ const item = {
   const component = loaded.component;
   assert.match(loaded.source, /Field schema JSON/);
   assert.match(loaded.source, /Download example JSON/);
+  assert.doesNotMatch(loaded.source, /Fixed value/);
+  assert.match(loaded.source, /Use table columns/);
+  assert.match(loaded.source, /Enter one group manually/);
+  assert.match(loaded.source, /Enter one visit manually/);
+  assert.match(loaded.source, /Imported data preview/);
+  assert.doesNotMatch(loaded.source, /Date column \(optional\)/);
+  assert.match(loaded.source, /showSuccessDialog/);
+  assert.match(loaded.source, /role="dialog"/);
+
+  const titleRequirementContext = {
+    TITLE_KEYS: ["study_name", "title", "study_title", "name", "short_name"],
+    studySchema: [{ field: "title" }, { field: "short_name" }],
+    findSchemaField: component.methods.findSchemaField,
+  };
+  assert.equal(component.methods.isStudyTitleField.call(titleRequirementContext, "title"), true);
+  assert.equal(component.methods.isStudyTitleField.call(titleRequirementContext, "short_name"), false);
   await component.methods.postImportedEntry.call({ token: "auth-token" }, 11, item);
 
   assert.equal(calls.length, 2);
@@ -135,7 +151,7 @@ const item = {
     fieldSchema: normalizedSchema,
     headers: ["Subject ID", "Group", "Visit", "Assessment Date", "Site Code", "Pain Score", "Adverse Event"],
     mapping: {
-      subject: { idCol: "Subject ID", dateCol: "Assessment Date" },
+      subject: { idCol: "Subject ID" },
       group: { nameCol: "Group" },
       visit: { nameCol: "Visit" },
       otherCols: [],
