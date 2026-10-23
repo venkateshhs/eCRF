@@ -112,7 +112,7 @@
             <div class="enrollment-chart-header">
               <div>
                 <strong>Cumulative enrollment</strong>
-                <span>Total and group counts from first data entry</span>
+                <span>{{ usesStackedEnrollmentAreas ? 'Cumulative group counts and total enrollment' : 'Total and group counts at each enrollment date' }}</span>
               </div>
               <div class="enrollment-legend" aria-label="Enrollment chart legend">
                 <span class="total-series"><i></i>Total</span>
@@ -142,25 +142,49 @@
                   <text x="445" y="291" text-anchor="middle">First qualifying data-entry date</text>
                   <text transform="translate(16 134) rotate(-90)" text-anchor="middle">Subjects</text>
                 </g>
-                <polyline
-                  v-for="series in enrollmentGroupSeries"
-                  :key="`enrollment-series-${series.group_index}`"
-                  class="enrollment-group-line"
-                  :stroke="enrollmentColor(series.group_index)"
-                  :points="series.points"
-                />
+                <template v-if="usesStackedEnrollmentAreas">
+                  <polygon
+                    v-for="area in enrollmentCountAreas"
+                    :key="`enrollment-count-area-${area.group_index}`"
+                    class="enrollment-count-area"
+                    :points="area.points"
+                    :fill="enrollmentColor(area.group_index)"
+                  />
+                </template>
+                <template v-else-if="hasMultipleEnrollmentGroups">
+                  <g v-for="series in enrollmentGroupSeries" :key="`enrollment-group-series-${series.group_index}`">
+                    <polyline
+                      class="enrollment-group-line"
+                      :stroke="enrollmentColor(series.group_index)"
+                      :points="series.points"
+                    />
+                    <circle
+                      v-for="point in series.chartPoints"
+                      :key="`enrollment-group-point-${series.group_index}-${point.date}`"
+                      class="enrollment-group-point"
+                      :cx="point.x"
+                      :cy="point.y"
+                      r="3.5"
+                      :fill="enrollmentColor(series.group_index)"
+                    >
+                      <title>{{ formatDateOnly(point.date) }} · {{ series.group_name }}: {{ point.count }}</title>
+                    </circle>
+                  </g>
+                </template>
                 <polyline v-if="enrollmentPlan.enabled" class="enrollment-planned-line" :points="enrollmentPlannedPoints" />
-                <polyline class="enrollment-total-line" :points="enrollmentTotalPoints" />
-                <circle
-                  v-for="point in enrollmentTotalChartPoints"
-                  :key="`enrollment-point-${point.date}`"
-                  class="enrollment-total-point"
-                  :cx="point.x"
-                  :cy="point.y"
-                  r="4"
-                >
-                  <title>{{ formatDateOnly(point.date) }}: {{ point.total }} enrolled</title>
-                </circle>
+                <polyline class="enrollment-total-line" :points="enrollmentTotalLinePoints" />
+                <template v-if="!usesStackedEnrollmentAreas">
+                  <circle
+                    v-for="point in enrollmentTotalChartPoints"
+                    :key="`enrollment-total-point-${point.date}`"
+                    class="enrollment-total-point"
+                    :cx="point.x"
+                    :cy="point.y"
+                    r="4"
+                  >
+                    <title>{{ formatDateOnly(point.date) }} · Total: {{ point.total }}</title>
+                  </circle>
+                </template>
               </svg>
             </div>
             <div v-if="enrollmentPlan.enabled" class="plan-comparison-note" :class="enrollmentPlanVarianceClass">
@@ -169,7 +193,7 @@
             </div>
           </div>
 
-          <div class="enrollment-chart-block proportion-block">
+          <div v-if="usesStackedEnrollmentAreas" class="enrollment-chart-block proportion-block">
             <div class="enrollment-chart-header">
               <div>
                 <strong>Group proportions over time</strong>
@@ -201,6 +225,103 @@
                 <i :style="{ backgroundColor: enrollmentColor(group.group_index) }"></i>
                 <span>{{ group.group_name }}</span>
                 <strong>{{ group.count }} · {{ group.proportion_percent }}%</strong>
+              </div>
+            </div>
+          </div>
+
+          <div v-else-if="hasGroupProportionLineHistory" class="enrollment-chart-block proportion-block">
+            <div class="enrollment-chart-header">
+              <div>
+                <strong>Group proportions over time</strong>
+                <span>Share after all enrollment events on each date</span>
+              </div>
+            </div>
+            <div class="enrollment-chart-scroll">
+              <svg class="enrollment-proportion-chart" viewBox="0 0 860 220" role="img" aria-label="Enrollment group proportion lines by date">
+                <g class="proportion-grid">
+                  <line x1="62" x2="828" y1="20" y2="20" />
+                  <line x1="62" x2="828" y1="95" y2="95" />
+                  <line x1="62" x2="828" y1="170" y2="170" />
+                </g>
+                <line class="equal-allocation-line" x1="62" x2="828" :y1="equalAllocationY" :y2="equalAllocationY" />
+                <text class="equal-allocation-label" x="824" :y="equalAllocationY - 5" text-anchor="end">Equal share {{ equalAllocationLabel }}</text>
+                <g v-for="series in enrollmentProportionSeries" :key="`proportion-series-${series.group_index}`">
+                  <polyline
+                    class="enrollment-proportion-line"
+                    :stroke="enrollmentColor(series.group_index)"
+                    :points="series.points"
+                  />
+                  <circle
+                    v-for="point in series.chartPoints"
+                    :key="`proportion-point-${series.group_index}-${point.date}`"
+                    class="enrollment-proportion-point"
+                    :cx="point.x"
+                    :cy="point.y"
+                    r="3.5"
+                    :fill="enrollmentColor(series.group_index)"
+                  >
+                    <title>{{ formatDateOnly(point.date) }} · {{ series.group_name }}: {{ point.count }} ({{ point.share_label }})</title>
+                  </circle>
+                </g>
+                <g class="chart-axes"><line x1="62" x2="828" y1="170" y2="170" /><line x1="62" x2="62" y1="20" y2="170" /></g>
+                <g class="axis-labels">
+                  <text x="52" y="174" text-anchor="end">0%</text><text x="52" y="99" text-anchor="end">50%</text><text x="52" y="24" text-anchor="end">100%</text>
+                  <text v-for="tick in enrollmentProportionXTicks" :key="`proportion-line-x-${tick.timestamp}`" :x="tick.x" y="194" :text-anchor="tick.anchor">{{ tick.label }}</text>
+                </g>
+              </svg>
+            </div>
+            <div class="group-proportion-list">
+              <div v-for="group in enrollmentGroups" :key="`sparse-share-${group.group_index}`">
+                <i :style="{ backgroundColor: enrollmentColor(group.group_index) }"></i>
+                <span>{{ group.group_name }}</span>
+                <strong>{{ group.count }} · {{ group.proportion_percent }}%</strong>
+              </div>
+            </div>
+          </div>
+
+          <div v-else-if="hasMultipleEnrollmentGroups" class="enrollment-chart-block current-allocation-block">
+            <div class="enrollment-chart-header">
+              <div>
+                <strong>Current group allocation</strong>
+                <span>A time trend will appear after subjects are enrolled on another date</span>
+              </div>
+            </div>
+            <div
+              class="current-allocation-bar"
+              role="img"
+              :aria-label="`Current allocation across ${enrollmentGroups.length} groups`"
+            >
+              <span
+                v-for="group in enrollmentGroups"
+                :key="`current-allocation-${group.group_index}`"
+                :style="{ backgroundColor: enrollmentColor(group.group_index), flexGrow: group.count }"
+                :title="`${group.group_name}: ${group.count} subject${group.count === 1 ? '' : 's'} (${group.proportion_percent}%)`"
+              ></span>
+            </div>
+            <div class="group-proportion-list">
+              <div v-for="group in enrollmentGroups" :key="`current-share-${group.group_index}`">
+                <i :style="{ backgroundColor: enrollmentColor(group.group_index) }"></i>
+                <span>{{ group.group_name }}</span>
+                <strong>{{ group.count }} · {{ group.proportion_percent }}%</strong>
+              </div>
+            </div>
+          </div>
+
+          <div v-else-if="singleEnrollmentGroup" class="enrollment-chart-block single-group-block">
+            <div class="enrollment-chart-header">
+              <div>
+                <strong>Group allocation</strong>
+                <span>All enrolled subjects are in the same group</span>
+              </div>
+            </div>
+            <div class="single-group-summary">
+              <div class="single-group-identity">
+                <i :style="{ backgroundColor: enrollmentColor(singleEnrollmentGroup.group_index) }"></i>
+                <span>{{ singleEnrollmentGroup.group_name }}</span>
+              </div>
+              <div class="single-group-total">
+                <strong>{{ singleEnrollmentGroup.count }}</strong>
+                <span>enrolled subject{{ singleEnrollmentGroup.count === 1 ? '' : 's' }} · {{ singleEnrollmentGroup.proportion_percent }}%</span>
               </div>
             </div>
           </div>
@@ -489,6 +610,10 @@
 <script>
 import axios from "axios";
 
+const STACKED_AREA_MIN_SUBJECTS = 30;
+const STACKED_AREA_MIN_DATES = 4;
+const STACKED_AREA_MIN_GROUPS = 5;
+
 export default {
   name: "StudyComplianceView",
   props: {
@@ -535,6 +660,23 @@ export default {
     enrollmentGroups() {
       return Array.isArray(this.enrollment?.actual_by_group) ? this.enrollment.actual_by_group : [];
     },
+    hasMultipleEnrollmentGroups() {
+      return this.enrollmentGroups.length > 1;
+    },
+    usesStackedEnrollmentAreas() {
+      return this.hasMultipleEnrollmentGroups
+        && this.enrollmentGroups.length >= STACKED_AREA_MIN_GROUPS
+        && Number(this.enrollment?.enrolled_subjects || 0) >= STACKED_AREA_MIN_SUBJECTS
+        && this.enrollmentTimeline.length >= STACKED_AREA_MIN_DATES;
+    },
+    hasGroupProportionLineHistory() {
+      return this.hasMultipleEnrollmentGroups
+        && this.enrollmentTimeline.length > 1
+        && !this.usesStackedEnrollmentAreas;
+    },
+    singleEnrollmentGroup() {
+      return this.enrollmentGroups.length === 1 ? this.enrollmentGroups[0] : null;
+    },
     enrollmentMinTimestamp() {
       const dates = [...this.enrollmentTimeline, ...this.enrollmentPlannedTimeline]
         .map((point) => Date.parse(`${point.date}T00:00:00Z`))
@@ -570,7 +712,8 @@ export default {
         y: this.enrollmentChartY(point.total),
       }));
     },
-    enrollmentTotalPoints() {
+    enrollmentTotalLinePoints() {
+      if (this.usesStackedEnrollmentAreas) return this.buildStepLinePoints(this.enrollmentTotalChartPoints);
       return this.enrollmentTotalChartPoints.map((point) => `${point.x},${point.y}`).join(" ");
     },
     enrollmentPlannedPoints() {
@@ -579,13 +722,45 @@ export default {
         .join(" ");
     },
     enrollmentGroupSeries() {
-      return this.enrollmentGroups.map((group) => ({
-        ...group,
-        points: this.enrollmentTimeline.map((point) => {
+      return this.enrollmentGroups.map((group) => {
+        const chartPoints = this.enrollmentTimeline.map((point) => {
+          const groupIndex = Number(group.group_index);
+          const current = (point.groups || []).find((item) => Number(item.group_index) === groupIndex);
+          const count = Number(current?.count || 0);
+          return {
+            date: point.date,
+            count,
+            x: this.enrollmentChartX(point.date),
+            y: this.enrollmentChartY(count),
+          };
+        });
+        return {
+          ...group,
+          chartPoints,
+          points: chartPoints.map((point) => `${point.x},${point.y}`).join(" "),
+        };
+      });
+    },
+    enrollmentCountAreas() {
+      const accumulated = this.enrollmentTimeline.map(() => 0);
+      return this.enrollmentGroups.map((group) => {
+        const lower = [...accumulated];
+        const upper = this.enrollmentTimeline.map((point, index) => {
           const current = (point.groups || []).find((item) => Number(item.group_index) === Number(group.group_index));
-          return `${this.enrollmentChartX(point.date)},${this.enrollmentChartY(current?.count || 0)}`;
-        }).join(" "),
-      }));
+          accumulated[index] += Number(current?.count || 0);
+          return accumulated[index];
+        });
+        return {
+          ...group,
+          points: this.buildStepAreaPoints(
+            this.enrollmentTimeline,
+            lower,
+            upper,
+            this.enrollmentChartX,
+            this.enrollmentChartY
+          ),
+        };
+      });
     },
     enrollmentYTicks() {
       return [0, 0.25, 0.5, 0.75, 1].map((ratio) => {
@@ -605,17 +780,54 @@ export default {
         const lower = [...accumulated];
         const upper = this.enrollmentTimeline.map((point, index) => {
           const current = (point.groups || []).find((item) => Number(item.group_index) === Number(group.group_index));
-          const share = Number(current?.proportion_percent || 0);
+          const total = Number(point.total || 0);
+          const share = total > 0 ? (Number(current?.count || 0) / total) * 100 : 0;
           accumulated[index] += share;
           return accumulated[index];
         });
-        const upperPoints = this.enrollmentTimeline.map((point, index) => `${this.enrollmentProportionX(point.date)},${this.enrollmentProportionY(upper[index])}`);
-        const lowerPoints = this.enrollmentTimeline.slice().reverse().map((point, reverseIndex) => {
-          const index = this.enrollmentTimeline.length - 1 - reverseIndex;
-          return `${this.enrollmentProportionX(point.date)},${this.enrollmentProportionY(lower[index])}`;
-        });
-        return { ...group, points: [...upperPoints, ...lowerPoints].join(" ") };
+        return {
+          ...group,
+          points: this.buildStepAreaPoints(
+            this.enrollmentTimeline,
+            lower,
+            upper,
+            this.enrollmentProportionX,
+            this.enrollmentProportionY
+          ),
+        };
       });
+    },
+    enrollmentProportionSeries() {
+      return this.enrollmentGroups.map((group) => {
+        const chartPoints = this.enrollmentTimeline.map((point) => {
+          const total = Number(point.total || 0);
+          const current = (point.groups || []).find((item) => Number(item.group_index) === Number(group.group_index));
+          const groupCount = Number(current?.count || 0);
+          const exactShare = total > 0 ? (groupCount / total) * 100 : 0;
+          return {
+            date: point.date,
+            count: groupCount,
+            share: exactShare,
+            share_label: `${Number(exactShare.toFixed(1))}%`,
+            x: this.enrollmentProportionX(point.date),
+            y: this.enrollmentProportionY(exactShare),
+          };
+        });
+        return {
+          ...group,
+          chartPoints,
+          points: chartPoints.map((point) => `${point.x},${point.y}`).join(" "),
+        };
+      });
+    },
+    equalAllocationPercent() {
+      return this.enrollmentGroups.length ? 100 / this.enrollmentGroups.length : 0;
+    },
+    equalAllocationY() {
+      return this.enrollmentProportionY(this.equalAllocationPercent);
+    },
+    equalAllocationLabel() {
+      return `${Number(this.equalAllocationPercent.toFixed(1))}%`;
     },
     enrollmentForecastLabel() {
       if (this.enrollmentForecast.available) return this.formatDateOnly(this.enrollmentForecast.projected_completion_date);
@@ -738,6 +950,31 @@ export default {
     },
   },
   methods: {
+    buildStepLinePoints(points) {
+      if (!points.length) return "";
+      const coordinates = [`${points[0].x},${points[0].y}`];
+      for (let index = 1; index < points.length; index += 1) {
+        coordinates.push(`${points[index].x},${points[index - 1].y}`);
+        coordinates.push(`${points[index].x},${points[index].y}`);
+      }
+      return coordinates.join(" ");
+    },
+    buildStepAreaPoints(timeline, lower, upper, xFunction, yFunction) {
+      if (!timeline.length) return "";
+      const x = (index) => xFunction.call(this, timeline[index].date);
+      const y = (value) => yFunction.call(this, value);
+      const coordinates = [`${x(0)},${y(upper[0])}`];
+      for (let index = 1; index < timeline.length; index += 1) {
+        coordinates.push(`${x(index)},${y(upper[index - 1])}`);
+        coordinates.push(`${x(index)},${y(upper[index])}`);
+      }
+      coordinates.push(`${x(timeline.length - 1)},${y(lower[timeline.length - 1])}`);
+      for (let index = timeline.length - 2; index >= 0; index -= 1) {
+        coordinates.push(`${x(index + 1)},${y(lower[index])}`);
+        coordinates.push(`${x(index)},${y(lower[index])}`);
+      }
+      return coordinates.join(" ");
+    },
     enrollmentChartX(value) {
       const timestamp = Date.parse(`${value}T00:00:00Z`);
       const span = this.enrollmentMaxTimestamp - this.enrollmentMinTimestamp;
@@ -946,16 +1183,28 @@ export default {
 .enrollment-legend .planned-series i { width: 14px; height: 0; border-top: 2px dashed #f97316; border-radius: 0; background: transparent; }
 .enrollment-chart-scroll { margin-top: 8px; overflow-x: auto; }
 .enrollment-chart, .enrollment-proportion-chart { display: block; width: 100%; min-width: 700px; height: auto; }
-.enrollment-total-line, .enrollment-group-line, .enrollment-planned-line { fill: none; stroke-linecap: round; stroke-linejoin: round; }
+.enrollment-total-line, .enrollment-group-line, .enrollment-planned-line, .enrollment-proportion-line { fill: none; stroke-linecap: round; stroke-linejoin: round; }
 .enrollment-total-line { stroke: #111827; stroke-width: 3; }
-.enrollment-group-line { stroke-width: 1.75; opacity: .72; }
+.enrollment-group-line { stroke-width: 1.8; opacity: .9; }
 .enrollment-planned-line { stroke: #f97316; stroke-width: 2.5; stroke-dasharray: 8 6; }
-.enrollment-total-point { fill: #fff; stroke: #111827; stroke-width: 2; }
+.enrollment-count-area { opacity: .58; }
+.enrollment-total-point { fill: #111827; stroke: #fff; stroke-width: 1.5; }
+.enrollment-group-point, .enrollment-proportion-point { stroke: #fff; stroke-width: 1.5; }
 .proportion-grid line { stroke: #e5e7eb; stroke-width: 1; }
 .enrollment-proportion-chart polygon { opacity: .72; }
+.enrollment-proportion-line { stroke-width: 2; }
+.equal-allocation-line { stroke: #94a3b8; stroke-width: 1; stroke-dasharray: 4 4; }
+.equal-allocation-label { fill: #64748b; font-size: 9px; }
 .group-proportion-list { display: flex; flex-wrap: wrap; gap: 8px 16px; margin-top: 8px; }
 .group-proportion-list div { display: grid; grid-template-columns: 9px auto auto; align-items: center; gap: 6px; color: #475569; font-size: 11px; }
 .group-proportion-list strong { color: #111827; }
+.current-allocation-bar { display: flex; width: 100%; height: 22px; overflow: hidden; margin-top: 16px; border-radius: 999px; background: #e5e7eb; }
+.current-allocation-bar span { min-width: 0; }
+.single-group-summary { display: flex; align-items: center; justify-content: space-between; gap: 18px; margin-top: 10px; padding: 13px 14px; border: 1px solid #dbeafe; border-radius: 9px; background: #f8fbff; }
+.single-group-identity { display: flex; align-items: center; gap: 8px; color: #334155; font-size: 13px; font-weight: 600; }
+.single-group-identity i { width: 10px; height: 10px; border-radius: 50%; }
+.single-group-total { display: flex; align-items: baseline; gap: 6px; color: #64748b; font-size: 11px; }
+.single-group-total strong { color: #111827; font-size: 18px; }
 .plan-comparison-note { display: flex; align-items: center; gap: 8px; margin-top: 7px; padding: 7px 9px; border-radius: 7px; background: #f0fdf4; color: #166534; font-size: 11px; }
 .plan-comparison-note.behind { background: #fff7ed; color: #9a3412; }
 .plan-comparison-note.on-plan { background: #eff6ff; color: #1d4ed8; }
@@ -1025,5 +1274,5 @@ export default {
 .method-note { padding: 11px 12px; border: 1px solid #e5e7eb; border-radius: 8px; background: #f9fafb; color: #6b7280; font-size: 11px; line-height: 1.55; }.method-note span { display: block; margin-top: 4px; }.method-note::after { content: ""; display: block; height: 1px; }
 @media (max-width: 1050px) { .kpi-grid, .enrollment-kpis { grid-template-columns: repeat(2, 1fr); }.insight-grid, .dashboard-grid { grid-template-columns: 1fr; } }
 @media (max-width: 760px) { .operational-grid, .threshold-summary, .plan-fields { grid-template-columns: 1fr; }.monthly-plan-field { grid-column: auto; }.threshold-summary { margin-left: 0; }.chart-heading, .scope-note, .enrollment-chart-header, .plan-editor-heading { align-items: flex-start; flex-direction: column; }.scope-note small { text-align: left; }.metric-note { align-self: flex-start; }.enrollment-legend { justify-content: flex-start; } }
-@media (max-width: 640px) { .compliance-header, .primary-insight { align-items: stretch; flex-direction: column; }.kpi-grid, .enrollment-kpis { grid-template-columns: 1fr; }.radial { align-self: center; }.recruitment-chart-wrap { flex-direction: column; }.bar-row { grid-template-columns: 1fr 44px; }.bar-meta { grid-column: 1 / -1; }.plan-comparison-note { align-items: flex-start; flex-direction: column; } }
+@media (max-width: 640px) { .compliance-header, .primary-insight { align-items: stretch; flex-direction: column; }.kpi-grid, .enrollment-kpis { grid-template-columns: 1fr; }.radial { align-self: center; }.recruitment-chart-wrap { flex-direction: column; }.bar-row { grid-template-columns: 1fr 44px; }.bar-meta { grid-column: 1 / -1; }.plan-comparison-note, .single-group-summary { align-items: flex-start; flex-direction: column; } }
 </style>

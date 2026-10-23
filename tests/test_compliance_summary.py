@@ -172,6 +172,50 @@ def test_enrollment_monitoring_uses_first_qualifying_entry_and_includes_retained
     }
 
 
+def test_enrollment_timeline_sorts_dates_groups_same_day_events_and_excludes_future_events():
+    study_data = {
+        "subjects": [
+            {"id": "SUB-001", "group": "g1"},
+            {"id": "SUB-002", "group": "g2"},
+            {"id": "SUB-003", "group": "g3"},
+            {"id": "SUB-004", "group": "g1"},
+            {"id": "SUB-005", "group": "g2"},
+        ],
+        "groups": [{"name": "g1"}, {"name": "g2"}, {"name": "g3"}],
+        "visits": [{"name": "Visit 1"}],
+        "selectedModels": [{"title": "Clinical", "fields": [{"id": "field"}]}],
+        "assignments": [[[True], [True], [True]]],
+    }
+    dates = ["2026-10-23", "2026-10-22", "2026-10-08", "2026-10-22", "2026-11-01"]
+    entries = []
+    for index, entry_date in enumerate(dates):
+        entry = _entry(index + 1, index, 0, 1, {"field": "value"}, f"{entry_date}T09:00:00Z")
+        entry.update({"progress_total": 1, "progress_percentage": 100, "progress_status": "complete"})
+        entry["group_index"] = 2 - (index % 3)  # Deliberately wrong: subject group must win.
+        entries.append(entry)
+
+    monitoring = build_compliance_summary(
+        study_data, entries, as_of=datetime(2026, 10, 23, tzinfo=timezone.utc)
+    )["enrollment_monitoring"]
+
+    assert monitoring["enrolled_subjects"] == 4
+    assert [point["date"] for point in monitoring["timeline"]] == [
+        "2026-10-08",
+        "2026-10-22",
+        "2026-10-23",
+    ]
+    assert [(point["total"], [group["count"] for group in point["groups"]]) for point in monitoring["timeline"]] == [
+        (1, [0, 0, 1]),
+        (3, [1, 1, 1]),
+        (4, [2, 1, 1]),
+    ]
+    assert monitoring["actual_by_group"] == [
+        {"group_index": 0, "group_name": "g1", "count": 2, "proportion_percent": 50},
+        {"group_index": 1, "group_name": "g2", "count": 1, "proportion_percent": 25},
+        {"group_index": 2, "group_name": "g3", "count": 1, "proportion_percent": 25},
+    ]
+
+
 def test_enrollment_forecast_uses_unrounded_rolling_rate():
     study_data = {
         "subjects": [{"id": f"SUB-{index:03d}", "group": "A", "status": "ACTIVE"} for index in range(1, 11)],
