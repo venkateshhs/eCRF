@@ -36,6 +36,7 @@ import secrets
 from sqlalchemy import or_, text
 from .utils import local_now
 from .shared_link_email import send_shared_link_email, shared_link_email_configured
+from .audit_labels import SHARED_URL_DATA_ENTRY_ACTOR
 from sqlalchemy.sql import func
 router = APIRouter(prefix="/forms", tags=["forms"])
 
@@ -2145,13 +2146,13 @@ def shared_upsert_data(
                         "form_version": entry.form_version,
                         "data": entry.data or {}
                     },
-                    actor="Shared link submit", db=db, actor_id=None, actor_name=None,
+                    actor=SHARED_URL_DATA_ENTRY_ACTOR, db=db, actor_id=None, actor_name=None,
                 )
             try:
                 audit_change_both(
                     scope="study",
                     action="share_entry_upserted",
-                    actor="",
+                    actor=SHARED_URL_DATA_ENTRY_ACTOR,
                     extra={
                         "entry_id": entry.id,
                         "subject_index": entry.subject_index,

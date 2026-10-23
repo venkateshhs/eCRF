@@ -27,6 +27,7 @@ from .study_export import ExportOptions, build_analysis_export
 from .subject_ids import validate_new_subject_ids
 from .shared_link_email import send_shared_link_email, shared_link_email_configured
 from .logger import logger
+from .audit_labels import SHARED_URL_DATA_ENTRY_ACTOR, SHARED_URL_MACHINE_ACTOR
 
 router = APIRouter(prefix="/forms", tags=["forms"])
 repo = DataladStudyRepo()
@@ -2685,8 +2686,8 @@ def shared_upsert_data(
             form_version=form_version,
             data=merged_data,
             skipped_required_flags=merged_flags_list,
-            actor="shared-link",
-            actor_name="Shared link submit",
+            actor=SHARED_URL_MACHINE_ACTOR,
+            actor_name=SHARED_URL_DATA_ENTRY_ACTOR,
             user_id=None,
             audit_label=audit_label,
             progress_status=overall_progress["progress_status"],
