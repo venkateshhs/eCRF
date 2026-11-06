@@ -76,7 +76,17 @@ class FakeRepo:
 
 def _schema():
     return {
-        "subjects": [{"id": "SUBJ-A", "group": "Control"}, {"id": "SUBJ-B", "group": "Treatment"}],
+        "subjects": [
+            {"id": "SUBJ-A", "group": "Control"},
+            {
+                "id": "SUBJ-B",
+                "group": "Treatment",
+                "status": "DROPPED_DATA_RETAINED",
+                "dropout_date": "2026-02-14",
+                "dropout_reason": "Other",
+                "dropout_other_reason": "Moved away",
+            },
+        ],
         "visits": [{"name": "Baseline"}],
         "groups": [{"name": "Control"}, {"name": "Treatment"}],
         "selectedModels": [{
@@ -115,7 +125,12 @@ def test_bids_export_has_required_root_files_and_human_columns(tmp_path):
         assert "a-field-uuid" not in table
         assert "sub-SUBJA" in table
         assert "subject_name" not in table.splitlines()[0]
-        assert participants.splitlines()[0] == "participant_id\tgroup"
+        assert participants.splitlines()[0] == "participant_id\tgroup\tdropout_date\tdropout_reason"
+        assert "sub-SUBJB\tTreatment\t2026-02-14\tOther — Moved away" in participants
+        assert table.splitlines()[0].split("\t")[:6] == [
+            "participant_id", "visit", "group", "dropout_date", "dropout_reason", "study_version",
+        ]
+        assert "2026-02-14" in table and "Other — Moved away" in table
         assert bundle.read(root + "sourcedata/sub-SUBJA/imaging/file-7_heart-scan.txt").decode() == "scan payload"
         assert bundle.read(root + "sourcedata/study/documents/file-8_protocol.pdf").decode() == "study protocol"
 
@@ -273,7 +288,7 @@ def test_all_versions_only_expand_fields_affected_by_form_changes(tmp_path):
         assert len(lines) == 2
         headers = lines[0].split("\t")
         values = dict(zip(headers, lines[1].split("\t")))
-        assert headers[:3] == ["participant_id", "visit", "group"]
+        assert headers[:5] == ["participant_id", "visit", "group", "dropout_date", "dropout_reason"]
         assert "study_version" not in headers
         assert values["site_code"] == "Latest value"
         assert "site_code__v001" not in headers
@@ -347,7 +362,7 @@ def test_only_removed_notes_gets_version_columns_when_everything_else_is_unchang
         lines = bundle.read(root + "phenotype/ecrf.tsv").decode().splitlines()
         headers = lines[0].split("\t")
         values = dict(zip(headers, lines[1].split("\t")))
-        assert headers == ["participant_id", "visit", "group", "temperature", "notes__v001"]
+        assert headers == ["participant_id", "visit", "group", "dropout_date", "dropout_reason", "temperature", "notes__v001"]
         assert values["temperature"] == "36.7"
         assert values["notes__v001"] == "Initial note"
         assert "notes__v002" not in headers
@@ -395,7 +410,7 @@ def test_added_unentered_field_uses_label_and_only_emits_empty_actual_version(tm
         headers = lines[0].split("\t")
         values = dict(zip(headers, lines[1].split("\t")))
         expected = "age_as_of_assessment_date__v003"
-        assert headers == ["participant_id", "visit", "group", expected]
+        assert headers == ["participant_id", "visit", "group", "dropout_date", "dropout_reason", expected]
         assert values[expected] == ""
         assert not any(header.startswith("number_2_1787209163717") for header in headers)
 

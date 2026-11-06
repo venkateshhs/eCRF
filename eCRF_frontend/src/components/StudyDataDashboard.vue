@@ -330,6 +330,7 @@ export default {
   data() {
     return {
       study: null,
+      authoritativeSubjects: [],
       entries: [],
       totalEntries: 0,
 
@@ -494,6 +495,11 @@ export default {
   },
 
   watch: {
+    initialStudy(nextStudy) {
+      if (!nextStudy) return;
+      this.captureAuthoritativeSubjects(nextStudy);
+      this.refreshDisplayedSubjectStatus();
+    },
     initialStudyFiles(nextFiles) {
       if (Array.isArray(nextFiles)) this.studyFiles = nextFiles;
     },
@@ -675,6 +681,7 @@ export default {
           });
           this.study = studyResp.data;
         }
+        this.captureAuthoritativeSubjects(this.study);
 
         if (Array.isArray(this.initialVersions)) {
           this.studyVersions = [...this.initialVersions].sort((a, b) => a.version - b.version);
@@ -716,6 +723,56 @@ export default {
         }
       }
       return JSON.parse(JSON.stringify(payload));
+    },
+
+    captureAuthoritativeSubjects(studyPayload) {
+      const subjects = studyPayload?.content?.study_data?.subjects;
+      this.authoritativeSubjects = Array.isArray(subjects)
+        ? this.cloneStudyPayload(subjects)
+        : [];
+    },
+
+    mergeSubjectsWithCurrentStatus(versionSubjects) {
+      const runtimeFields = [
+        "status",
+        "dropout_date",
+        "dropout_reason",
+        "dropout_other_reason",
+        "dropped_at",
+        "dropped_by",
+        "dropped_by_name",
+        "deletion_status",
+      ];
+      const currentSubjects = Array.isArray(this.authoritativeSubjects)
+        ? this.authoritativeSubjects
+        : [];
+      const currentById = new Map();
+      currentSubjects.forEach((subject) => {
+        const id = String(subject?.id ?? subject?.subject_id ?? "").trim();
+        if (id) currentById.set(id, subject);
+      });
+
+      return (Array.isArray(versionSubjects) ? versionSubjects : []).map((versionSubject, index) => {
+        const merged = { ...(versionSubject || {}) };
+        const id = String(versionSubject?.id ?? versionSubject?.subject_id ?? "").trim();
+        const currentSubject = (id && currentById.get(id)) || currentSubjects[index] || null;
+        if (!currentSubject) return merged;
+
+        runtimeFields.forEach((field) => {
+          if (Object.prototype.hasOwnProperty.call(currentSubject, field)) {
+            merged[field] = currentSubject[field];
+          } else {
+            delete merged[field];
+          }
+        });
+        return merged;
+      });
+    },
+
+    refreshDisplayedSubjectStatus() {
+      const studyData = this.study?.content?.study_data;
+      if (!studyData || !Array.isArray(studyData.subjects)) return;
+      studyData.subjects = this.mergeSubjectsWithCurrentStatus(studyData.subjects);
     },
 
     async loadStudyFiles(studyId) {
@@ -833,9 +890,12 @@ export default {
 
     applyTemplateSchema(schema) {
       const current = this.study?.content?.study_data || {};
+      const versionSubjects = Array.isArray(schema?.subjects) && schema.subjects.length
+        ? schema.subjects
+        : current.subjects || [];
       const normalized = {
         study: schema?.study ?? current.study ?? {},
-        subjects: Array.isArray(schema?.subjects) && schema.subjects.length ? schema.subjects : current.subjects || [],
+        subjects: this.mergeSubjectsWithCurrentStatus(versionSubjects),
         subjectCount: Number.isFinite(schema?.subjectCount)
           ? schema.subjectCount
           : current.subjectCount ?? (current.subjects?.length || 0),
@@ -1155,7 +1215,24 @@ export default {
     buildDashboardColumns(options = {}) {
       const entries = options.entries || this.entries;
       const forceAllPairs = options.forceAllPairs === true;
-      const cols = [];
+      const cols = [
+        {
+          kind: "subjectMetadata",
+          key: "__dropoutDate",
+          label: "Dropout Date",
+          groupTitle: "Subject Status",
+          sectionTitle: "Subject Status",
+          metadataField: "dropout_date",
+        },
+        {
+          kind: "subjectMetadata",
+          key: "__dropoutReason",
+          label: "Dropout Reason",
+          groupTitle: "Subject Status",
+          sectionTitle: "Subject Status",
+          metadataField: "dropout_reason",
+        },
+      ];
 
       this.sections.forEach((section, sIdx) => {
         const sectionTitle = section?.title || `Section ${sIdx + 1}`;
@@ -1282,6 +1359,13 @@ export default {
           row.__uploadedFiles = this.uploadedFilesForRow(subjIdx, vIdx, entry?.data || []);
 
           columns.forEach((col) => {
+            if (col.kind === "subjectMetadata") {
+              row[col.key] = col.metadataField === "dropout_date"
+                ? String(subject?.dropout_date || "")
+                : this.formatSubjectDropoutReason(subject);
+              return;
+            }
+
             const assigned = this.isAssigned(col.sIdx, vIdx, groupIdx);
 
             if (!assigned) {
@@ -1354,6 +1438,13 @@ export default {
       }
 
       return data;
+    },
+
+    formatSubjectDropoutReason(subject) {
+      const reason = String(subject?.dropout_reason || "").trim();
+      const otherReason = String(subject?.dropout_other_reason || "").trim();
+      if (reason === "Other" && otherReason) return `Other — ${otherReason}`;
+      return reason || otherReason;
     },
 
     applyDashboardFilters(data, columns) {

@@ -97,6 +97,11 @@ def _is_admin(user) -> bool:
     return role == "Administrator"
 
 
+def _is_principal_investigator(user) -> bool:
+    role = (getattr(getattr(user, "profile", None), "role", "") or "").strip()
+    return role == "Principal Investigator"
+
+
 def _assert_owner_or_admin(meta: models.StudyMetadata, user) -> None:
     if meta.created_by != user.id and not _is_admin(user):
         raise HTTPException(status_code=403, detail="Not authorized")
@@ -214,6 +219,22 @@ def _assert_has_study_permission(db: Session, meta: models.StudyMetadata, user, 
             raise HTTPException(status_code=409, detail="Archived studies are read-only")
         raise HTTPException(status_code=403, detail="Not authorized")
     return perms
+
+
+def _can_edit_enrollment_plan(db: Session, meta: models.StudyMetadata, user) -> bool:
+    if _is_archived(meta):
+        return False
+    permissions = _effective_study_permissions(db, meta, user)
+    if not permissions.get("view", False):
+        return False
+    return bool(permissions.get("edit_study", False) or _is_principal_investigator(user))
+
+
+def _assert_can_edit_enrollment_plan(db: Session, meta: models.StudyMetadata, user) -> None:
+    if _is_archived(meta):
+        raise HTTPException(status_code=409, detail="Archived studies are read-only")
+    if not _can_edit_enrollment_plan(db, meta, user):
+        raise HTTPException(status_code=403, detail="Not authorized")
 
 def _assert_can_download_study_file(db: Session, meta: models.StudyMetadata, user) -> Dict[str, bool]:
     """
@@ -1056,7 +1077,7 @@ def study_compliance_summary(
         study_data,
         repo.list_entries(study_id, meta.study_name),
     )
-    summary["can_edit_enrollment_plan"] = _effective_study_permissions(db, meta, current_user).get("edit_study", False)
+    summary["can_edit_enrollment_plan"] = _can_edit_enrollment_plan(db, meta, current_user)
     summary["generated_at"] = local_now().isoformat()
     return summary
 
@@ -1071,8 +1092,7 @@ def update_enrollment_plan(
     meta = db.query(models.StudyMetadata).filter(models.StudyMetadata.id == study_id).first()
     if not meta:
         raise HTTPException(status_code=404, detail="Study not found")
-    _assert_has_study_permission(db, meta, current_user, required="edit_study")
-    _assert_study_writable(meta)
+    _assert_can_edit_enrollment_plan(db, meta, current_user)
 
     if payload.mode == "linear" and (payload.target_subjects is None or payload.duration_months is None):
         raise HTTPException(status_code=422, detail="Target subjects and duration are required for a linear plan")

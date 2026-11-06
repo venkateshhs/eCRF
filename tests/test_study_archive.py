@@ -146,6 +146,39 @@ def test_owner_can_save_enrollment_plan_and_remove_it(db):
     assert "enrollmentMonitoring" not in content.study_data["studySettings"]
 
 
+def test_pi_with_study_view_access_can_edit_enrollment_plan(db, monkeypatch):
+    owner = add_user(db, "owner", "Investigator")
+    pi = add_user(db, "pi", "Principal Investigator")
+    study = add_study(db, owner.id, status="PUBLISHED")
+    content = models.StudyContent(study_id=study.id, study_data={"subjects": []})
+    db.add(content)
+    db.add(models.StudyAccessGrant(
+        study_id=study.id,
+        user_id=pi.id,
+        created_by=owner.id,
+        permissions={"view": True, "add_data": False, "edit_study": False},
+    ))
+    db.commit()
+
+    assert forms_hybrid._effective_study_permissions(db, study, pi)["edit_study"] is False
+    assert forms_hybrid._can_edit_enrollment_plan(db, study, pi) is True
+
+    result = forms_hybrid.update_enrollment_plan(
+        study.id,
+        schemas.EnrollmentPlanUpdate(mode="monthly", monthly_enrollments=[3, 4]),
+        db=db,
+        current_user=pi,
+    )
+
+    assert result["enrollment_plan"]["monthly_enrollments"] == [3, 4]
+    db.refresh(content)
+    assert content.study_data["studySettings"]["enrollmentMonitoring"]["monthly_enrollments"] == [3, 4]
+
+    monkeypatch.setattr(forms_hybrid.repo, "list_entries", lambda *_args, **_kwargs: [])
+    summary = forms_hybrid.study_compliance_summary(study.id, db=db, current_user=pi)
+    assert summary["can_edit_enrollment_plan"] is True
+
+
 def test_enrollment_plan_requires_edit_permission_and_writable_study(db):
     owner = add_user(db, "owner", "Principal Investigator")
     outsider = add_user(db, "outsider", "Investigator")
