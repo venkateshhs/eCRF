@@ -57,6 +57,14 @@ def _cell(value: Any) -> str:
     return str(value)
 
 
+def _dropout_reason(subject: Dict[str, Any]) -> str:
+    reason = str((subject or {}).get("dropout_reason") or "").strip()
+    other_reason = str((subject or {}).get("dropout_other_reason") or "").strip()
+    if reason == "Other" and other_reason:
+        return f"Other — {other_reason}"
+    return reason or other_reason
+
+
 def _column_name(value: Any, fallback: str) -> str:
     text = re.sub(r"[^A-Za-z0-9]+", "_", str(value or "").strip()).strip("_").lower()
     if not text:
@@ -265,6 +273,8 @@ def _combined_version_export(
         },
         "visit": {"LongName": "Visit", "Description": "Human-readable study visit name"},
         "group": {"LongName": "Study group", "Description": "Current human-readable study group name"},
+        "dropout_date": {"LongName": "Dropout date", "Description": "Subject-level dropout date recorded by the dropout workflow; blank for active subjects"},
+        "dropout_reason": {"LongName": "Dropout reason", "Description": "Subject-level dropout reason recorded by the dropout workflow; blank for active subjects"},
     }
 
     def add_descriptor(column: str, descriptor: Dict[str, Any], metadata: Dict[str, Any]) -> None:
@@ -441,6 +451,8 @@ def _combined_version_export(
             "participant_id": f"sub-{_bids_label(subject_name, f'{subject_index + 1:05d}')}",
             "visit": visit_name,
             "group": group_name,
+            "dropout_date": str(subject.get("dropout_date") or ""),
+            "dropout_reason": _dropout_reason(subject),
         }
         for descriptor in descriptors:
             value: Any = None
@@ -474,7 +486,7 @@ def _combined_version_export(
             row[descriptor["column"]] = _cell(value) if value is not None else ""
         rows.append(row)
 
-    columns = ["participant_id", "visit", "group"] + [descriptor["column"] for descriptor in descriptors]
+    columns = ["participant_id", "visit", "group", "dropout_date", "dropout_reason"] + [descriptor["column"] for descriptor in descriptors]
     return rows, columns, sidecar
 
 
@@ -601,10 +613,14 @@ def build_analysis_export(
         participant_rows.append({
             "participant_id": f"sub-{_bids_label(subject.get('id'), f'{index + 1:05d}')}",
             "group": group_name,
+            "dropout_date": str(subject.get("dropout_date") or ""),
+            "dropout_reason": _dropout_reason(subject),
         })
-    _write_tsv(root / "participants.tsv", participant_rows, ["participant_id", "group"])
+    _write_tsv(root / "participants.tsv", participant_rows, ["participant_id", "group", "dropout_date", "dropout_reason"])
     (root / "participants.json").write_text(json.dumps({
         "group": {"Description": "Study group display name"},
+        "dropout_date": {"Description": "Subject-level dropout date recorded by the dropout workflow; blank for active subjects"},
+        "dropout_reason": {"Description": "Subject-level dropout reason recorded by the dropout workflow; blank for active subjects"},
     }, indent=2), encoding="utf-8")
 
     entries = [row for row in _latest_by_slot(repo.list_entries(study_id, study_name)) if selected(row)]
@@ -635,13 +651,15 @@ def build_analysis_export(
         for version in versions:
             schema = schemas_by_version.get(version) or study_data
             catalog = _field_catalog(schema)
-            columns = ["participant_id", "visit", "group", "study_version"] + [item[4] for item in catalog]
+            columns = ["participant_id", "visit", "group", "dropout_date", "dropout_reason", "study_version"] + [item[4] for item in catalog]
             sidecar = {
                 "MeasurementToolMetadata": {
                     "Description": f"case-e electronic case report form, study template version {version}"
                 },
                 "visit": {"LongName": "Visit", "Description": "Human-readable study visit name"},
                 "group": {"LongName": "Study group", "Description": "Human-readable study group name"},
+                "dropout_date": {"LongName": "Dropout date", "Description": "Subject-level dropout date recorded by the dropout workflow; blank for active subjects"},
+                "dropout_reason": {"LongName": "Dropout reason", "Description": "Subject-level dropout reason recorded by the dropout workflow; blank for active subjects"},
                 "study_version": {"LongName": "Study template version", "Description": "case-e template version used for this entry"},
             }
             for _, _, section, field, column in catalog:
@@ -670,6 +688,8 @@ def build_analysis_export(
                     "participant_id": f"sub-{_bids_label(subject_name, f'{subject_index + 1:05d}')}",
                     "visit": visit_name,
                     "group": group_name,
+                    "dropout_date": str(subject.get("dropout_date") or ""),
+                    "dropout_reason": _dropout_reason(subject),
                     "study_version": version,
                     **_entry_values(entry, catalog),
                 }

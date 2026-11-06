@@ -69,6 +69,7 @@ class StudyMetadataBase(BaseModel):
 
     #  workflow fields (optional to avoid regressions)
     status: Optional[str] = None                 # "DRAFT" | "PUBLISHED" | "ARCHIVED"
+    archived_from_status: Optional[str] = None   # state restored by the unarchive workflow
     draft_of_study_id: Optional[int] = None      # if this is an edit-draft of an existing study
     last_completed_step: Optional[int] = None    # wizard resume helper
     permissions: Optional[StudyPermissionsOut] = None
@@ -118,6 +119,13 @@ class StudyFull(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class EnrollmentPlanUpdate(BaseModel):
+    mode: Literal["none", "linear", "monthly"] = "none"
+    target_subjects: Optional[int] = Field(default=None, ge=1)
+    duration_months: Optional[int] = Field(default=None, ge=1, le=240)
+    monthly_enrollments: List[int] = Field(default_factory=list)
 
 
 # File Schemas

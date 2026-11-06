@@ -982,7 +982,7 @@ import {
   getNextSubjectSequenceNumber,
 } from "@/utils/subjectIdUtils";
 import { validateManualSubjectIds } from "@/utils/manualSubjectIds";
-import { resolveImportVisit, validateImportGroup } from "@/utils/studyDataImportTarget";
+import { isBlockingImportIssue, resolveImportVisit, validateImportGroup } from "@/utils/studyDataImportTarget";
 import {
   calculateDataEntryFieldProgress,
   calculateDataEntryProgress,
@@ -992,6 +992,7 @@ import {
   evaluateValueAssignments,
 } from "@/utils/formValueAssignmentRuntime";
 import { normalizeImportedDateForFormat, parseDateByConfiguredFormat } from "@/utils/dateFormatParsing";
+import { normalizeImportedBoolean, splitDelimitedChoices } from "@/utils/spreadsheetValueImport";
 import {
   inferUploadedFileFieldContext,
   uploadedFileId,
@@ -3370,9 +3371,7 @@ async buildImportPreview(payload) {
 
       let status = "Ready";
       if (issues.length) {
-        const hasHardError = issues.some((x) =>
-          /not found|not available|does not match|required|invalid|must be|readonly|not assigned|is missing/i.test(String(x))
-        );
+        const hasHardError = issues.some(isBlockingImportIssue);
         status = hasHardError ? "Error" : "Warning";
       }
 
@@ -3484,13 +3483,12 @@ normalizeImportedValueForField(field, rawValue) {
   }
 
   if (type === "checkbox") {
-    const v = text.toLowerCase();
-    return ["true", "yes", "y", "1", "checked"].includes(v);
+    return normalizeImportedBoolean(rawValue);
   }
 
-  if (type === "select") {
+  if (type === "select" || type === "radio") {
     if (c.allowMultiple) {
-      return text.split(",").map((x) => x.trim()).filter(Boolean);
+      return splitDelimitedChoices(rawValue);
     }
     return text;
   }
@@ -3499,7 +3497,7 @@ normalizeImportedValueForField(field, rawValue) {
     return normalizeImportedDateForFormat(rawValue, c.dateFormat || "dd.MM.yyyy");
   }
 
-  if (type === "radio" || type === "time") {
+  if (type === "time") {
     return text;
   }
 

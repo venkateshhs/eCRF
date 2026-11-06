@@ -1,8 +1,8 @@
 <template>
   <div class="create-form-container">
-    <div class="scratch-form-content" :class="{ 'scratch-form-content-full': showMatrix || showLogic || showValueAssignments }">
+    <div class="scratch-form-content" :class="{ 'scratch-form-content-full': showMatrix || showLogic || showValueAssignments || showStudySettings }">
       <!-- ───────── Available Fields ───────── -->
-      <div v-if="!showMatrix && !showLogic && !showValueAssignments" class="available-fields">
+      <div v-if="!showMatrix && !showLogic && !showValueAssignments && !showStudySettings" class="available-fields">
         <div class="available-fields-topbar">
           <button @click="goBack" class="btn-back" title="Go Back">
             Back
@@ -268,15 +268,21 @@
       <div
         ref="scratchScrollEl"
         class="form-area"
-        :class="{ 'form-area-full': showMatrix || showLogic || showValueAssignments }"
+        :class="{ 'form-area-full': showMatrix || showLogic || showValueAssignments || showStudySettings }"
         @scroll.passive="onScratchScroll"
         @pointerenter="onBuilderPointerMove"
         @pointermove.passive="onBuilderPointerMove"
         @pointerleave="onBuilderPointerLeave"
       >
-        <div class="sections-container" :class="{ 'value-assignments-sections-container': showValueAssignments }">
+        <div
+          class="sections-container"
+          :class="{
+            'value-assignments-sections-container': showValueAssignments,
+            'study-settings-sections-container': showStudySettings
+          }"
+        >
           <!-- Sections View -->
-          <div v-if="!showMatrix && !showLogic && !showValueAssignments">
+          <div v-if="!showMatrix && !showLogic && !showValueAssignments && !showStudySettings">
             <!-- Sticky builder toolbar -->
             <div ref="builderStickyBar" class="sections-topbar builder-sticky-bar">
               <div class="form-actions-inline">
@@ -379,6 +385,11 @@
                       </button>
                       <button class="options-item" role="menuitem" @click.prevent="openSaveTemplateFormDialog">
                           Save template/form
+                      </button>
+
+                      <button class="options-item" role="menuitem" @click.prevent="openStudySettings">
+                        General study settings
+                        <small class="options-item-detail">{{ numberFormatSummary }}</small>
                       </button>
 
                       <button class="options-item danger" role="menuitem" @click.prevent="confirmClearForm">
@@ -718,6 +729,13 @@
               @update-logic="applyLogicPayload"
             />
           </div>
+          <div v-else-if="showStudySettings" class="study-settings-route-host">
+            <StudyGeneralSettings
+              v-model="studySettings"
+              :forms="forms"
+              @back="closeStudySettings"
+            />
+          </div>
         </div>
       </div>
     </div>
@@ -839,6 +857,7 @@
         :currentFieldKey="currentEditingFieldKey"
         :currentFieldLabel="currentEditingFieldLabel"
         :fieldDefinition="currentEditingFieldDefinition"
+        :studySettings="studySettings"
         @updateConstraints="confirmConstraintsDialog"
         @closeConstraintsDialog="cancelConstraintsDialog"
         @showGenericDialog="openGenericDialog"
@@ -997,7 +1016,7 @@
     </div>
 
     <button
-      v-if="!showMatrix && !showLogic && !showValueAssignments && hasScratchScrollableContent"
+      v-if="!showMatrix && !showLogic && !showValueAssignments && !showStudySettings && hasScratchScrollableContent"
       type="button"
       class="floating-scroll-btn"
       :class="{ 'is-up': scratchScrollDirection === 'up' }"
@@ -1028,6 +1047,7 @@ import FieldLinearScale from "@/components/fields/FieldLinearScale.vue";
 import FieldFileUpload from "@/components/fields/FieldFileUpload.vue";
 import LogicCalculationsRoute from "./LogicCalculationsRoute.vue";
 import LogicValueAssignmentsRoute from "./LogicValueAssignmentsRoute.vue";
+import StudyGeneralSettings from "./StudyGeneralSettings.vue";
 import ImportCsvTemplateDialog from "./ImportCsvTemplateDialog.vue";
 import RearrangeStructureDialog from "@/components/RearrangeStructureDialog.vue";
 import FieldTable from "@/components/FieldTable.vue";
@@ -1036,6 +1056,7 @@ import SaveTemplateFormDialog from "@/components/SaveTemplateFormDialog.vue";
 import StudySaveStatus from "@/components/StudySaveStatus.vue";
 import { copyCompleteTableStructure } from "@/utils/tableFieldCopy";
 import { calculateContainedRevealScrollTop } from "@/utils/builderScrollFocus";
+import { normalizeStudySettings, studyNumberExamples } from "@/utils/studySettings";
 export default {
   name: "ScratchFormComponent",
   components: {
@@ -1044,6 +1065,7 @@ export default {
     ProtocolMatrix,
     LogicCalculationsRoute,
     LogicValueAssignmentsRoute,
+    StudyGeneralSettings,
     FieldConstraintsDialog,
     FormPreview,
     DateFormatPicker,
@@ -1065,7 +1087,7 @@ export default {
   // IMPORTANT:
   // When ProtocolMatrix is open, let ProtocolMatrix handle unsaved guard/dialog.
   // This prevents double dialogs (one from Scratch + one from ProtocolMatrix).
-    if (this.showMatrix || this.showLogic || this.showValueAssignments) {
+    if (this.showMatrix || this.showLogic || this.showValueAssignments || this.showStudySettings) {
       next();
       return;
     }
@@ -1130,6 +1152,8 @@ export default {
       showMatrix: false,
       showLogic: false,
       showValueAssignments: false,
+      showStudySettings: false,
+      studySettings: normalizeStudySettings(),
       visits: [],
       groups: [],
       assignments: [],
@@ -1377,6 +1401,11 @@ export default {
 
     saveAndLeaveLabel() {
       return this.isPublishedStudy ? "Review and save changes" : "Save Draft and Leave";
+    },
+
+    numberFormatSummary() {
+      const example = studyNumberExamples(this.studySettings);
+      return `${example.label}: ${example.exampleDecimal} · ${example.exampleLarge}`;
     }
   },
 
@@ -1393,6 +1422,17 @@ export default {
           this.$store.commit("setStudyCreationDirty", true);
         }
       }
+    },
+    studySettings: {
+      deep: true,
+      handler(next) {
+        const normalized = normalizeStudySettings(next);
+        this.$store.commit("setStudyDetails", {
+          ...this.studyDetails,
+          studySettings: normalized,
+        });
+        if (!this.hydratingScratch) this.$store.commit("setStudyCreationDirty", true);
+      },
     },
     "currentForm.sections": {
       deep: true,
@@ -1429,6 +1469,10 @@ export default {
     window.addEventListener("beforeunload", this.beforeUnloadHandler);
     window.addEventListener("resize", this.updateScratchScrollState);
     this.hydratingScratch = true;
+
+    this.studySettings = normalizeStudySettings(
+      this.studyDetails.studySettings || this.studyDetails.study_settings
+    );
 
     const hasStudyForms =
       Array.isArray(this.studyDetails.forms) && this.studyDetails.forms.length;
@@ -2852,6 +2896,7 @@ export default {
 
       this.showMatrix = false;
       this.showValueAssignments = false;
+      this.showStudySettings = false;
       this.showLogic = true;
     },
 
@@ -2866,7 +2911,21 @@ export default {
 
       this.showMatrix = false;
       this.showLogic = false;
+      this.showStudySettings = false;
       this.showValueAssignments = true;
+    },
+
+    openStudySettings() {
+      this.closeAdditionalOptions();
+      this.showMatrix = false;
+      this.showLogic = false;
+      this.showValueAssignments = false;
+      this.showStudySettings = true;
+    },
+
+    closeStudySettings() {
+      this.showStudySettings = false;
+      this.refreshBuilderStickyObserver();
     },
 
     ensurePersistentIdsForLogic() {
@@ -3093,6 +3152,7 @@ export default {
         study_content: {
           study_data: {
             study: normalizedStudy,
+            studySettings: normalizeStudySettings(this.studySettings),
             groups: JSON.parse(JSON.stringify(details.groups || this.groups || [])),
             visits: JSON.parse(JSON.stringify(details.visits || this.visits || [])),
             subjectCount: Number(details.subjectCount ?? 0),
@@ -3140,6 +3200,7 @@ export default {
       this.$store.commit("setStudyDetails", {
         ...this.studyDetails,
         assignments: JSON.parse(JSON.stringify(this.assignments || [])),
+        studySettings: normalizeStudySettings(this.studySettings),
         forms: selectedFormsForStore
       });
 
@@ -3177,6 +3238,7 @@ export default {
               id: Number(existingId)
             },
             assignments: payload.study_content.study_data.assignments,
+            studySettings: payload.study_content.study_data.studySettings,
             forms: selectedFormsForStore
           });
 
@@ -3227,6 +3289,7 @@ export default {
           assignmentMethod: payload.study_content.study_data.assignmentMethod || "Random",
           subjects: payload.study_content.study_data.subjects || [],
           assignments: payload.study_content.study_data.assignments || [],
+          studySettings: payload.study_content.study_data.studySettings,
           skipSubjectCreationNow: !!payload.study_content.study_data.skipSubjectCreationNow,
           forms: selectedFormsForStore
         });
@@ -3246,6 +3309,7 @@ export default {
     buildScratchSaveFingerprint() {
       return JSON.stringify({
         forms: this.forms || [],
+        studySettings: normalizeStudySettings(this.studySettings),
         visits: this.visits || [],
         groups: this.groups || [],
         assignments: this.assignments || [],
@@ -3672,6 +3736,11 @@ export default {
     },
 
     goBack() {
+      if (this.showStudySettings) {
+        this.showStudySettings = false;
+        return;
+      }
+
       if (this.showLogic) {
         this.showLogic = false;
         return;
@@ -3854,6 +3923,7 @@ export default {
     handleProtocolClick() {
       this.showLogic = false;
       this.showValueAssignments = false;
+      this.showStudySettings = false;
       this.showMatrix = true;
     },
     editTemplate() {
@@ -3870,6 +3940,7 @@ export default {
       this.showMatrix = false;
       this.showLogic = false;
       this.showValueAssignments = false;
+      this.showStudySettings = false;
       this.refreshBuilderStickyObserver();
     },
 
@@ -5213,6 +5284,19 @@ export default {
   overflow: hidden;
 }
 
+.form-area-full .sections-container.study-settings-sections-container {
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.form-area-full .sections-container > .study-settings-route-host {
+  height: 100%;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
 /* =========================
    STICKY BUILDER TOOLBAR
    ========================= */
@@ -5793,6 +5877,14 @@ select:focus {
 .options-item:hover {
   background: #f3f4f6;
   color: #111827;
+}
+
+.options-item-detail {
+  display: block;
+  margin-top: 3px;
+  color: #6b7280;
+  font-size: 11px;
+  line-height: 1.3;
 }
 
 .options-item.danger {

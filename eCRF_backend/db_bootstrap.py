@@ -33,6 +33,7 @@ def ensure_tables() -> None:
 
 
 def ensure_auth_schema() -> None:
+    ensure_study_archive_schema()
     inspector = inspect(engine)
     table_names = inspector.get_table_names()
     if "users" not in table_names:
@@ -55,6 +56,21 @@ def ensure_auth_schema() -> None:
         )
     logger.info("Added users.must_change_password column.")
     ensure_entry_progress_schema()
+
+
+def ensure_study_archive_schema() -> None:
+    inspector = inspect(engine)
+    if "study_metadata" not in inspector.get_table_names():
+        return
+
+    existing = {col["name"] for col in inspector.get_columns("study_metadata")}
+    if "archived_from_status" in existing:
+        return
+
+    with engine.begin() as conn:
+        conn.execute(text("ALTER TABLE study_metadata ADD COLUMN archived_from_status VARCHAR(20)"))
+
+    logger.info("Added study_metadata.archived_from_status column.")
 
 
 def ensure_entry_progress_schema() -> None:

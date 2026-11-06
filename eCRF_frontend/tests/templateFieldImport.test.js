@@ -13,7 +13,7 @@ function load(relative) {
     plugins: ["@babel/plugin-transform-modules-commonjs"],
   }).code;
   const module = { exports: {} };
-  new Function("module", "exports", "require", code)(module, module.exports, require);
+  new Function("module", "exports", "require", code)(module, module.exports, name => name.startsWith("@/") ? load(`${name.slice(2)}.js`) : require(name));
   return module.exports;
 }
 
@@ -31,6 +31,24 @@ assert.equal(columns[1].inferredType, "number");
 assert.equal(columns[2].inferredType, "select");
 assert.equal(columns[3].inferredType, "date");
 assert.deepEqual(columns[2].distinct, ["Female", "Male"]);
+assert.equal(columns[2].inferredAllowMultiple, false);
+
+const multiResponseExport = [
+  ["Familienstand"],
+  ["ledig"],
+  ["verheiratet/verpartnert, mit Partner zusammenlebend"],
+  ["ledig"],
+  ["verheiratet/verpartnert, vom Partner getrennt lebend"],
+];
+const multiColumns = importer.analyzeColumnFields(multiResponseExport, 0);
+assert.equal(multiColumns[0].inferredType, "select");
+assert.equal(multiColumns[0].inferredAllowMultiple, true);
+assert.deepEqual(multiColumns[0].choiceOptions, [
+  "ledig",
+  "verheiratet/verpartnert",
+  "mit Partner zusammenlebend",
+  "vom Partner getrennt lebend",
+]);
 
 const definitions = [
   ["Field name", "Type"],

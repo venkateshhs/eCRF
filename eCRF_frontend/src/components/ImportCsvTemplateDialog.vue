@@ -41,7 +41,7 @@
         </div>
         <div class="toolbar"><div><strong>{{ selectedCount }} of {{ candidates.length }} selected</strong><small>{{ orientation === 'rows' ? 'Each selected row becomes one field.' : 'Each selected column becomes one field.' }}</small></div><div class="toolbar-actions"><input v-model="search" type="search" class="input search" placeholder="Search fields"><button class="btn-option small" @click="selectShown(true)">Select shown</button><button class="btn-option small" @click="selectShown(false)">Clear shown</button></div></div>
         <div v-if="orientation === 'rows' && rowMapping.labelIndex < 0" class="message info">Select the field label column to continue.</div>
-        <div v-else class="candidate-list"><label v-for="item in filteredCandidates" :key="item.id" class="candidate"><input v-model="item.selected" type="checkbox"><span><b>{{ candidateTitle(item) }}</b><small>{{ candidateSubtitle(item) }}</small></span><em>{{ typeLabel(item.inferredType || normalizeImportedType(item.rawType)) }}</em></label><div v-if="!filteredCandidates.length" class="empty">No matching fields.</div></div>
+        <div v-else class="candidate-list"><label v-for="item in filteredCandidates" :key="item.id" class="candidate"><input v-model="item.selected" type="checkbox"><span><b>{{ candidateTitle(item) }}</b><small>{{ candidateSubtitle(item) }}</small></span><em>{{ typeLabel(item.inferredAllowMultiple ? 'radio' : (item.inferredType || normalizeImportedType(item.rawType))) }}</em></label><div v-if="!filteredCandidates.length" class="empty">No matching fields.</div></div>
         <footer class="actions"><button class="btn-option" @click="step = 1">Back</button><button class="btn-primary" :disabled="!canReview" @click="goToReview">Review selected fields</button></footer>
       </section>
 
@@ -132,7 +132,7 @@ export default {
     goToSelection() { this.prepareCandidates(); this.step = 2; },
     selectShown(value) { this.filteredCandidates.forEach(x => { x.selected = value; }); },
     candidateTitle(x) { return this.orientation === "rows" ? (x.label || `Row ${x.rowIndex + 1}`) : (x.displayLabel || x.fieldName); },
-    candidateSubtitle(x) { return this.orientation === "rows" ? (x.rawType ? `Type in file: ${x.rawType}` : `Spreadsheet row ${x.rowIndex + 1}`) : `${x.nonBlankCount} non-empty value(s) — ${x.samples.length ? x.samples.join(" · ") : "No data"}`; },
+    candidateSubtitle(x) { return this.orientation === "rows" ? (x.rawType ? `Type in file: ${x.rawType}` : `Spreadsheet row ${x.rowIndex + 1}`) : `${x.nonBlankCount} non-empty value(s)${x.inferredAllowMultiple ? " — multiple choices detected" : ""} — ${x.samples.length ? x.samples.join(" · ") : "No data"}`; },
     normalizeImportedType(value) { return normalizeType(value, "text"); },
     typeLabel(type) { return this.typeOptions.find(x => x.value === type)?.label || "Text"; },
     goToReview() {
@@ -141,7 +141,7 @@ export default {
       const names = uniqueFieldNames(this.importRows); this.importRows.forEach((row, i) => { row.name = names[i]; }); this.validateReview(); this.step = 3;
     },
     baseRow(id, label, name, type) { return {sourceId:id,label,name,type,sampleText:"",optionsRaw:"",helpText:"",defaultValue:"",required:false,readonly:false,placeholder:"",min:"",max:"",step:"",rows:""}; },
-    buildColumnRows(selected) { return selected.map(x => { const label=x.label || x.fieldName; return {...this.baseRow(x.id,label,x.stableKey || slugifyFieldName(label),x.inferredType),sectionTitle:x.sectionName || "Imported fields",sourceAlias:x.sourceAlias || x.rawHeader || label,sampleText:x.samples.join(" · "),optionsRaw:x.distinct.length <= 20 ? x.distinct.join(" | ") : ""}; }); },
+    buildColumnRows(selected) { return selected.map(x => { const label=x.label || x.fieldName; const type=x.inferredAllowMultiple ? "radio" : x.inferredType; const options=x.inferredAllowMultiple ? x.choiceOptions : x.distinct; return {...this.baseRow(x.id,label,x.stableKey || slugifyFieldName(label),type),sectionTitle:x.sectionName || "Imported fields",sourceAlias:x.sourceAlias || x.rawHeader || label,sampleText:x.samples.join(" · "),optionsRaw:options.length <= 20 ? options.join(" | ") : "",allowMultiple:!!x.inferredAllowMultiple}; }); },
     buildDefinitionRows(selected) {
       return selected.filter(x => x.label).map(x => {
         const get = key => this.rowMapping[`${key}Index`] >= 0 ? x.values[this.rowMapping[`${key}Index`]] ?? "" : "";

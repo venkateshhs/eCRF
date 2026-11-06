@@ -221,6 +221,27 @@
       <section class="group" v-if="isNumber">
         <div class="row two">
           <div>
+            <label>Value meaning</label>
+            <select v-model="localMeasurementConcept" @change="onMeasurementConceptChanged">
+              <option v-for="concept in measurementConceptOptions" :key="concept.value" :value="concept.value">
+                {{ concept.label }}
+              </option>
+            </select>
+            <small class="note">Explicit classification only; the field label is never guessed.</small>
+          </div>
+          <div v-if="localMeasurementConcept">
+            <label>Unit</label>
+            <select v-model="localMeasurementUnitMode" @change="onMeasurementUnitModeChanged">
+              <option value="study_default">Study default ({{ inheritedMeasurementUnit }})</option>
+              <option v-for="unit in measurementUnitOptions" :key="unit" :value="`field:${unit}`">
+                Override: {{ unit }}
+              </option>
+            </select>
+          </div>
+        </div>
+
+        <div class="row two">
+          <div>
             <label>Min value</label>
             <input type="number" :value="num(local.min)" @input="setNum('min', $event)" />
           </div>
@@ -1156,6 +1177,11 @@ import {
 import DateFormatPicker from "@/components/DateFormatPicker.vue";
 import FieldTime from "@/components/fields/FieldTime.vue";
 import BaseTextarea from "@/components/forms/BaseTextarea.vue";
+import {
+  MEASUREMENT_CONCEPTS,
+  measurementConcept,
+  normalizeStudySettings,
+} from "@/utils/studySettings";
 
 const DATE_FORMATS = [
   "dd.MM.yyyy",
@@ -1283,6 +1309,10 @@ function buildInitialLocal(vm, constraintsForm, currentFieldType) {
     integerOnly: !!base.integerOnly,
     minDigits: isFinite(base.minDigits) ? Number(base.minDigits) : undefined,
     maxDigits: isFinite(base.maxDigits) ? Number(base.maxDigits) : undefined,
+    measurement:
+      base.measurement && typeof base.measurement === "object"
+        ? JSON.parse(JSON.stringify(base.measurement))
+        : undefined,
 
     minTime: base.minTime || "",
     maxTime: base.maxTime || "",
@@ -1343,6 +1373,7 @@ export default {
     allowTypeChange: { type: Boolean, default: true },
     hideBasicTypeControls: { type: Boolean, default: false },
     forceTypeLabel: { type: String, default: "" },
+    studySettings: { type: Object, default: () => ({}) },
   },
 
   data() {
@@ -1385,6 +1416,11 @@ export default {
       chipInput: "",
       markEditValue: null,
       markEditLabel: "",
+      localMeasurementConcept: String(local?.measurement?.concept || ""),
+      localMeasurementUnitMode:
+        local?.measurement?.unitSource === "field" && local?.measurement?.unit
+          ? `field:${local.measurement.unit}`
+          : "study_default",
     };
   },
   mounted() {
@@ -1393,6 +1429,16 @@ export default {
   },
 
   computed: {
+    measurementConceptOptions() {
+      return MEASUREMENT_CONCEPTS;
+    },
+    measurementUnitOptions() {
+      return measurementConcept(this.localMeasurementConcept).units || [];
+    },
+    inheritedMeasurementUnit() {
+      const settings = normalizeStudySettings(this.studySettings);
+      return settings.measurementDefaults[this.localMeasurementConcept] || this.measurementUnitOptions[0] || "not set";
+    },
     standardOptionRows() {
       return this.localOptions.map((opt, idx) => ({ opt, idx }))
         .filter(({ opt }) => !this.local.allowOther || String(opt).trim().toLowerCase() !== 'other');
@@ -1627,6 +1673,7 @@ export default {
 
         this.allowedFormatsText = allowedFormats.join(", ");
         this.local = nextLocal;
+        this.syncMeasurementEditor(nextLocal.measurement);
         this.localType = (this.currentFieldType || "text").toLowerCase();
         this.conversionReport = null;
         this.lossyConversionConfirmed = false;
@@ -1744,6 +1791,40 @@ export default {
   },
 
   methods: {
+    syncMeasurementEditor(measurement) {
+      this.localMeasurementConcept = String(measurement?.concept || "");
+      this.localMeasurementUnitMode =
+        measurement?.unitSource === "field" && measurement?.unit
+          ? `field:${measurement.unit}`
+          : "study_default";
+    },
+    onMeasurementConceptChanged() {
+      if (!this.localMeasurementConcept) {
+        delete this.local.measurement;
+        this.localMeasurementUnitMode = "study_default";
+        return;
+      }
+      this.localMeasurementUnitMode = "study_default";
+      this.local.measurement = {
+        concept: this.localMeasurementConcept,
+        unitSource: "study_default",
+      };
+    },
+    onMeasurementUnitModeChanged() {
+      if (!this.localMeasurementConcept) return;
+      if (this.localMeasurementUnitMode.startsWith("field:")) {
+        this.local.measurement = {
+          concept: this.localMeasurementConcept,
+          unitSource: "field",
+          unit: this.localMeasurementUnitMode.slice(6),
+        };
+      } else {
+        this.local.measurement = {
+          concept: this.localMeasurementConcept,
+          unitSource: "study_default",
+        };
+      }
+    },
     captureInitialConstraintState() {
       this.initialConstraintEditSnapshot = constraintEditSnapshot(
         this.local,
@@ -3039,6 +3120,8 @@ export default {
         this.local.integerOnly = false;
         this.local.minDigits = undefined;
         this.local.maxDigits = undefined;
+        delete this.local.measurement;
+        this.syncMeasurementEditor(null);
       } else if (t === "text" || t === "textarea") {
         this.local.minLength = undefined;
         this.local.maxLength = undefined;

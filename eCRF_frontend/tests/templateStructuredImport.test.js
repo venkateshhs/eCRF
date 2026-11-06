@@ -42,4 +42,28 @@ assert.equal(vm.emitted.sections.length, 2);
 assert.equal(vm.emitted.sections[0].fields[0].constraints.importAliases[0], "Same label (1)");
 assert.notEqual(vm.emitted.sections[0].fields[0].name, vm.emitted.sections[1].fields[0].name);
 
+const multiVm = instance(component);
+multiVm.loadWorkbookData({ Responses: [
+  ["ID", "Muttersprache"],
+  ["1", "Deutsch"],
+  ["2", "Deutsch, Tuerkisch"],
+  ["3", "Deutsch"],
+  ["4", "Deutsch, Englisch"],
+] });
+multiVm.orientation = "columns";
+multiVm.prepareCandidates();
+multiVm.candidates.find(item => item.label === "ID").selected = false;
+const multiCandidate = multiVm.candidates.find(item => item.label === "Muttersprache");
+assert.equal(multiCandidate.inferredAllowMultiple, true);
+assert.match(multiVm.candidateSubtitle(multiCandidate), /multiple choices detected/);
+multiVm.goToReview();
+assert.equal(multiVm.importRows[0].type, "radio");
+assert.equal(multiVm.importRows[0].allowMultiple, true);
+assert.equal(multiVm.importRows[0].optionsRaw, "Deutsch | Tuerkisch | Englisch");
+multiVm.confirmImport();
+const multiField = multiVm.emitted[0];
+assert.equal(multiField.type, "radio");
+assert.equal(multiField.constraints.allowMultiple, true);
+assert.deepEqual(multiField.options, ["Deutsch", "Tuerkisch", "Englisch"]);
+
 console.log("Structured template import tests passed");
