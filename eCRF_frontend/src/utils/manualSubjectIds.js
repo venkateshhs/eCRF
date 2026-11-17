@@ -1,10 +1,19 @@
 import Papa from "papaparse";
 import { read, utils } from "xlsx";
 
+export function normalizeSubjectIdForComparison(value) {
+  return String(value ?? "").trim().normalize("NFC").toLowerCase();
+}
+
+export function isValidManualSubjectId(value) {
+  const id = String(value ?? "").trim().normalize("NFC");
+  return /^[\p{L}\p{N}][\p{L}\p{N}_-]{0,127}$/u.test(id);
+}
+
 export function duplicateSubjectIds(ids, existingIds = []) {
   const seen = new Set(
     existingIds
-      .map(id => String(id ?? "").trim().toLowerCase())
+      .map(normalizeSubjectIdForComparison)
       .filter(Boolean)
   );
   const duplicates = new Map();
@@ -12,7 +21,7 @@ export function duplicateSubjectIds(ids, existingIds = []) {
   for (const rawId of Array.isArray(ids) ? ids : []) {
     const id = String(rawId ?? "").trim();
     if (!id) continue;
-    const normalized = id.toLowerCase();
+    const normalized = normalizeSubjectIdForComparison(id);
     if (seen.has(normalized) && !duplicates.has(normalized)) {
       duplicates.set(normalized, id);
     }
@@ -27,7 +36,7 @@ export function validateManualSubjectIds(ids, existingIds = []) {
   for (let index = 0; index < ids.length; index += 1) {
     const id = String(ids[index] ?? "").trim();
     if (!id) return `Subject ID ${index + 1} is empty.`;
-    if (!/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(id)) {
+    if (!isValidManualSubjectId(id)) {
       return `Subject ID ${index + 1}: use 1–128 letters, numbers, hyphens or underscores, starting with a letter or number.`;
     }
   }

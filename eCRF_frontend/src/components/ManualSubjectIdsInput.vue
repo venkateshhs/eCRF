@@ -103,6 +103,7 @@
       </template>
     </div>
     <p v-if="error" role="alert" class="error-message">{{ error }}</p>
+    <p v-else-if="notice" role="status" class="import-notice">{{ notice }}</p>
     <p v-else-if="validationError" role="alert" class="error-message">{{ validationError }}</p>
     <p class="privacy-note">Only the selected ID column is imported. Other columns and worksheets are not saved.</p>
   </div>
@@ -110,7 +111,8 @@
 <script>
 import { markRaw } from "vue";
 import {
-  duplicateSubjectIds,
+  isValidManualSubjectId,
+  normalizeSubjectIdForComparison,
   parseSubjectIdCsv,
   readSubjectIdWorkbook,
   parseSubjectIdWorksheet,
@@ -126,7 +128,7 @@ export default {
     csvOnly: { type: Boolean, default: false },
   },
   emits: ["update:modelValue"],
-  data: () => ({ csv: null, workbook: null, sheetName: "", column: -1, selectedRows: [], error: "", readVersion: 0 }),
+  data: () => ({ csv: null, workbook: null, sheetName: "", column: -1, selectedRows: [], error: "", notice: "", readVersion: 0 }),
   computed: {
     validationError() { return this.modelValue.length ? validateManualSubjectIds(this.modelValue, this.existingIds) : ""; },
     allRowsSelected() {
@@ -147,15 +149,15 @@ export default {
     rowError(index) {
       const value = String(this.modelValue[index] ?? "").trim();
       if (!value) return "Subject ID is required.";
-      if (!/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(value)) {
+      if (!isValidManualSubjectId(value)) {
         return "Use letters, numbers, hyphens or underscores.";
       }
-      const normalized = value.toLowerCase();
-      if (this.existingIds.some(id => String(id).trim().toLowerCase() === normalized)) {
+      const normalized = normalizeSubjectIdForComparison(value);
+      if (this.existingIds.some(id => normalizeSubjectIdForComparison(id) === normalized)) {
         return "This Subject ID already exists.";
       }
       if (this.modelValue.some((id, candidateIndex) =>
-        candidateIndex !== index && String(id).trim().toLowerCase() === normalized
+        candidateIndex !== index && normalizeSubjectIdForComparison(id) === normalized
       )) return "Subject IDs must be unique.";
       return "";
     },
@@ -165,7 +167,7 @@ export default {
       const file = event.target.files?.[0];
       const version = ++this.readVersion;
       this.csv = null; this.workbook = null; this.sheetName = "";
-      this.column = -1; this.selectedRows = []; this.error = "";
+      this.column = -1; this.selectedRows = []; this.error = ""; this.notice = "";
       if (!file) return;
       try {
         if (file.size > 5 * 1024 * 1024) throw new Error("Please use a file smaller than 5 MB.");
@@ -186,7 +188,7 @@ export default {
       event.target.value = "";
     },
     selectSheet() {
-      this.csv = null; this.column = -1; this.selectedRows = []; this.error = "";
+      this.csv = null; this.column = -1; this.selectedRows = []; this.error = ""; this.notice = "";
       try { this.csv = parseSubjectIdWorksheet(this.workbook, this.sheetName); }
       catch (error) { this.error = error.message; }
     },
@@ -195,15 +197,40 @@ export default {
       const incoming = [...this.selectedRows].sort((a, b) => a - b).map(index => String(this.csv.rows[index][this.column] ?? "").trim());
       // An untouched blank input is not an enrolled subject.
       const current = this.modelValue.filter((id, index) => index < this.lockedCount || String(id).trim());
-      const combined = [...current, ...incoming];
-      const duplicates = duplicateSubjectIds(combined, this.existingIds);
-      if (duplicates.length) {
-        this.error = `Import stopped. Duplicate Subject IDs: ${duplicates.map(id => `"${id}"`).join(", ")}. Remove or deselect the duplicates and try again. No subject IDs were changed.`;
+      const seen = new Set(
+        [...this.existingIds, ...current]
+          .map(normalizeSubjectIdForComparison)
+          .filter(Boolean)
+      );
+      const uniqueIncoming = [];
+      const skippedDuplicates = [];
+      incoming.forEach((id) => {
+        const normalized = normalizeSubjectIdForComparison(id);
+        if (normalized && seen.has(normalized)) {
+          if (!skippedDuplicates.some(item => normalizeSubjectIdForComparison(item) === normalized)) {
+            skippedDuplicates.push(id);
+          }
+          return;
+        }
+        if (normalized) seen.add(normalized);
+        uniqueIncoming.push(id);
+      });
+
+      const combined = [...current, ...uniqueIncoming];
+      if (!uniqueIncoming.length) {
+        this.error = skippedDuplicates.length
+          ? `No new Subject IDs were imported. Already present or duplicated: ${skippedDuplicates.map(id => `"${id}"`).join(", ")}.`
+          : "No Subject IDs were selected for import.";
+        this.notice = "";
         return;
       }
       this.error = validateManualSubjectIds(combined, this.existingIds);
       if (this.error) return;
-      this.emitIds(combined); this.csv = null; this.workbook = null; this.sheetName = ""; this.selectedRows = [];
+      this.emitIds(combined);
+      this.notice = skippedDuplicates.length
+        ? `Imported ${uniqueIncoming.length} new Subject ID${uniqueIncoming.length === 1 ? "" : "s"}. Skipped ${skippedDuplicates.length} duplicate${skippedDuplicates.length === 1 ? "" : "s"}: ${skippedDuplicates.map(id => `"${id}"`).join(", ")}.`
+        : `Imported ${uniqueIncoming.length} new Subject ID${uniqueIncoming.length === 1 ? "" : "s"}.`;
+      this.csv = null; this.workbook = null; this.sheetName = ""; this.selectedRows = [];
     },
   },
 };
@@ -268,6 +295,7 @@ export default {
 .csv-id-value { color: #111827; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 .import-btn { justify-self: end; }
 .error-message { margin: 10px 0 0; padding: 9px 11px; border-radius: 7px; background: #fef2f2; color: #b91c1c; font-size: 13px; }
+.import-notice { margin: 10px 0 0; padding: 9px 11px; border-radius: 7px; background: #ecfdf5; color: #166534; font-size: 13px; }
 .privacy-note { margin: 10px 0 0; color: #64748b; font-size: 12px; }
 button:disabled { opacity: .55; cursor: not-allowed; }
 @media (max-width: 640px) {

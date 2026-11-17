@@ -3,4 +3,5 @@
 skip = .git*,.codespellrc
 check-hidden = true
 # ignore-regex = 
-# ignore-words-list =
+# German import-header alias ("field") used by the spreadsheet mapper.
+ignore-words-list = feld

@@ -14,7 +14,12 @@ const code = babel.transformSync(source, {
 }).code;
 const moduleUnderTest = { exports: {} };
 new Function("module", "exports", code)(moduleUnderTest, moduleUnderTest.exports);
-const { isBlockingImportIssue, resolveImportVisit, validateImportGroup } = moduleUnderTest.exports;
+const {
+  isBlockingImportIssue,
+  isCommittableImportRow,
+  resolveImportVisit,
+  validateImportGroup,
+} = moduleUnderTest.exports;
 
 const visits = [{ name: "Baseline" }, { name: "Week 6" }];
 const groups = [{ name: "Control" }, { name: "Treatment" }];
@@ -51,5 +56,8 @@ assert.match(
 );
 assert.equal(isBlockingImportIssue("Choose a valid option."), true);
 assert.equal(isBlockingImportIssue("A non-blocking informational message"), false);
+assert.equal(isCommittableImportRow({ status: "Ready" }), true);
+assert.equal(isCommittableImportRow({ status: "Warning" }), true);
+assert.equal(isCommittableImportRow({ status: "Error" }), false);
 
 console.log("Study data import target tests passed");

@@ -54,6 +54,16 @@ function looksLikeDataRow(row = []) {
   return dataLike.length >= Math.max(2, Math.ceil(values.length * 0.35));
 }
 
+function looksLikeStableKeyRow(row = []) {
+  const values = row.map(cellText).filter(Boolean);
+  if (values.length < 2) return false;
+
+  const stableKeys = values.filter(value =>
+    /^(?!\d+$)[a-z0-9]+(?:_[a-z0-9]+)*$/i.test(value)
+  );
+  return stableKeys.length >= Math.ceil(values.length * 0.8);
+}
+
 export function detectSpreadsheetLayout(rows = [], headerRowIndex = 0) {
   const markers = detectLegacySectionMarkers(rows, headerRowIndex);
   if (markers.length >= 2) return "legacy-sections";
@@ -64,7 +74,16 @@ export function detectSpreadsheetLayout(rows = [], headerRowIndex = 0) {
   const firstValues = first.map(cellText).filter(Boolean);
   const secondValues = second.map(cellText).filter(Boolean);
   const repeatedSections = firstValues.length - new Set(firstValues.map(normalizeImportText)).size;
-  if (secondValues.length && !looksLikeDataRow(second) && third.some(value => cellText(value)) && !looksLikeDataRow(third)) {
+  // A text-heavy participant row is not necessarily another header row. Only
+  // infer a multi-row header when the first row also has the repeated section
+  // structure expected from Section + Field exports. Without that structural
+  // evidence, treating ordinary text rows as headers silently drops subjects.
+  if (
+    repeatedSections > 0 &&
+    secondValues.length &&
+    !looksLikeDataRow(second) &&
+    looksLikeStableKeyRow(third)
+  ) {
     return "three-row";
   }
   if (secondValues.length && !looksLikeDataRow(second) && repeatedSections > 0) return "two-row";

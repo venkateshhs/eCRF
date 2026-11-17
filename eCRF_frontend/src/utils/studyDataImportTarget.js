@@ -6,6 +6,10 @@ export function isBlockingImportIssue(issue) {
   return /not found|not available|does not match|required|invalid|must be|readonly|not assigned|is missing|choose a valid option/i.test(String(issue || ""));
 }
 
+export function isCommittableImportRow(row) {
+  return !!row && (row.status === "Ready" || row.status === "Warning");
+}
+
 export function resolveImportVisit({
   mode,
   visitSource,

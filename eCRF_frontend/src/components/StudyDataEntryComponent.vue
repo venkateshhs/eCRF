@@ -981,8 +981,13 @@ import {
   buildUniqueSubjectId,
   getNextSubjectSequenceNumber,
 } from "@/utils/subjectIdUtils";
-import { validateManualSubjectIds } from "@/utils/manualSubjectIds";
-import { isBlockingImportIssue, resolveImportVisit, validateImportGroup } from "@/utils/studyDataImportTarget";
+import { normalizeSubjectIdForComparison, validateManualSubjectIds } from "@/utils/manualSubjectIds";
+import {
+  isBlockingImportIssue,
+  isCommittableImportRow,
+  resolveImportVisit,
+  validateImportGroup,
+} from "@/utils/studyDataImportTarget";
 import {
   calculateDataEntryFieldProgress,
   calculateDataEntryProgress,
@@ -2991,11 +2996,29 @@ export default {
         return sectionRow.map((_, fIdx) => !!incomingRow[fIdx]);
       });
     },
+  hydrateImportTargetFromSlot(s, v, g, slot) {
+    this.ensureSlot(s, v, g);
+
+    let dataArr;
+    if (slot?.data && !Array.isArray(slot.data) && typeof slot.data === "object") {
+      dataArr = this.dictToArray(slot.data);
+    } else if (Array.isArray(slot?.data)) {
+      dataArr = JSON.parse(JSON.stringify(slot.data));
+    } else {
+      dataArr = this.makeSectionFieldSkeleton();
+    }
+
+    this.entryData[s][v][g] = this.mergeStudyFileRecordsIntoSlotData(s, v, dataArr);
+    this.skipFlags[s][v][g] = this.normalizeSkipFlagsShape(
+      slot?.skipped_required_flags || []
+    );
+    this.entryIds[s][v][g] = slot?.entry_id || null;
+  },
   async commitImportPreview() {
   try {
     this.importCommitting = true;
 
-    const validRows = (this.importPreviewRows || []).filter((r) => r.status === "Ready");
+    const validRows = (this.importPreviewRows || []).filter(isCommittableImportRow);
     if (!validRows.length) {
       this.showDialogMessage("No valid rows are available to commit.");
       return;
@@ -3019,7 +3042,12 @@ export default {
         this.currentVisitIndex = v;
         this.currentGroupIndex = g;
 
-        this.ensureSlot(s, v, g);
+        // Always start from the authoritative saved slot. Bulk import previews do
+        // not hydrate full entry data, so using the local skeleton here would
+        // replace fields that are absent from this spreadsheet with defaults.
+        const slot = await this.fetchRevisionTokenForSlot(s, v, g, this.selectedVersion);
+        const expectedRevisionToken = String(slot?.revision_token || "");
+        this.hydrateImportTargetFromSlot(s, v, g, slot);
 
         row.importedFields.forEach((item) => {
           const mIdx = Number(item.modelIndex);
@@ -3056,8 +3084,6 @@ export default {
           headers: { Authorization: `Bearer ${this.token}` },
         };
 
-        const slot = await this.fetchRevisionTokenForSlot(s, v, g, this.selectedVersion);
-        const expectedRevisionToken = String(slot?.revision_token || "");
         const existing = slot?.entry_id ? { id: slot.entry_id } : this.getBestEntryFor(s, v, g);
 
         if (existing?.id) {
@@ -3194,24 +3220,27 @@ export default {
 
     this.runCalculationsForCell(targetSubjectIndex, targetVisitIndex, targetGroupIndex, null, null);
 
-    const assigned = this.selectedModels
-      .map((_, mIdx) => mIdx)
-      .filter((mIdx) => !!this.assignments?.[mIdx]?.[targetVisitIndex]?.[targetGroupIndex]);
+    const importedTargets = new Map();
+    importedFields.forEach((item) => {
+      const mIdx = Number(item.modelIndex);
+      const fIdx = Number(item.fieldIndex);
+      importedTargets.set(`${mIdx}|${fIdx}`, { mIdx, fIdx });
+    });
 
-    assigned.forEach((mIdx) => {
+    importedTargets.forEach(({ mIdx, fIdx }) => {
       const section = this.selectedModels?.[mIdx];
-      (section?.fields || []).forEach((field, fIdx) => {
-        if (!this.hasVisibleFieldsInSection(mIdx)) return;
-        if (!this.isFieldVisible(mIdx, fIdx)) return;
+      const field = section?.fields?.[fIdx];
+      if (!section || !field) return;
+      if (!this.hasVisibleFieldsInSection(mIdx)) return;
+      if (!this.isFieldVisible(mIdx, fIdx)) return;
 
-        const valid = this.validateField(mIdx, fIdx);
-        if (!valid) {
-          const msg = this.fieldErrors(mIdx, fIdx);
-          if (msg) {
-            issues.push(`${section?.title || `Section ${mIdx + 1}`} → ${field?.label || field?.name || `Field ${fIdx + 1}`}: ${msg}`);
-          }
+      const valid = this.validateField(mIdx, fIdx);
+      if (!valid) {
+        const msg = this.fieldErrors(mIdx, fIdx);
+        if (msg) {
+          issues.push(`${section?.title || `Section ${mIdx + 1}`} → ${field?.label || field?.name || `Field ${fIdx + 1}`}: ${msg}`);
         }
-      });
+      }
     });
 
     return { issues };
@@ -3273,9 +3302,9 @@ async buildImportPreview(payload) {
       if (mode === "single") {
         targetSubjectIndex = Number(payload?.selectedSubjectIndex);
       } else {
-        const normalizedSubject = String(subjectValue || "").trim().toLowerCase();
+        const normalizedSubject = normalizeSubjectIdForComparison(subjectValue);
         targetSubjectIndex = (this.sd.subjects || []).findIndex((s) => {
-          const sid = String(s?.id || s?.subject_id || "").trim().toLowerCase();
+          const sid = normalizeSubjectIdForComparison(s?.id || s?.subject_id || "");
           return sid && sid === normalizedSubject;
         });
 
