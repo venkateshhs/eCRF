@@ -48,6 +48,41 @@ assert.equal(parsedCanonical.columns[2].sectionName, "Angry");
 assert.equal(parsedCanonical.columns[3].stableKey, "afraid_same");
 assert.equal(parsedCanonical.dataRows[0][0], "S01");
 
+const textHeavySingleHeader = [
+  ["Probanden-Code:", "Geschlecht:", "Familienstand:", "Beschäftigung"],
+  ["HMNAER06", "männlich", "ledig", "Vollzeit berufstätig"],
+  ["EWLAIM11", "weiblich", "verheiratet", "Student(in)"],
+  ["THINOEN17", "männlich", "ledig", "Teilzeit berufstätig"],
+];
+assert.equal(
+  structure.detectSpreadsheetLayout(textHeavySingleHeader),
+  "single",
+  "ordinary text participant rows must not be mistaken for extra header rows"
+);
+const parsedTextHeavy = structure.parseSpreadsheetStructure(textHeavySingleHeader, { layout: "auto" });
+assert.equal(parsedTextHeavy.dataStartIndex, 1);
+assert.equal(parsedTextHeavy.dataRows.length, 3);
+assert.equal(parsedTextHeavy.dataRows[0][0], "HMNAER06");
+
+const twoHeadersWithTextHeavyParticipant = [
+  ["Metadata", "Imported fields", "Imported fields", "Imported fields"],
+  ["Probanden-Code:", "Geschlecht:", "Alter (in Jahren):", "Familienstand:"],
+  ["HMNAER06", "weiblich", 28, "verheiratet/verpartnert, mit Partner zusammenlebend"],
+  ["EWLAIM11", "weiblich", 26, "ledig"],
+];
+assert.equal(
+  structure.detectSpreadsheetLayout(twoHeadersWithTextHeavyParticipant),
+  "two-row",
+  "the first participant must not be consumed as a stable-key header row"
+);
+const parsedTwoHeaders = structure.parseSpreadsheetStructure(
+  twoHeadersWithTextHeavyParticipant,
+  { layout: "auto" }
+);
+assert.equal(parsedTwoHeaders.dataStartIndex, 2);
+assert.equal(parsedTwoHeaders.dataRows.length, 2);
+assert.equal(parsedTwoHeaders.dataRows[0][0], "HMNAER06");
+
 const sentence = structure.parseSpreadsheetStructure([["Question with a period. (1)"], ["yes"]], { layout: "single" });
 assert.equal(sentence.columns[0].sectionName, "");
 assert.equal(sentence.columns[0].fieldName, "Question with a period. (1)");

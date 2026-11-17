@@ -368,7 +368,7 @@
             </div>
 
             <div v-if="previewSummary.errorRows || previewSummary.warningRows" class="warning-box soft">
-              Rows with issues are not committed. Please correct the spreadsheet and upload again, or commit only the valid rows.
+              Warning rows will be imported. Error rows are blocked and must be corrected before they can be imported.
             </div>
           </section>
         </div>
@@ -385,10 +385,10 @@
           v-if="wizardStep === 4 && hasPreview"
           type="button"
           class="btn-primary"
-          :disabled="committing || !previewSummary.readyRows"
+          :disabled="committing || !committableRowCount"
           @click="$emit('commit')"
         >
-          {{ committing ? "Committing..." : `Commit Valid Rows (${previewSummary.readyRows})` }}
+          {{ committing ? "Committing..." : `Import Rows (${committableRowCount})` }}
         </button>
       </div>
     </div>
@@ -535,6 +535,11 @@ export default {
 
     hasPreview() {
       return Array.isArray(this.previewRows) && this.previewRows.length > 0;
+    },
+    committableRowCount() {
+      return (this.previewRows || []).filter(
+        (row) => row?.status === "Ready" || row?.status === "Warning"
+      ).length;
     },
 
     metadataColumnIndexSet() {

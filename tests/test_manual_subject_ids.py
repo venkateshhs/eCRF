@@ -10,9 +10,9 @@ def study(*ids):
 
 
 def test_manual_enrollment_preserves_ids_and_allows_empty_skipped_setup():
-    data = study("0008", "ARIA08LE", "Ab09")
+    data = study("0008", "ARIA08LE", "Ab09", "TOKAÖL16", "Heonür05")
     validate_new_subject_ids(data)
-    assert [subject["id"] for subject in data["subjects"]] == ["0008", "ARIA08LE", "Ab09"]
+    assert [subject["id"] for subject in data["subjects"]] == ["0008", "ARIA08LE", "Ab09", "TOKAÖL16", "Heonür05"]
     validate_new_subject_ids(study())
 
 
@@ -31,6 +31,22 @@ def test_all_duplicate_ids_are_reported_without_mutating_input():
     assert '"existing", "dup", "second"' in error.value.detail
     assert "No subjects were added" in error.value.detail
     assert data["subjects"] == snapshot
+
+
+def test_unicode_ids_match_case_insensitively_without_rewriting_values():
+    data = study("TOKAÖL16", "tokao\u0308l16")
+    snapshot = [dict(subject) for subject in data["subjects"]]
+    with pytest.raises(HTTPException) as error:
+        validate_new_subject_ids(data)
+    assert '"tokaöl16"' in error.value.detail
+    assert data["subjects"] == snapshot
+
+
+def test_unicode_id_length_and_unsafe_characters_are_still_enforced():
+    validate_new_subject_ids(study("Å" * 128))
+    for identifier in ("Å" * 129, "Heonür 05", "TOKAÖL/16"):
+        with pytest.raises(HTTPException):
+            validate_new_subject_ids(study(identifier))
 
 
 def test_append_only_existing_subject_identity_and_status_protected():

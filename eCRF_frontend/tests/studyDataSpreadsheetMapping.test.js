@@ -50,4 +50,15 @@ assert.equal(vm.mappingCollisions.length, 0);
 vm.mappings[3] = "0-0";
 assert.equal(vm.mappingCollisions.length, 1, "many source columns may not overwrite one target field");
 
+vm.previewRows = [
+  { status: "Ready" },
+  { status: "Warning" },
+  { status: "Error" },
+];
+assert.equal(
+  vm.committableRowCount,
+  2,
+  "the import action count must include warning rows and exclude error rows"
+);
+
 console.log("Study data spreadsheet mapping tests passed");

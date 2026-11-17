@@ -72,8 +72,18 @@ assert.deepEqual(parseSubjectIdCsv('ID\n0008\nARIA08LE\n').rows, [['0008'], ['AR
 assert.throws(() => parseSubjectIdCsv('ID\n'), /at least one/);
 assert.throws(() => parseSubjectIdCsv('ID,other\nA,B,C\n'), /same number/);
 assert.equal(validateManualSubjectIds(['0008', 'ARIA08LE']), '');
+assert.equal(validateManualSubjectIds(['TOKAÖL16', 'Heonür05', 'Ångström_09']), '');
+assert.equal(manual.isValidManualSubjectId('TOKAÖL16'), true);
+assert.equal(manual.isValidManualSubjectId('Heonür05'), true);
+assert.equal(manual.isValidManualSubjectId('A'.repeat(128)), true);
+assert.equal(manual.isValidManualSubjectId('A'.repeat(129)), false);
 assert.match(validateManualSubjectIds(['A', 'a']), /duplicated/);
 assert.match(validateManualSubjectIds(['a'], ['A']), /already exist/);
+assert.match(validateManualSubjectIds(['TOKAÖL16', 'tokao\u0308l16']), /duplicated/);
+assert.equal(
+  manual.normalizeSubjectIdForComparison(' TOKAÖL16 '),
+  manual.normalizeSubjectIdForComparison('tokao\u0308l16')
+);
 assert.deepEqual(
   manual.duplicateSubjectIds(['Existing', 'DUP', 'dup', 'Second', 'SECOND'], ['existing']),
   ['Existing', 'dup', 'SECOND']
@@ -86,7 +96,7 @@ for (const value of ['', '../path', 'a/b', 'a b', 'x'.repeat(129)]) {
   assert.ok(validateManualSubjectIds([value]));
 }
 
-// Duplicate file imports must show every conflict and must not emit/replace IDs.
+// Duplicate file imports automatically keep only new IDs and report what was skipped.
 const inputScript = manualInputSource.match(/<script>([\s\S]*?)<\/script>/)[1];
 const inputCode = babel.transformSync(inputScript, {
   filename: 'ManualSubjectIdsInput.vue', babelrc: false, configFile: false,
@@ -105,13 +115,14 @@ const inputVm = {
   selectedRows: [0, 1, 2, 3], column: 0,
   csv: { rows: [['EXISTING'], ['DUP'], ['dup'], ['OK']] },
   modelValue: ['CURRENT'], existingIds: ['existing'], lockedCount: 0,
-  error: '', workbook: null, sheetName: '', disabled: false,
+  error: '', notice: '', workbook: null, sheetName: '', disabled: false,
   $emit: (...args) => emitted.push(args),
 };
 inputVm.importIds();
-assert.match(inputVm.error, /"EXISTING", "dup"/);
-assert.match(inputVm.error, /No subject IDs were changed/);
-assert.deepEqual(emitted, []);
+assert.equal(inputVm.error, '');
+assert.match(inputVm.notice, /Imported 2 new Subject IDs/);
+assert.match(inputVm.notice, /"EXISTING", "dup"/);
+assert.deepEqual(emitted, [['update:modelValue', ['CURRENT', 'DUP', 'OK']]]);
 assert.deepEqual(inputVm.modelValue, ['CURRENT']);
 const persisted = [{ id: '0008', group: 'Control', status: 'DROPPED_DATA_RETAINED' }];
 const next = reconcileManualSubjects(['0008', 'ARIA08LE'], persisted, persisted, ['Control'], true);
