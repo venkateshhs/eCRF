@@ -72,6 +72,48 @@ assert.equal(methods.findBestEntryFromEntries.call(dashboardContext, entries, 0,
 assert.equal(methods.findBestEntryFromEntries.call(dashboardContext, entries, 1, 0, 0).id, 4);
 assert.equal(methods.findBestEntryFromEntries.call(dashboardContext, entries, "0", 0, 0), null);
 
+const allSubjectOptions = dashboard.computed.subjectFilterOptions.call({
+  subjects: [
+    { id: "SUBJ-001", status: "ACTIVE" },
+    { id: "SUBJ-051", status: "ACTIVE" },
+    { id: "SUBJ-120", status: "DROPPED_OUT" },
+  ],
+});
+assert.deepEqual(allSubjectOptions, [
+  { value: "SUBJ-001", label: "SUBJ-001" },
+  { value: "SUBJ-051", label: "SUBJ-051" },
+  { value: "SUBJ-120", label: "SUBJ-120 — Dropped out" },
+]);
+
+const focusedWindow = methods.currentWindowIndexSets.call({
+  subjects: allSubjectOptions.map((subject) => ({ id: subject.value })),
+  visits: [{ name: "Baseline" }, { name: "Follow-up" }],
+  selectedSubjectIndex: 2,
+  viewAll: false,
+  currentPage: 1,
+  pageSize: 50,
+});
+assert.deepEqual([...focusedWindow.subjectIdxPageSet], [2]);
+assert.deepEqual([...focusedWindow.visitIdxPageSet], [0, 1]);
+assert.deepEqual([...focusedWindow.pairKeySet], ["2:0", "2:1"]);
+
+const subjectWatcher = dashboard.watch["filters.subjectId"].handler;
+const subjectFetches = [];
+const subjectWatcherContext = {
+  study: { metadata: { id: 12 } },
+  isBootstrapping: false,
+  externalMode: false,
+  viewAll: true,
+  async fetchPageEntries(options) {
+    subjectFetches.push(options);
+  },
+};
+subjectWatcher.call(subjectWatcherContext, "SUBJ-120", "");
+assert.equal(subjectWatcherContext.viewAll, false);
+assert.deepEqual(subjectFetches, [{ append: true, focusedSubject: true }]);
+subjectWatcher.call(subjectWatcherContext, "", "SUBJ-120");
+assert.deepEqual(subjectFetches, [{ append: true, focusedSubject: true }, undefined]);
+
 function legacyFindBest(slotEntries, targetVersion) {
   const exact = slotEntries.find((entry) => Number(entry.form_version) === Number(targetVersion));
   if (exact) return exact;
