@@ -62,13 +62,14 @@
 
     <div class="table-controls">
       <div class="left">
-        <span>Total rows: {{ totalGridRows }}</span>
-        <label v-if="canViewAll" class="view-all">
+        <span v-if="filters.subjectId">Rows for selected subject: {{ visits.length }}</span>
+        <span v-else>Total rows: {{ totalGridRows }}</span>
+        <label v-if="canViewAll && !filters.subjectId" class="view-all">
           <input type="checkbox" v-model="viewAll" />
           View all (≤ {{ VIEW_ALL_MAX_ROWS }})
         </label>
       </div>
-      <div class="right" v-if="!viewAll">
+      <div class="right" v-if="!viewAll && !filters.subjectId">
         <label for="page-size">Rows per page:</label>
         <select id="page-size" v-model.number="pageSize">
           <option :value="50">50</option>
@@ -151,8 +152,12 @@
               <th class="sticky-col sticky-subject">
                 <select v-model="filters.subjectId" aria-label="Filter by subject">
                   <option value="">All Subjects</option>
-                  <option v-for="subjectId in subjectFilterOptions" :key="`subject-${subjectId}`" :value="subjectId">
-                    {{ subjectId }}
+                  <option
+                    v-for="subject in subjectFilterOptions"
+                    :key="`subject-${subject.value}`"
+                    :value="subject.value"
+                  >
+                    {{ subject.label }}
                   </option>
                 </select>
               </th>
@@ -256,7 +261,7 @@
         </tbody>
       </table>
 
-      <div class="pagination-controls" v-if="!viewAll && !isLoadingEntries">
+      <div class="pagination-controls" v-if="!viewAll && !filters.subjectId && !isLoadingEntries">
         <span>Loaded first {{ loadedGridRows }} of {{ totalGridRows }} rows</span>
         <button :disabled="currentPage === totalPages || isLoadingMore" @click="goNext">
           {{ loadingMode === "next" ? "Loading…" : "Next" }}
@@ -448,7 +453,27 @@ export default {
     },
 
     subjectFilterOptions() {
-      return this.uniqueDashboardValues("subjectId");
+      const seen = new Set();
+      return (this.subjects || []).reduce((options, subject) => {
+        const value = String(subject?.id ?? subject?.subject_id ?? "").trim();
+        if (!value || seen.has(value)) return options;
+        seen.add(value);
+
+        const dropped = String(subject?.status || "ACTIVE").toUpperCase() !== "ACTIVE";
+        options.push({
+          value,
+          label: dropped ? `${value} — Dropped out` : value,
+        });
+        return options;
+      }, []);
+    },
+
+    selectedSubjectIndex() {
+      const selected = String(this.filters.subjectId || "").trim();
+      if (!selected) return -1;
+      return (this.subjects || []).findIndex((subject) =>
+        String(subject?.id ?? subject?.subject_id ?? "").trim() === selected
+      );
     },
 
     groupFilterOptions() {
@@ -480,12 +505,13 @@ export default {
     },
 
     totalPages() {
-      if (this.viewAll) return 1;
+      if (this.viewAll || this.selectedSubjectIndex >= 0) return 1;
       const wholeGridPages = Math.ceil(Math.max(1, this.totalGridRows) / this.pageSize);
       return Math.max(1, wholeGridPages);
     },
 
     loadedGridRows() {
+      if (this.selectedSubjectIndex >= 0) return this.visits.length;
       return Math.min(this.currentPage * this.pageSize, this.totalGridRows);
     },
 
@@ -509,13 +535,32 @@ export default {
       }
     },
     pageSize() {
-      if (this.viewAll) return;
+      if (this.viewAll || this.filters.subjectId) return;
       this.currentPage = 1;
       this.fetchPageEntries();
     },
     viewAll() {
+      if (this.filters.subjectId) return;
       this.currentPage = 1;
       this.fetchPageEntries();
+    },
+    "filters.subjectId": {
+      async handler(nextSubjectId, previousSubjectId) {
+        if (!this.study || this.isBootstrapping) return;
+        if (String(nextSubjectId || "") === String(previousSubjectId || "")) return;
+
+        if (nextSubjectId) {
+          this.viewAll = false;
+          if (!this.externalMode) {
+            await this.fetchPageEntries({ append: true, focusedSubject: true });
+          }
+          return;
+        }
+
+        if (previousSubjectId && !this.externalMode) {
+          await this.fetchPageEntries();
+        }
+      },
     },
     fullscreen() {
       this.$nextTick(() => {
@@ -918,7 +963,28 @@ export default {
       const allSubjectIndexes = new Set([...Array(S).keys()]);
       const allVisitIndexes = new Set([...Array(V).keys()]);
 
-      if (forceAll || this.viewAll || S === 0 || V === 0) {
+      if (forceAll || S === 0 || V === 0) {
+        return {
+          subjectIdxPageSet: allSubjectIndexes,
+          visitIdxPageSet: allVisitIndexes,
+          pairKeySet: null,
+          totalRowsInWindow: S * V,
+        };
+      }
+
+      if (this.selectedSubjectIndex >= 0) {
+        const selectedSubjectIndex = this.selectedSubjectIndex;
+        return {
+          subjectIdxPageSet: new Set([selectedSubjectIndex]),
+          visitIdxPageSet: allVisitIndexes,
+          pairKeySet: new Set(
+            [...Array(V).keys()].map((visitIndex) => `${selectedSubjectIndex}:${visitIndex}`)
+          ),
+          totalRowsInWindow: V,
+        };
+      }
+
+      if (this.viewAll) {
         return {
           subjectIdxPageSet: allSubjectIndexes,
           visitIdxPageSet: allVisitIndexes,
@@ -961,6 +1027,7 @@ export default {
       const studyId = this.getStudyId();
       const append = options.append === true;
       const loadAll = options.loadAll === true;
+      const focusedSubject = options.focusedSubject === true;
 
       const { subjectIdxPageSet, visitIdxPageSet } = this.currentWindowIndexSets({
         ...options,
@@ -984,7 +1051,11 @@ export default {
       const url = `/forms/studies/${studyId}/data_entries` + (params.toString() ? `?${params.toString()}` : "");
 
       try {
-        if (append) {
+        if (focusedSubject) {
+          this.isLoadingEntries = true;
+          this.loadingMode = "subject";
+        }
+        else if (append) {
           this.isLoadingMore = true;
           this.loadingMode = loadAll ? "all" : "next";
         }
@@ -1006,7 +1077,11 @@ export default {
         if (!append) this.entries = [];
         return false;
       } finally {
-        if (append) {
+        if (focusedSubject) {
+          this.isLoadingEntries = false;
+          this.loadingMode = null;
+        }
+        else if (append) {
           this.isLoadingMore = false;
           this.loadingMode = null;
         }

@@ -89,7 +89,8 @@
 <script>
 const REASONS = [
   "Withdrawal of consent", "Lost to follow-up", "Adverse event", "Investigator decision",
-  "Protocol deviation", "Non-compliance", "Disease progression", "Death",
+  "Protocol deviation", "Non-compliance", "Disease progression",
+  "Disease progression with best support of care", "Death",
   "Administrative reason", "Other",
 ];
 

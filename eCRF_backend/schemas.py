@@ -345,6 +345,7 @@ class SubjectDropoutRequest(BaseModel):
         "Protocol deviation",
         "Non-compliance",
         "Disease progression",
+        "Disease progression with best support of care",
         "Death",
         "Administrative reason",
         "Other",
