@@ -38,7 +38,9 @@
               </div>
               <div class="kv">
                 <span class="k">Role</span>
-                <span class="v role-pill" :data-role="user.profile.role">{{ user.profile.role }}</span>
+                <span class="v role-pill" :data-role="user.profile.role">
+                  {{ user.profile.role === "No Access" ? "Revoked" : user.profile.role }}
+                </span>
               </div>
             </div>
           </div>
@@ -135,7 +137,7 @@
                 <div class="form-field span-2">
                   <label>Role</label>
                   <select v-model="newUser.role" class="wide-select">
-                    <option v-for="r in roles" :key="r" :value="r">{{ r }}</option>
+                    <option v-for="role in roles" :key="role" :value="role">{{ roleOptionLabel(role) }}</option>
                   </select>
                 </div>
 
@@ -182,7 +184,7 @@
                             class="role-select"
                             @change="onInitiateRoleChange(u, $event.target.value)"
                           >
-                            <option v-for="r in roles" :key="r" :value="r">{{ r }}</option>
+                            <option v-for="role in roles" :key="role" :value="role">{{ roleOptionLabel(role) }}</option>
                           </select>
                           <span class="select-caret" aria-hidden="true">▾</span>
                         </div>
@@ -206,7 +208,10 @@
 
             <div v-if="showRoleDialog" class="dialog">
               <div class="dialog-box">
-                <p>
+                <p v-if="pendingRole === 'No Access'">
+                  Revoke application access for <strong>{{ pendingUser.username }}</strong>?
+                </p>
+                <p v-else>
                   Change <strong>{{ pendingUser.username }}</strong>'s role to
                   <strong>{{ pendingRole }}</strong>?
                 </p>
@@ -234,7 +239,7 @@
                       <strong>Investigator</strong> - For assigned studies, can view and add data. Cannot edit study structure.
                     </li>
                     <li>
-                      <strong>No Access</strong> - Account exists but cannot access the application.
+                      <strong>Revoke</strong> - The account remains in the system and cannot sign in.
                     </li>
                   </ul>
                 </div>
@@ -567,6 +572,9 @@ export default {
     },
   },
   methods: {
+    roleOptionLabel(role) {
+      return role === "No Access" ? "Revoke" : role;
+    },
     syncTabFromRoute() {
       if (this.mustChangePassword) {
         this.currentTab = "password";

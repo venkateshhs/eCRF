@@ -1328,7 +1328,7 @@ export default {
       if (r === "principal investigator" || r === "pi") return "Principal Investigator";
       if (r === "administrator" || r === "admin") return "Administrator";
       if (r === "investigator") return "Investigator";
-      if (r === "no access") return "No Access";
+      if (r === "no access") return "Revoked";
       return role;
     },
 
