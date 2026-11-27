@@ -1160,7 +1160,7 @@ def drop_out_subject(
     is_admin = _is_admin(current_user)
     is_author = meta.created_by == current_user.id
     if not (is_admin or is_author):
-        if payload.mode == "delete_data" or not _is_principal_investigator(current_user):
+        if not _is_principal_investigator(current_user):
             raise HTTPException(status_code=403, detail="Not authorized")
         permissions = _assert_has_study_permission(db, meta, current_user, required="edit_study")
         if not permissions["view"]:

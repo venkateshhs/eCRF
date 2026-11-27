@@ -779,11 +779,10 @@
     />
 
     <SubjectDropoutDialog
-      v-if="showSubjectDropoutDialog"
+      v-if="showSubjectDropoutDialog && canManageSubjectDropout"
       :subjects="sd.subjects"
       :entries="existingEntries"
       :files="studyFiles"
-      :can-delete-data="canDeleteSubjectDropoutData"
       :saving="savingSubjectDropout"
       :error="subjectDropoutError"
       @close="closeSubjectDropoutDialog"
@@ -1434,19 +1433,15 @@ export default {
     canManageSubjectDropout() {
       const metadata = this.study?.metadata;
       if (this.isShared || !metadata || String(metadata.status).trim().toUpperCase() === "ARCHIVED") return false;
+      const userId = this.$store.state.user?.id;
+      const isOwner = metadata.created_by != null && userId != null && String(metadata.created_by) === String(userId);
+      if (this.isAdminUser || isOwner) return true;
+
       const user = this.$store.getters.getUser || this.$store.state.user || {};
-      return this.canDeleteSubjectDropoutData || (
+      return (
         (user.profile?.role || user.role || "").trim() === "Principal Investigator" &&
         metadata.permissions?.view === true &&
         metadata.permissions?.edit_study === true
-      );
-    },
-    canDeleteSubjectDropoutData() {
-      const metadata = this.study?.metadata;
-      if (this.isShared || !metadata || String(metadata.status).trim().toUpperCase() === "ARCHIVED") return false;
-      const userId = this.$store.state.user?.id;
-      return this.isAdminUser || (
-        metadata.created_by != null && userId != null && String(metadata.created_by) === String(userId)
       );
     },
     studyId() {
@@ -7812,7 +7807,6 @@ applyImportedRowFromDialog(payload) {
 
     async submitSubjectDropout(request) {
       if (!this.canManageSubjectDropout || this.savingSubjectDropout) return;
-      if (request.mode === "delete_data" && !this.canDeleteSubjectDropoutData) return;
       this.savingSubjectDropout = true;
       this.subjectDropoutError = "";
       try {

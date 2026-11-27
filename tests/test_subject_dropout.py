@@ -22,10 +22,12 @@ def _write_json(path, payload):
     "role,user_id,permissions,mode,status,expected",
     [
         ("Principal Investigator", 2, {"view": True, "edit_study": True}, "keep_data", "PUBLISHED", 400),
-        ("Principal Investigator", 2, {"view": True, "edit_study": True}, "delete_data", "PUBLISHED", 403),
+        ("Principal Investigator", 2, {"view": True, "edit_study": True}, "delete_data", "PUBLISHED", 400),
         ("Principal Investigator", 2, {"view": True, "add_data": True}, "keep_data", "PUBLISHED", 403),
+        ("Principal Investigator", 2, {"view": True, "add_data": True}, "delete_data", "PUBLISHED", 403),
         ("Principal Investigator", 2, {"view": False, "edit_study": True}, "keep_data", "PUBLISHED", 403),
         ("Investigator", 2, {"view": True, "edit_study": True}, "keep_data", "PUBLISHED", 403),
+        ("Investigator", 2, {"view": True, "edit_study": True}, "delete_data", "PUBLISHED", 403),
         ("Principal Investigator", 2, {"view": True, "edit_study": True}, "keep_data", "ARCHIVED", 409),
         ("Investigator", 1, {}, "delete_data", "PUBLISHED", 400),
         ("Administrator", 2, {}, "delete_data", "PUBLISHED", 400),
