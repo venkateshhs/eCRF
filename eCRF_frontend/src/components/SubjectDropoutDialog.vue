@@ -9,7 +9,7 @@
           <strong>Drop out and keep existing data</strong>
           <span>Existing data remains read-only. No new data can be added.</span>
         </button>
-        <button class="choice danger-choice" type="button" @click="mode = 'delete_data'">
+        <button v-if="canDeleteData" class="choice danger-choice" type="button" @click="mode = 'delete_data'">
           <strong>Drop out and delete subject data</strong>
           <span>Removes data and file references from the active Case-e dataset.</span>
         </button>
@@ -89,7 +89,8 @@
 <script>
 const REASONS = [
   "Withdrawal of consent", "Lost to follow-up", "Adverse event", "Investigator decision",
-  "Protocol deviation", "Non-compliance", "Disease progression", "Death",
+  "Protocol deviation", "Non-compliance", "Disease progression",
+  "Disease progression with best support of care", "Death",
   "Administrative reason", "Other",
 ];
 
@@ -99,6 +100,7 @@ export default {
     subjects: { type: Array, default: () => [] },
     entries: { type: Array, default: () => [] },
     files: { type: Array, default: () => [] },
+    canDeleteData: { type: Boolean, default: false },
     saving: { type: Boolean, default: false },
     error: { type: String, default: "" },
   },
@@ -136,7 +138,7 @@ export default {
       if (!this.selectedSubject || !this.dropoutDate || !this.reason) return false;
       if (this.reason === "Other" && !this.otherReason) return false;
       if (this.mode === "delete_data") {
-        return this.acknowledged && this.confirmationId.trim() === this.selectedSubject.id;
+        return this.canDeleteData && this.acknowledged && this.confirmationId.trim() === this.selectedSubject.id;
       }
       return true;
     },

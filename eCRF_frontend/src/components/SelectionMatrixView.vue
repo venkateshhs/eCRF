@@ -169,6 +169,9 @@
                   <i class="fas fa-user-slash"></i>
                   {{ subjectStatus(item.subject) === 'DROPPED_DATA_DELETED' ? 'Data deleted' : 'Dropped out' }}
                 </span>
+                <span v-if="isDropped(item.subject) && dropoutReason(item.subject)" class="dropout-reason">
+                  {{ dropoutReason(item.subject) }}
+                </span>
               </td>
 
 
@@ -311,8 +314,13 @@ export default {
         ? "Dropped · Data deleted"
         : "Dropped · Data retained";
     },
+    dropoutReason(subject) {
+      const reason = String(subject?.dropout_reason || "").trim();
+      const details = String(subject?.dropout_other_reason || "").trim();
+      return reason === "Other" && details ? `Other — ${details}` : reason;
+    },
     dropoutTitle(subject) {
-      const reason = subject?.dropout_reason || "Reason not available";
+      const reason = this.dropoutReason(subject) || "Reason not available";
       const date = subject?.dropout_date || "date not available";
       return `Subject dropped out on ${date}: ${reason}. Data entry is disabled.`;
     },
@@ -1195,6 +1203,7 @@ export default {
 .subject-row-deleted { background: #f1f5f9; color: #64748b; }
 .subject-row-dropped .select-btn { cursor: not-allowed; filter: none; opacity: 1; }
 .dropout-badge { display: block; margin-top: 5px; color: #be123c; font-size: 12px; font-weight: 700; }
+.dropout-reason { display: block; margin-top: 3px; color: #475569; font-size: 12px; font-weight: 400; white-space: normal; overflow-wrap: anywhere; }
 
 /* ========= Responsive ========= */
 @media (max-width: 900px) {

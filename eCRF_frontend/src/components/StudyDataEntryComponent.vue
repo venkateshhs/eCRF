@@ -783,6 +783,7 @@
       :subjects="sd.subjects"
       :entries="existingEntries"
       :files="studyFiles"
+      :can-delete-data="canDeleteSubjectDropoutData"
       :saving="savingSubjectDropout"
       :error="subjectDropoutError"
       @close="closeSubjectDropoutDialog"
@@ -1431,8 +1432,22 @@ export default {
       return (user.profile?.role || user.role || "") === "Administrator";
     },
     canManageSubjectDropout() {
-      if (this.isShared || !this.study?.metadata) return false;
-      return this.isAdminUser || Number(this.study.metadata.created_by) === Number(this.$store.state.user?.id);
+      const metadata = this.study?.metadata;
+      if (this.isShared || !metadata || String(metadata.status).trim().toUpperCase() === "ARCHIVED") return false;
+      const user = this.$store.getters.getUser || this.$store.state.user || {};
+      return this.canDeleteSubjectDropoutData || (
+        (user.profile?.role || user.role || "").trim() === "Principal Investigator" &&
+        metadata.permissions?.view === true &&
+        metadata.permissions?.edit_study === true
+      );
+    },
+    canDeleteSubjectDropoutData() {
+      const metadata = this.study?.metadata;
+      if (this.isShared || !metadata || String(metadata.status).trim().toUpperCase() === "ARCHIVED") return false;
+      const userId = this.$store.state.user?.id;
+      return this.isAdminUser || (
+        metadata.created_by != null && userId != null && String(metadata.created_by) === String(userId)
+      );
     },
     studyId() {
       const id = Number(this.$route.params.id);
@@ -7782,7 +7797,7 @@ applyImportedRowFromDialog(payload) {
 
     openSubjectDropoutDialog() {
       if (!this.canManageSubjectDropout) {
-        this.showDialogMessage("Only an administrator or the study author can drop out a subject.");
+        this.showDialogMessage("You don't have permission to drop out subjects in this study.");
         return;
       }
       this.subjectDropoutError = "";
@@ -7797,6 +7812,7 @@ applyImportedRowFromDialog(payload) {
 
     async submitSubjectDropout(request) {
       if (!this.canManageSubjectDropout || this.savingSubjectDropout) return;
+      if (request.mode === "delete_data" && !this.canDeleteSubjectDropoutData) return;
       this.savingSubjectDropout = true;
       this.subjectDropoutError = "";
       try {

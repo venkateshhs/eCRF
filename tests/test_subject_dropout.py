@@ -4,6 +4,7 @@ from types import SimpleNamespace
 import pytest
 from fastapi import HTTPException
 
+from eCRF_backend import forms_hybrid, schemas
 from eCRF_backend.datalad_repo import DataladStudyRepo
 from eCRF_backend.forms_hybrid import (
     _assert_entry_subject_update_allowed,
@@ -15,6 +16,42 @@ from eCRF_backend.forms_hybrid import (
 def _write_json(path, payload):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload), encoding="utf-8")
+
+
+@pytest.mark.parametrize(
+    "role,user_id,permissions,mode,status,expected",
+    [
+        ("Principal Investigator", 2, {"view": True, "edit_study": True}, "keep_data", "PUBLISHED", 400),
+        ("Principal Investigator", 2, {"view": True, "edit_study": True}, "delete_data", "PUBLISHED", 403),
+        ("Principal Investigator", 2, {"view": True, "add_data": True}, "keep_data", "PUBLISHED", 403),
+        ("Principal Investigator", 2, {"view": False, "edit_study": True}, "keep_data", "PUBLISHED", 403),
+        ("Investigator", 2, {"view": True, "edit_study": True}, "keep_data", "PUBLISHED", 403),
+        ("Principal Investigator", 2, {"view": True, "edit_study": True}, "keep_data", "ARCHIVED", 409),
+        ("Investigator", 1, {}, "delete_data", "PUBLISHED", 400),
+        ("Administrator", 2, {}, "delete_data", "PUBLISHED", 400),
+    ],
+)
+def test_dropout_endpoint_permissions(role, user_id, permissions, mode, status, expected):
+    meta = SimpleNamespace(id=11, created_by=1, status=status)
+    grant = SimpleNamespace(permissions=permissions)
+    user = SimpleNamespace(id=user_id, profile=SimpleNamespace(role=role))
+
+    def query(model):
+        return SimpleNamespace(filter=lambda *_: SimpleNamespace(
+            first=lambda: meta if model is forms_hybrid.models.StudyMetadata else grant
+        ))
+
+    # An invalid date lets us verify who reaches validation without writing data.
+    payload = schemas.SubjectDropoutRequest(
+        mode=mode,
+        dropout_date="invalid",
+        reason="Disease progression with best support of care",
+    )
+    with pytest.raises(HTTPException) as exc:
+        forms_hybrid.drop_out_subject(11, 0, payload, SimpleNamespace(query=query), user)
+    assert exc.value.status_code == expected
+    if expected == 400:
+        assert exc.value.detail == "Dropout date must use YYYY-MM-DD"
 
 
 def test_active_subject_guard_accepts_legacy_subject_and_blocks_dropout():

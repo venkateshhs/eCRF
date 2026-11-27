@@ -1156,8 +1156,15 @@ def drop_out_subject(
     meta = db.query(models.StudyMetadata).filter(models.StudyMetadata.id == study_id).first()
     if not meta:
         raise HTTPException(status_code=404, detail="Study not found")
-    _assert_owner_or_admin(meta, current_user)
     _assert_study_writable(meta)
+    is_admin = _is_admin(current_user)
+    is_author = meta.created_by == current_user.id
+    if not (is_admin or is_author):
+        if payload.mode == "delete_data" or not _is_principal_investigator(current_user):
+            raise HTTPException(status_code=403, detail="Not authorized")
+        permissions = _assert_has_study_permission(db, meta, current_user, required="edit_study")
+        if not permissions["view"]:
+            raise HTTPException(status_code=403, detail="Not authorized")
     try:
         datetime.strptime(payload.dropout_date, "%Y-%m-%d")
     except ValueError:
@@ -1189,7 +1196,9 @@ def drop_out_subject(
         "dropout_date": payload.dropout_date,
         "dropout_reason": payload.reason,
         "dropout_other_reason": common["dropout_other_reason"],
-        "actor_role": "Administrator" if _is_admin(current_user) else "Study author",
+        "actor_role": (
+            "Administrator" if is_admin else "Study author" if is_author else "Principal Investigator"
+        ),
         **repo._build_actor_payload(
             actor=_actor_identifier(current_user),
             actor_name=_display_name(current_user),
